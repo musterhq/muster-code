@@ -368,7 +368,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (item) store.updateItem(itemId, item.text, status, status === 'expired' ? {...item.data, expiredReason:'timeout'} : reason ? {...item.data, expiredReason:reason} : item.data);
     if (status === 'expired') store.appendItem(pending.chatId, 'notice', 'An approval request timed out before you answered, so the agent was told it was not approved. Use Ask again to have it re-ask.', 'completed', {kind:'attention-expired', itemId});
     const toolItemId = typeof item?.data?.toolItemId === 'string' ? item.data.toolItemId : undefined, tool = toolItemId ? store.item(toolItemId) : undefined;
-    if (tool?.data?.awaitingApproval === itemId) { const {awaitingApproval: _cleared, ...rest} = tool.data; store.updateItem(tool.id, tool.text, tool.status, rest); }
+    if (tool?.data?.awaitingApproval === itemId) { const {awaitingApproval: _cleared, ...rest} = tool.data; store.updateItem(tool.id, tool.text, tool.status, {...rest, ...(status === 'declined' ? {executionDenied:true} : {})}); }
     timeline(pending.chatId); state(); pending.resolve(decision);
   }
   function finishQuestion(itemId: string, pending: PendingQuestionRequest, answers: QuestionAnswers, status: string, receiptAnswers?: Record<string, {answers:string[]}>, reason?: 'stale') {
@@ -945,6 +945,16 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       } finally {
         // Background sub-agents can still be waiting on a card after the parent turn ended: keep it answerable.
         if (run.stopped || disposed || !provider.hasActiveWork?.(chatId)) { settleApprovals(chatId); settleQuestions(chatId); }
+        // Stop can close the provider before it sends item/completed. Persist the terminal
+        // state once, keeping completed tools and partial output intact.
+        if (run.stopped) for (const [providerId, localId] of toolIds) {
+          const item = store.item(localId);
+          if (item?.status === 'running') {
+            const startedAt = toolStarted.get(providerId);
+            store.updateItem(localId, item.text, 'interrupted', {...item.data, awaitingApproval:undefined,
+              ...(startedAt !== undefined ? {durationMs:Date.now() - startedAt} : {})});
+          }
+        }
         runs.delete(chatId);
         // #426: a compaction asked for during the turn runs now (before any queued message is dispatched).
         const deferred = deferredCompactions.get(chatId);

@@ -66,6 +66,14 @@ export function fileStats(data:Record<string,unknown>|undefined):FileStat[] {
 /** F60: a started tool the provider has blocked on an approval card is waiting, not running (runtime sets `awaitingApproval`). */
 export const APPROVAL_WAIT_LABEL='Waiting for approval';
 export function awaitingApproval(item:{status?:string;data?:Record<string,unknown>}):boolean {return item.status==='running'&&typeof item.data?.awaitingApproval==='string';}
+/** Terminal verbs must not imply that a refused tool executed. */
+export function toolState(item:{status?:string;data?:Record<string,unknown>},presentation:ToolPresentation,failed=false):string {
+ if(awaitingApproval(item))return APPROVAL_WAIT_LABEL;
+ if(item.data?.executionDenied===true||item.data?.status==='declined')return 'Did not run';
+ if(item.status==='interrupted')return 'Stopped';
+ if(item.status==='running')return presentation.runningVerb;
+ return item.status==='completed'||failed||item.status==='cancelled'?presentation.verb:'Tool';
+}
 export const basename=(path:string)=>path.split('/').filter(Boolean).at(-1)||path;
 /**
  * VS Code-style disambiguation: every path gets the shortest path-segment suffix that is
@@ -107,7 +115,7 @@ export function commandOutcome(data:Record<string,unknown>|undefined,status:stri
  const exitCode=typeof data?.exitCode==='number'?data.exitCode:undefined;
  const duration=typeof data?.durationMs==='number'&&status!=='running'?formatToolDuration(data.durationMs):undefined;
  const failed=status==='failed'||(exitCode!=null&&exitCode!==0&&status!=='running');
- const suffix=failed?(exitCode!=null?`failed (exit ${exitCode})`:'failed'):status==='interrupted'?'interrupted':status==='cancelled'?'cancelled':'';
+ const suffix=failed?(exitCode!=null?`failed (exit ${exitCode})`:'failed'):data?.executionDenied===true||data?.status==='declined'?'denied':status==='interrupted'?'':status==='cancelled'?'cancelled':'';
  const source=string(data?.stderr)||output||(()=>{const error=data?.error;if(typeof error==='string'){try{const parsed=JSON.parse(error);return typeof parsed==='string'?parsed:typeof parsed?.message==='string'?parsed.message:error;}catch{return error;}}return '';})();
  return {exitCode,duration,failed,suffix,excerpt:failed?lastLines(source,2):[]};
 }
