@@ -1116,6 +1116,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       if (!settled || runs.has(chatId)) throw new Error('The run did not stop in time, so the chat was kept. Try deleting it again.');
     }
     settleApprovals(chatId); settleQuestions(chatId);
+    // #654: what the chat owns outside the store (its sandbox) goes first; a failure keeps the chat so nothing leaks.
+    const doomed = store.chat(chatId);
+    if (doomed) await domainHooks.chatRemoval({chat: doomed, kind: 'delete'});
     try { domains.handlers.get('goals.clear')?.({chatId}); } catch { /* no goal */ }
     const timer = timers.get(chatId); if (timer) clearTimeout(timer); timers.delete(chatId);
     store.deleteChat(chatId);
@@ -1273,6 +1276,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const result = store.updateChat(chatId, patch);
         // Archiving is only a filing action: say so in the chat when work is still going.
         if (patch.archived && !chat.archived && (busy(chat) || approvalsFor(chatId))) { store.appendItem(chatId, 'notice', ARCHIVE_RUNNING_WARNING, 'completed', {kind:'archived-running'}); timeline(chatId); }
+        // #654: an archived chat's sandbox stops (kept, not destroyed) in the background; archiving never waits on Docker.
+        if (patch.archived && !chat.archived) void domainHooks.chatRemoval({chat: result, kind: 'archive'});
         state(); return result;
       }
       case 'chat.markUnread': {
@@ -1864,6 +1869,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     for (const chat of store.snapshot().chats) if (chat.unread || chat.recovery?.kind === 'recovery-needed' || provider.hasActiveWork?.(chat.id)) keep.add(chat.id);
     const archived = store.autoArchiveIdle(new Date(Date.now() - days * 86_400_000).toISOString(), keep);
     if (!archived.length) return;
+    for (const chatId of archived) { const chat = store.chat(chatId); if (chat) void domainHooks.chatRemoval({chat, kind: 'archive'}); }
     state();
     emit({type:'notice', message:`Archived ${plural(archived.length, 'chat')} idle for over ${days} days. Find ${archived.length === 1 ? 'it' : 'them'} under Archived.`});
   }
