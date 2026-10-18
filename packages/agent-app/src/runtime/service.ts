@@ -1228,11 +1228,17 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const folderId = p.folderId === undefined ? undefined : id(p.folderId), projectId = p.projectId === undefined ? undefined : id(p.projectId);
         // A chat created before the first provider probe settles would otherwise skip every default (no provider reads as available yet).
         await firstProviderProbe();
-        const defaults = domainHooks.chatDefaults({...(folderId ? {folderId} : {}), ...(projectId ? {projectId} : {})});
+        const parent = p.inheritFrom === undefined ? undefined : store.chat(id(p.inheritFrom));
+        const defaults = {...domainHooks.chatDefaults({...(folderId ? {folderId} : {}), ...(projectId ? {projectId} : {})})};
+        if (parent) {
+          // A chat opened from another chat (new worktree) continues with that chat's model, effort and access.
+          defaults.providerId = parent.providerId; defaults.model = parent.model; defaults.permissionMode = parent.permissionMode;
+          const parentEffort = efforts.get(parent.id); if (parentEffort) defaults.effort = parentEffort;
+        }
         // UR-SR-a: there is no Ask mode picker any more; a legacy 'ask' default means Agent with read-only access.
         const legacyAsk = defaults.mode === 'ask';
         const mode = defaults.mode === 'plan' ? 'plan' : 'agent';
-        const permissionMode = defaults.permissionMode && ['read-only','workspace'].includes(defaults.permissionMode) ? defaults.permissionMode : legacyAsk ? 'read-only' : undefined;
+        const permissionMode = defaults.permissionMode && ['read-only','workspace','full'].includes(defaults.permissionMode) ? defaults.permissionMode : legacyAsk ? 'read-only' : undefined;
         // Nothing chosen anywhere: the first ready provider. Nothing ready: an unbound chat that shows "Connect a model".
         const initial = defaults.providerId && defaults.model?.trim() ? {providerId: defaults.providerId, model: defaults.model.trim()} : firstReadyModel(provider.info());
         let result = store.createChat({folderId, projectId, model: initial.model, ...(initial.providerId ? {providerId: initial.providerId} : {}), mode, ...(permissionMode ? {permissionMode} : {})});
