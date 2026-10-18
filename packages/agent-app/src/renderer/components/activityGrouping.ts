@@ -1,5 +1,5 @@
 import type {TimelineItem} from '../../shared/protocol';
-import {APPROVAL_WAIT_LABEL,awaitingApproval,classifyTool} from './toolPresentation.ts';
+import {APPROVAL_WAIT_LABEL,awaitingApproval,classifyTool,executionDenied} from './toolPresentation.ts';
 import {agentDisplayName} from '../agentIdentity.ts';
 import {projectSubagentActivity,subagentLifecycle,subagentState,type SubagentActivity,type SubagentLifecycleEvent} from '../subagentActivity.ts';
 
@@ -103,10 +103,10 @@ export function subagentRowLabel(row:{event:SubagentLifecycleEvent;agents:{name:
 }
 export function summarizeActivity(items:readonly TimelineItem[]):string {
   const unique=[...new Map(items.map(item=>[item.id,item])).values()];
-  const running=unique.findLast(item=>item.status==='running');
+  const running=unique.findLast(item=>item.status==='running'&&!executionDenied(item.data));
   if(running){const p=classifyTool(running.data);return `${awaitingApproval(running)?APPROVAL_WAIT_LABEL:p.runningVerb}${p.subject?' '+p.subject:''}`;}
   const read=new Set<string>(),edited=new Set<string>(),viewed=new Set<string>(),used=new Set<string>();let searches=0,commands=0,tools=0,agents=0;
-  for(const item of unique.filter(item=>item.status==='completed')){
+  for(const item of unique.filter(item=>item.status==='completed'&&!executionDenied(item.data))){
     const p=classifyTool(item.data);
     if(p.images?.length) {for(const path of p.images)viewed.add(path);}
     else if(p.kind==='read') {for(const path of p.paths??[p.subject]) if(path)read.add(path);}
@@ -120,11 +120,12 @@ export function summarizeActivity(items:readonly TimelineItem[]):string {
   const count=(n:number,one:string,many=one+'s')=>`${n} ${n===1?one:many}`;
   // Codex order: the apps it drove ("Used Chrome integration"), what changed, what was looked at, then what ran.
   const parts=[used.size?`used ${namesLabel([...used])}`:'',edited.size?`edited ${count(edited.size,'file')}`:'',read.size?`read ${count(read.size,'file')}`:'',viewed.size?`viewed ${count(viewed.size,'image')}`:'',searches?`${count(searches,'search','searches')}`:'',commands?`ran ${count(commands,'command')}`:'',agents?`${count(agents,'agent action')}`:'',tools?`${count(tools,'tool call')}`:''].filter(Boolean);
-  const failed=unique.filter(item=>item.status==='failed').length;
-  const interrupted=unique.filter(item=>item.status==='interrupted').length;
-  const cancelled=unique.filter(item=>item.status==='cancelled').length;
+  // #580: the counts match the rows: a refused tool "did not run", a stopped one reads Stopped.
+  let failed=0,interrupted=0,cancelled=0,denied=0;
+  for(const item of unique){if(executionDenied(item.data))denied++;else if(item.status==='failed')failed++;else if(item.status==='interrupted')interrupted++;else if(item.status==='cancelled')cancelled++;}
+  if(denied)parts.push(`${denied} not run`);
   if(cancelled)parts.push(`${cancelled} cancelled`);
-  if(failed)parts.push(`${failed} failed`);if(interrupted)parts.push(`${interrupted} interrupted`);
+  if(failed)parts.push(`${failed} failed`);if(interrupted)parts.push(`${interrupted} stopped`);
   const summary=parts.join(', ');
   return summary?summary[0].toUpperCase()+summary.slice(1):'Activity';
 }
