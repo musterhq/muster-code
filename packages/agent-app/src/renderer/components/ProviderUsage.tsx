@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useReducer, useState, useSyncExternalStore } from 'react';
 import type { ProviderUsage, ProviderUsageWindow } from '../../shared/domains/providers-protocol';
 import type { ProviderInfo } from '../../shared/protocol';
 import { invoke, subscribe } from '../bridge';
@@ -59,12 +59,68 @@ export function exhaustedUsage(usage: ProviderUsage | undefined, now = Date.now(
   return [usage?.primary, usage?.secondary].find((w): w is ProviderUsageWindow => Boolean(w && w.usedPercent >= 100 && (!w.resetsAt || !(Date.parse(w.resetsAt) <= now))));
 }
 
-/** Kept in a child so usage events never rerender the composer or subscribe to streamed tokens. */
+/** One app-wide usage snapshot for the composer warning and the model picker. Chat switches remount the
+ * composer, so a read per mount would add IPC to a hot path: the snapshot is read at most once per
+ * SHARED_USAGE_TTL_MS (the runtime's own cache window) and otherwise kept current by `providerUsage` events. */
+const SHARED_USAGE_TTL_MS = 30_000;
+const shared: {rows: ReadonlyMap<string, ProviderUsage>; readAt: number; reading: boolean; off?: () => void; listeners: Set<() => void>} =
+  {rows: new Map(), readAt: 0, reading: false, listeners: new Set()};
+const notifyShared = () => { for (const listener of shared.listeners) listener(); };
+function subscribeShared(listener: () => void): () => void {
+  shared.listeners.add(listener);
+  // A single bus listener for the app's lifetime: dropping it when the last composer unmounts would lose events
+  // between a chat switch's unmount and mount, forcing a fresh read on every switch.
+  shared.off ??= subscribe(event => {
+    if (event.type !== 'providerUsage') return;
+    shared.rows = new Map(shared.rows).set(event.usage.providerId, event.usage);
+    notifyShared();
+  });
+  return () => { shared.listeners.delete(listener); };
+}
+function readSharedUsage(): void {
+  if (shared.reading || Date.now() - shared.readAt < SHARED_USAGE_TTL_MS) return;
+  shared.reading = true;
+  invoke('providers.usage', {}).then(rows => {
+    const next = new Map(rows.map(row => [row.providerId, row] as const));
+    // An event that landed during the read is newer than the snapshot it raced.
+    for (const [id, row] of shared.rows) if (row.updatedAt > (next.get(id)?.updatedAt ?? '')) next.set(id, row);
+    shared.rows = next;
+    notifyShared();
+  }, () => {}).finally(() => { shared.reading = false; shared.readAt = Date.now(); });
+}
+/** Test hook: forget the shared snapshot and its bus listener. */
+export function resetSharedProviderUsage(): void {
+  shared.off?.(); shared.off = undefined; shared.rows = new Map(); shared.readAt = 0; shared.reading = false;
+}
+export function useSharedProviderUsage(enabled: boolean): ReadonlyMap<string, ProviderUsage> {
+  const rows = useSyncExternalStore(subscribeShared, () => shared.rows);
+  useEffect(() => { if (enabled) readSharedUsage(); }, [enabled]);
+  return rows;
+}
+
+/** Dismissed per provider and limit window, across composers, until a new window is exhausted. */
+const dismissedWarnings = new Set<string>();
+
+/** Kept in a child so usage events never rerender the composer. */
 export function ProviderUsageWarning({providerId}: {providerId: string | undefined}) {
-  const {usage} = useProviderUsage(providerId);
-  const exhausted = exhaustedUsage(usage);
-  if (!exhausted) return null;
-  return <p className="composer-image-warning" role="status">Provider usage limit reached · {resetLabel(exhausted.resetsAt)}. Choose another provider before sending.</p>;
+  const enabled = reportsUsage(providerId);
+  const rows = useSharedProviderUsage(enabled);
+  const [, refresh] = useReducer((count: number) => count + 1, 0);
+  const exhausted = enabled && providerId ? exhaustedUsage(rows.get(providerId)) : undefined;
+  const key = exhausted && `${providerId}:${exhausted.windowMinutes ?? ''}:${exhausted.resetsAt ?? ''}`;
+  // One timeout to the reset, only while the warning shows, so it clears itself without polling.
+  const resetsIn = exhausted?.resetsAt ? Date.parse(exhausted.resetsAt) - Date.now() : undefined;
+  useEffect(() => {
+    if (resetsIn === undefined || resetsIn > 2_147_000_000) return;
+    const timer = setTimeout(refresh, Math.max(0, resetsIn) + 500);
+    return () => clearTimeout(timer);
+  }, [key, resetsIn === undefined]);
+  if (!exhausted || !key || dismissedWarnings.has(key)) return null;
+  const name = getState().providers.value?.find(entry => entry.id === providerId)?.name ?? 'This provider';
+  return <p className="composer-tools-warning" role="status" data-testid="usage-limit-warning">
+    {name} has reached its usage limit · {resetLabel(exhausted.resetsAt)}. Choose a model from another provider to send now.
+    <button type="button" onClick={() => { dismissedWarnings.add(key); refresh(); }}>Dismiss</button>
+  </p>;
 }
 
 function Meter({window: w}: {window: ProviderUsageWindow}) {

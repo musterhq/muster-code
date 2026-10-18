@@ -22,7 +22,8 @@ window.muster={subscribe(listener:any){usageListeners.add(listener);return()=>us
 
 const React=await import('react');
 const {createRoot}=await import('react-dom/client');
-const {ProviderUsageWarning,exhaustedUsage}=await import('../src/renderer/components/ProviderUsage');
+const {ProviderUsageWarning,exhaustedUsage,resetSharedProviderUsage}=await import('../src/renderer/components/ProviderUsage');
+const store=await import('../src/renderer/store');
 const {ModelPicker}=await import('../src/renderer/components/ModelPicker');
 const providers:any[]=[
   {id:'hybrow',codex:true,name:'Hybrow OmniRoute',available:true,identityMasked:'',models:[
@@ -74,7 +75,7 @@ assert.equal(manage,1);
 (document.querySelector('[role="tab"][aria-label="ChatGPT"]') as HTMLButtonElement).click();await delay(20);
 assert.deepEqual(names(),['GPT-6','GPT-6 Mini']);
 (document.querySelector('[role="tab"][aria-label="All providers"]') as HTMLButtonElement).click();await delay(20);
-assert.deepEqual(q('.model-picker-section').map(node=>node.textContent),['Hybrow OmniRoute · Usage limit reached','ChatGPT','Claude Code']);
+assert.deepEqual(q('.model-picker-section').map(node=>node.textContent),['Hybrow OmniRoute · Limit reached','ChatGPT','Claude Code']);
 assert.equal(q('.model-picker-limit').length,1,'exhausted provider is flagged while other providers remain available');
 // Search spans every provider, whatever the tab; routes that match are listed inline.
 (document.querySelector('[role="tab"][aria-label="Claude Code"]') as HTMLButtonElement).click();await delay(20);
@@ -118,14 +119,27 @@ assert.equal(empty,1);
 assert.equal(document.querySelector('.model-picker-effort'),null,'no reasoning control without efforts');
 root.unmount();
 
-const baselineListeners=usageListeners.size;
-// Both composers mount this isolated warning: visible without opening a picker or hovering.
-usageRows=usageRows.map(row=>({...row,providerId:'codex'}));
+const pickerReads=usageReads;
+// Reopening the picker inside the snapshot window reads nothing new.
 root=createRoot(host,{onUncaughtError:error=>(errors as unknown[]).push(error)});
-root.render(<ProviderUsageWarning providerId="codex"/>);
-await delay(40);
-assert.match(host.textContent??'',/Provider usage limit reached.*resets.*Choose another provider before sending/);
+root.render(<ModelPicker providers={providers} selected={null} onSelect={()=>{}}/>);
+await delay(30);
+root.unmount();
+assert.equal(usageReads,pickerReads,'reopening the picker reuses the usage snapshot');
+
+// Both composers mount this isolated warning: visible without opening a picker or hovering.
+resetSharedProviderUsage();
+store.getState().providers.value=[{id:'codex',name:'ChatGPT',codex:true,available:true,models:[]} as any,{id:'claude-code',name:'Claude Code',available:true,models:[]} as any];
+usageRows=usageRows.map(row=>({...row,providerId:'codex'}));
+const renderWarning=async(providerId:string)=>{root=createRoot(host,{onUncaughtError:error=>(errors as unknown[]).push(error)});root.render(<ProviderUsageWarning providerId={providerId}/>);await delay(40);};
+await renderWarning('codex');
+const listenersWithWarning=usageListeners.size;
+assert.match(host.textContent??'',/^ChatGPT has reached its usage limit · resets .*\. Choose a model from another provider to send now\.Dismiss$/);
 const reads=usageReads;
+// A chat switch remounts the composer: the warning comes back from the snapshot without another read.
+root.unmount();await renderWarning('codex');
+assert.match(host.textContent??'',/usage limit/);
+assert.equal(usageReads,reads,'remounting the composer does not read usage again');
 usageRows=[{...usageRows[0],secondary:{...usageRows[0].secondary,usedPercent:21}}];
 for(const listener of usageListeners)listener({type:'providerUsage',usage:usageRows[0]});
 await delay(20);
@@ -135,11 +149,22 @@ usageRows=[{...usageRows[0],primary:{usedPercent:100,windowMinutes:300,resetsAt:
 for(const listener of usageListeners)listener({type:'providerUsage',usage:usageRows[0]});
 await delay(20);
 assert.match(host.textContent??'',/reset time not reported/,'primary exhaustion without a reset is still warned');
+// Dismiss hides it for this limit window in every composer, and a new window warns again.
+(host.querySelector('[data-testid="usage-limit-warning"] button') as HTMLButtonElement).click();
+await delay(20);
+assert.equal(host.textContent,'','Dismiss hides the warning');
+root.unmount();await renderWarning('codex');
+assert.equal(host.textContent,'','a dismissed warning stays hidden in the next composer');
+usageRows=[{...usageRows[0],primary:{usedPercent:100,windowMinutes:300,resetsAt:new Date(Date.now()+60_000).toISOString()}}];
+for(const listener of usageListeners)listener({type:'providerUsage',usage:usageRows[0]});
+await delay(20);
+assert.match(host.textContent??'',/resets in 1 min/,'a new limit window warns again');
 root.render(<ProviderUsageWarning providerId="claude-code"/>);
 await delay(20);
 assert.equal(host.textContent,'','switching providers does not retain the previous provider warning');
 root.unmount();
-assert.equal(usageListeners.size,baselineListeners,'usage listeners are cleaned up');
+assert.equal(usageReads,reads,'no reads beyond the first for the whole warning lifecycle');
+assert.equal(usageListeners.size,listenersWithWarning,'remounts and dismissals add no event-bus listeners');
 assert.equal(exhaustedUsage(undefined),undefined);
 assert.equal(exhaustedUsage({...usageRows[0],primary:{usedPercent:100,windowMinutes:300,resetsAt:'2020-01-01T00:00:00Z'}}),undefined,'passed resets do not establish exhaustion');
 assert.deepEqual(errors,[]);
