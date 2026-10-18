@@ -8,12 +8,14 @@ export type ScopedComputerProblem = 'docker-missing'|'daemon-down'|'image'|'owne
 export const SCOPED_COMPUTER_MAX_TIMEOUT_MS = 2*60*60*1000;
 export const SCOPED_COMPUTER_DEFAULT_TIMEOUT_MS = 30*60*1000;
 export const SCOPED_COMPUTER_MAX_RUNNING = 2;
-/** SBX-08: kernel-enforced (cgroup) ceilings passed to `docker run`; changing one recreates the container, files kept. */
-export interface ScopedComputerLimits {memoryMiB:number;cpus:number;processes:number}
-export const SCOPED_COMPUTER_DEFAULT_LIMITS:Readonly<ScopedComputerLimits> = {memoryMiB:512,cpus:1,processes:256};
-export const SCOPED_COMPUTER_LIMIT_BOUNDS = {memoryMiB:{min:256,max:16384,step:256},cpus:{min:0.25,max:8,step:0.25},processes:{min:32,max:4096,step:32}} as const;
-/** Live cgroup usage from `docker stats`; null fields were not reported. */
-export interface ScopedComputerUsage {computerId:string;running:boolean;memoryBytes:number|null;memoryLimitBytes:number|null;cpuPercent:number|null;pids:number|null;sampledAt:string}
+/** SBX-08: kernel-enforced (cgroup) ceilings passed to `docker run`; changing one recreates the container, files kept.
+ * `diskGiB` caps /workspace plus the container's writable layer: writes past it are refused and a command that grows
+ * past it is stopped (and Docker enforces it too where the storage driver supports a size quota). */
+export interface ScopedComputerLimits {memoryMiB:number;cpus:number;processes:number;diskGiB:number}
+export const SCOPED_COMPUTER_DEFAULT_LIMITS:Readonly<ScopedComputerLimits> = {memoryMiB:512,cpus:1,processes:256,diskGiB:10};
+export const SCOPED_COMPUTER_LIMIT_BOUNDS = {memoryMiB:{min:256,max:16384,step:256},cpus:{min:0.25,max:8,step:0.25},processes:{min:32,max:4096,step:32},diskGiB:{min:1,max:512,step:1}} as const;
+/** Live cgroup usage from `docker stats`; null fields were not reported. Disk is /workspace plus the writable layer. */
+export interface ScopedComputerUsage {computerId:string;running:boolean;memoryBytes:number|null;memoryLimitBytes:number|null;cpuPercent:number|null;pids:number|null;sampledAt:string;diskBytes?:number|null;diskLimitBytes?:number}
 /** SBX-16: versioned, read-only tool/skill layers mounted into the container. Sources are chosen by the main process only. */
 export type ScopedComputerLayerId = 'skills'|'tools';
 export interface ScopedComputerLayer {id:ScopedComputerLayerId;label:string;/** Content hash of the snapshot (12 hex). */version:string;/** In-container mount point (read-only). */target:string}
@@ -48,7 +50,7 @@ export interface ScopedComputerStatus {
   durability:'scratch'|'durable';
   image:string;
   user:string;
-  limits:{network:ScopedComputerNetwork;memoryMiB:number;cpus:number;processes:number;maxRunning:number;maxTimeoutMs:number};
+  limits:{network:ScopedComputerNetwork;memoryMiB:number;cpus:number;processes:number;diskGiB:number;maxRunning:number;maxTimeoutMs:number};
   /** Read-only layers this container was created with. */
   layers?:ScopedComputerLayer[];
   /** Increments whenever the container (re)boots; services compare against it. */

@@ -32,20 +32,28 @@ export function mergeLimits(current:ScopedComputerLimits,patch:unknown):ScopedCo
   }
   return next;
 }
-export function validLimits(value:unknown):value is ScopedComputerLimits {
-  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='cpus,memoryMiB,processes')return false;
+/** Saved limits; records written before the disk limit existed (or with the default disk limit) have no `diskGiB`. */
+export function validLimits(value:unknown):value is Omit<ScopedComputerLimits,'diskGiB'>&{diskGiB?:number} {
+  const keys=value&&typeof value==='object'&&!Array.isArray(value)?Object.keys(value).sort().join(','):'';
+  if(keys!=='cpus,memoryMiB,processes'&&keys!=='cpus,diskGiB,memoryMiB,processes')return false;
   try {mergeLimits(SCOPED_COMPUTER_DEFAULT_LIMITS,value);return true;}catch {return false;}
 }
-const limitLabel=(key:keyof ScopedComputerLimits)=>key==='memoryMiB'?'Memory':key==='cpus'?'CPUs':'Processes';
+/** What a record stores: the default disk limit is left out so a record stays readable by builds without it. */
+export function savedLimits(limits:ScopedComputerLimits):Omit<ScopedComputerLimits,'diskGiB'>&{diskGiB?:number} {
+  const {diskGiB,...rest}=limits;return diskGiB===SCOPED_COMPUTER_DEFAULT_LIMITS.diskGiB?rest:limits;
+}
+export const diskLimitBytes=(limits:ScopedComputerLimits)=>limits.diskGiB*1024**3;
+const limitLabel=(key:keyof ScopedComputerLimits)=>key==='memoryMiB'?'Memory':key==='cpus'?'CPUs':key==='diskGiB'?'Disk':'Processes';
 /**
- * Grant limits for the core. Default memory/CPU are left undeclared so containers created before limits were
- * configurable keep their policy digest; the core's executor applies the same defaults (512 MiB, 1 CPU).
+ * Grant limits for the core. Default memory/CPU/disk are left undeclared so containers created before limits were
+ * configurable keep their policy digest; the core's executor applies the same defaults (512 MiB, 1 CPU, 10 GiB).
  */
 export function grantLimits(limits:ScopedComputerLimits,layers:readonly (ScopedComputerLayer&{source:string})[]) {
   return {
     maxProcesses:limits.processes,
     ...(limits.memoryMiB!==SCOPED_COMPUTER_DEFAULT_LIMITS.memoryMiB?{memoryMib:limits.memoryMiB}:{}),
     ...(limits.cpus!==SCOPED_COMPUTER_DEFAULT_LIMITS.cpus?{cpus:limits.cpus}:{}),
+    ...(limits.diskGiB!==SCOPED_COMPUTER_DEFAULT_LIMITS.diskGiB?{maxDiskMb:limits.diskGiB*1024}:{}),
     ...(layers.length?{readOnlyMounts:layers.map(layer=>({source:layer.source,target:layer.target}))}:{}),
   };
 }
