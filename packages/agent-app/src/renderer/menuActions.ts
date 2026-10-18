@@ -10,6 +10,7 @@ import {isSpotlightSearchOpen,openCommandPalette} from './components/SpotlightSe
 import {focusComposer} from './focus';
 import {transitionLayout} from './layoutMotion';
 import {chatOrder,installNavHistory,neighbourChat,type NavHistoryHandle} from './navHistory';
+import {installSwipeNavigation} from './swipeNavigation';
 import {
   activeChat,closeTab,getState,notifyError,notifySuccess,openAppSettings,openAutomationsScreen,openHubScreen,openMemoryScreen,openProjectsScreen,type SettingsSection,
   selectChat,setNavHidden,setResourcesHidden,subscribeStore,toggleSummary,updateChat,wakeChat,
@@ -134,5 +135,7 @@ export function runMenuAction(action:MenuAction):void {
 /** Subscribe the renderer to the native menu; a no-op outside Electron (tests, shell-only mode). */
 export function installMenuActions():()=>void {
   nav();
-  return window.musterMenu?.onAction(runMenuAction)??(()=>{});
+  const unswipe=installSwipeNavigation(direction=>{if(direction==='back')goBack();else goForward();});
+  const unmenu=window.musterMenu?.onAction(runMenuAction)??(()=>{});
+  return ()=>{unswipe();unmenu();};
 }
