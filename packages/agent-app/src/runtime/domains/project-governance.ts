@@ -338,7 +338,8 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     armMonitors();
     wakeQueue();
     let ids: string[] = [];
-    try { ids = (ctx.db().prepare('SELECT id FROM projects WHERE COALESCE(archived, 0) = 0').all() as { id: string }[]).map(r => r.id); } catch { /* a bare test context has no projects table */ }
+    // `archived` is added lazily by the projects domain, so read every row and filter here rather than naming the column.
+    try { ids = (ctx.db().prepare('SELECT * FROM projects').all() as { id: string; archived?: number | null }[]).filter(r => !r.archived).map(r => r.id); } catch { /* a bare test context has no projects table */ }
     seedChildMarks(ids);
     for (const projectId of ids) scheduleEval(projectId);
   }
@@ -604,6 +605,9 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       if (!parent || !owner || DONE.has(parent.state) || !children.every(c => DONE.has(c.state))) continue;
       const fp = fingerprintOf(children);
       if (gov().wakeMark(parentId, 'children_completed') === fp) continue;
+      // A paused, pending or removed owner, or a held project, is left unmarked so the next evaluation after a resume wakes them.
+      const m = memberOf(projectId, owner);
+      if (!quiet && (!m || m.pausedAt || m.pendingAt || m.revokedAt || projectHold(projectId) || gate(parent))) continue;
       gov().setWakeMark(projectId, parentId, 'children_completed', fp);
       if (quiet || !agentGov(projectId, owner).heartbeat.wakeOnChildren) continue;
       const sorted = [...children].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0)), shown = sorted.slice(0, 12).map(c => `${keyOf(c)}${c.state === 'cancelled' ? ' (cancelled)' : ''}`);
@@ -1212,7 +1216,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     try {
       if (command === 'project.tasks.add') { const o = output as { id?: string; projectId?: string; owner?: TaskOwner } | undefined; if (o?.id && o.projectId && o.owner?.kind === 'agent') onAssigned(o.projectId, o.id); }
       else if (command === 'project.tasks.edit') { const patch = (input.patch ?? {}) as { owner?: TaskOwner }; const o = output as { id?: string; projectId?: string } | undefined; if (patch.owner?.kind === 'agent' && o?.id && o.projectId) onAssigned(o.projectId, o.id); }
-      else if ((command === 'project.members.pause' || command === 'project.members.revoke' || command === 'project.members.restore') && typeof input.projectId === 'string' && typeof input.id === 'string') arm(input.projectId, input.id);
+      else if ((command === 'project.members.pause' || command === 'project.members.revoke' || command === 'project.members.restore') && typeof input.projectId === 'string' && typeof input.id === 'string') { arm(input.projectId, input.id); if (command !== 'project.members.revoke') scheduleEval(input.projectId); }
       else if (command === 'project.archive' || command === 'project.restore') { const pid = typeof input.id === 'string' ? input.id : ''; for (const a of gov().heartbeatAgents()) if (a.projectId === pid) arm(a.projectId, a.memberId); if (command === 'project.restore' && pid) scheduleEval(pid); }
       if (command === 'project.members.pause' && input.paused === false && typeof input.projectId === 'string' && typeof input.id === 'string') {
         const open = gov().openBreaker(input.projectId, 'wake_storm', input.id);

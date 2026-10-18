@@ -223,3 +223,18 @@ test('#129: subtasks that finished while the app was closed wake the parent’s 
     assert.match(wakes[0]!.note ?? '', /^All 2 subtasks are done/);
   } finally { await s.dispose(); }
 });
+
+test('#129: an agent paused when its subtasks finish is woken once after it is resumed', async t => {
+  const h = await wave1(t);
+  const cto = await h.member('CTO');
+  await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, heartbeat: { minGapSec: 0 } });
+  const parent = await h.addTask('Parent', { kind: 'agent', id: cto.id });
+  const kid = await h.addTask('Kid', { kind: 'user', id: 'local' }, { parentId: parent.id });
+  await h.s.invoke('project.members.pause', { projectId: h.project.id, id: cto.id, paused: true });
+  await verify(h, kid.id); await settle();
+  assert.equal((await childWakes(h, parent.id)).length, 0, 'a paused agent is not woken (and the completion is not used up)');
+  await h.s.invoke('project.members.pause', { projectId: h.project.id, id: cto.id, paused: false });
+  await until(async () => (await childWakes(h, parent.id)).length === 1, 'the wake after resume');
+  await h.settled(parent.id); await settle();
+  assert.equal((await childWakes(h, parent.id)).length, 1, 'exactly one wake for the set');
+});
