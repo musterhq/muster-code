@@ -267,10 +267,8 @@
 .file-find-plain mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--text); border-radius: var(--radius-2); }
 .file-find-plain mark[data-current='true'] { background: var(--accent); color: var(--bg); }
 
-/* Large source files keep the existing gutter and typography with bounded rows. */
+/* Large source files keep the existing gutter, typography and row height with bounded rows. */
 .virtual-file-source { min-height: 100%; outline: none; }
-.virtual-file-source .code-table { line-height: 20px; }
-.virtual-file-source td { padding-block: 0; }
 .virtual-file-source .virtual-file-spacer td { padding: 0; border: 0; line-height: 0; }
 .virtual-file-source mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--text); }
 .virtual-file-source mark[data-current='true'] { background: var(--accent); color: var(--bg); }

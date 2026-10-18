@@ -4,6 +4,7 @@ import {createRoot} from 'react-dom/client';
 import {flushSync} from 'react-dom';
 import {FileTab} from '../src/renderer/components/FileTab';
 import {HighlightedSourceTable} from '../src/renderer/components/HighlightedCode';
+import {VirtualFileSource} from '../src/renderer/components/VirtualFileSource';
 import {getState, openFile} from '../src/renderer/store';
 import '../src/renderer/styles.css';
 const assert = (condition: unknown, message: string) => {if (!condition) throw new Error(message);};
@@ -32,6 +33,7 @@ async function run() {
   flushSync(() => root.render(<HighlightedSourceTable source={source} language="text"/>));
   void host.offsetHeight;
   const before = {milliseconds: performance.now() - beforeStart, nodes: host.querySelectorAll('*').length};
+  const smallRowHeight = host.querySelector('tr[data-line]')!.getBoundingClientRect().height;
   flushSync(() => root.render(null));
   await openFile('folder', 'big.txt');
   const tab = getState().tabs.find(tab => tab.path === 'big.txt')!;
@@ -51,8 +53,22 @@ async function run() {
   assert(rows().length < 100, 'full-file DOM must stay bounded (fails with old full table)');
   assert(after.nodes < 500, 'full-file DOM must contain fewer than 500 elements');
   const scroller = host.querySelector<HTMLElement>('.code-scroll')!;
-  const first = host.querySelector<HTMLElement>('[data-line="1"] .code-line')!;
-  assert(first.parentElement!.getBoundingClientRect().height === 20, 'virtual rows match layout height');
+  let first = host.querySelector<HTMLElement>('[data-line="1"] .code-line')!;
+  assert(Math.abs(first.parentElement!.getBoundingClientRect().height - smallRowHeight) < 0.01, `virtual rows keep the small-file row height (${smallRowHeight})`);
+  assert(host.querySelector('.virtual-file-source table')?.getAttribute('aria-rowcount') === String(lines.length), 'table reports every source row to assistive tech');
+  // A scrollbar drag jumps far in one step; the rows under the viewport must be painted in that same frame.
+  const textLeft = first.getBoundingClientRect().left;
+  for (const fraction of [0.37, 0.81, 0.12]) {
+    scroller.scrollTop = Math.floor(scroller.scrollHeight * fraction);
+    await frame();
+    const box = scroller.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.left + 60, box.top + box.height / 2);
+    assert(hit?.closest('tr')?.hasAttribute('data-line'), `jump to ${fraction} paints rows in the same frame`);
+    assert(Math.abs(hit!.closest('tr')!.querySelector('.code-line')!.getBoundingClientRect().left - textLeft) < 0.5, 'the gutter keeps one width at any scroll position');
+  }
+  scroller.scrollTop = 0;
+  await settle();
+  first = host.querySelector<HTMLElement>('[data-line="1"] .code-line')!;
   const selection = window.getSelection()!;
   selection.setBaseAndExtent(first.firstChild!, 2, first.firstChild!, 8);
   await settle();
@@ -71,6 +87,12 @@ async function run() {
   assert(copy() === expected, 'copy reconstructs unmounted lines');
   selection.setBaseAndExtent(last.firstChild!, 9, first.firstChild!, 2);
   assert(copy() === expected, 'backward selection copies the same source range');
+  // A drag released over rows that are not mounted yet still copies the original text up to that point.
+  const spacer = host.querySelector<HTMLElement>('.virtual-file-spacer')!;
+  selection.setBaseAndExtent(first.firstChild!, 2, spacer.firstChild!, 0);
+  const gapStart = Number(spacer.dataset.gapStart);
+  assert(copy() === source.slice(2, source.split('\n').slice(0, gapStart - 1).join('\n').length + 1), 'selection ending in a spacer copies through the hidden rows');
+  selection.setBaseAndExtent(last.firstChild!, 9, first.firstChild!, 2);
   let context: {text: string; source: {startLine: number; endLine: number}} | undefined;
   const accept = (event: Event) => {context = (event as CustomEvent).detail; event.preventDefault();};
   window.addEventListener('muster:composer-add-context', accept);
@@ -93,6 +115,8 @@ async function run() {
   await until(() => host.querySelector('mark[data-current="true"]')?.closest('tr')?.getAttribute('data-line') === '21184');
   const searchScroller = host.querySelector<HTMLElement>('.code-scroll')!;
   assert(searchScroller.scrollTop > 400_000, 'search navigates to an offscreen match');
+  const markBox = host.querySelector('mark[data-current="true"]')!.getBoundingClientRect(), viewBox = searchScroller.getBoundingClientRect();
+  assert(markBox.left >= viewBox.left && markBox.right <= viewBox.right, `the current match is scrolled into view sideways (${markBox.left}-${markBox.right} in ${viewBox.left}-${viewBox.right})`);
   host.querySelector<HTMLButtonElement>('[aria-label="Next match"]')!.click();
   await until(() => host.querySelector('mark[data-current="true"]')?.closest('tr')?.getAttribute('data-line') === '1');
   assert(rows().length < 100, 'find stays virtualized');
@@ -102,6 +126,19 @@ async function run() {
   observer.disconnect();
   assert(longTasks.length === 0, `load/scroll/search/selection must have no >50ms tasks: ${longTasks}`);
   root.unmount();
+  // The horizontal scroll range must not follow whichever rows are mounted: a long line near the top
+  // keeps its scroll position while short lines further down are on screen.
+  const varied = Array.from({length: 5_000}, (_, i) => i === 3 ? 'x'.repeat(600) : `short ${i}`).join('\n');
+  const plainRoot = createRoot(host);
+  flushSync(() => plainRoot.render(<div className="code-scroll" style={{height: 300}}><VirtualFileSource source={varied}/></div>));
+  await settle();
+  const plain = host.querySelector<HTMLElement>('.code-scroll')!;
+  plain.scrollLeft = plain.scrollWidth;
+  const left = plain.scrollLeft;
+  plain.scrollTop = 40_000;
+  await settle();
+  assert(left > 0 && plain.scrollLeft === left, `horizontal scroll stays at ${left} after scrolling down (got ${plain.scrollLeft})`);
+  plainRoot.unmount();
   return {bytes: source.length, lines: lines.length, before, after, longTasks};
 }
 (globalThis as typeof globalThis & {testResult: Promise<unknown>}).testResult = run();
