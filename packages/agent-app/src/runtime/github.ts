@@ -265,6 +265,52 @@ export function summarizeChecks(items:GitHubCheck[]):GitHubChecks['summary'] {
   return summary;
 }
 
+/** The workflow behind a GitHub Actions check suite: a check is one job of one workflow for one trigger. */
+export interface SuiteWorkflow {workflowId:string; name:string; event:string}
+const idOf = (value:unknown):string => { const id = (value as {id?:unknown} | null | undefined)?.id; return typeof id === 'number' || typeof id === 'string' ? String(id) : ''; };
+/** True when one check name shows up in more than one check suite: only then is it worth asking which workflow each suite ran. */
+export function suitesShareNames(runs:Record<string, unknown>[]):boolean {
+  const suites = new Map<string, string>();
+  for (const run of runs) { const name = str(run.name), suite = idOf(run.check_suite), seen = suites.get(name); if (seen === undefined) suites.set(name, suite); else if (seen !== suite) return true; }
+  return false;
+}
+export function workflowsBySuite(rows:unknown):Map<string, SuiteWorkflow> {
+  const map = new Map<string, SuiteWorkflow>();
+  for (const row of Array.isArray(rows) ? rows as Record<string, unknown>[] : []) {
+    const suite = row.check_suite_id, workflow = row.workflow_id;
+    if ((typeof suite === 'number' || typeof suite === 'string') && (typeof workflow === 'number' || typeof workflow === 'string')) map.set(String(suite), {workflowId: String(workflow), name: str(row.name), event: str(row.event)});
+  }
+  return map;
+}
+/** Which workflow each check suite ran, read only when a check name is shared across suites (one request, never on the common path); undefined when unread. */
+export async function suiteWorkflows(cwd:string, base:string, sha:string, runs:Record<string, unknown>[]):Promise<Map<string, SuiteWorkflow> | undefined> {
+  if (!suitesShareNames(runs)) return undefined;
+  return request<{workflow_runs?:Record<string, unknown>[]}>(cwd, {method: 'GET', path: `${base}/actions/runs?head_sha=${sha}&per_page=100&exclude_pull_requests=true`}).then(body => workflowsBySuite(body?.workflow_runs), () => undefined);
+}
+/**
+ * The newest check run of each check (#646). Re-runs, and a workflow that runs again on the same commit, replace the older run; same-named jobs of
+ * different workflows, triggers or apps are separate checks, and carry the workflow's name (and trigger) when their names would otherwise read the same.
+ * Without workflow facts (no name is shared across suites, or Actions could not be read) each check suite counts as its own, so no check is ever lost.
+ */
+export function latestCheckRuns(runs:Record<string, unknown>[], workflows?:Map<string, SuiteWorkflow>):GitHubCheck[] {
+  const latest = new Map<string, {run:Record<string, unknown>; workflow?:SuiteWorkflow}>();
+  for (const run of runs) {
+    const name = str(run.name), suite = idOf(run.check_suite), workflow = workflows?.get(suite);
+    // A suite Actions did not list (another app, or past the first 100 workflow runs) is keyed by app, but an Actions one keeps its own suite.
+    const byApp = workflows && str((run.app as {slug?:unknown} | null | undefined)?.slug) !== 'github-actions';
+    const key = workflow ? `workflow\0${workflow.workflowId}\0${workflow.event}\0${name}` : byApp ? `app\0${idOf(run.app)}\0${name}` : `suite\0${suite}\0${name}`;
+    const prior = latest.get(key);
+    if (!prior || num(run.id) > num(prior.run.id)) latest.set(key, {run, ...(workflow ? {workflow} : {})});
+  }
+  const kept = [...latest.values()].map(entry => ({...entry, check: checkFromRun(entry.run)}));
+  const repeats = (label:(entry:typeof kept[number]) => string) => { const seen = new Map<string, number>(); for (const entry of kept) seen.set(label(entry), (seen.get(label(entry)) ?? 0) + 1); return (entry:typeof kept[number]) => (seen.get(label(entry)) ?? 0) > 1; };
+  const sameName = repeats(entry => entry.check.name);
+  for (const entry of kept) if (sameName(entry) && entry.workflow?.name) entry.check.name = `${entry.workflow.name} / ${entry.check.name}`;
+  const sameLabel = repeats(entry => entry.check.name);
+  for (const entry of kept) if (sameLabel(entry) && entry.workflow?.event) entry.check.name = `${entry.check.name} (${entry.workflow.event})`;
+  return kept.map(entry => entry.check);
+}
+
 export async function listChecks(root:string, number:number, refresh = false):Promise<GitHubChecks> {
   const real = await fs.realpath(root); const n = prNumber(number);
   const pr = await getPullRequest(real, n, refresh);
@@ -286,10 +332,9 @@ export async function listChecks(root:string, number:number, refresh = false):Pr
       checkRuns(),
       request<{statuses?:Record<string, unknown>[]}>(real, {method: 'GET', path: `${repoPath(s)}/commits/${sha}/status?per_page=100`}).catch(error => { if (error instanceof GitHubError && error.code === 'not_found') return {statuses: []}; throw error; }),
     ]);
-    // Re-runs create new check runs with the same name in the same check suite: keep the newest per name and suite, so same-named jobs of different workflows stay separate.
-    const latest = new Map<string, Record<string, unknown>>();
-    for (const run of runs?.check_runs ?? []) { const suite = (run.check_suite as {id?:unknown} | undefined)?.id; const key = `${str(run.name)}\0${suite === undefined ? '' : String(suite)}`; const prior = latest.get(key); if (!prior || num(run.id) > num(prior.id)) latest.set(key, run); }
-    const items = [...[...latest.values()].map(checkFromRun), ...(combined?.statuses ?? []).map(checkFromStatus)];
+    // Check runs of one workflow that ran more than once on this commit (a workflow_run trigger, a reopened pull request) are told apart by workflow, not suite.
+    const runRows = runs?.check_runs ?? [];
+    const items = [...latestCheckRuns(runRows, await suiteWorkflows(real, repoPath(s), sha, runRows)), ...(combined?.statuses ?? []).map(checkFromStatus)];
     const order = (check:GitHubCheck) => check.status !== 'completed' ? 1 : check.conclusion === 'success' ? 3 : check.conclusion === 'skipped' || check.conclusion === 'neutral' ? 4 : 0;
     items.sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name));
     return {headSha: pr.headSha, items, summary: summarizeChecks(items)};

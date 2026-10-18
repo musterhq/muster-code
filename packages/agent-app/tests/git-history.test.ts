@@ -314,17 +314,16 @@ test('a conflicted file larger than the view cap is never overwritten with its c
   await run(dir, ['merge', '--abort']);
 });
 
-test('a diff of exactly 1000 files is not truncated; 1001 is', async () => {
+test('a diff of 999 or exactly 1000 files is not truncated; 1001 is', async () => {
   const dir = await repo();
   await run(dir, ['checkout', '-q', '-b', 'many']);
   await mkdir(join(dir, 'm'));
-  for (let i = 0; i < 1001; i++) await writeFile(join(dir, 'm', `f${i}.txt`), 'x\n');
-  await run(dir, ['add', '-A']);
-  await run(dir, ['reset', '-q', '--', 'm/f1000.txt']);
-  await run(dir, ['commit', '-q', '-m', 'exact']);
-  const exact = await compareRefs(dir, {base: 'main', head: 'many'});
+  await Promise.all(Array.from({length: 1001}, (_, i) => writeFile(join(dir, 'm', `f${i}.txt`), 'x\n')));
+  const commitTo = async (count: number) => { await run(dir, ['add', '-A']); if (count < 1001) await run(dir, ['reset', '-q', '--', ...Array.from({length: 1001 - count}, (_, i) => `m/f${count + i}.txt`)]); await run(dir, ['commit', '-q', '-m', String(count)]); return compareRefs(dir, {base: 'main', head: 'many'}); };
+  const under = await commitTo(999);
+  assert.equal(under.files.length, 999); assert.equal(under.truncated, false);
+  const exact = await commitTo(1000);
   assert.equal(exact.files.length, 1000); assert.equal(exact.truncated, false);
-  await run(dir, ['add', '-A']); await run(dir, ['commit', '-q', '-m', 'over']);
-  const over = await compareRefs(dir, {base: 'main', head: 'many'});
+  const over = await commitTo(1001);
   assert.equal(over.files.length, 1000); assert.equal(over.truncated, true);
 });
