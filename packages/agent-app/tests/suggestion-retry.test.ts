@@ -40,3 +40,27 @@ for (const failure of ['second task', 'suggestion save'] as const) {
     if (failure === 'second task') assert.equal(children[0]!.seq! + children[1]!.seq!, 5, 'failed batch must roll back task sequence allocation');
   });
 }
+
+test('a suggested task deleted before the retry is created again instead of failing every retry', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'suggestion-retry-'));
+  const tasks = new ProjectTaskStore(dir), store = new InteractionStore(dir);
+  t.after(() => { tasks.close(); store.close(); rmSync(dir, { recursive: true, force: true }); });
+  const parent = tasks.createTask({ projectId: 'p', title: 'Parent', acceptance: '', dependencies: [] });
+  const suggestion = store.addSuggestion({ projectId: 'p', taskId: parent.id, memberId: null, memberName: 'Agent', items: ['First', 'Second'].map(title => ({ title, acceptance: '', assignee: null, priority: null })) });
+  const tools = createTaskTools({
+    tasks: () => tasks, store: () => store, exists: () => true,
+    keyOf: () => 'P-1', record: () => {}, changed: () => {}, onAssigned: () => {},
+  } as unknown as TaskToolDeps);
+  const save = store.saveSuggestion.bind(store);
+  store.saveSuggestion = () => { throw new Error('Injected failure'); };
+  const create = () => tools.handlers['project.suggestions.create']({ projectId: 'p', id: suggestion.id });
+  assert.throws(create, /Injected failure/);
+  store.saveSuggestion = save;
+  const first = tasks.listTasks('p').items.find(task => task.title === 'First')!;
+  tasks.deleteTask({ projectId: 'p', id: first.id, revision: first.revision });
+  const result = create();
+  const children = tasks.listTasks('p').items.filter(task => task.parentId === parent.id);
+  assert.deepEqual(children.map(task => task.title).sort(), ['First', 'Second']);
+  assert.equal(result.state, 'done');
+  assert.ok(!children.some(task => task.id === first.id), 'the deleted task stays deleted');
+});
