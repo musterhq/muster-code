@@ -65,9 +65,9 @@ test('default settings select the stock themes', () => {
   assert.equal(pickTheme('light', 'sepia', 'muster-dark').id, 'sepia');
 });
 
-test('there are 8 built-ins: stock pair plus six', () => {
-  assert.deepEqual(BUILT_IN_THEMES.map(t => t.id), ['muster-light', 'muster-dark', 'high-contrast-dark', 'high-contrast-light', 'solarized-dark', 'solarized-light', 'github-dark', 'sepia']);
-  assert.equal(new Set(BUILT_IN_THEMES.map(t => t.id)).size, 8);
+test('there are 27 built-ins: stock pair, six classics and 19 studio palettes', () => {
+  assert.deepEqual(BUILT_IN_THEMES.map(t => t.id), ['muster-light', 'muster-dark', 'high-contrast-dark', 'high-contrast-light', 'solarized-dark', 'solarized-light', 'github-dark', 'sepia', 'charcoal', 'chalk', 'midnight', 'daylight', 'indigo-night', 'indigo-day', 'deep-navy', 'phosphor', 'ink', 'linen', 'slate', 'stone', 'ember-dark', 'ember-light', 'aubergine', 'moss', 'pure-black', 'pure-white', 'studio']);
+  assert.equal(new Set(BUILT_IN_THEMES.map(t => t.id)).size, 27);
 });
 
 test('contrast: every theme meets WCAG AA on its text/background pairs (the six new ones on every pair at 4.5:1)', () => {
