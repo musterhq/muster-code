@@ -32,9 +32,9 @@ class Contents extends EventEmitter {
   close(options:any){assert.equal(options.waitForBeforeUnload,false);this.destroyed=true;this.closed=true;this.emit('destroyed');}
 }
 class View {
-  webContents=new Contents();visible=false;bounds:any;options:any;
+  webContents=new Contents();visible=false;bounds:any;options:any;backgroundColor='';
   setVisible(visible:boolean){this.visible=visible;}
-  setBackgroundColor(_color:string){}
+  setBackgroundColor(color:string){this.backgroundColor=color;}
   setBounds(bounds:any){this.bounds=bounds;}
 }
 class Session extends EventEmitter {
@@ -88,6 +88,12 @@ test('geometry is clipped, zoom-aware and rejects malformed numbers',()=>{
   assert.deepEqual(browserBounds({x:30,y:10,width:40,height:30},100,80,2),{x:60,y:20,width:40,height:60});
   assert.throws(()=>browserBounds({x:0,y:0,width:NaN,height:1},100,100));
   assert.throws(()=>browserBounds({x:0,y:0,width:-1,height:1},100,100));
+});
+
+test('web pages use a white background independent of the app theme',()=>{
+  const {controller,open,views}=fixture();open();
+  assert.equal(views[0].backgroundColor,'#ffffff');
+  controller.dispose();
 });
 
 test('remote contents are sandboxed, have no preload/Node bridge, and permissions/downloads/popups are denied',()=>{
