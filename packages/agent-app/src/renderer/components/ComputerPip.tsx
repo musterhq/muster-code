@@ -271,7 +271,11 @@ const selectVisibleTab=(state:ReturnType<typeof getState>)=>!state.resourcesHidd
 /** Space to keep beside the transcript so the preview card never covers its text, or undefined when it does not
  *  overlap the (centred, max-width) column at all, or when reserving would leave the transcript too narrow to read. */
 function pipReserve(center:HTMLElement,anchor:{right:number;width:number},side:'left'|'right'):{side:'left'|'right';px:number}|undefined {
-  return pipReserveFor(center.getBoundingClientRect(),parseFloat(getComputedStyle(center).getPropertyValue('--timeline-max'))||804,window.innerWidth,anchor,side);
+  // The column centres inside the timeline's content box: the pane minus the summary card's own reserve (its padding).
+  const timeline=center.querySelector<HTMLElement>('.chat > .timeline-shell > .timeline');
+  const pad=timeline?getComputedStyle(timeline):undefined,box=center.getBoundingClientRect();
+  const left=box.left+(parseFloat(pad?.paddingLeft??'')||0),right=box.right-(parseFloat(pad?.paddingRight??'')||0);
+  return pipReserveFor({left,right,width:right-left},parseFloat(getComputedStyle(center).getPropertyValue('--timeline-max'))||804,window.innerWidth,anchor,side);
 }
 
 /** Codex-style picture-in-picture: a frameless cluster of live window thumbnails at the conversation's right,

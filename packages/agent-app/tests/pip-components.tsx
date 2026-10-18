@@ -64,9 +64,11 @@ const tabsText=()=>[...document.querySelectorAll('[role="tab"]')].map(tab=>tab.t
 assert.deepEqual(errors,[]);
 assert.equal(cards().length,2,'both live sessions show as PiPs, the past transcript session does not');
 const stack=document.querySelector<HTMLElement>('.pip-stack')!;
-const transcript=document.querySelector<HTMLElement>('.timeline')!.getBoundingClientRect();
+// The 804px column centres in the 1000px pane, so its text ends at 870px; the card either clears that or gets a reserve.
 const previewLeft=window.innerWidth-Number.parseFloat(stack.style.right)-Number.parseFloat(stack.style.width);
-assert.ok(transcript.right<=previewLeft,'the visible browser preview does not overlap the transcript container');
+const center=document.querySelector<HTMLElement>('main.center')!;
+assert.ok(previewLeft>=870+8||Number.parseFloat(center.style.getPropertyValue('--pip-reserve'))>0,'the visible browser preview never covers transcript text');
+assert.equal(!!center.dataset.pipSide,previewLeft<870+8,'space is reserved only when the card would cover text');
 assert.equal(document.querySelector('.pip-empty'),null,'a card with a frame never shows a placeholder');
 assert.equal(cards().every(card=>!!card.querySelector('img')),true,'every card shows its real frame');
 assert.ok(!document.body.textContent!.includes('Ended'),'live sessions are not labelled ended');
