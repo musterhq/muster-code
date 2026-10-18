@@ -46,24 +46,25 @@ export function ledgerAggregates(db: DatabaseSync, input: { since: string; month
       SELECT date(created_at, ?) AS day, json_extract(body, '$.outcome') AS outcome FROM turn_ledger WHERE created_at >= ? ${scope}
       UNION ALL SELECT date(ended_at, ?) AS day, json_extract(body, '$.outcome') AS outcome FROM turn_ledger_history WHERE ended_at >= ? ${history}
     ) GROUP BY day, outcome`).all(mod, input.since, ...p, mod, input.since, ...p) as { day: string; outcome: string | null; n: number }[]).map(r => ({ day: r.day, outcome: r.outcome, count: Number(r.n) }));
-  const tokens = `COALESCE(json_extract(body, '$.tokens.input'), 0) + COALESCE(json_extract(body, '$.tokens.output'), 0)`;
-  const spend = db.prepare(`SELECT COALESCE(SUM(cost), 0) AS usd, COALESCE(SUM(cost IS NOT NULL), 0) AS priced, COALESCE(SUM(cost IS NULL), 0) AS unpriced, COALESCE(SUM(tokens), 0) AS tokens FROM (
-      SELECT json_extract(body, '$.costUsd') AS cost, ${tokens} AS tokens FROM turn_ledger WHERE created_at >= ? ${scope}
-      UNION ALL SELECT json_extract(body, '$.costUsd') AS cost, ${tokens} AS tokens FROM turn_ledger_history WHERE ended_at >= ? ${history}
-    )`).get(input.monthStart, ...p, input.monthStart, ...p) as { usd: number; priced: number; unpriced: number; tokens: number };
-  let usd = Number(spend.usd), priced = Number(spend.priced), unpriced = Number(spend.unpriced);
-  if (input.priceOf && unpriced) {
-    const rows = db.prepare(`SELECT provider, model, SUM(i) AS i, SUM(c) AS c, SUM(o) AS o, COUNT(*) AS n FROM (
-        SELECT json_extract(body, '$.provider') AS provider, json_extract(body, '$.model') AS model, COALESCE(json_extract(body, '$.tokens.input'), 0) AS i, COALESCE(json_extract(body, '$.tokens.cached'), 0) AS c, COALESCE(json_extract(body, '$.tokens.output'), 0) AS o FROM turn_ledger WHERE created_at >= ? AND json_extract(body, '$.costUsd') IS NULL ${scope}
-        UNION ALL SELECT json_extract(body, '$.provider'), json_extract(body, '$.model'), COALESCE(json_extract(body, '$.tokens.input'), 0), COALESCE(json_extract(body, '$.tokens.cached'), 0), COALESCE(json_extract(body, '$.tokens.output'), 0) FROM turn_ledger_history WHERE ended_at >= ? AND json_extract(body, '$.costUsd') IS NULL ${history}
-      ) WHERE provider IS NOT NULL AND model IS NOT NULL GROUP BY provider, model`).all(input.monthStart, ...p, input.monthStart, ...p) as { provider: string; model: string; i: number; c: number; o: number; n: number }[];
-    for (const row of rows) {
-      const cost = estimateCostUsd({ inputTokens: Number(row.i), cachedInputTokens: Number(row.c), outputTokens: Number(row.o), reasoningOutputTokens: 0, requests: 0 }, input.priceOf(row.provider, row.model));
-      if (cost === null) continue;
-      usd += cost; priced += Number(row.n); unpriced -= Number(row.n);
-    }
+  // One pass over this month's turns, summed per model and per priced/unpriced/no-usage: the unpriced turns of a model with
+  // a known price (`priceOf`: the user's price, else the catalog's) are priced from their tokens. A known price times unknown
+  // usage is still unknown, so a turn with no recorded tokens (an imported multi-turn chat) stays unpriced, never $0, the
+  // same rule the Costs tab follows.
+  const cols = `json_extract(body, '$.provider') AS provider, json_extract(body, '$.model') AS model, json_extract(body, '$.costUsd') AS cost, COALESCE(json_extract(body, '$.tokens.input'), 0) AS i, COALESCE(json_extract(body, '$.tokens.cached'), 0) AS c, COALESCE(json_extract(body, '$.tokens.output'), 0) AS o`;
+  const groups = db.prepare(`SELECT provider, model, cost IS NULL AS unpriced, (i > 0 OR o > 0) AS used, COALESCE(SUM(cost), 0) AS usd, SUM(i) AS i, SUM(c) AS c, SUM(o) AS o, COUNT(*) AS n FROM (
+      SELECT ${cols} FROM turn_ledger WHERE created_at >= ? ${scope}
+      UNION ALL SELECT ${cols} FROM turn_ledger_history WHERE ended_at >= ? ${history}
+    ) GROUP BY 1, 2, 3, 4`).all(input.monthStart, ...p, input.monthStart, ...p) as { provider: string | null; model: string | null; unpriced: number; used: number; usd: number; i: number; c: number; o: number; n: number }[];
+  let usd = 0, priced = 0, unpriced = 0, tokens = 0;
+  for (const g of groups) {
+    const n = Number(g.n), i = Number(g.i), o = Number(g.o);
+    tokens += i + o;
+    if (!g.unpriced) { usd += Number(g.usd); priced += n; continue; }
+    const pricing = input.priceOf && g.used && g.provider && g.model ? input.priceOf(g.provider, g.model) : null;
+    const cost = estimateCostUsd({ inputTokens: i, cachedInputTokens: Number(g.c), outputTokens: o, reasoningOutputTokens: 0, requests: 0 }, pricing);
+    if (cost === null) unpriced += n; else { usd += cost; priced += n; }
   }
-  return { turns, spend: { usd, priced, unpriced, tokens: Number(spend.tokens) } };
+  return { turns, spend: { usd, priced, unpriced, tokens } };
 }
 
 export interface DashboardInputs {

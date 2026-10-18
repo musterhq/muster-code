@@ -44,7 +44,7 @@ import { importFromPaperclip, planImport, SqliteImportStore } from '../paperclip
 import { ImportedHistory, within } from '../checkout/imported-history.ts';
 import { realGit } from '../checkout/git-port.ts';
 import { buildCosts, groupsFromReceipts } from '../insight/costs.ts';
-import { effectivePricing, type ModelPricing } from '../../shared/model-catalog.ts';
+import { effectivePricing, EMPTY_MODEL_POLICY, type ModelPolicy } from '../../shared/model-catalog.ts';
 import { buildDashboard, DASHBOARD_DAYS, ledgerAggregates, monthStart } from '../workspace-dashboard.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 import { device } from '../../shared/device-noun.ts';
@@ -795,13 +795,12 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   });
 
   // --- the Dashboard (#132) -------------------------------------------------------------------------------------------------
+  // The price the Costs tab uses for a turn the Ledger left unpriced: the user's own price (Settings › Models), else the catalog's.
   const pricingLookup = async () => {
-    const policy = await context.invoke('models.policy.get', {}).catch(() => null);
-    return (providerId: string, model: string) => {
-      let catalog: ModelPricing | undefined;
-      try { catalog = (context.modelCatalog?.().providers.find(p => p.id === providerId) as unknown as { models?: { id: string; pricing?: ModelPricing }[] } | undefined)?.models?.find(m => m.id === model)?.pricing; } catch { catalog = undefined; }
-      return policy ? effectivePricing(policy, providerId, model, catalog) : catalog ?? null;
-    };
+    const policy: ModelPolicy = await context.invoke('models.policy.get', {}).catch(() => EMPTY_MODEL_POLICY);
+    let providers: ReturnType<NonNullable<DomainContext['modelCatalog']>>['providers'] = [];
+    try { providers = context.modelCatalog?.().providers ?? []; } catch { /* no catalog: only the user's prices apply */ }
+    return (providerId: string, model: string) => effectivePricing(policy, providerId, model, providers.find(p => p.id === providerId)?.models.find(m => m.id === model)?.pricing);
   };
   const dashboard = async (offset: number, projectId?: string) => {
     const now = Date.now(), since = new Date(now - (DASHBOARD_DAYS + 1) * 86_400_000).toISOString();

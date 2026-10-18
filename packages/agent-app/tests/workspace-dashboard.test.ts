@@ -82,3 +82,15 @@ test('turns the provider left unpriced are priced from the catalog or model poli
   const a = ledgerAggregates(db, { since, monthStart: monthStart(NOW, 0), offset: 0, skipImportedPaperclip: false, priceOf });
   assert.deepEqual(a.spend, { usd: 3.5, priced: 2, unpriced: 2, tokens: 8_000_000 });
 });
+
+test('a priced model never turns a turn with no recorded usage into $0: it stays unpriced', () => {
+  const db = new DatabaseSync(':memory:');
+  const l = new TurnLedger(db);
+  const known = (i: number, tokens: unknown) => ({ ...body(i, '2026-09-29T09:00:00.000Z', 'completed', null), provider: 'p', model: 'known', tokens });
+  // An imported multi-turn chat keeps its provider and model but no per-turn tokens; a live turn that reported no usage has zeros.
+  l.importHistory([known(1, null)]); l.append(known(2, { input: 0, cached: 0, output: 0, reasoning: 0 })); l.append(known(3, { input: 2_000_000, cached: 1_000_000, output: 0, reasoning: 0 }));
+  const priceOf = () => ({ inputPerMTok: 1, outputPerMTok: 2, cachedInputPerMTok: 0.1, source: 'catalog' as const });
+  const a = ledgerAggregates(db, { since: new Date(NOW - 15 * 86_400_000).toISOString(), monthStart: monthStart(NOW, 0), offset: 0, skipImportedPaperclip: false, priceOf });
+  assert.equal(a.spend.priced, 1); assert.equal(a.spend.unpriced, 2);
+  assert.ok(Math.abs(a.spend.usd - 1.1) < 1e-9, 'cached input is billed at the cached rate, the rest of the input at the input rate');
+});
