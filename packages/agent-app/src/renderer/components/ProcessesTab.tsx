@@ -19,6 +19,7 @@ import type {FileRunAction} from '../../shared/domains/files-protocol';
 import './processes-tab.css';
 import './process-saved-actions.css';
 import { ResourceState } from './ResourceState';
+import {cleanIpcError} from './resourceErrors';
 import {Tip} from './Tooltip';
 
 const PURPOSES=[{id:'command',label:'Command',Icon:SquareTerminal},{id:'test',label:'Test',Icon:FlaskConical},{id:'build',label:'Build',Icon:Hammer},{id:'server',label:'Server',Icon:Globe},{id:'task',label:'Task',Icon:Wrench}] as const;
@@ -246,7 +247,7 @@ function useTerminals(chatId:string,active:boolean,autoStart:boolean) {
     },cause=>{
       if(disposed)return;
       if(retries<2){retryTimer=setTimeout(initialLoad,250*2**retries++);return;}
-      setLoadError(message(cause));setLoading(false);
+      setLoadError(cleanIpcError(cause));setLoading(false);
     });};
     initialLoad();
     // A hidden window receives no events; catch up any stream that moved on meanwhile.
