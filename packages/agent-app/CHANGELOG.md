@@ -5,6 +5,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Claude Code token counts match what Claude Code reports: each model response is counted once with its final output, cache reads count as cached input, and a turn's result fills in anything missing. Earlier usage rows are unchanged.
+
 - Ledger receipts use your Settings › Models prices: a custom provider model now shows a cost, and a price you set wins over the catalog price, matching Settings usage. A price change applies to new turns only.
 - Release settled and superseded turn-ledger state and bound retained runs when settlement never arrives.
 - A sub-agent that finished is announced once in the transcript, and one /compact leaves a single compaction row instead of two.
