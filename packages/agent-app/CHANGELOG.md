@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Ledger receipts use your Settings › Models prices: a custom provider model now shows a cost, and a price you set wins over the catalog price, matching Settings usage. A price change applies to new turns only.
 - Release settled and superseded turn-ledger state and bound retained runs when settlement never arrives.
 - A sub-agent that finished is announced once in the transcript, and one /compact leaves a single compaction row instead of two.
 - Agent wakes that were waiting (for the gap between wakes, or for a run to end) are no longer lost when you quit: they resume when Muster opens, start once, and carry every reason and comment they collected. An agent also wakes once when every subtask of its task is done, including subtasks finished while Muster was closed; turn this off per agent with "Wake when all its subtasks are done".
