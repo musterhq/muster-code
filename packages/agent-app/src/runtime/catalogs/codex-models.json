@@ -1,5 +1,5 @@
 {
-  "source": "Codex 0.162 model catalog; used only when the account cache is unreadable.",
+  "source": "Codex 0.162 model catalog (GPT-6.1 Sol at its 500K context window); used only when the account cache is missing or unreadable.",
   "models": [
     {
       "slug": "gpt-6.1-sol",

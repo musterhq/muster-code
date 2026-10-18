@@ -17,15 +17,17 @@ test('a signed-in Codex route without a readable cache offers the current fallba
     invalidateProviderInstances();
     const info = configuredProviderInstances(options).find(row => row.info.id === 'openai-direct')!.info;
     assert.equal(info.available, true);
-    for (const [id, name, defaultEffort] of [
-      ['gpt-6.1-sol', 'GPT-6.1 Sol', 'low'],
-      ['gpt-6-sol', 'GPT-6 Sol', 'medium'],
-      ['gpt-6-luna', 'GPT-6 Luna', 'medium'],
-    ]) {
+    assert.deepEqual(info.models.map(model => model.id), ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna']);
+    assert.match(info.detail ?? '', /bundled Codex model catalog/);
+    for (const [id, name, defaultEffort, contextWindow] of [
+      ['gpt-6.1-sol', 'GPT-6.1 Sol', 'low', 500000],
+      ['gpt-6-sol', 'GPT-6 Sol', 'medium', 272000],
+      ['gpt-6-luna', 'GPT-6 Luna', 'medium', 272000],
+    ] as const) {
       const model = info.models.find(model => model.id === id)!;
       assert.ok(model, `${id} is offered without a cache`);
       assert.equal(model.name, name);
-      assert.equal(model.contextWindow, 272000);
+      assert.equal(model.contextWindow, contextWindow);
       assert.deepEqual(model.efforts, ['low', 'medium', 'high', 'xhigh']);
       assert.equal(model.defaultEffort, defaultEffort);
     }
