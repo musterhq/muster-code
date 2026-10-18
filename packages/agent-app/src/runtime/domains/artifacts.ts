@@ -3,7 +3,7 @@
  * resource (WRK-13), and plugin UI entries (EXT-10) that the desktop shell serves from an isolated origin.
  */
 import { promises as fs } from 'node:fs';
-import { join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Chat } from '../../shared/protocol.ts';
 import { MAX_SIDE_CHAT_EXCERPT, sideChatLabel, type Canvas, type PluginUiEntry, type SideChat, type SideChatBinding } from '../../shared/domains/artifacts-protocol.ts';
 import { CanvasStore, summaryOf } from '../canvases.ts';
@@ -80,7 +80,7 @@ export async function pluginUiEntry(plugin: { id: string; path: string; displayN
   const root = await fs.realpath(plugin.path);
   const target = await fs.realpath(resolve(root, entry)).catch(() => { throw new Error(`${app}'s UI entry ${entry} is missing.`); });
   const inside = relative(root, target);
-  if (!inside || inside === '..' || inside.startsWith(`..${sep}`) || inside.startsWith(sep) || resolve(root, inside) !== target) throw new Error(`${app}'s UI entry is outside the plugin.`);
+  if (!inside || inside === '..' || inside.startsWith(`..${sep}`) || inside.startsWith(sep) || isAbsolute(inside) || resolve(root, inside) !== target) throw new Error(`${app}'s UI entry is outside the plugin.`);
   const stat = await fs.stat(target);
   if (!stat.isFile() || stat.size > MAX_PLUGIN_UI_BYTES) throw new Error(`${app}'s UI entry is not a file under 2 MB.`);
   return { pluginId: plugin.id, app, title: `${plugin.displayName ?? plugin.name} · ${app}`, root, entry: inside.split(sep).join('/') };
