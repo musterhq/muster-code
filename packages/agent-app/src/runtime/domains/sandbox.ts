@@ -147,6 +147,27 @@ export function createSandboxDomain(ctx: DomainContext): DomainModule {
     return { developerInstructions: sandboxNote(browserOf(row(chat.id)) === 'sandbox' ? 'sandbox' : 'host'), configOverrides: { [`mcp_servers.${SANDBOX_MCP}.command`]: launcher, [`mcp_servers.${SANDBOX_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${SANDBOX_MCP}.tool_timeout_sec`]: 1830 } };
   });
 
+  /** A project's sandbox is shared: it is only stopped once no other live (unarchived) chat in the project remains. */
+  const projectStillUsed = (chat: Chat): boolean => {
+    const others = (ctx.store as { snapshot?: () => { chats: Chat[] } }).snapshot?.().chats;
+    return !others || others.some(other => other.id !== chat.id && other.projectId === chat.projectId && !other.archived);
+  };
+  // #654: deleting a chat destroys its own sandbox (container, workspace, saved state) and forgets its environment row;
+  // archiving stops it and keeps everything. A project sandbox is never destroyed here.
+  const offRemoval = ctx.hooks.onChatRemoval?.(async ({chat, kind}) => {
+    const service = currentAgentSandboxHost();
+    if (service?.releaseScope) {
+      try {
+        await service.releaseScope({kind: 'chat', id: chat.id}, kind === 'delete' ? 'destroy' : 'stop');
+        if (chat.projectId && !projectStillUsed(chat)) await service.releaseScope({kind: 'project', id: chat.projectId}, 'stop');
+      } catch (error) {
+        if (kind === 'archive') return;
+        throw new Error(`This chat's sandbox could not be removed, so the chat was kept. ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (kind === 'delete') db.prepare('DELETE FROM chat_environments WHERE chat_id = ?').run(chat.id);
+  });
+
   return {
     handlers: {
       'sandbox.chatEnvironment.get': input => status(chatFor(chatIdOf(input))),
@@ -233,6 +254,6 @@ export function createSandboxDomain(ctx: DomainContext): DomainModule {
         return { applied };
       },
     },
-    dispose() { unsubscribe(); ctx.hooks.setRunEnvironmentResolver(undefined); },
+    dispose() { unsubscribe(); offRemoval?.(); ctx.hooks.setRunEnvironmentResolver(undefined); },
   };
 }
