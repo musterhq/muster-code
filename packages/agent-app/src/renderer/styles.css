@@ -504,6 +504,9 @@ textarea:focus-visible {
 }
 /* One-line activity (thinking, tools, notices) stacks tightly; replies and messages keep their breathing room. */
 .timeline-row:is([data-kind='reasoning'], [data-kind='tool'], [data-kind='activity'], [data-kind='notice']) { padding-block: 1px; }
+/* "Today 0:52": marks where a chat starts or resumes after a pause. */
+.day-divider { display: flex; justify-content: center; padding: 14px 0 18px; color: var(--text-faint); font-size: var(--fs-13); font-variant-numeric: tabular-nums; user-select: none; }
+.day-divider b { color: var(--text-dim); font-weight: 500; }
 
 .msg { max-width: 720px; }
 .msg-user {
