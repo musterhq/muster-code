@@ -1228,11 +1228,26 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const folderId = p.folderId === undefined ? undefined : id(p.folderId), projectId = p.projectId === undefined ? undefined : id(p.projectId);
         // A chat created before the first provider probe settles would otherwise skip every default (no provider reads as available yet).
         await firstProviderProbe();
-        const defaults = domainHooks.chatDefaults({...(folderId ? {folderId} : {}), ...(projectId ? {projectId} : {})});
+        // #591: a chat opened from another chat (a new worktree) continues with that chat's model, effort and access.
+        // An id that names no chat inherits nothing; the new chat takes the usual defaults.
+        const parent = p.inheritFrom === undefined ? undefined : store.chat(id(p.inheritFrom));
+        const defaults = {...domainHooks.chatDefaults({...(folderId ? {folderId} : {}), ...(projectId ? {projectId} : {})})};
+        // Folder, Project and user defaults never grant Full access: only a chat where the user confirmed it passes it on.
+        if (defaults.permissionMode === 'full') delete defaults.permissionMode;
+        if (parent) {
+          // The parent's model only when it can still run; an unbound or signed-out parent keeps the defaults' model.
+          let runnable = false;
+          if (parent.providerId && parent.model?.trim()) { try { validateRunnableModel(parent.model, parent.providerId); runnable = true; } catch { /* unavailable now */ } }
+          if (runnable) {
+            defaults.providerId = parent.providerId; defaults.model = parent.model; delete defaults.effort;
+            const parentEffort = efforts.get(parent.id); if (parentEffort) defaults.effort = parentEffort;
+          }
+          if (parent.permissionMode) defaults.permissionMode = parent.permissionMode;
+        }
         // UR-SR-a: there is no Ask mode picker any more; a legacy 'ask' default means Agent with read-only access.
         const legacyAsk = defaults.mode === 'ask';
         const mode = defaults.mode === 'plan' ? 'plan' : 'agent';
-        const permissionMode = defaults.permissionMode && ['read-only','workspace'].includes(defaults.permissionMode) ? defaults.permissionMode : legacyAsk ? 'read-only' : undefined;
+        const permissionMode = defaults.permissionMode && ['read-only','workspace','full'].includes(defaults.permissionMode) ? defaults.permissionMode : legacyAsk ? 'read-only' : undefined;
         // Nothing chosen anywhere: the first ready provider. Nothing ready: an unbound chat that shows "Connect a model".
         const initial = defaults.providerId && defaults.model?.trim() ? {providerId: defaults.providerId, model: defaults.model.trim()} : firstReadyModel(provider.info());
         let result = store.createChat({folderId, projectId, model: initial.model, ...(initial.providerId ? {providerId: initial.providerId} : {}), mode, ...(permissionMode ? {permissionMode} : {})});
