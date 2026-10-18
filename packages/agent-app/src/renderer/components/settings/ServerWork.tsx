@@ -1,3 +1,4 @@
+import { guarded } from './serverAction';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Copy } from 'lucide-react';
 import { notifySuccess } from '../../store';
@@ -26,7 +27,7 @@ interface ProjectRow { id: string; name: string; role: string; canManage: boolea
 export function ProjectPeople({ server, me }: { server: ServerBridge; me: ServerUser }): React.ReactElement | null {
   const list = useServer<ProjectRow[]>(server, 'server.projects.mine');
   const [form, setForm] = useState<{ projectId: string; role: 'editor' | 'viewer'; expires: string } | null>(null), [link, setLink] = useState(''), [error, setError] = useState('');
-  const act = (fn: () => Promise<unknown>, done?: string) => fn().then(() => { if (done) notifySuccess(done); list.reload(); }, e => setError(errorText(e)));
+  const act = (fn: () => Promise<unknown>, done?: string) => guarded(() => fn().then(() => { if (done) notifySuccess(done); list.reload(); }, e => setError(errorText(e))));
   const projectsList = arr<ProjectRow>(list.value);
   if (!projectsList.length) return list.error ? <p role="alert" className="settings-error">{list.error}</p> : null;
   return <section aria-label="People on your projects">
@@ -55,7 +56,7 @@ interface AgentsView { invites: { id: string; agentName: string; projectName: st
 export function RemoteAgents({ server, admin }: { server: ServerBridge; admin: boolean }): React.ReactElement | null {
   const list = useServer<AgentsView>(server, 'server.agents.list'), projects = useServer<ProjectRow[]>(server, 'server.projects.mine');
   const [form, setForm] = useState({ projectId: '', name: '', title: '', expires: '1d' }), [made, setMade] = useState<{ command: string; expiresAt: string } | null>(null), [error, setError] = useState('');
-  const act = (fn: () => Promise<unknown>, done?: string) => fn().then(() => { if (done) notifySuccess(done); list.reload(); }, e => setError(errorText(e)));
+  const act = (fn: () => Promise<unknown>, done?: string) => guarded(() => fn().then(() => { if (done) notifySuccess(done); list.reload(); }, e => setError(errorText(e))));
   const owned = arr<ProjectRow>(projects.value).filter(p => p.canManage);
   const agentsView = { invites: arr<AgentsView['invites'][number]>(list.value?.invites), agents: arr<AgentsView['agents'][number]>(list.value?.agents) };
   if (!admin && (projects.value === null || !owned.length)) return null;
@@ -87,7 +88,7 @@ export function Channels({ server }: { server: ServerBridge }): React.ReactEleme
   const types = useServer<TypeRow[]>(server, 'server.connectors.types'), list = useServer<ConnRow[]>(server, 'server.connectors.list'), projects = useServer<ProjectRow[]>(server, 'server.projects.mine');
   const [adding, setAdding] = useState(false), [type, setType] = useState('slack'), [name, setName] = useState(''), [mode, setMode] = useState(''), [secrets, setSecrets] = useState<Record<string, string>>({}), [open, setOpen] = useState<string | null>(null);
   const [route, setRoute] = useState({ projectId: '', match: '', mode: 'reply' }), [notify, setNotify] = useState({ channel: '', projectId: '' }), [message, setMessage] = useState(''), [error, setError] = useState('');
-  const act = (fn: () => Promise<unknown>, done?: string) => fn().then(() => { setError(''); if (done) notifySuccess(done); list.reload(); }, e => setError(errorText(e)));
+  const act = (fn: () => Promise<unknown>, done?: string) => guarded(() => fn().then(() => { setError(''); if (done) notifySuccess(done); list.reload(); }, e => setError(errorText(e))));
   const typeRows = arr<TypeRow>(types.value), connRows = arr<ConnRow>(list.value), projectRows = arr<ProjectRow>(projects.value);
   const spec = typeRows.find(t => t.type === type), activeMode = mode && spec?.modes.includes(mode) ? mode : spec?.modes[0] ?? '';
   const create = () => act(async () => {

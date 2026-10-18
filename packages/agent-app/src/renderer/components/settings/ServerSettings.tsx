@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Copy, LogOut } from 'lucide-react';
 import { notifySuccess } from '../../store';
+import { guarded, useActionPending } from './serverAction';
 import { ProjectPeople, RemoteAgents, Channels } from './ServerWork';
 import { serverBridge, type ServerBridge, type ServerUser } from '../../webHost.ts';
 
@@ -30,7 +31,7 @@ function useServer<T>(server: ServerBridge, command: string, input: Record<strin
   return { value, reload, error };
 }
 function act(run: () => Promise<unknown>, done: () => void, success?: string, onError?: (m: string) => void) {
-  run().then(() => { if (success) notifySuccess(success); done(); }, e => onError?.(errorText(e)));
+  void guarded(() => run().then(() => { if (success) notifySuccess(success); done(); }, e => onError?.(errorText(e))));
 }
 
 export function ServerSettings(): React.ReactElement {
@@ -108,6 +109,7 @@ function People({ server, me }: { server: ServerBridge; me: ServerUser }): React
 function Invites({ server }: { server: ServerBridge }): React.ReactElement {
   const { value, reload, error } = useServer<InviteRow[]>(server, 'server.invites.list');
   const [role, setRole] = useState<Role>('member'), [expires, setExpires] = useState('7d'), [link, setLink] = useState(''), [actionError, setActionError] = useState('');
+  const busy = useActionPending();
   const create = () => act(async () => { const r = await server.invoke<{ url: string }>('server.invites.create', { role, expires }); setLink(r.url); }, reload, undefined, setActionError);
   return <section aria-label="Invites">
     <h3 className="preference-group-title">Invites</h3>
@@ -115,12 +117,12 @@ function Invites({ server }: { server: ServerBridge }): React.ReactElement {
       <span className="preference-control server-inline">
         <select className="ws-select" aria-label="Invite role" value={role} onChange={e => setRole(e.target.value as Role)}>{ROLES.filter(r => r !== 'owner').map(r => <option key={r} value={r}>{r}</option>)}</select>
         <select className="ws-select" aria-label="Invite expiry" value={expires} onChange={e => setExpires(e.target.value)}><option value="1d">1 day</option><option value="7d">7 days</option><option value="30d">30 days</option></select>
-        <button type="button" className="settings-button" onClick={create}>Create link</button>
+        <button type="button" className="settings-button" disabled={busy} onClick={create}>Create link</button>
       </span></div></div>
     {link && <p className="server-link"><code>{link}</code> <button type="button" className="settings-button secondary" onClick={() => void navigator.clipboard.writeText(link).then(() => notifySuccess('Invite link copied.'))}><Copy size={13} aria-hidden="true"/> Copy</button></p>}
     {value && value.length > 0 && <table className="server-table"><thead><tr><th>Role</th><th>Status</th><th>Expires</th><th/></tr></thead>
       <tbody>{value.map(i => <tr key={i.id}><td>{i.role}</td><td><span className="ws-chip" data-tone={i.status === 'pending' ? 'accent' : undefined}>{i.status}</span></td><td>{when(i.expiresAt)}</td>
-        <td>{i.status === 'pending' && <button type="button" className="settings-button secondary" onClick={() => act(() => server.invoke('server.invites.revoke', { id: i.id }), reload, 'Invite revoked.', setActionError)}>Revoke</button>}</td></tr>)}</tbody></table>}
+        <td>{i.status === 'pending' && <button type="button" className="settings-button secondary" disabled={busy} onClick={() => act(() => server.invoke('server.invites.revoke', { id: i.id }), reload, 'Invite revoked.', setActionError)}>Revoke</button>}</td></tr>)}</tbody></table>}
     {(error || actionError) && <p role="alert" className="settings-error">{error || actionError}</p>}
   </section>;
 }

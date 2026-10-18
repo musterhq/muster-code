@@ -93,6 +93,9 @@ assert.match(text(host2),/disc.*coming soon/);
 await click(byText(host2,'button','Create link'));await settle();
 assert.match(text(host2),/https:\/\/muster\.example\.com\/invite\/mi_abc/);
 assert.deepEqual(rpc.find(c=>c.command==='server.invites.create')?.input,{role:'member',expires:'7d'});
+{const before=rpc.filter(c=>c.command==='server.invites.create').length;const create=byText(host2,'button','Create link') as HTMLButtonElement;
+  await act(async()=>{create.click();create.click();await delay(30);});await settle();
+  assert.equal(rpc.filter(c=>c.command==='server.invites.create').length-before,1,'a double click creates one invite');}
 const melRow=[...host2.querySelectorAll('tr')].find(r=>text(r).includes('@mel')&&text(r).includes('Mel Member'))!;
 await click(byText(melRow,'button','Revoke'));await settle();
 assert.deepEqual(rpc.find(c=>c.command==='server.users.revoke')?.input,{userId:'u2'});
