@@ -10,6 +10,7 @@ import {CODEX_LAUNCHER, findBinary, locateCli, Validator} from './adapters/share
 import {unpackedPath} from './unpacked-path.ts';
 import {entryAcceptsImages,fetchModelList,type ListedModel} from './adapters/http-chat.ts';
 import {readCodexCatalog} from './codex-catalog.ts';
+import bundledCodex from './catalogs/codex-models.json' with {type: 'json'};
 import {codexAuthHeaders,inlineStringTable,type CodexProviderAuth} from './codex-provider-auth.ts';
 
 export interface ProviderInstance {
@@ -512,7 +513,9 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       // Read like a model catalog (16 MB bound, not the 1 MB config bound): the cache carries every model's instructions and grows with each Codex release.
       const cache=readCodexCatalog(track(join(codexHome,'models_cache.json')),fs);
       if(cache.ok){list=cache.models;catalogSource='Codex’s model cache';}
-      if(!list)return fail('Codex has not listed this account’s models yet. Run `codex` once, or set model_catalog_json in config.toml.');
+      // A readable provider list is authoritative, including its visibility and metadata.
+      // Only a missing or unreadable cache uses the shipped fallback.
+      if(!list){list=bundledCodex.models;catalogSource='Muster’s bundled Codex model catalog (account cache unavailable)';}
     }
     let models:Models,excluded:ExcludedModel[]=[],listingKey:string|undefined,listingInfo:Pick<ProviderInfo,'listing'|'listingError'>={};
     if(list){

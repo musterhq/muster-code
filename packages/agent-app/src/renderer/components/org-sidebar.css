@@ -4,7 +4,7 @@
 .org-head { display: flex; align-items: center; min-width: 0; border-radius: var(--radius-6); }
 .org-head:hover { background: var(--bg-hover); }
 .org-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 0 6px; min-height: var(--sidebar-row-h); background: none; border: 0; color: var(--text); font: inherit; font-size: var(--sidebar-font); font-weight: 600; cursor: pointer; text-align: left; border-radius: var(--radius-6); }
-.org-toggle:focus-visible, .org-task:focus-visible, .org-project:focus-visible, .org-more:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; }
+.org-toggle:focus-visible, .org-task:focus-visible, .org-project:focus-visible, .org-page:focus-visible, .org-more:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; }
 .org-chev { flex: none; color: var(--text-faint); transition: transform 0.15s; }
 .org-block[data-open] .org-chev { transform: rotate(90deg); }
 .org-avatar { flex: none; width: 18px; height: 18px; border-radius: var(--radius-4); display: grid; place-items: center; font-size: var(--fs-10); font-weight: 700; color: var(--on-accent); }
@@ -18,11 +18,12 @@
 .org-body { display: grid; gap: 1px; padding-left: 14px; }
 .org-mini { margin: 6px 0 2px 8px; font-size: var(--sidebar-label); color: var(--text-faint); }
 .org-empty { margin: 2px 8px; font-size: var(--fs-12); color: var(--text-faint); }
-.org-task, .org-project { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 0 8px; min-height: 26px; background: none; border: 0; border-radius: var(--radius-6); color: var(--text); font: inherit; font-size: var(--sidebar-font); cursor: pointer; text-align: left; }
-.org-task:hover, .org-project:hover { background: var(--bg-hover); }
-.org-task.is-active, .org-project.is-active { background: var(--bg-active); }
-.org-project { color: var(--text-dim); }
-.org-project:hover { color: var(--text); }
+.org-task, .org-project, .org-page { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 0 8px; min-height: 26px; background: none; border: 0; border-radius: var(--radius-6); color: var(--text); font: inherit; font-size: var(--sidebar-font); cursor: pointer; text-align: left; }
+.org-task:hover, .org-project:hover, .org-page:hover { background: var(--bg-hover); }
+.org-task.is-active, .org-project.is-active, .org-page.is-active { background: var(--bg-active); }
+.org-project, .org-page { color: var(--text-dim); }
+.org-project:hover, .org-page:hover, .org-page.is-active { color: var(--text); }
+.org-page svg { flex: none; color: var(--text-faint); }
 .org-project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .org-key { flex: none; font-family: var(--mono); font-size: var(--fs-11); color: var(--text-faint); }
 .org-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
