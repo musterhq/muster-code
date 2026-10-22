@@ -232,7 +232,14 @@ function outputRef(item: Json): { output?: ServerOutputRef } {
 }
 
 /** Rows for the read-only lists (skills, artifacts, audit, routines). */
-export function mapRows(kind: 'artifacts' | 'audit' | 'routines', payload: unknown): WorkspaceRow[] {
+/** Who an audit row's actor is, by name: the org's agents and people as last read. Unknown ids keep the short id. */
+export type ActorNames = { agents?: ReadonlyMap<string, { name: string }>; people?: ReadonlyMap<string, string> };
+const actorLabel = (item: Json, names?: ActorNames): string => {
+  const type = str(item.actorType), id = item.actorId == null ? '' : String(item.actorId), agentId = str(item.agentId);
+  const named = (type === 'agent' || agentId) ? names?.agents?.get(agentId ?? id)?.name : type === 'user' ? names?.people?.get(id) : undefined;
+  return named ?? `${type ?? 'actor'} ${id.slice(0, 8)}`;
+};
+export function mapRows(kind: 'artifacts' | 'audit' | 'routines', payload: unknown, names?: ActorNames): WorkspaceRow[] {
   const list = kind === 'artifacts' ? arr(obj(payload).artifacts) : arr(Array.isArray(payload) ? payload : obj(payload).items);
   return list.slice(0, 200).map(item => {
     if (kind === 'artifacts') { const issue = obj(item.issue), project = obj(item.project); return { id: String(item.id), title: str(item.title) ?? 'Artifact', detail: [str(issue.identifier), str(item.mediaKind), str(item.previewText)?.slice(0, 140)].filter(Boolean).join(' · '), status: str(item.source), at: str(item.updatedAt), source: 'paperclip', projectId: str(project.id) ?? str(item.projectId), taskId: str(issue.id), ...outputRef(item) }; }
@@ -241,7 +248,7 @@ export function mapRows(kind: 'artifacts' | 'audit' | 'routines', payload: unkno
       const details = obj(item.details), entity = str(item.entityType), entityId = str(item.entityId);
       const taskId = entity === 'issue' ? entityId : str(details.issueId) ?? str(details.taskId);
       const projectId = entity === 'project' ? entityId : str(details.projectId);
-      return { id: String(item.id), title: `${str(item.action) ?? 'action'} · ${str(item.entityType) ?? ''}`, detail: `${str(item.actorType) ?? 'actor'} ${String(item.actorId ?? '').slice(0, 8)}`, status: null, at: str(item.createdAt), source: 'paperclip', projectId, taskId };
+      return { id: String(item.id), title: `${str(item.action) ?? 'action'} · ${str(item.entityType) ?? ''}`, detail: actorLabel(item, names), status: null, at: str(item.createdAt), source: 'paperclip', projectId, taskId };
     }
     return mapRoutine(item);
   });

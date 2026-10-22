@@ -11,7 +11,7 @@ Object.assign(globalThis,{window,document:window.document,Node:window.Node,HTMLE
 // SBX-08/15/16 sandbox settings panel. Never pass DOM nodes to assert.equal (heap cap).
 const calls:{command:string;input:any}[]=[],listeners=new Set<(event:any)=>void>();
 const emit=(event:any)=>{for(const listener of listeners)listener(event);};
-let status:any={id:'computer_1',scope:{kind:'project',id:'p1'},label:'App',provider:'local-docker',state:'running',workspacePreserved:true,durability:'durable',image:'node',user:'1000:1000',bootGeneration:2,limits:{network:'none',memoryMiB:512,cpus:1,processes:256,maxRunning:2,maxTimeoutMs:7_200_000}};
+let status:any={id:'computer_1',scope:{kind:'project',id:'p1'},label:'App',provider:'local-docker',state:'running',workspacePreserved:true,durability:'durable',image:'node',user:'1000:1000',bootGeneration:2,limits:{network:'none',memoryMiB:512,cpus:1,processes:256,diskGiB:10,maxRunning:2,maxTimeoutMs:7_200_000}};
 const service={id:'svc_000000000001',name:'dev server',command:'npm run dev',cwd:'/workspace/app',env:{},restart:'on-failure',state:'running',bootGeneration:2,restarts:1,lastExitCode:null,reason:'Restarted after the sandbox restarted.',output:'listening on 3000\n'};
 let services:any={computerId:'computer_1',bootGeneration:2,services:[service,{...service,id:'svc_000000000002',name:'old job',restart:'never',state:'lost',bootGeneration:1,restarts:0,reason:'Stopped when the sandbox restarted. Its restart policy is never.'}]};
 (window as any).muster={subscribe(listener:any){listeners.add(listener);return()=>listeners.delete(listener);},async invoke(command:string,input:any){
@@ -19,7 +19,7 @@ let services:any={computerId:'computer_1',bootGeneration:2,services:[service,{..
   if(command==='computer.inspect')return status;
   if(command==='computer.history')return [];
   if(command==='computer.files.list')return {path:'',entries:[],truncated:false};
-  if(command==='computer.usage')return {computerId:'computer_1',running:true,memoryBytes:480*1024**2,memoryLimitBytes:512*1024**2,cpuPercent:50,pids:12,sampledAt:'t'};
+  if(command==='computer.usage')return {computerId:'computer_1',running:true,memoryBytes:480*1024**2,memoryLimitBytes:512*1024**2,cpuPercent:50,pids:12,sampledAt:'t',diskBytes:2*1024**3,diskLimitBytes:10*1024**3};
   if(command==='computer.services.list')return services;
   if(command==='computer.services.stop'){services={...services,services:services.services.map((s:any)=>s.id===input.serviceId?{...s,state:'stopped',reason:'Stopped.'}:s)};return services.services[0];}
   if(command==='computer.services.register')return {...input.service,id:'svc_000000000003',state:'running',bootGeneration:2,restarts:0,lastExitCode:null,output:''};
@@ -46,11 +46,12 @@ button('Settings').click();await delay(120);
 assert.match(text(),/480 MB of 512 MB/);assert.match(text(),/50\.0% of 1 CPU/);assert.match(text(),/12 of 256/);
 assert.equal(field('Memory usage').getAttribute('aria-valuenow'),'94');
 assert.ok(document.querySelector('.sbx-meter-fill.is-high'),'high memory use is highlighted');
-await setValue(field('Memory limit'),'2048','change');await setValue(field('CPU limit'),'2','change');
+assert.match(text(),/Disk2\.0 GB of 10 GB/);assert.equal(field('Disk usage').getAttribute('aria-valuenow'),'20');
+await setValue(field('Memory limit'),'2048','change');await setValue(field('CPU limit'),'2','change');await setValue(field('Disk limit'),'20','change');
 assert.match(text(),/Applying recreates the container/);
 button('Apply').click();await delay(60);
-assert.deepEqual(calls.find(call=>call.command==='computer.setLimits')!.input,{scope:{kind:'project',id:'p1'},limits:{memoryMiB:2048,cpus:2,processes:256}});
-assert.match(text(),/2048 MiB · 2 CPU · 256 processes/);
+assert.deepEqual(calls.find(call=>call.command==='computer.setLimits')!.input,{scope:{kind:'project',id:'p1'},limits:{memoryMiB:2048,cpus:2,processes:256,diskGiB:20}});
+assert.match(text(),/2048 MiB · 2 CPU · 256 processes · 20 GB disk/);
 // SBX-15: services with boot generation, restart policy and an earlier-boot marker.
 assert.match(text(),/Services boot 2/);assert.match(text(),/dev server/);assert.match(text(),/Restart on failure · boot 2 · 1 restart/);assert.match(text(),/Never restart · boot 1 \(earlier\)/);assert.match(text(),/Lost/);
 button('Stop dev server').click();await delay(60);assert.ok(calls.some(call=>call.command==='computer.services.stop'&&call.input.serviceId==='svc_000000000001'));
