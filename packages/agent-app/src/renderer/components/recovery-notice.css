@@ -1,1 +1,3 @@
 .chat-error-banner.is-interrupted { background: color-mix(in srgb, var(--warn) 8%, transparent); color: var(--warn); }
+/* A Retry or Accounts link right after the reason sits apart from its last word. */
+.chat-error-banner > span + .workspace-inline-link { margin-left: 8px; }

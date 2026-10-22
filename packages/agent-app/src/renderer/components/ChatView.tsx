@@ -469,6 +469,7 @@ export function ChatView(): React.ReactElement {
   const timeline = state.timelines[chat.id] ?? { phase: 'idle' as const };
   const project = chat.projectId ? state.snapshot?.projects.find(p=>p.id===chat.projectId) : undefined;
   const headStatus = displayStatus(chat, liveItems, stalled);
+  const retryId = retryTarget(liveItems, chat.status === 'running' || chat.status === 'stopping');
   const place = project?.name ?? folder?.name, placeTitle = project ? project.goal || project.name : folder?.path;
 
   return (
@@ -483,7 +484,7 @@ export function ChatView(): React.ReactElement {
       </header>
       {chat.originChatId&&(()=>{const origin=state.snapshot?.chats.find(c=>c.id===chat.originChatId);return <ForkOrigin title={origin?.title} onOpen={origin?()=>void selectChat(origin.id):undefined}/>;})()}
       {timeline.phase==='ready'&&(()=>{const imported=timeline.value?.find(item=>item.kind==='notice'&&item.data?.kind==='imported');return imported?.data?<ImportOrigin data={imported.data}/>:null;})()}
-      <RecoveryNotice key={`${chat.id}:${chat.providerThreadId ?? ""}:${chat.providerTurnId ?? ""}:${chat.recovery?.kind ?? ""}`} chat={chat}/>
+      <RecoveryNotice key={`${chat.id}:${chat.providerThreadId ?? ""}:${chat.providerTurnId ?? ""}:${chat.recovery?.kind ?? ""}`} chat={chat} onRetry={retryId?()=>retryTurn(chat.id,retryId):undefined}/>
       {timeline.phase === 'loading' || timeline.phase === 'idle' ? (
         <div className="chat-loading" role="status">
           Loading conversation…

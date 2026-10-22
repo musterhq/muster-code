@@ -83,5 +83,22 @@ assert.equal(button()?.textContent,'Open Accounts & providers');
 button()!.click();await delay(20);
 const {getState}=await import('../src/renderer/store');
 assert.equal(getState().screen,'settings');assert.equal(getState().settingsSection,'providers');
+// A closed network transport offers manual Retry even after the draft was consumed.
+setComposerDraft('chat-1','');
+let networkRetries=0,finishRetry!:()=>void;
+root.render(<RecoveryNotice chat={{...base,draft:'',error:'The HTTPS proxy failed.',recovery:{kind:'failed',retryable:true,reason:'The HTTPS proxy failed.'}}} onRetry={async()=>{networkRetries++;await new Promise<void>(resolve=>{finishRetry=resolve;});}}/>);await delay(20);
+assert.ok(text().includes('HTTPS proxy'));
+assert.equal(button()?.textContent,'Retry');assert.equal(button()?.hasAttribute('disabled'),false);
+button()!.click();await delay(20);
+assert.equal(networkRetries,1);assert.equal(button()?.textContent,'Retrying…');assert.equal(button()?.hasAttribute('disabled'),true);
+finishRetry();await delay(20);
+assert.equal(button()?.textContent,'Retry');
+// Retry re-runs the failed turn: a follow-up the user is typing is never sent in its place.
+setComposerDraft('chat-1','A follow-up I am still writing');await delay(20);
+const sendsBefore=invoked.filter(call=>call.command==='chat.send').length;
+button()!.click();await delay(20);
+assert.equal(networkRetries,2,'Retry uses the turn retry');assert.equal(invoked.filter(call=>call.command==='chat.send').length,sendsBefore,'the draft is not sent');
+finishRetry();await delay(20);
+setComposerDraft('chat-1','');
 root.unmount();assert.deepEqual(errors,[]);
 console.log('PASS: admission-rejected Retry now sends the retained draft with busy/disabled states; recovery-needed keeps the reconcile button');
