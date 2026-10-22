@@ -2,6 +2,15 @@
 
 Every fix and feature in Muster starts as a spec and is finished when that spec's tests pass.
 
+## Where specs live
+
+All specs are in this folder and nowhere else: one file per issue, named `<issue>-<slug>.md` (for example `668-context-window.md`). Listed by name, the folder sorts by issue number, so it doubles as the index.
+
+- An open issue gets its spec before work starts.
+- The PR that fixes it edits that same file: it fills in the Tests table and sets Status. It never adds a second spec.
+- An epic has one spec. Its child issues reference the epic's acceptance criteria and keep their own files short.
+- When an issue closes, its spec stays, with Status: Shipped and the PR number. It is the record of what the behaviour is meant to be.
+
 ## The order
 
 1. **Spec.** Copy `TEMPLATE.md` to `docs/specs/<issue>-<slug>.md`, in the same PR as the change. Write:

@@ -1,5 +1,7 @@
 # <Title> (#<issue>)
 
+Status: Draft | In progress (#<PR>) | Shipped (#<PR>)
+
 ## Problem
 
 <!-- What goes wrong today, for whom, and how often. Quote the issue or the user's own words. -->
