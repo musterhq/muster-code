@@ -43,7 +43,7 @@ import {parseKillIntent, userProcessThreat, type UserProcessTarget, type UserPro
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
 import { ProjectTaskStore, type TaskStatus } from './project-tasks.ts';
 import { ChatQueue, queueActionAfter } from './chat-queue.ts';
-import { PluginReloads, installedPlugin, lastTurn, pluginReloadNotice, turnAbout, type InstalledPlugin } from './plugin-reload.ts';
+import { PluginReloads, installedPlugin, lastTurn, pluginReloadNotice, turnAbout, turnMentions, type InstalledPlugin } from './plugin-reload.ts';
 import { createNativeThreadBridge } from './codex-native.ts';
 import { createNativeTurnObserver } from './native-turns.ts';
 import { createNativeQueueMirror } from './native-queue.ts';
@@ -1849,8 +1849,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     // A turn the app-server started itself settles on its own turn/completed; if its session is gone, settle it here.
     nativeTurns.stopped(chatId, !!provider.nativeThread?.(chatId));
   }
-  /** A plugin or MCP server installed while chats work: the provider's tool list is fixed per session, so chats that were
-   *  running (or whose last turn was about it) restart on a fresh session that resumes their thread and re-send their
+  /** A plugin or MCP server installed while chats work: the provider's tool list is fixed per session, so chats whose
+   *  current or recent turn was about it restart on a fresh session that resumes their thread and re-send their
    *  last message through the queue. Once per install and chat. */
   function reloadForInstall(plugin: InstalledPlugin) {
     if (closing || disposed) return;
@@ -1862,7 +1862,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       if (!running && (run || chat.status === 'running' || chat.status === 'stopping')) continue;
       const turn = lastTurn(store.timeline(chat.id));
       if (!turn.prompt?.text.trim()) continue;
-      if (!running && !turnAbout(plugin, turn, chat.updatedAt)) continue;
+      // Only chats whose turn is about this plugin: other running work is never interrupted and re-sent.
+      if (running ? !turnMentions(plugin, turn) : !turnAbout(plugin, turn, chat.updatedAt)) continue;
       if (!pluginReloads.claim(plugin, chat.id)) continue;
       let item: QueuedMessage;
       try { item = queue.add(chat.id, {text: turn.prompt.text, requestId: randomUUID(), attachmentIds: []}); queue.promote(chat.id, item.id); }

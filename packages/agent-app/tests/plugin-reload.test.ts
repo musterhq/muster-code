@@ -53,12 +53,14 @@ test('an MCP server added mid-run restarts the running chat once and re-sends it
   const dataDir=await directory(t),fake=gatedProvider();
   const service=createAgentService({dataDir,provider:fake.provider,onEvent(){}});
   t.after(()=>service.dispose());
-  const running=await service.invoke('chat.create',{}),unrelated=await service.invoke('chat.create',{}),asked=await service.invoke('chat.create',{});
+  const running=await service.invoke('chat.create',{}),busy=await service.invoke('chat.create',{}),unrelated=await service.invoke('chat.create',{}),asked=await service.invoke('chat.create',{});
   // An idle chat that never talked about the plugin.
   await service.invoke('chat.send',{id:unrelated.id,text:'write a haiku',requestId:'u1'});await until(()=>fake.open(unrelated.id));fake.finish(unrelated.id);
   // An idle chat whose last turn asked for the plugin the agent could not see yet.
   await service.invoke('chat.send',{id:asked.id,text:'list my open issues with fake_tools',requestId:'a1'});await until(()=>fake.open(asked.id));fake.finish(asked.id);
-  await service.invoke('chat.send',{id:running.id,text:'triage the bug backlog',requestId:'r1'});await until(()=>fake.open(running.id));
+  await service.invoke('chat.send',{id:running.id,text:'triage the bug backlog in fake_tools',requestId:'r1'});await until(()=>fake.open(running.id));
+  // A running chat doing unrelated work: it is never interrupted.
+  await service.invoke('chat.send',{id:busy.id,text:'refactor the parser',requestId:'b1'});await until(()=>fake.open(busy.id));
   const chatOf=async(id:string)=>(await service.invoke('app.snapshot',undefined)).chats.find(chat=>chat.id===id)!;
   await until(async()=>(await chatOf(unrelated.id)).status==='completed'&&(await chatOf(asked.id)).status==='completed');
   const before=fake.inputs.length;
@@ -67,13 +69,14 @@ test('an MCP server added mid-run restarts the running chat once and re-sends it
   await service.invoke('mcp.servers.add',{name:'fake_tools',transport:'http',url:'https://example.com/mcp'});
   await until(()=>fake.inputs.length===before+2);
   await settle();
-  // One stop for the running chat; idle chats are never interrupted.
+  // One stop for the running chat about the plugin; idle chats and unrelated running work are never interrupted.
   assert.deepEqual(fake.stops,[running.id]);
   assert.ok(fake.marks.length>=1,'warm sessions are marked for a fresh app-server');
   const resent=fake.inputs.slice(before);
   assert.deepEqual(resent.map(input=>input.chat.id).sort(),[running.id,asked.id].sort());
   const runningInput=resent.find(input=>input.chat.id===running.id)!,askedInput=resent.find(input=>input.chat.id===asked.id)!;
   assert.match(runningInput.prompt,/triage the bug backlog/);
+  assert.equal((await service.invoke('chat.timeline',{id:busy.id})).items.some(item=>item.data?.kind==='plugin-reloaded'),false);
   assert.match(askedInput.prompt,/list my open issues with fake_tools/);
   // The tool list of the restarted session includes the new server.
   for(const input of resent)assert.equal(input.configOverrides?.['mcp_servers.fake_tools.url'],'https://example.com/mcp');
@@ -84,7 +87,7 @@ test('an MCP server added mid-run restarts the running chat once and re-sends it
   assert.equal((await service.invoke('chat.timeline',{id:unrelated.id})).items.some(item=>item.data?.kind==='plugin-reloaded'),false);
 
   // Once per install: another, unrelated install does not re-send these chats again.
-  fake.finish(running.id);fake.finish(asked.id);
+  fake.finish(running.id);fake.finish(asked.id);fake.finish(busy.id);
   await until(async()=>(await chatOf(running.id)).status==='completed'&&(await chatOf(asked.id)).status==='completed');
   const settled=fake.inputs.length;
   await service.invoke('mcp.servers.add',{name:'other_tools',transport:'http',url:'https://example.com/other'});

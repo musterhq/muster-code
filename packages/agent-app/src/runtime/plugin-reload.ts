@@ -3,7 +3,7 @@
  * (Codex reads `mcp_servers.*` and the apps feature at launch), so the agent in a running chat cannot see the new tools
  * and tells the user it can't use them. On install, Muster stops the running turn, marks warm sessions for a fresh
  * app-server that resumes the same thread (transcript kept), and re-sends the chat's last message through its queue:
- * once per install, and only for chats that were running or whose last turn was about the installed plugin.
+ * once per install, and only for chats whose current or last turn was about the installed plugin.
  */
 import type { TimelineItem } from '../shared/protocol.ts';
 
@@ -55,12 +55,17 @@ export function lastTurn(items: readonly TimelineItem[]): { prompt?: TimelineIte
 
 /** An idle chat's last turn counts as "about the install" for this long after it ended. */
 export const RELOAD_IDLE_WINDOW_MS = 30 * 60_000;
+/** Whether a turn's prompt or answer so far names this plugin. A running chat is restarted only then: interrupting
+ *  unrelated work would throw away its progress and repeat its prompt. */
+export function turnMentions(plugin: InstalledPlugin, turn: { prompt?: TimelineItem; reply: string }): boolean {
+  if (!turn.prompt?.text.trim()) return false;
+  return mentions(turn.prompt.text, plugin.aliases) || mentions(turn.reply, plugin.aliases);
+}
 /** Whether an idle chat's last turn was about this plugin: recent, and its prompt or answer names it. */
 export function turnAbout(plugin: InstalledPlugin, turn: { prompt?: TimelineItem; reply: string }, endedAt: string, now = Date.now()): boolean {
-  if (!turn.prompt?.text.trim()) return false;
   const ended = Date.parse(endedAt);
   if (!Number.isFinite(ended) || now - ended > RELOAD_IDLE_WINDOW_MS) return false;
-  return mentions(turn.prompt.text, plugin.aliases) || mentions(turn.reply, plugin.aliases);
+  return turnMentions(plugin, turn);
 }
 
 export const pluginReloadNotice = (name: string) => `${name} installed — restarted the session and re-sent your last message`;
