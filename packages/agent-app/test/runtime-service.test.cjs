@@ -57,3 +57,16 @@ test('Project chats resolve a sole attached folder and reject unrelated or ambig
  const independent = await service.invoke('chat.create', {folderId:folders[0].id});
  assert.equal(independent.projectId, undefined);
 });
+
+test('a chat created from a parent chat inherits its model and access mode',async t=>{
+ const {service}=await fixture(t,async()=>({status:'completed',finalMessage:'',threadId:'t'}));
+ const parent=await service.invoke('chat.create',{});
+ await service.invoke('chat.setPermissionMode',{id:parent.id,permissionMode:'full',acknowledgeFullAccess:true});
+ await service.invoke('chat.update',{id:parent.id,model:'parent-model'});
+ const plain=await service.invoke('chat.create',{});
+ assert.notEqual(plain.permissionMode,'full');
+ const child=await service.invoke('chat.create',{inheritFrom:parent.id});
+ assert.equal(child.permissionMode,'full');
+ assert.equal(child.model,(await service.invoke('app.snapshot')).chats.find(c=>c.id===parent.id).model);
+ assert.equal(child.providerId,parent.providerId);
+});

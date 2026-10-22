@@ -8,9 +8,16 @@ import type { MyWork, OrgsList } from '../shared/domains/checkout-protocol';
 import { invoke, subscribe } from './bridge';
 import { hubRoute, openHub, refreshWorkspace, workspaceSnapshot } from './hubStore';
 import { notifyError } from './store';
+import { loadView, saveView } from './taskView';
 
 interface State { work: MyWork | null; error: string }
-let state: State = { work: null, error: '' };
+/** The last My work read, shown at once on the next start while `orgs.work` (slow on a large server) refreshes it (#446). */
+const CACHE_KEY = 'muster.orgs.work';
+const readCache = (): MyWork | null => {
+  try { const v = JSON.parse(globalThis.localStorage?.getItem(CACHE_KEY) ?? 'null') as MyWork | null; return v && typeof v === 'object' && Array.isArray(v.orgs) ? v : null; } catch { return null; }
+};
+const writeCache = (work: MyWork): void => { try { globalThis.localStorage?.setItem(CACHE_KEY, JSON.stringify(work)); } catch { /* not remembered */ } };
+let state: State = { work: readCache(), error: '' };
 const listeners = new Set<() => void>();
 let reads = 0;
 let viewers = 0, timer: ReturnType<typeof setTimeout> | null = null, dirty = true, inflight: Promise<void> | null = null, off: (() => void) | null = null;
@@ -22,7 +29,7 @@ export function loadMyWork(refresh = false): Promise<void> {
   if (inflight && !refresh) return inflight;
   dirty = false;
   const mine = ++reads;
-  const read: Promise<void> = invoke('orgs.work', refresh ? { refresh: true } : {}).then(work => { if (mine === reads && (!same(state.work, work) || state.error)) set({ work, error: '' }); }, cause => { if (mine === reads) set({ work: state.work, error: cause instanceof Error ? cause.message : String(cause) }); }).finally(() => { if (inflight === read) inflight = null; });
+  const read: Promise<void> = invoke('orgs.work', refresh ? { refresh: true } : {}).then(work => { if (mine === reads && (!same(state.work, work) || state.error)) { set({ work, error: '' }); writeCache(work); } }, cause => { if (mine === reads) set({ work: state.work, error: cause instanceof Error ? cause.message : String(cause) }); }).finally(() => { if (inflight === read) inflight = null; });
   inflight = read;
   return read;
 }
@@ -64,6 +71,14 @@ export async function openProjectInOrg(orgId: string, projectId: string): Promis
   return true;
 }
 export function openMyWork(): void { openHub('mywork'); }
+/** An org's whole Tasks page (as a board), Dashboard or Roster from the sidebar: the pages show one org at a time, so that org is made active first (#446). */
+export async function openOrgPage(orgId: string, page: 'tasks' | 'dashboard' | 'roster'): Promise<void> {
+  try { await ensureOrg(orgId); } catch (cause) { notifyError(cause); return; }
+  if (page === 'tasks') saveView('all', { ...loadView('all'), layout: 'board' });
+  openHub(page);
+}
+/** Tests: forget the in-memory read so the next viewer starts from the cached copy, as a new window does. */
+export function resetMyWorkForTests(): void { state = { work: readCache(), error: '' }; dirty = true; inflight = null; }
 export const onMyWorkPage = (): boolean => hubRoute().page === 'mywork';
 
 // --- the accordion: one org open at a time unless pinned ------------------------------------------------------------------------------------

@@ -42,6 +42,7 @@ export interface AdapterRunResult {
   /** not-dispatched: the upstream refused before doing work (bad key, 4xx, missing binary). */
   dispatchState: 'not-dispatched' | 'dispatched';
   statusCode?: number;
+  retryAfterMs?: number;
 }
 export interface RunnableAdapter {
   /** 'http' runs are stateless requests; 'cli' runs own a local child process. Neither leaves remote work behind once settled. */
