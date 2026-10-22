@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import type { DatabaseSync } from 'node:sqlite';
 import type { LedgerEntry, LedgerFile } from '../shared/domains/paperclip-protocol.ts';
-import { estimateCostUsd, ZERO_USAGE, type UsageTotals } from '../shared/model-catalog.ts';
+import { effectivePricing, estimateCostUsd, ZERO_USAGE, type ModelPricing, type UsageTotals } from '../shared/model-catalog.ts';
 import { usageStep, type UsageCursor } from './model-usage.ts';
 import { ReviewBaselineStore, snapshotTree } from './review-baseline.ts';
 import type { DomainContext } from './domains/types.ts';
@@ -105,7 +105,8 @@ export async function filesChanged(cwd: string, beforeTree: string | null): Prom
 /** Emitted by the service only when an approval card is actually shown; Full-access auto-accepts and policy allows never emit it. */
 export const APPROVAL_SHOWN_EVENT = 'muster/approval/shown';
 export const TOOL_TYPES = new Set(['commandExecution', 'mcpToolCall', 'dynamicToolCall', 'fileChange', 'webSearch', 'imageView']);
-interface Open { startedAt: number; cwd: string; usage: UsageTotals; cursor?: UsageCursor; tools: Map<string, number>; approvals: number; tests: number }
+const MAX_OPEN_RUNS = 1000;
+interface Open { chatId: string; startedAt: number; cwd: string; usage: UsageTotals; cursor?: UsageCursor; tools: Map<string, number>; approvals: number; tests: number }
 /** How a tool shows in a Receipt: `server/tool` for MCP, `shell` for commands, else the item type. */
 export const toolName = (type: string, server: unknown, tool: unknown) => type === 'mcpToolCall' ? `${server ?? 'mcp'}/${tool ?? 'tool'}` : type === 'commandExecution' ? 'shell' : type;
 export const TEST_COMMAND = /\b(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|\bpytest\b|\bgo\s+test\b|\bcargo\s+test\b|\bnode\s+--test\b|\bvitest\b|\bjest\b|\bmake\s+test\b/;
@@ -119,7 +120,20 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
   if (!hooks?.onRunStarted || !hooks.onRunSettled || !hooks.onProviderEvent) return () => undefined;
   const open = new Map<string, Open>();
   const byChat = new Map<string, string>();
-  const offStart = hooks.onRunStarted(run => { open.set(run.runId, { startedAt: Date.now(), cwd: run.cwd, usage: { ...ZERO_USAGE }, tools: new Map(), approvals: 0, tests: 0 }); byChat.set(run.chat.id, run.runId); });
+  const release = (runId: string) => {
+    const turn = open.get(runId);
+    open.delete(runId);
+    if (turn && byChat.get(turn.chatId) === runId) byChat.delete(turn.chatId);
+    return turn;
+  };
+  const offStart = hooks.onRunStarted(run => {
+    const previous = byChat.get(run.chat.id);
+    if (previous) release(previous);
+    // Bound abandoned runs without timers or work on provider events. Evicted runs produce no partial receipts.
+    if (open.size >= MAX_OPEN_RUNS) release(open.keys().next().value!);
+    open.set(run.runId, { chatId: run.chat.id, startedAt: Date.now(), cwd: run.cwd, usage: { ...ZERO_USAGE }, tools: new Map(), approvals: 0, tests: 0 });
+    byChat.set(run.chat.id, run.runId);
+  });
   const offEvent = hooks.onProviderEvent(event => {
     const runId = byChat.get(event.chat.id), turn = runId ? open.get(runId) : undefined;
     if (!turn) return;
@@ -135,8 +149,7 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
     }
   });
   const offSettled = hooks.onRunSettled(async run => {
-    const turn = open.get(run.runId);
-    open.delete(run.runId);
+    const turn = release(run.runId);
     if (!turn) return;
     try {
       // Files cost a second full-tree snapshot, taken for every turn that has a baseline. That includes a Work locally chat
@@ -149,7 +162,14 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
         const baseline = context.db().prepare('SELECT tree_sha FROM review_baselines WHERE run_id = ?').get(run.runId) as { tree_sha: string | null } | undefined;
         files = await filesChanged(turn.cwd, baseline?.tree_sha ?? null);
       } catch { files = null; }
-      const pricing = (() => { try { const provider = context.modelCatalog?.().providers.find(p => p.id === run.chat.providerId) as unknown as { models?: { id: string; pricing?: unknown }[] } | undefined; return provider?.models?.find(m => m.id === run.chat.model)?.pricing ?? null; } catch { return null; } })();
+      const catalog = (() => { try { const provider = context.modelCatalog?.().providers.find(p => p.id === run.chat.providerId) as unknown as { models?: { id: string; pricing?: ModelPricing }[] } | undefined; return provider?.models?.find(m => m.id === run.chat.model)?.pricing; } catch { return undefined; } })();
+      // The user's Settings price wins over the catalog's, as in Settings usage and the Dashboard (effectivePricing). Read
+      // once at settlement, never on provider events; the cost is stamped into the chained entry, so a later price change
+      // never rewrites a recorded turn. No price anywhere stays unknown (null), never $0.
+      let pricing: ModelPricing | null = catalog ?? null;
+      if (run.chat.providerId && run.chat.model) {
+        try { pricing = effectivePricing(await context.invoke('models.policy.get', {}), run.chat.providerId, run.chat.model, catalog); } catch { /* policy unreadable: the catalog price, if any */ }
+      }
       const endedAt = new Date().toISOString();
       // A task run is the task's: its Roster owner, the task, trigger "task" (Costs, Timeline and task links key on these).
       const owner = run.chat.projectId && attribute ? await attribute({ chatId: run.chat.id, projectId: run.chat.projectId }).catch(() => null) : null;
@@ -157,7 +177,7 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
         id: `${run.chat.id}:${run.runId}`, chatId: run.chat.id, runId: run.runId, taskId: owner?.taskId ?? null, projectId: run.chat.projectId ?? null,
         trigger: owner ? 'task' : run.chat.projectId ? 'project chat' : 'chat', agent: owner?.agent || run.chat.title || 'Agent', provider: run.chat.providerId ?? null, model: run.chat.model ?? null,
         tokens: { input: turn.usage.inputTokens, cached: turn.usage.cachedInputTokens, output: turn.usage.outputTokens, reasoning: turn.usage.reasoningOutputTokens },
-        costUsd: estimateCostUsd(turn.usage, pricing as never), tools: [...turn.tools].map(([name, count]) => ({ name, count })), approvals: turn.approvals, tests: turn.tests,
+        costUsd: estimateCostUsd(turn.usage, pricing), tools: [...turn.tools].map(([name, count]) => ({ name, count })), approvals: turn.approvals, tests: turn.tests,
         files, startedAt: new Date(turn.startedAt).toISOString(), endedAt, durationMs: Date.now() - turn.startedAt, outcome: run.status,
       });
       onAppend?.(entry);
