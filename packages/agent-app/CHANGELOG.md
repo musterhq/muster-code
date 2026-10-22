@@ -5,9 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
-<<<<<<< HEAD
 - Switching chats with the terminal dock open no longer starts a shell for each chat. A shell starts when you explicitly open Terminal or choose New terminal.
-=======
 - The Dashboard prices turns the provider reported no cost for from the model catalog or your Settings › Models prices; turns with no known price still count as unpriced.
 - Sandboxes now have a disk limit (10 GB by default, set under Resources next to memory and CPUs). A file write that would go past it is refused with a plain message, and a command or service that keeps filling the disk is stopped with a notice, so a runaway command can no longer fill your Mac's disk. A sandbox also no longer gets swap on top of its memory limit, so a 512 MB sandbox really stops at 512 MB. Deleting a chat now removes its sandbox container and files; archiving a chat stops its sandbox and keeps its files. A Project's shared sandbox keeps running while other chats in the Project still use it.
 - Claude Code token counts match what Claude Code reports: each model response is counted once with its final output, cache reads count as cached input, and a turn's result fills in anything missing. Earlier usage rows are unchanged.
@@ -18,7 +16,6 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Agent wakes that were waiting (for the gap between wakes, or for a run to end) are no longer lost when you quit: they resume when Muster opens, start once, and carry every reason and comment they collected. An agent also wakes once when every subtask of its task is done, including subtasks finished while Muster was closed; turn this off per agent with "Wake when all its subtasks are done".
 - A comparison with exactly 1000 changed files is no longer marked truncated, and CI checks that share a name across different workflows are listed separately (named "Workflow / job") instead of merged, while a workflow that ran again on the same commit still shows only its newest run.
 - The checkout outbox retry wait starts over when the queue empties by any route (Sync, Retry, discard, a lease ending), so a later failure is retried after 30 seconds instead of the old long wait.
->>>>>>> origin/main
 - Each organisation in the sidebar now has All tasks (the org's whole board), Dashboard and Roster rows. Opening one switches to that org first, so they work for every org, not only the active one.
 - The sidebar's organisations and My work show the last copy straight away on start while the slow server read refreshes them, instead of appearing late or staying empty.
 - Stopping a turn settles unfinished tool rows as Stopped, retaining partial output after reopening; denied, rule-blocked and timed-out commands say Did not run instead of Ran or failed, and activity summaries count them the same way.
