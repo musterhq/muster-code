@@ -10,7 +10,7 @@ window.getComputedStyle=()=>style;
 Object.assign(globalThis,{window,document:window.document,Node:window.Node,HTMLElement:window.HTMLElement,Element:window.Element,MutationObserver:window.MutationObserver,ResizeObserver:class{observe(){}disconnect(){}},localStorage:{getItem(){return null;},setItem(){}},requestAnimationFrame:(callback:any)=>setTimeout(callback,0),cancelAnimationFrame:clearTimeout,getComputedStyle:()=>style});
 const calls:{command:string;input:any}[]=[],listeners=new Set<(event:any)=>void>();
 const emit=(event:any)=>{for(const listener of listeners)listener(event);};
-const limits={network:'none',memoryMiB:512,cpus:1,processes:256,maxRunning:2,maxTimeoutMs:7_200_000};
+const limits={network:'none',memoryMiB:512,cpus:1,processes:256,diskGiB:10,maxRunning:2,maxTimeoutMs:7_200_000};
 let status:any={id:'computer_1',scope:{kind:'chat',id:'c1'},label:'Research',provider:'local-docker',state:'running',workspacePreserved:true,durability:'scratch',image:'node',user:'1000:1000',limits};
 let exec=0;
 (window as any).muster={subscribe(listener:any){listeners.add(listener);return()=>listeners.delete(listener);},async invoke(command:string,input:any){
@@ -39,7 +39,7 @@ const key=async(name:string,extra:Record<string,unknown>={})=>{const event=new w
 root.render(<ScopedComputerTab scope={{kind:'chat',id:'c1'}}/>);await delay(80);
 assert.equal(errors.length,0);
 assert.match(text(),/Scratch sandbox · Research/);assert.match(text(),/Linux container \(Docker\) · not this Mac · disposable/);
-assert.equal(document.querySelector('.sbx-state')?.textContent,'Ready');assert.match(text(),/No network/);assert.match(text(),/512 MiB · 1 CPU · 256 processes · user 1000/);
+assert.equal(document.querySelector('.sbx-state')?.textContent,'Ready');assert.match(text(),/No network/);assert.match(text(),/512 MiB · 1 CPU · 256 processes · 10 GB disk · user 1000/);
 // Restored history: ANSI stripped, shown as ended.
 assert.match(text(),/npm test/);assert.match(text(),/pass 3/);assert.ok(!text().includes('\x1b'));assert.match(text(),/Ended when Muster closed/);
 // Files side list.

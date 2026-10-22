@@ -13,7 +13,7 @@ import { hasTestSetup } from '../checkout/folder.ts';
 import { badgeOf } from '../checkout/lease.ts';
 import { TurnLedger } from '../turn-ledger.ts';
 import { connectionFor } from '../server/connection.ts';
-import { RETRY_BASE_MS, retryDelay } from '../checkout/outbox-policy.ts';
+import { OutboxRetry } from '../checkout/outbox-policy.ts';
 import { serverHubFor } from '../server/orgs.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
@@ -30,7 +30,6 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
   // Org copies are private files (0700 folder, 0600 files) under the app's data directory, deleted when a check-out ends.
   const store = new CheckoutStore(() => ctx.db(), join(ctx.dataDir, 'checkout'));
   let service: CheckoutService | null = null;
-  let retry: ReturnType<typeof setTimeout> | null = null;
   const server = () => { const origin = conn.config.baseUrl; try { return new URL(origin).host; } catch { return origin; } };
   /** The connected server's origin (scheme, host, port): what leases, queued posts and bindings are keyed by. */
   const origin = () => { try { return new URL(conn.baseUrl()).origin; } catch { return conn.config.baseUrl; } };
@@ -71,19 +70,9 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
     queued: chatId => ctx.store.queue(chatId).length > 0,
     emit: taskId => { ctx.emit({ type: 'checkoutChanged', taskId }); ctx.emit({ type: 'projectsWorkspaceChanged', scopes: ['tasks'], taskIds: taskId ? [taskId] : [] }); schedule(); },
   });
-  /** Posts that could not go (offline) are tried again every half minute, only while some are waiting. */
-  let failures = 0;
-  const schedule = () => {
-    if (retry || !store.pendingCount()) return;
-    // 30 s after a first failure, doubling to a 30 minute cap. A refused sign-in (401) is not retried at all: the check is local, and a new key is noticed within 30 s.
-    const wait = svc().authBlocked() ? RETRY_BASE_MS : retryDelay(failures);
-    retry = setTimeout(() => {
-      retry = null;
-      if (svc().authBlocked()) { schedule(); return; }
-      void svc().flush().catch(() => undefined).finally(() => { failures = store.syncState().lastError ? failures + 1 : 0; schedule(); });
-    }, wait);
-    retry.unref?.();
-  };
+  /** Posts that could not go (offline) are tried again 30 s after a failure, doubling to a 30 minute cap, only while some are waiting. */
+  const outboxRetry = new OutboxRetry({ pending: () => store.pendingCount(), authBlocked: () => svc().authBlocked(), flush: () => svc().flush(), lastError: () => store.syncState().lastError });
+  const schedule = () => outboxRetry.schedule();
   /** A quiet session gets a "paused" note. One timer, only while a task is checked out here. */
   const idle = setInterval(() => { if (store.openLeases().length) void svc().checkIdle().catch(() => undefined); }, 5 * 60_000);
   idle.unref?.();
@@ -176,6 +165,6 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
       'checkout.remind': input => { svc().remind(id(input.taskId)); return { ok: true }; },
     },
     power(event) { if (event.state === 'resume' && store.pendingCount()) void svc().flush().catch(() => undefined); },
-    dispose() { offPrompt(); offStarted?.(); offSettled(); offCommand?.(); clearInterval(idle); if (retry) clearTimeout(retry); hub.badge = undefined; hub.onOnline = undefined; },
+    dispose() { offPrompt(); offStarted?.(); offSettled(); offCommand?.(); clearInterval(idle); outboxRetry.dispose(); hub.badge = undefined; hub.onOnline = undefined; },
   };
 }
