@@ -460,6 +460,11 @@ await key(byTest('composer-input') as HTMLTextAreaElement,'Enter');await delay(4
 assert.ok(!byTest('queue-send-confirm'));
 assert.ok(calls.some(call=>call.command==='chat.send'&&call.input.text==='do not lose me'),'sent without a prompt');
 assert.ok(!calls.some(call=>call.command==='chat.queue.clear'),'held messages are never cleared');
+// A late save of the user's own typing (no run ended) never brings back text they deleted.
+chat={...chat,status:'interrupted',queuePaused:undefined,queue:undefined,draft:''};emit();await delay(30);
+store.setComposerDraft('chat','');await delay(20);
+chat={...chat,draft:'typed then deleted'};emit();await delay(50);
+assert.equal(store.getState().composerDrafts.chat.text,'','a draft save without a run ending is not adopted');
 chat={...chat,status:'completed',queuePaused:undefined,queue:undefined,draft:''};emit();await delay(30);
 store.setComposerDraft('chat','');await delay(20);
 assert.deepEqual(errors,[]);root.unmount();await delay(15);

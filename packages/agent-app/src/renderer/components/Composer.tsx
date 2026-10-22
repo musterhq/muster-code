@@ -166,11 +166,15 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const draft = state.composerDrafts[chat.id];
   const text = draft?.text ?? chat.draft;
   // A run stopped before its message was sent hands the text back (runtime sets chat.draft); the local empty draft would otherwise hide it.
-  const lastRuntimeDraft = useRef(chat.draft);
+  // Only when the run just ended (status changed in the same update): a late save of the user's own typing also changes
+  // chat.draft, and adopting that would bring back text the user had already deleted.
+  const lastRuntimeDraft = useRef({ id: chat.id, draft: chat.draft, status: chat.status });
   useEffect(() => {
     const previous = lastRuntimeDraft.current;
-    lastRuntimeDraft.current = chat.draft;
-    if (chat.draft && chat.draft !== previous && !(draft?.text ?? '').trim() && (chat.status === 'interrupted' || chat.status === 'failed')) setComposerDraft(chat.id, chat.draft);
+    lastRuntimeDraft.current = { id: chat.id, draft: chat.draft, status: chat.status };
+    if (previous.id !== chat.id) return;
+    const runEnded = previous.status !== chat.status && (chat.status === 'interrupted' || chat.status === 'failed');
+    if (runEnded && chat.draft && chat.draft !== previous.draft && !(draft?.text ?? '').trim()) setComposerDraft(chat.id, chat.draft);
   }, [chat.id, chat.draft, chat.status]);
   const input = useRef<HTMLTextAreaElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
@@ -204,7 +208,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const [panel, setPanel] = useState<{ kind: 'goal'; initial: string; mode: 'set' | 'edit' } | { kind: 'skill'; draft: SkillDraft } | { kind: 'sketch'; editing?: string } | { kind: 'info'; view: InfoView } | null>(null);
   /** Strokes behind each attached sketch (by attachment localId), so clicking its tile reopens it for editing. */
   const sketches = useRef(new Map<string, SketchStroke[]>());
-  /** "Send message?" while the queue is paused, and Codex's "Resume paused goal?" after a send. */
+  /** Codex's "Resume paused goal?" after a send. */
   const [askResume, setAskResume] = useState(false);
   const [plusQuery, setPlusQuery] = useState('');
   const [plusActive, setPlusActive] = useState(0);
