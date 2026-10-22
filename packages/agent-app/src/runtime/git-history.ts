@@ -74,8 +74,8 @@ async function changedFiles(real: string, base: string, head: string): Promise<{
     const finalPath = renamed ? fields[++index] : path;
     if (finalPath === undefined) break;
     const count = counts.get(finalPath) ?? {adds: null, dels: null};
-    files.push({path: finalPath, ...(renamed ? {previousPath: path} : {}), status, adds: count.adds, dels: count.dels, binary: count.adds === null && count.dels === null});
     if (files.length >= FILE_LIMIT) return {files, truncated: true};
+    files.push({path: finalPath, ...(renamed ? {previousPath: path} : {}), status, adds: count.adds, dels: count.dels, binary: count.adds === null && count.dels === null});
   }
   return {files, truncated: false};
 }
