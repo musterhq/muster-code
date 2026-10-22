@@ -53,3 +53,15 @@ test('credential redaction masks a password that contains an @', () => {
   assert.ok(masked.includes('@github.com/o/r.git'), masked);
   assert.equal(redactGitText('see https://example.com/page?email=a@b.c'), 'see https://example.com/page?email=a@b.c');
 });
+
+test('undoing a staged symlink change keeps the index entry a symlink', async () => {
+  const dir = repo();
+  symlinkSync('a.txt', join(dir, 'link')); g(dir, 'add', '.'); g(dir, 'commit', '-q', '-m', 'link');
+  rmSync(join(dir, 'link')); symlinkSync('missing.txt', join(dir, 'link')); g(dir, 'add', 'link');
+  const changes = await reviewChanges(dir, 'staged');
+  const file = changes.files.find(f => f.path === 'link')!;
+  assert.ok(file, JSON.stringify(changes.files));
+  await undoFile(dir, {path: 'link', baseline: 'staged', expectedAfterHash: file.afterHash});
+  assert.match(g(dir, 'ls-files', '-s', 'link'), /^120000 /);
+  assert.equal(g(dir, 'diff', '--cached', '--name-only').trim(), '');
+});
