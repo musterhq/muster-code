@@ -125,7 +125,6 @@ async function main(): Promise<void> {
   // --- Agent service -------------------------------------------------------
   const dataDir = path.join(app.getPath('userData'), 'agent-data');
   // Pending approvals/questions badge the dock while the window is not in front.
-  let attentionCount = 0;
   const badgeTracker = createBadgeTracker();
   // AUT-05: monitoring notifications follow the user's settings (mute, failures only, attention alerts off).
   let notifyPrefs: NotificationPrefs = notificationPrefs(undefined);
@@ -135,7 +134,6 @@ async function main(): Promise<void> {
     const next = attentionAllowed(notifyPrefs, Date.now()) ? requested : 0;
     const focused = window !== null && !window.isDestroyed() && window.isVisible() && window.isFocused();
     const update = badgeTracker(next, focused);
-    attentionCount = next;
     if (!update) return;
     if (process.platform === 'darwin') {
       app.dock?.setBadge(update.badge);
@@ -369,8 +367,9 @@ async function main(): Promise<void> {
   };
   syncTransparency();
   nativeTheme.on('updated', syncTransparency);
-  window.on('blur', () => applyBadge(attentionCount));
-  window.on('focus', () => { applyBadge(attentionCount); if (!isMac) window?.flashFrame(false); });
+  // Re-apply the unfiltered count: passing the muted (0) count would forget the requests still pending.
+  window.on('blur', () => applyBadge(pendingAttention));
+  window.on('focus', () => { applyBadge(pendingAttention); if (!isMac) window?.flashFrame(false); });
 
   // --- Renderer crash recovery ---------------------------------------------
   const crashes = createCrashTracker();
