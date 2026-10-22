@@ -25,6 +25,7 @@ const gitStatus={branch:'feat/x',detached:false,unborn:false,revision:'r1',files
   file('src/app.tsx',' ','M'),file('docs/new.md','R',' ',{previousPath:'docs/old.md'}),file('logo.png','A',' '),file('gone.txt',' ','D'),file('new.txt','?','?'),
 ],truncated:false,stagedCount:2,conflicted:false,upstream:'origin/feat/x',ahead:2,behind:1,remoteUrl:'https://github.com/o/r',pushRemote:'origin'};
 let prs:any[]=[];
+let trashFails=false;
 const conflictStatus={...gitStatus,files:[file('src/merge.ts','U','U',{conflict:true,staged:false})],stagedCount:0,conflicted:true};
 const sha=(n:number)=>String(n).padStart(40,'b');
 const commits=[
@@ -35,6 +36,9 @@ const commits=[
 ];
 window.muster={subscribe(){return()=>{};},async invoke(command:string,input:any){
   calls.push({command,input});
+  if(command==='files.trash'){if(trashFails)throw new Error('Trash unavailable');return;}
+  if(command==='review.changes'&&input.folderId==='f'&&input.baseline!=='head')return {baseline:input.baseline,label:'Changes',files:[{path:'src/app.tsx',status:'modified',adds:4,dels:2},{path:'new.txt',status:'untracked',adds:1,dels:0}],truncated:false};
+  if(command==='review.fileDiff')return {path:input.path,status:input.path==='new.txt'?'untracked':'modified',before:'',after:'new\n',beforeHash:'',afterHash:'new',revision:'r1',size:{before:0,after:4},label:'Changes',truncated:false};
   if(command==='artifacts.sideChat.list')return {sideChats:[]};
   if(command==='git.status'&&input.folderId==='f')return gitStatus;
   if(command==='git.status'&&input.folderId==='h')return conflictStatus;
@@ -165,6 +169,60 @@ assert.equal(commitButton.textContent,'Commit 2 staged');
 assert.equal(commitButton.disabled,true,'no commit without a message');
 // "Compare against" replaces the old "baseline" wording.
 assert.match(host.querySelector('.review-baseline-trigger')?.textContent??'',/Compare against.*Last commit/);
+// Opening either side of a file must not change the Changes picker or hide its commit box.
+const reviewState=await import('../src/renderer/reviewState');
+for(const [side,path,baseline] of [['unstaged','src/app.tsx','unstaged'],['staged','docs/new.md','staged']] as const){
+  const row=Array.from(section(side)!.querySelectorAll<HTMLButtonElement>('.change-row')).find(row=>row.textContent?.includes(path.split('/').pop()!))!;
+  row.click();await delay(100);
+  assert.equal(reviewState.reviewBaselineFor('f'),'head','opening a diff preserves the Changes comparison');
+  assert.equal(store.getState().tabs.find(tab=>tab.id===`diff:f:${path}`)?.reviewBaseline,baseline,'the diff compares the selected side');
+  store.closeTab(`diff:f:${path}`);await delay(80);
+  assert.match(host.querySelector('.review-baseline-trigger')?.textContent??'',/Last commit/);
+  assert.ok(host.querySelector('.git-commit-box'),'closing a diff keeps the commit box');
+}
+const discard=()=>host.querySelector<HTMLButtonElement>('button[aria-label="Discard new.txt"]');
+const confirmation=()=>document.querySelector<HTMLElement>('[data-testid="git-discard-confirm"]');
+const confirmAction=(label:string)=>Array.from(confirmation()!.querySelectorAll<HTMLButtonElement>('button')).find(button=>button.textContent===label)!;
+assert.ok(discard(),'untracked rows offer Discard');
+assert.equal(host.querySelector('button[aria-label="Discard src/app.tsx"]'),null,'tracked files are not offered Trash');
+discard()!.click();await delay(30);
+assert.match(confirmation()?.textContent??'',/Move new.txt to Trash/);
+assert.equal(calls.filter(call=>call.command==='files.trash').length,0,'opening confirmation does not discard');
+confirmAction('Cancel').click();await delay(30);
+assert.equal(confirmation(),null);
+assert.equal(calls.filter(call=>call.command==='files.trash').length,0,'cancelling leaves the file alone');
+store.openTab({id:'file:f:new.txt',kind:'file',folderId:'f',path:'new.txt',title:'new.txt'},{preview:false});store.activateTab('git:f');await delay(60);
+discard()!.click();await delay(30);
+trashFails=true;
+confirmAction('Move to Trash').click();await delay(50);
+assert.match(confirmation()?.textContent??'',/Trash unavailable/,'a failed discard stays open with its error');
+trashFails=false;
+confirmAction('Move to Trash').click();await delay(80);
+assert.equal(confirmation(),null);
+assert.equal(store.getState().tabs.some(tab=>tab.id==='file:f:new.txt'),false,'discarding from Changes closes the file\'s open editor tab');
+assert.deepEqual(calls.filter(call=>call.command==='files.trash').at(-1)?.input,{folderId:'f',path:'new.txt'});
+await store.openDiff('f','new.txt','unstaged');await delay(120);
+assert.ok(host.querySelector('.diff-head button[aria-label="Discard new.txt"]'),'the untracked diff also offers Discard');
+reviewState.setReviewBaseline('f',{ref:'main'});await delay(30);
+host.querySelector<HTMLButtonElement>('.diff-head .review-baseline-trigger')!.click();await delay(50);
+const lastCommit=Array.from(document.querySelectorAll<HTMLElement>('.review-baseline-item')).find(item=>item.textContent?.includes('Last commit'))!;
+lastCommit.click();await delay(80);
+assert.equal(store.getState().tabs.find(tab=>tab.id==='diff:f:new.txt')?.reviewBaseline,'head','changing a diff comparison updates only that tab');
+assert.deepEqual(reviewState.reviewBaselineFor('f'),{ref:'main'},'the diff picker leaves the Changes comparison alone');
+reviewState.setReviewBaseline('f','head');await delay(30);
+host.querySelector<HTMLButtonElement>('.diff-head button[aria-label="Discard new.txt"]')!.click();await delay(30);
+confirmAction('Move to Trash').click();await delay(80);
+assert.equal(store.getState().tabs.some(tab=>tab.id==='diff:f:new.txt'),false,'successful discard closes the stale diff');
+assert.equal(reviewState.reviewBaselineFor('f'),'head');
+assert.ok(host.querySelector('.git-commit-box'));
+// Explicit comparisons used outside the working-tree sections are inherited when opening a diff.
+reviewState.setReviewBaseline('f',{ref:'main'});
+await store.openDiff('f','src/app.tsx');await delay(60);
+assert.deepEqual(store.getState().tabs.find(tab=>tab.id==='diff:f:src/app.tsx')?.reviewBaseline,{ref:'main'});
+store.closeTab('diff:f:src/app.tsx');await delay(60);
+assert.deepEqual(reviewState.reviewBaselineFor('f'),{ref:'main'});
+assert.match(host.querySelector('.review-baseline-trigger')?.textContent??'',/main/);
+reviewState.setReviewBaseline('f','head');await delay(60);
 // Segment navigation: Changes → History (with its lane graph and coloured refs).
 (host.querySelector('.git-segment[data-view="history"]') as HTMLButtonElement).click();
 await delay(250);

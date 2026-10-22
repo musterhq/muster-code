@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createRequire} from 'node:module';
 import {existsSync} from 'node:fs';
-import {mkdtemp, mkdir, rm, writeFile, chmod} from 'node:fs/promises';
+import {mkdtemp, mkdir, writeFile, chmod} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
@@ -20,6 +20,7 @@ import {createProviderAdapter, type CoreClient, type ProviderInput} from '../src
 import {createAdapterCatalog} from '../src/runtime/adapters/index.ts';
 import {CustomProviders} from '../src/runtime/custom-providers.ts';
 import {SecretStore} from '../src/runtime/secret-store.ts';
+import {removeTmp} from './fixtures/tmp-dir.ts';
 import {withAdmissionRetry} from '../src/runtime/admission-retry.ts';
 import {configuredProviderInstances, invalidateProviderInstances, providerListingsSettled} from '../src/runtime/provider-instances.ts';
 import {clearCommandTokens} from '../src/runtime/codex-provider-auth.ts';
@@ -31,7 +32,7 @@ const coreBundle = join(appDir, 'dist/runtime/core-client.cjs');
 const codexBin = (() => { if (process.env.MUSTER_CODEX_COMMAND) return process.env.MUSTER_CODEX_COMMAND; try { return execFileSync('/bin/sh', ['-c', 'command -v codex'], {encoding: 'utf8'}).trim() || undefined; } catch { return undefined; } })();
 const codexSkip = !codexBin ? 'the Codex CLI is not installed' : !existsSync(coreBundle) ? 'dist/runtime/core-client.cjs is missing; run npm run build' : false;
 
-async function tmp(t: {after(fn: () => Promise<void>): void}, prefix: string) { const dir = await mkdtemp(join(tmpdir(), prefix)); t.after(() => rm(dir, {recursive: true, force: true})); return dir; }
+async function tmp(t: {after(fn: () => Promise<void>): void}, prefix: string) { const dir = await mkdtemp(join(tmpdir(), prefix)); t.after(() => removeTmp(dir)); return dir; }
 function fakeSecrets(dir: string) {
   return new SecretStore(dir, () => ({isEncryptionAvailable: () => true, encryptString: (value: string) => Buffer.from(value).reverse(), decryptString: (value: Buffer) => Buffer.from(value).reverse().toString()}));
 }
