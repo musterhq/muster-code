@@ -1198,6 +1198,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   /** #449, after launch: re-arm stored limit resumes, and continue the chats that were working when Muster closed. */
   async function bootAutoResume(): Promise<void> {
     for (const row of autoResume.all()) if (row.kind === 'limit' && row.state === 'armed') armResume(row.chatId);
+    // #450: a queue head whose dispatch was cut short by the quit is still queued (no receipt): an idle chat whose queue
+    // is not paused sends it now, instead of holding it until the user acts.
+    for (const chat of store.snapshot().chats) if (!chat.archived && !restartCandidates.includes(chat.id) && store.queue(chat.id).length && !queue.paused(chat.id) && !busy(chat) && !runs.has(chat.id) && !autoResume.get(chat.id)) dispatchQueued(chat.id);
     if (!restartCandidates.length) return;
     if (!settingOn('chats.resumeAfterRestart')) { for (const chatId of restartCandidates) if (autoResume.get(chatId)?.kind === 'restart') autoResume.delete(chatId); return; }
     await firstProviderProbe();

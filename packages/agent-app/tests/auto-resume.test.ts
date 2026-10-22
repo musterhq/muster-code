@@ -361,3 +361,18 @@ test('#579: after a crash, Continue anyway and then Steer on the queued message 
   assert.equal((await items(service,seeded.id)).filter(item=>item.kind==='user'&&item.text.includes('QUEUED-SURVIVED')).length,1);
   assert.equal((await snapshotChat(service,seeded.id)).queue,undefined);
 });
+
+test('#450: a queued message whose dispatch was cut short by a quit is sent once at the next launch',async t=>{
+  fastTiming(t);
+  const dataDir=await directory(t);
+  const store=new AgentStore(dataDir);
+  const chat=store.createChat({model:MODEL,mode:'agent',providerId:'claude-code'});
+  store.updateChat(chat.id,{providerId:'claude-code',providerBindingId:'claude-code',status:'completed'});
+  store.enqueue(chat.id,{id:'cut-1',text:'was being dispatched',requestId:'q-cut',attachmentIds:[],createdAt:new Date().toISOString()},20);
+  store.close();
+  const {provider,calls}=scripted(()=>undefined);
+  const service=createAgentService({dataDir,provider,onEvent(){}});t.after(()=>service.dispose());
+  await until(()=>calls.length===1);await settle(300);
+  assert.deepEqual(calls.map(call=>call.prompt),['was being dispatched']);
+  assert.equal((await snapshotChat(service,chat.id)).queue,undefined);
+});
