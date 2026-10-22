@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { mkdtemp, mkdir, writeFile, rename, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { COALESCE_MS, MAX_WATCHED_ROOTS, WorkspaceWatchService } from '../src/runtime/workspace-watch.ts';
 
@@ -156,18 +157,69 @@ test('source folders named build are not silently excluded', async (t) => {
   await waitFor(() => changed.length > 0);
 });
 
-test('build output directories do not trigger refreshes, source files still do', async (t) => {
+const git = (cwd: string, ...args: string[]) => {
+  const result = spawnSync('git', ['-c', 'core.fsmonitor=false', ...args], { cwd, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+};
+const hasGit = spawnSync('git', ['--version']).status === 0;
+
+test('always-generated caches (.next, .turbo, __pycache__) never trigger refreshes', async (t) => {
   const root = await makeRoot(t);
+  for (const dir of ['.next', '.turbo', '__pycache__']) await mkdir(join(root, dir));
+  const { svc, changed } = makeService(t);
+  await svc.watch('f', root);
+  await settle(changed);
+  for (const dir of ['.next', '.turbo', '__pycache__']) await writeFile(join(root, dir, 'chunk.js'), 'x');
+  await sleep(QUIET_MS);
+  assert.deepEqual(changed, []);
+});
+
+test('a git-ignored dist/ or target/ does not refresh; source files still do', { skip: !hasGit && 'git not installed' }, async (t) => {
+  const root = await makeRoot(t);
+  git(root, 'init', '-q');
+  await writeFile(join(root, '.gitignore'), 'dist/\n/target\n');
   await mkdir(join(root, 'dist'));
   await mkdir(join(root, 'target', 'debug'), { recursive: true });
   await mkdir(join(root, 'src'));
   const { svc, changed } = makeService(t);
   await svc.watch('f', root);
   await settle(changed);
-  await writeFile(join(root, 'dist', 'bundle.js'), 'x');
-  await writeFile(join(root, 'target', 'debug', 'app'), 'x');
-  await sleep(QUIET_MS);
+  // A build writes many files; none of them may refresh the tree.
+  for (let i = 0; i < 20; i++) {
+    await writeFile(join(root, 'dist', `chunk${i}.js`), 'x');
+    await writeFile(join(root, 'target', 'debug', `obj${i}.o`), 'x');
+  }
+  await sleep(QUIET_MS * 2);
   assert.deepEqual(changed, []);
   await writeFile(join(root, 'src', 'a.ts'), 'x');
   await waitFor(() => changed.length > 0);
+});
+
+test('a committed dist/ (not git-ignored) keeps refreshing', { skip: !hasGit && 'git not installed' }, async (t) => {
+  const root = await makeRoot(t);
+  git(root, 'init', '-q');
+  await mkdir(join(root, 'dist'));
+  await writeFile(join(root, 'dist', 'index.js'), 'v1');
+  const { svc, changed } = makeService(t);
+  await svc.watch('f', root);
+  await settle(changed);
+  await writeFile(join(root, 'dist', 'index.js'), 'v2');
+  await waitFor(() => changed.length > 0);
+});
+
+test('ignoring dist/ in .gitignore takes effect without re-watching the folder', { skip: !hasGit && 'git not installed' }, async (t) => {
+  const root = await makeRoot(t);
+  git(root, 'init', '-q');
+  await mkdir(join(root, 'dist'));
+  const { svc, changed } = makeService(t);
+  await svc.watch('f', root);
+  await settle(changed);
+  await writeFile(join(root, 'dist', 'a.js'), 'x');
+  await waitFor(() => changed.length > 0); // not ignored yet: cached as committed output
+  await writeFile(join(root, '.gitignore'), 'dist/\n');
+  await waitFor(() => changed.length > 1); // the .gitignore edit itself refreshes
+  await settle(changed);
+  await writeFile(join(root, 'dist', 'b.js'), 'x');
+  await sleep(QUIET_MS * 2);
+  assert.deepEqual(changed, []);
 });
