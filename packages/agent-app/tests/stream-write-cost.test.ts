@@ -13,7 +13,7 @@ test('2000 deltas in one burst are stored with a handful of writes, and the fina
   const dataDir=await mkdtemp(join(tmpdir(),'muster-stream-'));t.after(()=>rm(dataDir,{recursive:true,force:true}));
   let release!:()=>void;const finished=new Promise<void>(resolve=>{release=resolve;});
   const provider:ProviderAdapter={info,stop:async()=>false,dispose(){},run:async input=>{
-    input.onThreadReady('th');input.onTurnAccepted({threadId:'th',turnId:'tu'});
+    input.onThreadReady?.('th');input.onTurnAccepted?.({threadId:'th',turnId:'tu',dispatchState:'dispatched'});
     for(let i=0;i<2000;i++)input.onDelta(`${i} `);
     await new Promise(resolve=>setTimeout(resolve,50));
     release();
