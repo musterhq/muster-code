@@ -13,7 +13,9 @@
     "build": "node scripts/build.mjs",
     "start": "node scripts/build.mjs && electron .",
     "dev": "node scripts/build.mjs --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc-rs --noEmit -p tsconfig.json",
+    "typecheck:tsc": "tsc --noEmit",
+    "typecheck:parity": "node scripts/typecheck-parity.mjs",
     "test": "node --max-old-space-size=1536 --experimental-transform-types --import ./tests/pin-device-platform.mjs --test 'tests/*.test.ts'",
     "test:renderer": "node scripts/test-renderer.mjs",
     "rebuild:native": "node scripts/postinstall.mjs --force",
@@ -51,10 +53,11 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "electron": "44.7.0",
+    "electron-builder": "26.15.3",
     "esbuild": "0.28.2",
     "linkedom": "^0.18.13",
-    "typescript": "7.0.2",
-    "electron-builder": "26.15.3"
+    "tsc-rs": "0.7.0",
+    "typescript": "7.0.2"
   },
   "overrides": {
     "uuid": "^11.1.0"
