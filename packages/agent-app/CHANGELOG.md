@@ -5,9 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
-<<<<<<< HEAD
 - The "connected" notice for a provider now appears only on a real change (a new provider, or signing in again after it was signed out or failed) instead of on every launch or each time Claude Code re-checks its sign-in.
-=======
 - The Dashboard prices turns the provider reported no cost for from the model catalog or your Settings › Models prices; turns with no known price still count as unpriced.
 - Sandboxes now have a disk limit (10 GB by default, set under Resources next to memory and CPUs). A file write that would go past it is refused with a plain message, and a command or service that keeps filling the disk is stopped with a notice, so a runaway command can no longer fill your Mac's disk. A sandbox also no longer gets swap on top of its memory limit, so a 512 MB sandbox really stops at 512 MB. Deleting a chat now removes its sandbox container and files; archiving a chat stops its sandbox and keeps its files. A Project's shared sandbox keeps running while other chats in the Project still use it.
 - Claude Code token counts match what Claude Code reports: each model response is counted once with its final output, cache reads count as cached input, and a turn's result fills in anything missing. Earlier usage rows are unchanged.
@@ -22,7 +20,6 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - The sidebar's organisations and My work show the last copy straight away on start while the slow server read refreshes them, instead of appearing late or staying empty.
 - Stopping a turn settles unfinished tool rows as Stopped, retaining partial output after reopening; denied, rule-blocked and timed-out commands say Did not run instead of Ran or failed, and activity summaries count them the same way.
 - A chat started in a new worktree from an existing chat now keeps that chat's access mode, and its model and reasoning effort while that model is still available, instead of the app defaults
->>>>>>> origin/main
 - Back and Forward (⌘[ / ⌘]) work like a browser: they return through Settings sections, Inbox, Projects, Automations and Memory as well as chats, instead of skipping everything but chats. A two-finger trackpad swipe (or three-finger, if macOS is set that way) does the same; code blocks, diffs and tables that scroll sideways keep their swipe.
 - The diff tab header keeps the file name readable in narrow panes and wraps the compare picker and file actions onto their own row instead of cutting them off.
 - The dark theme is darker and less grey: near-black surfaces and a deeper sidebar glass tint, with the blur kept.
