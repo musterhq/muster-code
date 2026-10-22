@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import {
-  effectivePricing, estimateCostUsd, isModelKey, normalizeModelPolicy, summarizeUsage, validatePricing,
+  effectivePricing, estimateCostUsd, isModelKey, normalizeModelPolicy, summarizeUsage, validatePricing, validateContextWindow, modelKey,
   type ModelPolicy, type ModelPricing, type UsageReport, type UsageRow, type UsageTotals,
 } from '../../shared/model-catalog.ts';
 import type { BoundedList, ProjectTask } from '../../shared/protocol.ts';
@@ -31,7 +31,7 @@ export function createModelsDomain(ctx: DomainContext): DomainModule {
   let cached: ModelPolicy | undefined;
   const read = (): ModelPolicy => {
     if (cached) return cached;
-    try { cached = normalizeModelPolicy((JSON.parse(readFileSync(file(), 'utf8')) as { policy?: unknown }).policy); } catch { cached = { hidden: [], shown: [], pricing: {} }; }
+    try { cached = normalizeModelPolicy((JSON.parse(readFileSync(file(), 'utf8')) as { policy?: unknown }).policy); } catch { cached = normalizeModelPolicy(undefined); }
     return cached;
   };
   const write = (policy: ModelPolicy): ModelPolicy => {
@@ -139,6 +139,7 @@ export function createModelsDomain(ctx: DomainContext): DomainModule {
     return report;
   };
 
+  ctx.hooks.setContextWindowResolver?.((providerId, model) => read().contextWindows[modelKey(providerId, model)]);
   return {
     handlers: {
       'models.policy.get': () => read(),
@@ -156,7 +157,13 @@ export function createModelsDomain(ctx: DomainContext): DomainModule {
         if (input.pricing === null) delete pricing[input.key as string]; else pricing[input.key as string] = validatePricing(input.pricing);
         return write({ ...current, pricing });
       },
-      'models.policy.reset': () => write({ hidden: [], shown: [], pricing: {} }),
+      'models.policy.setContextWindow': input => {
+        if (!isModelKey(input.key)) throw new Error('Choose a model.');
+        const current = read(), contextWindows = { ...current.contextWindows };
+        if (input.tokens === null) delete contextWindows[input.key as string]; else contextWindows[input.key as string] = validateContextWindow(input.tokens);
+        return write({ ...current, contextWindows });
+      },
+      'models.policy.reset': () => write(normalizeModelPolicy(undefined)),
       'models.usage.chat': input => {
         const chatId = id(input.chatId, 'chat');
         if (typeof ctx.store?.chat === 'function' && !ctx.store.chat(chatId)) throw new Error('Chat not found.');
@@ -164,6 +171,6 @@ export function createModelsDomain(ctx: DomainContext): DomainModule {
       },
       'models.usage.project': input => projectReport(id(input.projectId, 'project')),
     },
-    dispose() { offEvent?.(); offStart?.(); offSettle?.(); runTasks.clear(); },
+    dispose() { ctx.hooks.setContextWindowResolver?.(undefined); offEvent?.(); offStart?.(); offSettle?.(); runTasks.clear(); },
   };
 }
