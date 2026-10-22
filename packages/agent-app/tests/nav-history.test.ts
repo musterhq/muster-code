@@ -40,7 +40,7 @@ test('installNavHistory follows a store and selects through the supplied callbac
   const chats=new Set(['a','b','c']);
   const handle=installNavHistory({
     subscribe:listener=>{listeners.add(listener);return()=>listeners.delete(listener);},
-    activeChatId:()=>active,
+    current:()=>active,
     exists:id=>chats.has(id),
     select:id=>{selected.push(id);active=id;for(const l of listeners)l();},
   });

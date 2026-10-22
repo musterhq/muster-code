@@ -221,3 +221,40 @@ test('#426 imported chat: /compact and the automatic trigger both work from the 
   await send(service,chatId,'And another.');
   assert.equal((await rows(service,chatId)).filter(row=>row.data?.auto).length,1);
 });
+
+test('one /compact leaves one compaction row even when the provider also reports thread/compacted',async t=>{
+  const fake:Fake={inputs:[],usage:1000,compacts:0};
+  const {service,folder}=await serviceOn(t,'codex-app-server',200_000,fake);
+  const chat=await service.invoke('chat.create',{folderId:folder.id});
+  let report:ProviderInput['onEvent']|undefined;
+  fake.events=input=>{report=input.onEvent;};
+  await send(service,chat.id,'first');
+  // The report lands while the request is still in flight.
+  const compactNow=service.invoke('chat.compact',{id:chat.id});
+  report!('thread/compacted',{threadId:'thread-1'});
+  await compactNow;
+  const compactionRows=await rows(service,chat.id);
+  assert.equal(compactionRows.length,1,'a single row');
+  assert.equal(compactionRows[0]!.status,'completed');
+  assert.equal(compactionRows[0]!.data?.manual,true);
+});
+
+// #583: Codex answers thread/compact/start at once and reports the compaction itself afterwards.
+for(const reports of [['item/started','item/completed','thread/compacted'],['item/started','item/completed'],['thread/compacted']]){
+  test(`one /compact leaves one manual row when ${reports.join(', ')} arrive after the request returns`,async t=>{
+    const fake:Fake={inputs:[],usage:1000,compacts:0};
+    const {service,folder}=await serviceOn(t,'codex-app-server',200_000,fake);
+    const chat=await service.invoke('chat.create',{folderId:folder.id});
+    let report:ProviderInput['onEvent']|undefined;
+    fake.events=input=>{report=input.onEvent;};
+    await send(service,chat.id,'first');
+    await service.invoke('chat.compact',{id:chat.id});
+    for(const method of reports)report!(method,method==='thread/compacted'?{threadId:'thread-1',turnId:'compact-1'}:{threadId:'thread-1',turnId:'compact-1',item:{type:'contextCompaction',id:'cc-1'}});
+    const compactionRows=await rows(service,chat.id);
+    assert.deepEqual(compactionRows.map(row=>[row.text,row.status,!!row.data?.manual,!!row.data?.auto]),[['Context compacted','completed',true,false]]);
+    // The report is consumed: a later compaction the provider starts on its own still gets its own row.
+    report!('item/started',{threadId:'thread-1',turnId:'auto-1',item:{type:'contextCompaction',id:'cc-2'}});
+    report!('item/completed',{threadId:'thread-1',turnId:'auto-1',item:{type:'contextCompaction',id:'cc-2'}});
+    assert.deepEqual((await rows(service,chat.id)).map(row=>[row.status,!!row.data?.manual]),[['completed',true],['completed',false]]);
+  });
+}
