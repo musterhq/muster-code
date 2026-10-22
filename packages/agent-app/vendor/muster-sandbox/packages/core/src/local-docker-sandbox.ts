@@ -46,6 +46,8 @@ export const SANDBOX_DEFAULT_MEMORY_MIB = 512;
 export const SANDBOX_DEFAULT_CPUS = 1;
 export const SANDBOX_DEFAULT_PIDS = 256;
 export const SANDBOX_MAX_PIDS = 4096;
+/** Writable-layer ceiling passed as `--storage-opt size=` when the storage driver can enforce it (overlay2 on xfs+pquota, btrfs, zfs). */
+export const SANDBOX_DEFAULT_DISK_MIB = 10240;
 const REGISTRY_FILE = "sandbox-registry.json";
 const CONTAINER_PREFIX = "muster-sbx-";
 const KILL_GRACE_MS = 1500;
@@ -169,14 +171,20 @@ function mountDir(descriptor: ScopedRuntimeDescriptor): string {
   return join(descriptor.workDir, "workspace");
 }
 
-/** Resource flags for `docker run`, derived only from the descriptor (enforced by the kernel cgroup, not advisory). */
-export function sandboxResourceArgs(descriptor: ScopedRuntimeDescriptor): string[] {
+/**
+ * Resource flags for `docker run`, derived only from the descriptor (enforced by the kernel cgroup, not advisory).
+ * `--memory-swap` equals `--memory`, so the container gets no swap on top (Docker's default is twice the memory).
+ * `storageQuota` adds `--storage-opt size=`; only some storage drivers accept it, so `provision` retries without it.
+ */
+export function sandboxResourceArgs(descriptor: ScopedRuntimeDescriptor, options: { storageQuota?: boolean } = {}): string[] {
   const limits = descriptor.limits;
   const pids = Math.min(SANDBOX_MAX_PIDS, Math.max(1, Math.trunc(limits.maxProcesses ?? SANDBOX_DEFAULT_PIDS)));
   const memory = Math.max(6, Math.trunc(limits.memoryMib ?? SANDBOX_DEFAULT_MEMORY_MIB));
   const cpus = limits.cpus ?? SANDBOX_DEFAULT_CPUS;
   if (!Number.isFinite(cpus) || cpus <= 0) throw new SandboxProviderError(`Invalid cpu limit ${String(cpus)} for sandbox`);
-  return ["--pids-limit", String(pids), "--memory", `${memory}m`, "--cpus", String(cpus)];
+  const args = ["--pids-limit", String(pids), "--memory", `${memory}m`, "--memory-swap", `${memory}m`, "--cpus", String(cpus)];
+  if (options.storageQuota) args.push("--storage-opt", `size=${Math.max(1, Math.trunc(limits.maxDiskMb ?? SANDBOX_DEFAULT_DISK_MIB))}m`);
+  return args;
 }
 
 /**
@@ -366,6 +374,8 @@ function dockerExec(
 export class LocalDockerSandbox {
   private readonly dockerBin: string;
   private readonly defaultImage: string;
+  /** Cleared once Docker refuses `--storage-opt` (most drivers, e.g. overlay2 on ext4); the app's own disk check still applies. */
+  private storageQuota = true;
 
   constructor(options: LocalDockerSandboxOptions = {}) {
     this.dockerBin = options.dockerBin ?? "docker";
@@ -415,7 +425,7 @@ export class LocalDockerSandbox {
     await mkdir(controlDir(descriptor), { recursive: true, mode: 0o700 });
     // Layers are validated (and must exist) before any `docker run`; a missing layer never yields a container without it.
     const layerArgs = await sandboxLayerMountArgs(descriptor);
-    const run = await dockerExec(this.dockerBin, [
+    const runArgs = (storageQuota: boolean) => [
       "run",
       "-d",
       // PID 1 is otherwise `sleep infinity`, which never reaps: every orphaned process (a killed command's children,
@@ -431,7 +441,7 @@ export class LocalDockerSandbox {
       "ALL",
       "--security-opt",
       "no-new-privileges",
-      ...sandboxResourceArgs(descriptor),
+      ...sandboxResourceArgs(descriptor, { storageQuota }),
       "--network",
       networkModeFor(descriptor),
       "--mount",
@@ -442,7 +452,13 @@ export class LocalDockerSandbox {
       image,
       "sleep",
       "infinity",
-    ]);
+    ];
+    let run = await dockerExec(this.dockerBin, runArgs(this.storageQuota));
+    if (run.code !== 0 && this.storageQuota && /storage-opt|storage opt/i.test(run.stderr)) {
+      this.storageQuota = false;
+      await dockerExec(this.dockerBin, ["rm", "-f", containerName]);
+      run = await dockerExec(this.dockerBin, runArgs(false));
+    }
     if (run.code !== 0) {
       throw new SandboxProviderError(`docker run failed for sandbox ${containerName}: exit ${run.code}`, run.stderr);
     }

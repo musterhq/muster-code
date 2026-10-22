@@ -18,6 +18,8 @@ export interface AgentSandboxHost {
   /** SBX-11: registers and starts (or stops and removes) the headless browser service inside the scope's container. */
   browserService?(scope: ScopedComputerRef, enabled: boolean): Promise<{state: string; reason?: string}>;
   browserServiceStatus?(scope: ScopedComputerRef): Promise<{state: string; reason?: string}>;
+  /** #654: 'stop' when a chat is archived; 'destroy' (container, workspace and saved state) when it is deleted. */
+  releaseScope?(scope: ScopedComputerRef, mode: 'stop' | 'destroy'): Promise<void>;
 }
 
 /**

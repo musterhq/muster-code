@@ -572,9 +572,9 @@ export function retryTimeline(id: string): void {
 }
 
 /** Opens a new chat; `draft` prefills its composer (Codex's prefilled "Record a skill" conversation). */
-export async function createChat(folderId?: string, projectId?: string, options: {draft?: string} = {}): Promise<string | undefined> {
+export async function createChat(folderId?: string, projectId?: string, options: {draft?: string; inheritFrom?: string} = {}): Promise<string | undefined> {
   try {
-    const chat = await invoke('chat.create', { folderId, projectId });
+    const chat = await invoke('chat.create', { folderId, projectId, ...(options.inheritFrom ? { inheritFrom: options.inheritFrom } : {}) });
     set({ activeChatId: chat.id, screen: 'work' });
     if (options.draft) setComposerDraft(chat.id, options.draft);
     await loadTimeline(chat.id);
