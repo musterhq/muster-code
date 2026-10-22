@@ -33,6 +33,7 @@ export function createDomainHooks() {
   const removals = new Set<(event: ChatRemoval) => Promise<void> | void>();
   let defaults: ChatDefaultsResolver | undefined, environment: RunEnvironmentResolver | undefined, toolPolicy: ToolPolicyResolver | undefined, commitIdentity: ((folderId: string) => { name: string; email: string } | null) | undefined, worktreeRecorder: ((projectId: string, taskId: string, folderId: string) => void) | undefined;
   let automated: AutomatedWorktreeResolver | undefined;
+  let contextWindow: ((providerId: string, model: string) => number | undefined) | undefined;
   let historyBrief: TaskHistoryBriefResolver | undefined;
   const add = <T>(set: Set<T>, fn: T) => { set.add(fn); return () => { set.delete(fn); }; };
   const hooks: DomainHooks = {
@@ -44,6 +45,7 @@ export function createDomainHooks() {
     setChatDefaults(fn) { defaults = fn; },
     setRunEnvironmentResolver(fn) { environment = fn; },
     setToolPolicy(fn) { toolPolicy = fn; },
+    setContextWindowResolver(fn) { contextWindow = fn; },
     setCommitIdentity(fn) { commitIdentity = fn; },
     setTaskWorktreeRecorder(fn) { worktreeRecorder = fn; },
     noteTaskWorktree(projectId, taskId, folderId) { try { worktreeRecorder?.(projectId, taskId, folderId); } catch { /* best effort */ } },
@@ -57,6 +59,8 @@ export function createDomainHooks() {
   };
   return {
     hooks,
+    /** The user's own context window for a model, if they set one. */
+    contextWindowOverride(providerId: string, model: string): number | undefined { try { return contextWindow?.(providerId, model); } catch { return undefined; } },
     hasRunHooks: () => prompts.size + runOptions.size + started.size > 0,
     /** Each contributor gets 2s and 8KB; results are wrapped as <context source="label">. */
     async contributePrompt(input: Omit<Parameters<PromptContributor>[0], 'signal'>): Promise<{ text: string; sources: string[]; blocks: { label: string; text: string }[] }> {

@@ -3,8 +3,10 @@ import React, { useEffect, useState } from 'react';
 import type { Chat, ContextTelemetry, PluginEntry } from '../../shared/protocol';
 import type { McpServer } from '../../shared/domains/mcp-protocol';
 import { formatCount, plural } from '../../shared/wording.ts';
-import type { ModelWindowInfo } from '../../shared/context-window.ts';
+import { withUserWindow, type ModelWindowInfo } from '../../shared/context-window.ts';
 import { contextView } from '../contextView';
+import { useModelPolicy } from '../modelPolicy';
+import { modelKey } from '../../shared/model-catalog';
 import { useStoreSelector } from '../useStore';
 import { invoke } from '../bridge';
 import { copyText } from '../clipboard';
@@ -40,7 +42,8 @@ function StatusCard({ chat, modelName, accessLabel }: { chat: Chat; modelName: s
     return () => { live = false; };
   }, [chat.id]);
   const providerId = chat.providerId || undefined, usage = useProviderUsage(providerId, true);
-  const model = useStoreSelector(state => state.providers.value?.find(p => p.id === chat.providerId)?.models.find(m => m.id === chat.model));
+  const catalogModel = useStoreSelector(state => state.providers.value?.find(p => p.id === chat.providerId)?.models.find(m => m.id === chat.model));
+  const model = withUserWindow(catalogModel, useModelPolicy().contextWindows[modelKey(chat.providerId ?? "", chat.model)]);
   return <dl className="composer-info-rows">
     <div><dt>Chat ID</dt><dd><code>{chat.id}</code><Tip label="Copy chat ID"><button type="button" className="composer-info-copy" aria-label="Copy chat ID" onClick={() => void copyText(chat.id).catch(notifyError)}><Copy size={11} /></button></Tip></dd></div>
     {chat.providerThreadId && <div><dt>Provider thread</dt><dd><code>{chat.providerThreadId}</code></dd></div>}
