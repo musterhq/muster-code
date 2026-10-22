@@ -92,6 +92,23 @@ test('output has a bounded tail, environment excludes ambient secrets, and launc
   }finally{if(prior===undefined)delete process.env[key];else process.env[key]=prior;await f.close();}
 });
 
+test('stopping during startup keeps a later launch error stopped',async()=>{
+  const f=await fixture();
+  try{
+    await f.registry.attach({chatId:'chat',leaseId:'viewer'});
+    const input={chatId:'chat',requestId:'stop-starting',command:join(f.directory,'missing-program'),args:[]};
+    const started=await f.registry.start(input);
+    assert.equal(started.status,'starting');
+    const stopping=await f.registry.stop({chatId:'chat',processId:started.processId});
+    assert.equal(stopping.status,'stopping');
+    const done=await until(f.registry,started.processId,session=>!isActiveProcess(session.status));
+    assert.equal(done.status,'stopped');
+    assert.equal(done.error,undefined);
+    assert.equal((await f.registry.start(input)).status,'stopped');
+    assert.equal(f.events.some(event=>event.type==='processSession'&&event.session.status==='failed'),false);
+  }finally{await f.close();}
+});
+
 test('four owned groups are the limit; shutdown stops all and persists no process identifiers',async()=>{
   const f=await fixture();
   try{
