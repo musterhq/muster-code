@@ -27,12 +27,16 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Stopping a turn settles unfinished tool rows as Stopped, retaining partial output after reopening; denied commands say Did not run.
 
 - Codex offers GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna when its model cache is unavailable; a readable provider catalog keeps precedence.
-- Untracked files can be discarded to Trash with confirmation from Changes or a diff, and opening a diff preserves the Changes compare mode.
+- Untracked files can be discarded to Trash with confirmation from Changes or a diff, file actions stay visible, and opening a diff preserves the Changes compare mode.
+
 - Commands stopped during startup now remain stopped when a launch error arrives, avoiding failure follow-ups.
 - Retrying suggested task creation after a failure reuses each suggestion’s tasks, and failed task batches roll back together.
+
 - Trim default model names in settings and reject unknown or inherited permission pane names.
 - Plugin pages and files now allow names beginning with two dots while still blocking path traversal and symlinks outside the plugin folder.
 - Notification toasts stay clear of the summary card, including when the right pane is open.
+- Rate limit retries respect Retry-After on every attempt, show the provider’s explanation and retry time, and no longer claim an unsent message is in the composer.
+
 - Rate limit retries respect Retry-After on every attempt, show the provider’s explanation and retry time, and no longer claim an unsent message is in the composer. When the provider asks to wait more than five minutes, Muster stops and says when to try again instead of retrying early.
 - Terminal panes retry failed loads twice and offer a Retry action if loading still fails.
 - A chat started in a new worktree from an existing chat now keeps that chat's model, reasoning effort and access mode instead of the app defaults
