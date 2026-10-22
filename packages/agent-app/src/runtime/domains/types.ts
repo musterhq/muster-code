@@ -20,6 +20,8 @@ export interface ChatDefaults { providerId?: string; model?: string; effort?: Re
 export type ChatDefaultsResolver = (input: { folderId?: string; projectId?: string }) => ChatDefaults | undefined;
 /** A domain command that completed without throwing. Observers must not throw or block. */
 export interface CommandCompleted { command: string; input: Record<string, unknown>; output: unknown }
+/** #654: a chat is about to be deleted (still in the store) or was just archived. */
+export interface ChatRemoval { chat: Chat; kind: 'delete' | 'archive' }
 export type RunEnvironmentResolver = (chat: Chat, defaultCwd: string) => Promise<{ cwd: string }>;
 /** G13: a per-agent tool policy decision for an approval request. null: no rule applies and the usual flow decides. */
 export type ToolPolicyResolver = (chat: Chat, method: string, params: Record<string, unknown>) => { effect: 'allow' | 'ask' | 'deny'; message: string } | null;
@@ -58,6 +60,8 @@ export interface DomainHooks {
   commitIdentity?(folderId: string): { name: string; email: string } | null;
   /** Observes successful domain commands (e.g. Projects logging memory and environment writes to activity). Optional so bare test contexts need not provide it. */
   onCommand?(fn: (event: CommandCompleted) => void): () => void;
+  /** #654: release what a chat owns. On 'delete' a throw keeps the chat (its message is shown); 'archive' never fails the archive. Optional so bare test contexts need not provide it. */
+  onChatRemoval?(fn: (event: ChatRemoval) => Promise<void> | void): () => void;
 }
 
 export interface DomainContext {

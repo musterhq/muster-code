@@ -61,7 +61,7 @@ export class PluginUiRegistry {
     try {
       file = await fs.realpath(path.join(registered.root, ...parts));
       const inside = path.relative(registered.root, file);
-      if (!inside || inside.startsWith('..') || path.isAbsolute(inside)) return fail(403, 'Forbidden');
+      if (!inside || inside === '..' || inside.startsWith(`..${path.sep}`) || path.isAbsolute(inside)) return fail(403, 'Forbidden');
       const stat = await fs.stat(file);
       if (!stat.isFile() || stat.size > MAX_FILE_BYTES) return fail(404, 'Not found');
     } catch { return fail(404, 'Not found'); }
