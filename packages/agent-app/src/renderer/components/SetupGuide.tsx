@@ -228,7 +228,7 @@ function FolderStep({status,folders}:{status:SetupStatus|null;folders:string[]})
     {folders.length>0&&<ul className="setup-summary" aria-label="Folders">{folders.slice(0,4).map(name=><SummaryLine key={name} ok text={name}/>)}{folders.length>4&&<li>and {folders.length-4} more</li>}</ul>}
     <div className="setup-inline-actions">
       <button type="button" className={folders.length?undefined:'is-primary'} disabled={busy} onClick={()=>{setBusy(true);void pickFolder().finally(()=>setBusy(false));}}><FolderPlus size={13} aria-hidden="true"/>{busy?'Choosing…':folders.length?'Add another folder…':'Add a folder…'}</button>
-      <button type="button" disabled={status?.git.available===false} title={status?.git.available===false?status.git.detail:undefined} onClick={()=>{void saveProgress({step:'folder'});closeSetupGuide();openCloneSheet({onLanded:()=>openSetupGuide('folder')});}}><GitBranch size={13} aria-hidden="true"/>Clone a repository…</button>
+      <button type="button" disabled={status?.git.available===false} title={status?.git.available===false?status.git.detail:undefined} onClick={()=>{void saveProgress({step:'folder'});closeSetupGuide();openCloneSheet({onLanded:()=>openSetupGuide('folder'),landingHint:'The default branch is checked out; setup continues once it lands.'});}}><GitBranch size={13} aria-hidden="true"/>Clone a repository…</button>
     </div>
     {status&&!status.git.available&&<p className="setup-note">{status.git.detail}</p>}
   </>;
