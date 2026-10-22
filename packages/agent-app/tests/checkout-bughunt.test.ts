@@ -132,6 +132,29 @@ test('two simultaneous check-outs of one task make one worktree, one chat and on
   assert.equal(h.server.comments.get('t1')!.length, 1, 'one check-out comment');
 });
 
+test('a check-out by id and one by key at the same time make one worktree', async () => {
+  const h = setup(); await h.reader.part(CO);
+  await h.svc.bind(CO.id, 'p-redis', REPO, 'dev');
+  const results = await Promise.allSettled([h.svc.start({ taskId: 't1', model: OWN, confirm: true }), h.svc.start({ taskId: 'RAG-1', model: OWN, confirm: true })]);
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1, 'the second is refused');
+  assert.deepEqual(h.worktrees, ['muster/RAG-1'], 'one worktree');
+  assert.equal(h.chatList.length, 1, 'one chat');
+  // Nothing is left held: once both settle, the task can be checked out again after a release.
+  await h.svc.release('t1');
+  await h.svc.start({ taskId: 'RAG-1', model: OWN, confirm: true });
+});
+
+test('a release while a hand-back is under way is refused', async () => {
+  const h = setup(); await h.reader.part(CO);
+  await h.svc.bind(CO.id, 'p-redis', REPO, 'dev');
+  const lease = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  await h.svc.onTurn(lease.chatId!, 'r1', 'completed');
+  const handing = h.svc.handBack({ taskId: 't1', reviewer: { kind: 'agent', id: 'a-qa' }, summary: 'Ready.' });
+  await assert.rejects(h.svc.release('t1'), /being handed back/);
+  await handing;
+  assert.equal(h.server.comments.get('t1')!.filter(c => /Handed back for review/.test(c.body)).length, 1);
+});
+
 test('two simultaneous hand-backs of one task push once and hand back once', async () => {
   const h = setup(); await h.reader.part(CO);
   await h.svc.bind(CO.id, 'p-redis', REPO, 'dev');

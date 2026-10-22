@@ -250,14 +250,15 @@ export class CheckoutService {
   private readonly starting = new Set<string>();
   async start(input: CheckoutStartInput): Promise<LeaseView> {
     if (input.confirm !== true) throw new Error('Check out shows what it will post first. Confirm to continue.');
-    const ref = String(input.taskId);
-    if (this.starting.has(ref)) throw new LeaseError(`${ref} is already being checked out on ${device().lower}.`, 'conflict');
-    this.starting.add(ref);
-    try { return await this.startOnce(input); } finally { this.starting.delete(ref); }
+    // A task can be named by its id or its key: the ref is held at once, and the task's id too once it is known, so `t1` and `RAG-1` cannot both start.
+    const ref = String(input.taskId), held: string[] = [];
+    const hold = (key: string) => { if (this.starting.has(key)) throw new LeaseError(`${ref} is already being checked out on ${device().lower}.`, 'conflict'); this.starting.add(key); held.push(key); };
+    hold(ref);
+    try { return await this.startOnce(input, id => { if (id !== ref) hold(id); }); } finally { for (const key of held) this.starting.delete(key); }
   }
-  private async startOnce(input: CheckoutStartInput): Promise<LeaseView> {
-    if (input.confirm !== true) throw new Error('Check out shows what it will post first. Confirm to continue.');
+  private async startOnce(input: CheckoutStartInput, holdTask: (id: string) => void): Promise<LeaseView> {
     const { company, part, task, me, backend } = await this.locate(input.taskId, { fresh: true });
+    holdTask(task.id);
     if (task.status === 'done' || task.status === 'cancelled') throw new Error(`${task.key} is ${task.status === 'done' ? 'done' : 'cancelled'}. Reopen it on the server first.`);
     const existing = this.d.store.lease(task.id);
     if (existing && existing.state === 'checked_out') throw new LeaseError(`${task.key} is already checked out on ${device().lower}.`, 'conflict');
