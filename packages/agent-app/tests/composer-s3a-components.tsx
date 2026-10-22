@@ -94,6 +94,8 @@ let panel=byTest('composer-question')!;assert.ok(panel,'panel above the card');
 assert.ok(panel.nextElementSibling?.matches('[data-testid="composer"]'),'attached directly above the composer card');
 assert.equal(panel.querySelector('.composer-question-title')?.textContent,'Database');
 assert.equal(panel.querySelector('.composer-question-count')?.textContent,'1/2');
+// The panel registers as the host in an effect: let it land before checking the timeline card.
+await delay(150);await render();
 assert.ok(byTest('pending-question-hosted'),'the timeline card defers to the panel');
 assert.equal(input().getAttribute('placeholder'),'Type your own answer, or leave blank to use the selected option');
 assert.deepEqual(Array.from(panel.querySelectorAll('kbd')).map(node=>node.textContent),['1','2']);
