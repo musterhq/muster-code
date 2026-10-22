@@ -15,6 +15,8 @@ import type {
   Snapshot,
   TimelineItem,
 } from '../shared/protocol';
+import type {ReviewBaseline} from '../shared/domains/review-protocol';
+import {reviewBaselineFor} from './reviewState';
 import type {ScopedComputerRef} from '../shared/scoped-computer-protocol';
 import {SETTING_DEFAULTS,normalizeSettings,type AppSettings,type SettingKey} from '../shared/domains/settings-protocol';
 import {browserURL} from '../shared/browser-protocol';
@@ -46,6 +48,8 @@ export interface WorkspaceTab {
   kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView';
   /** kind: 'git' only — which segment is showing. */
   gitView?: GitView;
+  /** kind: 'diff' — comparison local to this tab, independent of the Changes picker. */
+  reviewBaseline?: ReviewBaseline;
   /** kind: 'canvas' only (WRK-12). */
   canvasId?: string;
   /** kind: 'pluginUi' only (EXT-10): the plugin (its folder id) and the app it declares. */
@@ -570,9 +574,9 @@ export function retryTimeline(id: string): void {
 }
 
 /** Opens a new chat; `draft` prefills its composer (Codex's prefilled "Record a skill" conversation). */
-export async function createChat(folderId?: string, projectId?: string, options: {draft?: string} = {}): Promise<string | undefined> {
+export async function createChat(folderId?: string, projectId?: string, options: {draft?: string; inheritFrom?: string} = {}): Promise<string | undefined> {
   try {
-    const chat = await invoke('chat.create', { folderId, projectId });
+    const chat = await invoke('chat.create', { folderId, projectId, ...(options.inheritFrom ? { inheritFrom: options.inheritFrom } : {}) });
     set({ activeChatId: chat.id, screen: 'work' });
     if (options.draft) setComposerDraft(chat.id, options.draft);
     await loadTimeline(chat.id);
@@ -1421,9 +1425,9 @@ export async function loadGitChanges(folderId: string): Promise<void> {
   }
 }
 
-export async function openDiff(folderId: string, path: string): Promise<void> {
+export async function openDiff(folderId: string, path: string, reviewBaseline: ReviewBaseline = reviewBaselineFor(folderId)): Promise<void> {
   const id = `diff:${folderId}:${path}`;
-  openTab({ id, kind: 'diff', folderId, path, title: `Diff: ${path.split('/').pop() ?? path}` });
+  openTab({ id, kind: 'diff', folderId, path, reviewBaseline, title: `Diff: ${path.split('/').pop() ?? path}` });
   set({ diffs: { ...state.diffs, [id]: { phase: 'loading' } } });
   try {
     const diff = await invoke('git.diff', { folderId, path });

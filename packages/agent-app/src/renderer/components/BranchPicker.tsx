@@ -4,7 +4,7 @@ import {ArrowLeft, Check, FolderGit2, GitBranch, GitBranchPlus, Loader2, Search}
 import type {Snapshot} from '../../shared/protocol';
 import type {GitBranches} from '../../shared/domains/git-protocol';
 import {invoke} from '../bridge';
-import {createChat, loadGitChanges, notifyError, notifySuccess, openChangesTab, openConflictTab} from '../store';
+import {createChat, getState, loadGitChanges, notifyError, notifySuccess, openChangesTab, openConflictTab} from '../store';
 import {useStore} from '../useStore';
 import {GitSync} from './GitStatus';
 import './branch-picker.css';
@@ -33,7 +33,10 @@ export function routeSwitchConflicts(folder: Folder, conflicts: readonly string[
 export async function startWorktreeChat(folderId: string, branch: string): Promise<boolean> {
   try {
     const {folder} = await invoke('git.worktree.create', {folderId, branch});
-    await createChat(folder.id);
+    // #591: settings carry over only from the chat whose folder is being branched, never from an unrelated chat.
+    const {activeChatId, snapshot} = getState();
+    const parent = snapshot?.chats.find(chat => chat.id === activeChatId && chat.folderId === folderId)?.id;
+    await createChat(folder.id, undefined, parent ? { inheritFrom: parent } : {});
     notifySuccess(`New chat in worktree ${branch}`);
     return true;
   } catch (cause) { notifyError(cause); return false; }
