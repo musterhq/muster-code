@@ -127,6 +127,8 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
       db.prepare('DELETE FROM memory_offer_history WHERE at < ?').run(now - OFFER_DEDUPE_WINDOW_MS);
       const chats = db.prepare('SELECT DISTINCT chat_id FROM memory_offer_history').all() as { chat_id: string }[];
       for (const { chat_id } of chats) if (!context.store.chat(chat_id)) db.prepare('DELETE FROM memory_offer_history WHERE chat_id = ?').run(chat_id);
+      // A throttle row only matters on its own day.
+      db.prepare('DELETE FROM memory_offer_days WHERE day <> ?').run(dayKey(new Date(now)));
     },
   };
   const archiveDir = join(context.dataDir, 'memory-archives');
