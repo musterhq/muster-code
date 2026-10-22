@@ -57,8 +57,13 @@
 .diff-view button,.diff-view select { transition:background-color 160ms cubic-bezier(.2,.75,.25,1),color 160ms cubic-bezier(.2,.75,.25,1),border-color 160ms cubic-bezier(.2,.75,.25,1); }
 @media (prefers-reduced-motion:reduce) { .diff-view button,.diff-view select,.diff-segmented button,.diff-fold-bar button { transition:none; } }
 /* Review header: file stepping, rename source, mode change, baseline, file-level Undo/Keep. */
-.diff-view .diff-head { display:flex; align-items:center; gap:8px; min-width:0; }
+.diff-view .diff-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; min-width:0; }
 .diff-head .file-path { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* Narrow panes: keep the file name readable and wrap the compare/actions group onto its own row instead of crushing both. */
+.diff-view .diff-head .file-path { flex:1 1 140px; }
+.diff-head-actions { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; min-width:0; margin-left:auto; }
+/* The picker's icon and aria-label still say what it is; dropping the prefix keeps the actions on one row. */
+@container (max-width: 420px) { .diff-head .review-baseline-prefix { display:none; } }
 .diff-file-nav { display:inline-flex; flex:none; gap:1px; }
 .diff-file-nav .icon-button:disabled { opacity:.3; }
 .diff-previous-path { color:var(--text-faint); text-decoration:line-through; text-decoration-color:color-mix(in srgb,var(--text-faint) 60%,transparent); }
