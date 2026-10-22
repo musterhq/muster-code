@@ -19,6 +19,10 @@ test('clone URLs whose username is a token are rejected', () => {
     `https://${TOKEN.replace('_', '%5F')}@github.com/o/r.git`,
     'https://0123456789abcdef0123456789abcdef01234567@host.example/o/r.git',
     'http://AbCdEfGhIjKlMnOpQrStUvWxYz1234@host.example/o/r.git',
+    // git splits user:password before decoding, so an encoded colon still stores the token in .git/config.
+    `https://user%3A${TOKEN}@github.com/o/r.git`,
+    `ssh://${TOKEN}@github.com/o/r.git`,
+    `${TOKEN}@github.com:o/r.git`,
   ];
   for (const url of bad) assert.throws(() => validateCloneUrl(url), /Remove the token from the URL/, url);
 });
