@@ -8,6 +8,8 @@ export interface ModelsCommands {
   'models.policy.setHidden': { input: { key: string; hidden: boolean }; output: ModelPolicy };
   /** Set (or clear with null) the user's price for a model, in dollars per million tokens. Overrides a catalog price. */
   'models.policy.setPricing': { input: { key: string; pricing: PricingInput | null }; output: ModelPolicy };
+  /** #668: set (or clear with null) the user's context window for a model, in tokens. Beats the catalog, the router's listing and the provider's report. */
+  'models.policy.setContextWindow': { input: { key: string; tokens: number | null }; output: ModelPolicy };
   /** Clears every hidden model and price override. */
   'models.policy.reset': { input: Record<string, never>; output: ModelPolicy };
   /** Tokens this chat's runs reported, per provider/model, with estimated cost where a price is known (PRO-06). */
@@ -19,6 +21,6 @@ export type ModelsEvent =
   | { type: 'modelPolicyChanged'; policy: ModelPolicy }
   | { type: 'modelUsageChanged'; chatId: string; projectId?: string };
 export const MODELS_COMMANDS = {
-  'models.policy.get': true, 'models.policy.setHidden': true, 'models.policy.setPricing': true, 'models.policy.reset': true,
+  'models.policy.get': true, 'models.policy.setHidden': true, 'models.policy.setPricing': true, 'models.policy.setContextWindow': true, 'models.policy.reset': true,
   'models.usage.chat': true, 'models.usage.project': true,
 } as const satisfies Record<keyof ModelsCommands, true>;

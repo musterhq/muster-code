@@ -28,7 +28,7 @@ test('#426 window and threshold: a 1M model and a 200K model compact at differen
   assert.deepEqual(effectiveContextWindow({contextWindow:1_000_000},200_000),{tokens:1_000_000,source:'catalog'});
   assert.deepEqual(effectiveContextWindow(undefined,200_000),{tokens:200_000,source:'reported'});
   assert.deepEqual(effectiveContextWindow({},null),{tokens:DEFAULT_CONTEXT_WINDOW,source:'default'},'no window at all uses the default');
-  assert.equal(musterCompactAt('gemini-cli',undefined,null).at,Math.floor(DEFAULT_CONTEXT_WINDOW*AUTO_COMPACT_RATIO));
+  assert.equal(musterCompactAt('gemini-cli',undefined,null).at,Infinity,'#668: a guessed window never compacts ahead of time');
   // A catalog's own auto_compact_token_limit is the threshold.
   assert.deepEqual(compactionThreshold({tokens:272_000,source:'catalog'},200_000),{tokens:200_000,source:'catalog-limit'});
   assert.equal(catalogModels('gateway',[{slug:'m',context_window:272_000,auto_compact_token_limit:200_000}]).models[0]!.autoCompactTokenLimit,200_000);
