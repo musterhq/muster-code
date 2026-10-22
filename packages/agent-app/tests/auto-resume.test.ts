@@ -339,3 +339,25 @@ test('an update install waits for running work, says so once, and installs when 
   gate.idle();assert.equal(installs,1,'one install per request');
   assert.equal(await gate.install(),'ok','idle: installs at once');
 });
+
+test('#579: after a crash, Continue anyway and then Steer on the queued message send it exactly once',async t=>{
+  fastTiming(t);
+  const dataDir=await directory(t);
+  const store=new AgentStore(dataDir);
+  const seeded=store.createChat({model:MODEL,mode:'agent',providerId:'hybrow'});
+  store.updateChat(seeded.id,{providerId:'hybrow',providerBindingId:'hybrow',status:'running',providerThreadId:'thread-k',providerThreadProviderId:'hybrow',providerThreadBindingId:'hybrow',providerTurnId:'turn-k'});
+  store.enqueue(seeded.id,{id:'queued-1',text:'Queued after kill: reply QUEUED-SURVIVED.',requestId:'q-kill',attachmentIds:[],createdAt:new Date().toISOString()},20);
+  store.close();
+  const {provider,calls}=scripted(()=>undefined);
+  const service=createAgentService({dataDir,provider,onEvent(){}});t.after(()=>service.dispose());
+  await until(async()=>(await snapshotChat(service,seeded.id)).recovery?.kind==='recovery-needed');await settle();
+  assert.equal(calls.length,0,'a turn that may still be running at the provider is never continued or followed by the queue');
+  await service.invoke('chat.continueAnyway',{id:seeded.id});await settle();
+  assert.equal(calls.length,0,'Continue anyway does not send the queued message by itself');
+  // Steer clicked twice in a row on the idle chat's queued row.
+  await Promise.all([service.invoke('chat.queue.steer',{id:seeded.id,queueId:'queued-1'}),service.invoke('chat.queue.steer',{id:seeded.id,queueId:'queued-1'}).catch(()=>undefined)]);
+  await until(()=>calls.length>=1);await settle(300);
+  assert.deepEqual(calls.map(call=>call.prompt),['Queued after kill: reply QUEUED-SURVIVED.']);
+  assert.equal((await items(service,seeded.id)).filter(item=>item.kind==='user'&&item.text.includes('QUEUED-SURVIVED')).length,1);
+  assert.equal((await snapshotChat(service,seeded.id)).queue,undefined);
+});

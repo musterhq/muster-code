@@ -1230,8 +1230,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (dispatching.has(chatId)) return;
     const item = queue.head(chatId);
     if (!item) return;
-    // Already sent under this request id (a replay): drop the row instead of sending it again.
-    if (store.receipt(item.requestId)) { queue.dropSent(chatId, item.id); state(); dispatchQueued(chatId); return; }
+    // Already sent under this request id (a replay, or steered into a run): drop the row instead of sending it again.
+    if (store.receipt(item.requestId) || steered.get(item.requestId) === chatId) { queue.dropSent(chatId, item.id); state(); dispatchQueued(chatId); return; }
     dispatching.add(chatId);
     const pending = send(chatId, item.text, item.requestId, item.skillIds?.length ? item.skillIds : undefined, item.attachmentIds, {pluginIds: item.pluginIds ?? [], ...(item.effort ? {effort: item.effort} : {}), queued: item}).then(() => {
       dispatching.delete(chatId);
@@ -1881,8 +1881,6 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // Codex pauses an active goal before interrupting, so the stop never triggers a continuation.
         if (goalsByChat().get(chatId)?.status === 'active') { try { await domains.handlers.get('goals.pause')?.({chatId}); } catch { /* the goal was cleared meanwhile */ } }
         run.stopped = true; run.retry.abort(); store.updateChat(chatId, {status: 'stopping'}); settleApprovals(chatId); settleQuestions(chatId); state(); await provider.stop(chatId);
-        // Tool rows the stopped turn left running read Interrupted, not a spinner forever.
-        if (store.settleRunningTools(chatId)) timeline(chatId);
         // A turn the app-server started itself settles on its own turn/completed; if its session is gone, settle it here.
         nativeTurns.stopped(chatId, !!provider.nativeThread?.(chatId)); return; }
       case 'chat.reconcile': {
