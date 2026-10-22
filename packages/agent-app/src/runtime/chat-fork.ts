@@ -21,15 +21,15 @@ const RECENT_USER_BYTES = 2 * 1024;
 const GIT_BYTES = 2 * 1024;
 const GIT_TIMEOUT_MS = 1500;
 
-/** Branch and `git status --short` of the chat's folder, bounded; '' when it is not a git repo or git is unavailable. */
+/** Branch and `git status --short` of the chat's folder, bounded; '' when it is not a git repo or git is unavailable.
+ *  Synchronous (the thread-reset callback is), so it is one `git status --branch` call with a short timeout, run only when
+ *  a digest is built (provider switch, fork, lost thread). fsmonitor is off so a repo's config cannot run a hook here. */
 export function workspaceGitState(cwd: string | undefined): string {
   if (!cwd) return '';
-  const git = (args: string[]) => execFileSync('git', ['-C', cwd, ...args], {encoding: 'utf8', timeout: GIT_TIMEOUT_MS, maxBuffer: 256 * 1024, stdio: ['ignore', 'pipe', 'ignore'], env: {...process.env, GIT_OPTIONAL_LOCKS: '0'}}).trim();
   try {
-    let branch = git(['rev-parse', '--abbrev-ref', 'HEAD']);
-    if (branch === 'HEAD') branch = `detached at ${git(['rev-parse', '--short', 'HEAD'])}`;
-    const status = git(['status', '--short']);
-    const rows = status ? status.split('\n') : [];
+    const out = execFileSync('git', ['-C', cwd, '-c', 'core.fsmonitor=false', 'status', '--short', '--branch'], {encoding: 'utf8', timeout: GIT_TIMEOUT_MS, maxBuffer: 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'], env: {...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0'}}).replace(/\s+$/, '');
+    const [head = '', ...rows] = out.split('\n');
+    const branch = head.replace(/^## /, '').trim() || 'unknown';
     let text = `Branch: ${branch}\n${rows.length ? 'git status --short:' : 'git status --short: clean'}`;
     let shown = 0;
     for (const row of rows) {
@@ -51,7 +51,8 @@ export function transcriptDigest(items: readonly TimelineItem[], cwd?: string): 
   let summaryIndex = -1;
   for (let index = items.length - 1; index >= 0; index--) if (items[index]!.kind === 'assistant' && items[index]!.text.trim()) { summaryIndex = index; break; }
   const taken = new Set<number>([...(firstIndex >= 0 ? [firstIndex] : []), ...userIndexes, ...(summaryIndex >= 0 ? [summaryIndex] : [])]);
-  const git = workspaceGitState(cwd);
+  // Git state only accompanies a conversation: with nothing to carry over there is no digest (and no git call).
+  const git = items.some(item => line(item) !== null) ? workspaceGitState(cwd) : '';
   const body = (index: number, max: number) => clip(items[index]!.text.trim(), max);
   const sections: string[] = [];
   if (firstIndex >= 0) sections.push(`First request in this task:\nUser: ${body(firstIndex, ITEM_BYTES)}`);

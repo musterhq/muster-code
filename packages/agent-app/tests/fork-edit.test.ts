@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {test,type TestContext} from 'node:test';
 import {mkdtemp,rm,mkdir,writeFile} from 'node:fs/promises';
+import {existsSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -172,6 +173,11 @@ test('digest on a busy turn still leads with the task: first request, last 5 use
   assert.match(digest,/Branch: feature-x/);assert.match(digest,/\?\? dirty\.txt/);
   assert.ok(digest.indexOf('FIRST-TASK')<digest.indexOf('late-tool-29'));
   assert.ok(Buffer.byteLength(digest)<=FORK_DIGEST_BYTES+400);
+  // A repo's own config never runs code here: core.fsmonitor is forced off for this status call.
+  const marker=join(repo,'.git','fsmonitor-ran');
+  await writeFile(join(repo,'hook.sh'),`#!/bin/sh\ntouch '${marker}'\n`);execFileSync('chmod',['+x',join(repo,'hook.sh')]);run('config','core.fsmonitor',join(repo,'hook.sh'));
+  assert.match(workspaceGitState(repo),/Branch: feature-x/);
+  assert.equal(existsSync(marker),false,'the fsmonitor hook did not run');
 });
 
 test('digest skips git state outside a repository and still respects the budget',async t=>{
