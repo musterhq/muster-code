@@ -129,7 +129,7 @@ test('C14: wake flags are stored per agent and defaults are conservative', async
   const h = await wave1(t);
   const cto = await h.member('CTO');
   const view = await h.s.invoke('project.agent.gov.get', { projectId: h.project.id, memberId: cto.id });
-  assert.deepEqual(view.governance.heartbeat, { enabled: false, intervalSec: 3600, wakeOnAssignment: false, wakeOnComment: false, wakeOnDecision: true, minGapSec: 30, maxConcurrent: 0 });
+  assert.deepEqual(view.governance.heartbeat, { enabled: false, intervalSec: 3600, wakeOnAssignment: false, wakeOnComment: false, wakeOnDecision: true, wakeOnChildren: true, minGapSec: 30, maxConcurrent: 0 });
   const out = await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, heartbeat: { wakeOnComment: true, wakeOnAssignment: true } });
   assert.equal(out.heartbeat.wakeOnComment, true);
   const act = await h.activity('member.access');

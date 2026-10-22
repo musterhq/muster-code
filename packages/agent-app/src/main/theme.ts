@@ -20,5 +20,5 @@ export function applyThemeSource(target: ThemeTarget, theme: ThemePreference | u
 
 /** Solid window fill for platforms without vibrancy, matching --bg of the painted theme. */
 export function windowBackground(shouldUseDarkColors: boolean): string {
-  return shouldUseDarkColors ? '#181818' : '#fbfbfb';
+  return shouldUseDarkColors ? '#0e0e0e' : '#fbfbfb';
 }
