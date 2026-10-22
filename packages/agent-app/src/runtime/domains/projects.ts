@@ -678,7 +678,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
         const runFolder = current.runChatId ? ctx.store.chat(current.runChatId)?.folderId : undefined, folderId = runFolder && details.folderIds.includes(runFolder) ? runFolder : details.primaryFolderId;
         const sha = await head(folderId);
         const t = store.verifyTask({ projectId, id: taskId, revision: revision(input.revision), kind, notes: text(input.notes, 'notes', 4000), ...(input.command !== undefined ? { command: text(input.command, 'command', 1000) } : {}), ...(input.reviewer !== undefined ? { reviewer: text(input.reviewer, 'reviewer', 200) } : {}), ...(sha ? { commitSha: sha } : {}), ...(folderId ? { folderId } : {}) }, actorOf(input));
-        changed(projectId, t.id); return view(projectId, t.id);
+        changed(projectId, t.id); gov.evaluate(projectId); return view(projectId, t.id);
       },
       'project.tasks.dispatch': input => dispatch(project(input), id(input.id), revision(input.revision), 'user', input.folderId === undefined ? undefined : id(input.folderId, 'folder id'), input.reason === 'assignment' ? { reason: 'assignment' } : undefined),
       'project.decisions.add': input => { const projectId = project(input), d = open().tasks.createDecision({ projectId, title: text(input.title, 'decision title', 500), rationale: text(input.rationale ?? '', 'rationale', 8000), scope: text(input.scope ?? '', 'scope', 500), relatedTaskIds: ids(input.relatedTaskIds ?? [], 'related tasks') }); changed(projectId); return d; },
@@ -723,7 +723,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
         const s = open().tasks.setSchedule(projectId, patch); changed(projectId); return s;
       },
       'project.coordinator.start': input => startCoordinator(project(input)),
-      'project.coordinator.apply': input => { const projectId = project(input), p = proposal(projectId, input.key); applyOps(projectId, p.ops); open().tasks.markProposal(projectId, p.key, 'applied'); open().tasks.record(projectId, 'coordinator.applied', `Applied ${plural(p.ops.length, 'coordinator change')}`, open().tasks.coordinator(projectId)); changed(projectId); return { ...p, state: 'applied' }; },
+      'project.coordinator.apply': input => { const projectId = project(input), p = proposal(projectId, input.key); applyOps(projectId, p.ops); open().tasks.markProposal(projectId, p.key, 'applied'); open().tasks.record(projectId, 'coordinator.applied', `Applied ${plural(p.ops.length, 'coordinator change')}`, open().tasks.coordinator(projectId)); changed(projectId); gov.evaluate(projectId); return { ...p, state: 'applied' }; },
       'project.coordinator.dismiss': input => { const projectId = project(input), p = proposal(projectId, input.key); open().tasks.markProposal(projectId, p.key, 'dismissed'); changed(projectId); return { ...p, state: 'dismissed' }; },
     },
     /** SBX-13: the scheduler tick pauses in sleep and runs once on wake (no queued interval burst). */

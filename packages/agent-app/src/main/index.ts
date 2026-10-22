@@ -332,7 +332,7 @@ async function main(): Promise<void> {
     trafficLightPosition: isMac ? { x: 18, y: 18 } : undefined,
     ...(wantsVibrancy
       ? { vibrancy: 'sidebar' as const, visualEffectState: 'active' as const, transparent: false }
-      : { backgroundColor: '#181818' }),
+      : { backgroundColor: '#0e0e0e' }),
     webPreferences: {
       sandbox: true,
       contextIsolation: true,
@@ -379,7 +379,7 @@ async function main(): Promise<void> {
     if (!reduce && reducedTransparency) window.setBackgroundColor('#00000000');
     reducedTransparency = reduce;
     window.setVibrancy(reduce ? null : 'sidebar');
-    if (reduce) window.setBackgroundColor('#181818');
+    if (reduce) window.setBackgroundColor('#0e0e0e');
   };
   syncTransparency();
   nativeTheme.on('updated', syncTransparency);
@@ -850,6 +850,8 @@ async function main(): Promise<void> {
     window.focus();
     window.webContents.send(MENU_CHANNEL, action);
   };
+  // Three-finger trackpad swipe (macOS "Swipe between pages" set to three fingers): Back / Forward. Two-finger swipes are handled in the renderer.
+  window?.on('swipe', (_event, direction) => { if (direction === 'left') sendMenuAction('back'); else if (direction === 'right') sendMenuAction('forward'); });
   ipcMain.on(MENU_CLOSE_CHANNEL, (event) => {
     if (!isTrustedSender(event.senderFrame, event.sender.id)) return;
     window?.close();
