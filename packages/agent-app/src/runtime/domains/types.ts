@@ -41,6 +41,8 @@ export interface DomainHooks {
   onProviderEvent(fn: (event: ProviderEventInfo) => void): () => void;
   setChatDefaults(fn: ChatDefaultsResolver | undefined): void;
   setRunEnvironmentResolver(fn: RunEnvironmentResolver | undefined): void;
+  /** #668: the user's own context window for a model (Settings › Models), read by Muster's compaction trigger. */
+  setContextWindowResolver?(fn: ((providerId: string, model: string) => number | undefined) | undefined): void;
   /** Replaces the single tool-policy resolver (undefined clears it). Optional so bare test contexts need not provide it. */
   setToolPolicy?(fn: ToolPolicyResolver | undefined): void;
   /** Replaces the resolver of the git identity a Git-tab commit in a folder carries (an agent's task worktree). */

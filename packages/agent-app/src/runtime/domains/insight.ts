@@ -62,7 +62,7 @@ export function createInsightDomain(ctx: DomainContext): DomainModule {
   };
   /** The Ledger of a window, summed in SQL, with the user's own prices applied to the turns the catalog could not price. */
   const pricedGroups = async (since: string, offsetMin: number, projectId?: string) => {
-    const policy = await ctx.invoke('models.policy.get', {}).catch(() => ({ hidden: [], shown: [], pricing: {} }));
+    const policy = await ctx.invoke('models.policy.get', {}).catch(() => ({ hidden: [], shown: [], pricing: {}, contextWindows: {} }));
     const providers = ctx.modelCatalog?.().providers ?? [];
     ensureLedgerIndexes(ctx.db());
     const { groups, truncated } = readGroups(ctx.db(), since, offsetMin, projectId);

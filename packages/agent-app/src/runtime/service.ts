@@ -9,7 +9,7 @@ import { promises as fs, existsSync, mkdirSync, copyFileSync, statSync } from 'n
 import { basename, join } from 'node:path';
 import { rescanProviderListings, setProviderListingStore } from './provider-instances.ts';
 import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, TimelineItem, WakeReason } from '../shared/protocol.ts';
-import { CONTEXT_OVERFLOW, musterCompactAt } from '../shared/context-window.ts';
+import { CONTEXT_OVERFLOW, musterCompactAt, withUserWindow } from '../shared/context-window.ts';
 import type { PendingAttentionSummary, AttentionRequest } from '../shared/attention-protocol.ts';
 import { discoverLocalProviders } from './provider-discovery.ts';
 import { homedir } from 'node:os';
@@ -486,8 +486,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   async function autoCompactBeforeTurn(chat: Chat, route: ProviderInfo): Promise<boolean> {
     const telemetry = store.contextTelemetry(chat.id);
     if (telemetry.compacted || telemetry.usedTokens === null || compactions.has(chat.id)) return false;
-    const model = route.models.find(entry => entry.id === chat.model);
-    const {at, window} = musterCompactAt(route.driver, model, telemetry.windowTokens);
+    const model = withUserWindow(route.models.find(entry => entry.id === chat.model), domainHooks.contextWindowOverride(route.id, chat.model));
+    const {at, window} = musterCompactAt(route.driver, model, telemetry.windowTokens, telemetry.usedTokens);
     if (telemetry.usedTokens < at || !store.timeline(chat.id).some(item => item.kind === 'user')) return false;
     const used = `${Math.round(telemetry.usedTokens / 1000)}K of ${Math.round(window.tokens / 1000)}K tokens`;
     const row = store.appendItem(chat.id, 'notice', `Compacting context before this message (${used} in use)…`, 'running', {kind:'compaction', status:'running', auto:true});
