@@ -9,13 +9,13 @@ import { GovernanceStore } from '../src/runtime/governance/store.ts';
 import { DEFAULT_GOVERNANCE, DEFAULT_HEARTBEAT } from '../src/shared/domains/project-governance-protocol.ts';
 import { FakeClock } from './wave1-harness.ts';
 
-function queue() {
+function queue(task: { live: boolean } = { live: false }) {
   const dir = mkdtempSync(join(tmpdir(), 'muster-wq-bh-')), store = new GovernanceStore(dir), clock = new FakeClock(), delivered: string[][] = [];
   store.clock = clock.now;
   const q = new WakeQueue({
     store, now: clock.now, setTimer: clock.set, clearTimer: clock.clear, settings: () => ({ ...DEFAULT_GOVERNANCE }), heartbeat: () => ({ ...DEFAULT_HEARTBEAT, minGapSec: 30 }),
     member: () => ({ name: 'CTO', paused: false, revoked: false, pending: false }),
-    task: (_p, t) => ({ state: 'todo', held: null, live: false, title: t }),
+    task: (_p, t) => ({ state: 'todo', held: null, live: task.live, title: t }),
     projectHold: () => null, deliver: async w => { delivered.push(w.reasons); return { chatId: 'c1' }; }, storm: () => undefined, changed: () => undefined,
   });
   return { q, store, clock, delivered, done: () => { q.dispose(); store.close(); rmSync(dir, { recursive: true, force: true }); } };
@@ -53,5 +53,21 @@ test('the minimum gap is measured from when a delayed wake actually started, not
     assert.equal(h.delivered.length, 2, 'still inside the 30 s gap');
     await h.clock.advance(10_000); // 66 s
     assert.equal(h.delivered.length, 3);
+  } finally { h.done(); }
+});
+
+test('a wake asked for while a deferred follow-up is being started joins it instead of starting a second run', async () => {
+  const task = { live: true }, h = queue(task);
+  try {
+    const b = await h.q.request({ projectId: 'p', memberId: 'm', taskId: 't', reason: 'comment' });
+    assert.equal(b.status, 'deferred');
+    await h.clock.advance(120_000); // the run outlasts the minimum gap
+    task.live = false;
+    // The run ends and, in the same tick, another request arrives while the follow-up is still being started.
+    const [, c] = await Promise.all([h.q.released('p', 't'), h.q.request({ projectId: 'p', memberId: 'm', taskId: 't', reason: 'mention' })]);
+    assert.notEqual(c.status, 'started', 'no second run');
+    await h.clock.advance(60_000);
+    assert.equal(h.delivered.length, 1, JSON.stringify(h.delivered));
+    assert.deepEqual(h.delivered[0]!.sort(), ['comment', 'mention']);
   } finally { h.done(); }
 });
