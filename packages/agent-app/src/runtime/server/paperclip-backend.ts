@@ -219,14 +219,14 @@ export class PaperclipBackend implements ServerBackend, PersonalAccess {
     const runs = await this.client.get<unknown>(`/companies/${enc(company.id)}/heartbeat-runs?limit=${Math.min(limit, 200)}`).catch(() => []);
     return arr(runs).map(r => mapReceipt(r, agents));
   }
-  async dashboard(company: WorkspaceCompany, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<{ receipts: LedgerEntry[]; activity: WorkspaceRow[]; budgets?: unknown }> {
+  async dashboard(company: WorkspaceCompany, agents: ReadonlyMap<string, WorkspaceAgent>, people?: ReadonlyMap<string, string>): Promise<{ receipts: LedgerEntry[]; activity: WorkspaceRow[]; budgets?: unknown }> {
     const base = `/companies/${enc(company.id)}`;
     const [runs, activity, overview] = await Promise.all([this.client.get<unknown>(`${base}/heartbeat-runs?limit=200`).catch(() => []), this.client.get<unknown>(`${base}/activity?limit=12`).catch(() => []), this.client.get<unknown>(`${base}/budgets/overview`).catch(() => null)]);
-    return { receipts: arr(runs).map(r => mapReceipt(r, agents)), activity: mapRows('audit', activity), ...(overview ? { budgets: overview } : {}) };
+    return { receipts: arr(runs).map(r => mapReceipt(r, agents)), activity: mapRows('audit', activity, { agents, people }), ...(overview ? { budgets: overview } : {}) };
   }
-  async rows(kind: WorkspaceListKind, company: WorkspaceCompany): Promise<WorkspaceRow[]> {
+  async rows(kind: WorkspaceListKind, company: WorkspaceCompany, names?: { agents?: ReadonlyMap<string, WorkspaceAgent>; people?: ReadonlyMap<string, string> }): Promise<WorkspaceRow[]> {
     const base = `/companies/${enc(company.id)}`;
-    const rows = mapRows(kind, await this.client.get<unknown>(kind === 'artifacts' ? `${base}/artifacts` : kind === 'audit' ? `${base}/activity?limit=150` : `${base}/routines`));
+    const rows = mapRows(kind, await this.client.get<unknown>(kind === 'artifacts' ? `${base}/artifacts` : kind === 'audit' ? `${base}/activity?limit=150` : `${base}/routines`), names);
     // An output's page is a path on the server's web UI: make it the full address ("Open on server").
     return kind === 'artifacts' ? rows.map(r => r.output ? { ...r, output: { ...r.output, href: `${this.client.endpoint.baseUrl}${r.output.href}` } } : r) : rows;
   }

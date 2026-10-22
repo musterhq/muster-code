@@ -7,6 +7,7 @@ import {createAdapterCatalog,type AdapterCatalog} from './adapters/index.ts';
 import {readOwnedCommandOutputs} from './command-output-recovery.ts';
 import {authFailureStatus, authRecovery, coreBudgetOptions, classifyProviderFailure, lifecycleDiagnostic, requestWhileOwned, providerAccessPolicy, type ProviderBudgets, type ProviderRecovery} from './provider-run-lifecycle.ts';
 import {currentProviderUsage, formatResetEta} from './provider-usage.ts';
+import {asSentence} from './admission-retry.ts';
 import {connectorPolicy, leanCodexFeatureOverrides} from './context-budget.ts';
 import type { Chat, ProviderInfo } from '../shared/protocol.ts';
 import {NativeUnavailableError} from './codex-native.ts';
@@ -241,13 +242,13 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       // attempts are terminal: cancelled or failed, never 'recovery-needed'.
       const recovery: ProviderRecovery | undefined = cancelled ? {kind: 'cancelled', retryable: false, reason: 'Stopped. This attempt will not resume automatically.'}
         : result.status === 'completed' ? undefined
-        : notDispatched && (result.statusCode === 429 || result.statusCode === 503) ? {kind: 'admission-rejected', retryable: true, reason: `${result.errorMessage ?? 'The provider is at capacity.'} No turn was dispatched; retry manually later.`}
+        : notDispatched && (result.statusCode === 429 || result.statusCode === 503) ? {kind: 'admission-rejected', retryable: true, reason: `${asSentence(result.errorMessage ?? 'The provider is temporarily unavailable.')} The request was not accepted. Try again later.`}
         : authFailureStatus(result.statusCode, notDispatched ? result.errorMessage : '') ? authRecovery(route.info, authFailureStatus(result.statusCode, notDispatched ? result.errorMessage : '')!, result.errorMessage)
         : {kind: 'failed', retryable: notDispatched, reason: result.errorMessage ? `The provider attempt failed: ${result.errorMessage}` : 'The provider attempt failed.'};
       return {status: cancelled ? 'failed' : result.status, finalMessage: result.finalMessage, dispatchState: result.dispatchState,
         ...(result.threadId ? {threadId: result.threadId} : {}), ...(result.turnId ? {turnId: result.turnId} : {}),
-        ...(recovery ? {recovery, errorMessage: recovery.reason} : {}),
-        ...(result.statusCode ? {failure: {kind: 'rpc-rejected' as const, statusCode: result.statusCode}} : {})};
+        ...(recovery ? {recovery, errorMessage: result.errorMessage ?? recovery.reason} : {}),
+        ...(result.statusCode ? {failure: {kind: 'rpc-rejected' as const, statusCode: result.statusCode, retryAfterMs: result.retryAfterMs}} : {})};
     } catch (error) {
       const reason = `The provider attempt failed: ${error instanceof Error ? error.message : String(error)}`;
       return {status: 'failed', finalMessage: '', dispatchState: activity ? 'dispatched' : 'not-dispatched', errorMessage: reason, recovery: {kind: owned.controller.signal.aborted ? 'cancelled' : 'failed', retryable: !activity && !owned.controller.signal.aborted, reason}};
