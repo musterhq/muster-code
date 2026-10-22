@@ -120,7 +120,7 @@ export function commandState(id: CommandId, ctx: CommandContext): CommandState {
     return title ? { enabled: true, scope: title } : { enabled: false, reason: `No chat in position ${slot[1]}` };
   }
   switch (id) {
-    case 'back': return ctx.canBack ? { enabled: true } : { enabled: false, reason: 'No earlier chat in history' };
+    case 'back': return ctx.canBack ? { enabled: true } : { enabled: false, reason: 'Nothing earlier in this window' };
     case 'forward': return ctx.canForward ? { enabled: true } : { enabled: false, reason: 'Nothing to go forward to' };
     case 'next-chat': case 'prev-chat': return ctx.chatCount > 1 ? { enabled: true } : { enabled: false, reason: 'Needs at least two chats' };
     case 'focus-composer': return ctx.screen === 'work' ? { enabled: true } : { enabled: false, reason: 'Return to a chat to use the composer' };
