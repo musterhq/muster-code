@@ -97,6 +97,9 @@ export class ConversationMemory {
     if (file) try {
       if (statSync(file).size <= 2 * this.maxChars + 65536) { const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown; if (Array.isArray(parsed)) known = parsed.filter((m): m is ChatMessage => !!m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string'); }
     } catch { known = undefined; }
+    // A history saved by an older build can open with a reply or hold an empty reply; the APIs reject both on every turn.
+    while (known && known.length > 0 && known[0]!.role !== 'user') known = known.slice(1);
+    known = known?.map(m => m.role === 'assistant' && !m.content.trim() ? {...m, content: '(no reply)'} : m);
     return known ? {threadId: threadId!, history: [...known], resumed: true} : {threadId: randomUUID(), history: [], resumed: false};
   }
   /** Saves the thread, trimmed to the newest 80 messages / `maxChars`. Returns how many user turns the saved

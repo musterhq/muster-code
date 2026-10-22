@@ -28,6 +28,18 @@ test('trimming by size never leaves the history starting with a reply',()=>{
   assert.equal(memory.open(threadId).history[0]?.role,'user');
 });
 
+test('a history saved by an older build is resent from its first user message, with no empty reply',async()=>{
+  const {mkdtemp,rm,writeFile}=await import('node:fs/promises');const {tmpdir}=await import('node:os');const {join}=await import('node:path');const {randomUUID}=await import('node:crypto');
+  const dir=await mkdtemp(join(tmpdir(),'muster-history-'));
+  try{
+    const threadId=randomUUID();
+    await writeFile(join(dir,`${threadId}.json`),JSON.stringify([{role:'assistant',content:'orphan'},{role:'user',content:'q'},{role:'assistant',content:''},{role:'user',content:'q2'},{role:'assistant',content:'a'}]));
+    const {history,resumed}=new ConversationMemory(64,400_000,()=>dir).open(threadId);
+    assert.equal(resumed,true);
+    assert.deepEqual(history.map(m=>m.content),['q','(no reply)','q2','a']);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
 test('a turn that produced no text is not resent as an empty assistant message',async()=>{
   const bodies:Array<{messages:Array<{role:string;content:unknown}>}>=[];
   const replies=[[{type:'message_start',message:{usage:{input_tokens:3}}},{type:'content_block_delta',delta:{type:'thinking_delta',thinking:'hmm'}},{type:'message_stop'}],
