@@ -64,7 +64,7 @@ export function routerAgents(listed:readonly ListedModel[]):Models {
     const first=words(rest.length?head!:id);const title=first.charAt(0).toUpperCase()+first.slice(1);return rest.length?`${title} · ${words(rest.join('/'))}`:title;};
   // Named agents (planner, advisor, executor…) first, then auto/… routes.
   const combos=listed.filter(entry=>entry.owner==='combo'&&entry.chat!==false);
-  return [...combos.filter(entry=>!entry.id.includes('/')),...combos.filter(entry=>entry.id.includes('/'))].slice(0,200).map(entry=>({id:entry.id,name:entry.name&&entry.name!==entry.id?entry.name:pretty(entry.id),...(entry.images!==undefined?{images:entry.images}:{}),...(entry.contextWindow?{contextWindow:entry.contextWindow}:{})}));
+  return [...combos.filter(entry=>!entry.id.includes('/')),...combos.filter(entry=>entry.id.includes('/'))].slice(0,200).map(entry=>({id:entry.id,name:entry.name&&entry.name!==entry.id?entry.name:pretty(entry.id),...(entry.images!==undefined?{images:entry.images}:{}),...(entry.contextWindow?{contextWindow:entry.contextWindow,contextWindowSource:'listing' as const}:{})}));
 }
 export function catalogModels(family:'openai-direct'|'gateway'|(string&{}),list:readonly unknown[]):{models:ProviderInfo['models'];excluded:ExcludedModel[]} {
   const models:ProviderInfo['models']=[],excluded:ExcludedModel[]=[];
