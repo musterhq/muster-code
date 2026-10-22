@@ -171,5 +171,5 @@ test('PRO-04: the visibility policy persists, validates and resets', async t => 
   assert.equal(isModelHidden(shownAgain, 'hybrow', 'cursor/other', true), true, 'off by default until switched on');
   assert.equal(isModelHidden(shownAgain, 'hybrow', 'cursor/other'), false, 'a normal model is on unless switched off');
   await call(reread, 'models.policy.setPricing', {key, pricing: {inputPerMTok: 1, outputPerMTok: 2}});
-  assert.deepEqual(await call(reread, 'models.policy.reset'), {hidden: [], shown: [], pricing: {}});
+  assert.deepEqual(await call(reread, 'models.policy.reset'), {hidden: [], shown: [], pricing: {}, contextWindows: {}});
 });
