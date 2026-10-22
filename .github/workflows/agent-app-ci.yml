@@ -62,8 +62,17 @@ jobs:
       - name: Install
         run: npm ci --no-audit --no-fund
 
-      - name: Typecheck
-        run: npx tsc --noEmit
+      - name: Typecheck (tsc-rs)
+        run: npm run typecheck
+
+      # Parity guard: the official compiler stays the reference while tsc-rs (a 0.x Rust port) earns trust. This runs both
+      # checkers on packages/agent-app and packages/server and fails if their sorted diagnostics differ.
+      # The official tsc run can be dropped after two weeks of agreement (started with the PR that introduced this step).
+      - name: Typecheck parity (tsc vs tsc-rs)
+        run: |
+          npm run typecheck:tsc
+          (cd ../server && npm ci --no-audit --no-fund --ignore-scripts)
+          node scripts/typecheck-parity.mjs
 
       # Some runtime tests load the bundled core from dist/, so build before testing.
       - name: Build

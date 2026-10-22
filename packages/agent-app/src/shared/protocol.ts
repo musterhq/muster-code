@@ -139,7 +139,7 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'app.snapshot': { input: undefined; output: Snapshot };
  'folder.add': { input: {path: string}; output: Folder };
  'folder.pick': { input: undefined; output: Folder | null };
- 'chat.create': { input: {folderId?: string; projectId?: string}; output: Chat };
+ 'chat.create': { input: {folderId?: string; projectId?: string; inheritFrom?: string}; output: Chat };
  'chat.select': { input: {id: string}; output: TimelineItem[] };
  /** Native chat menu (sidebar row and header ⋯). Main performs data actions itself (pin, unread, archive, delete, move, copy, export)
   *  and returns only the actions the renderer owns. `surface:'header'` adds the header-only entries. */

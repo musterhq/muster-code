@@ -81,3 +81,10 @@ test('DF-F16: usage from another (worker) thread never moves the chat meter', as
   assert.equal(isForeignThreadEvent({},'main'),false);
   assert.equal(isForeignThreadEvent({threadId:'first'},undefined),false);
 });
+
+test('a usage reconciliation is spend, not context: the meter keeps its reading',()=>{
+  const now=()=>'2026-10-18T00:00:00.000Z';
+  const live=applyProviderEvent(EMPTY_CONTEXT_TELEMETRY,'thread/tokenUsage/updated',{tokenUsage:{last:{inputTokens:29786,cachedInputTokens:26269,outputTokens:86}}},now)!;
+  assert.equal(live.usedTokens,29872);
+  assert.equal(applyProviderEvent(live,'thread/tokenUsage/updated',{tokenUsage:{last:{inputTokens:0,cachedInputTokens:0,outputTokens:87},reconciliation:true}},now),null);
+});

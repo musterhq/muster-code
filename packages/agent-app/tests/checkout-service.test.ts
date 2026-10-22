@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
 import { NO_PROJECT } from '../src/shared/domains/checkout-protocol.ts';
 import { CheckoutService, isRealTestCommand, lastTestRun, lastUserText, parseTestSummary, reassignStrategy, userSaysDone, type CheckoutDeps, type LocalProviderInfo, type TimelineEntry } from '../src/runtime/checkout/service.ts';
 import { ENVELOPE_RULES, redactSecrets, sanitizeOut, stripMarkup, untrusted } from '../src/runtime/checkout/sanitize.ts';
@@ -1451,7 +1451,7 @@ test('#383 no "Paused" note while any chat in the worktree was active', async ()
 
 
 // --- #394: lease-ending changes check the task first; a refused sign-in is not "offline"; the outbox backs off and gives up ------------------------------
-import { RETRY_BASE_MS, RETRY_MAX_MS, retryDelay, whyNotSend } from '../src/runtime/checkout/outbox-policy.ts';
+import { OutboxBackoff, OutboxRetry, RETRY_BASE_MS, RETRY_MAX_MS, retryDelay, whyNotSend } from '../src/runtime/checkout/outbox-policy.ts';
 const handBackCalls = (h: { server: FakeServer }) => h.server.calls.filter(c => /^patch t1 .*in_review/.test(c));
 async function readyToHandBack() { const h = setup(); await bound(h); const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true }); await h.svc.onTurn(l.chatId!, 'r1', 'completed'); return h; }
 const REVIEWER = { kind: 'agent' as const, id: 'a-qa' };
@@ -1518,4 +1518,54 @@ test('#394 outbox: 30 s doubling to a 30 minute cap; an update that kept failing
   const status = await h.svc.outbox(); assert.equal(status.pending, 0); assert.ok(status.stuck! >= 1, 'given up: “N updates couldn’t be sent”'); assert.equal(h.svc.get('t1')!.stuck, status.stuck);
   h.server.down = false; await h.svc.retry('t1');
   assert.equal((await h.svc.outbox()).stuck, 0); assert.equal(handBackCalls(h).length, 1, 'Retry sent it');
+});
+
+test('outbox backoff starts over when the queue empties by any path, so a later failure waits the base time', () => {
+  const backoff = new OutboxBackoff();
+  for (let n = 0; n < 6; n++) backoff.settled(true, 1);
+  assert.equal(backoff.wait(false), RETRY_MAX_MS, 'backed off to the cap');
+  backoff.observe(0);
+  assert.equal(backoff.wait(false), RETRY_BASE_MS, 'drained elsewhere: back to the base wait');
+  backoff.settled(true, 1); assert.equal(backoff.wait(false), retryDelay(1));
+  backoff.settled(true, 0); assert.equal(backoff.wait(false), RETRY_BASE_MS, 'a failed flush that left nothing waiting does not count');
+  assert.equal(backoff.wait(true), RETRY_BASE_MS, 'a refused sign-in polls at the base wait');
+});
+
+/** The outbox retry timer driven by a fake clock: `queue` posts wait, every flush fails while `down`, and `flushes` counts the tries. */
+function retryRig() {
+  const rig = { queue: 1, down: true, flushes: 0, lastError: null as string | null };
+  const retry = new OutboxRetry({ pending: () => rig.queue, authBlocked: () => false, lastError: () => rig.lastError, flush: async () => { rig.flushes++; rig.lastError = rig.down ? 'Muster Server cannot be reached.' : null; if (!rig.down) rig.queue = 0; } });
+  const settle = () => new Promise<void>(resolve => setImmediate(resolve));
+  const tick = async (ms: number) => { mock.timers.tick(ms); await settle(); await settle(); };
+  return { rig, retry, tick };
+}
+
+test('#643 outbox retry: after the queue empties, a new failure is tried again after the base wait, not the backed-off one', async t => {
+  mock.timers.enable({ apis: ['setTimeout'] }); t.after(() => mock.timers.reset());
+  const { rig, retry, tick } = retryRig();
+  retry.schedule();
+  for (let n = 0; n < 7; n++) { await tick(retryDelay(n) - 1); assert.equal(rig.flushes, n, `no try before ${retryDelay(n)} ms`); await tick(1); assert.equal(rig.flushes, n + 1); }
+  // Backed off to the cap, with a 30 minute timer armed. The person discards what waited (no flush, the last error stays), then a new post fails.
+  rig.queue = 0; retry.schedule();
+  rig.queue = 1; retry.schedule();
+  await tick(RETRY_BASE_MS); assert.equal(rig.flushes, 8, 'tried after the base wait');
+  await tick(retryDelay(1)); assert.equal(rig.flushes, 9, 'then backs off again from the start');
+  // Sent: the queue is empty, nothing is armed and nothing more is tried.
+  rig.down = false; await tick(retryDelay(2)); assert.equal(rig.flushes, 10); assert.equal(rig.queue, 0);
+  await tick(RETRY_MAX_MS * 2); assert.equal(rig.flushes, 10, 'no timer while nothing waits');
+  retry.dispose();
+});
+
+test('#643 outbox retry: a failed flush that still leaves posts waiting backs off; dispose stops the timer, even with a flush in flight', async t => {
+  mock.timers.enable({ apis: ['setTimeout'] }); t.after(() => mock.timers.reset());
+  const { rig, retry, tick } = retryRig();
+  retry.schedule(); retry.schedule(); retry.schedule();
+  await tick(RETRY_BASE_MS); assert.equal(rig.flushes, 1, 'one timer however often it is asked');
+  rig.queue = 3; retry.schedule(); // more arrived: still waiting, still failing
+  await tick(retryDelay(1) - 1); assert.equal(rig.flushes, 1, 'no tight loop: the wait doubled'); await tick(1); assert.equal(rig.flushes, 2);
+  let release!: () => void; const held = new Promise<void>(resolve => { release = resolve; });
+  const slow = new OutboxRetry({ pending: () => 1, authBlocked: () => false, lastError: () => 'down', flush: async () => { rig.flushes++; await held; } });
+  slow.schedule(); await tick(RETRY_BASE_MS); const before = rig.flushes;
+  slow.dispose(); retry.dispose(); release(); await tick(0);
+  await tick(RETRY_MAX_MS * 4); assert.equal(rig.flushes, before, 'nothing is tried after dispose');
 });
