@@ -18,6 +18,8 @@ export function setCloneTimeoutForTests(ms?: number): void { cloneTimeoutMs = ms
 function looksLikeCredential(username: string): boolean {
   let name = username;
   try { name = decodeURIComponent(username); } catch { /* keep the raw text */ }
+  // An encoded colon (`user%3Aghp_…`) is a password git would keep in the remote URL.
+  if (name.includes(':')) return true;
   return /^(?:gh[pousr]_|github_pat_|glpat-)/i.test(name) || /^(?:x-access-token|x-token-auth|x-oauth-basic|oauth2)$/i.test(name)
     || /^[0-9a-f]{40}$/i.test(name) || /^[A-Za-z0-9_-]{32,}$/.test(name)
     // 20+ characters of mixed-case letters and digits with no hyphen: an opaque token, not a long human username like `christopher-alexander-smith`.
@@ -34,11 +36,14 @@ export function validateCloneUrl(value: unknown): string {
     let parsed: URL;
     try { parsed = new URL(url); } catch { throw new Error('That is not a valid repository URL.'); }
     if (parsed.password) throw new Error('Remove the password from the URL. Git will use your credential helper or SSH key instead.');
-    if (['https', 'http', 'git'].includes(scheme) && looksLikeCredential(parsed.username)) throw new Error('Remove the token from the URL. Git will use your credential helper or SSH key instead.');
+    if (scheme !== 'file' && looksLikeCredential(parsed.username)) throw new Error('Remove the token from the URL. Git will use your credential helper or SSH key instead.');
     if (scheme !== 'file' && !parsed.hostname) throw new Error('The URL has no host.');
     return url;
   }
-  if (/^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[^:]/.test(url)) return url; // git@github.com:owner/repo.git
+  if (/^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[^:]/.test(url)) { // git@github.com:owner/repo.git
+    if (looksLikeCredential(url.slice(0, url.indexOf('@')))) throw new Error('Remove the token from the URL. Git will use your credential helper or SSH key instead.');
+    return url;
+  }
   if (isAbsolute(url) || url.startsWith('~/')) return url.startsWith('~/') ? join(homedir(), url.slice(2)) : url;
   throw new Error('Enter an https://, ssh:// or git@host:path repository URL.');
 }
