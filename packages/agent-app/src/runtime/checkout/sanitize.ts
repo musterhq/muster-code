@@ -9,15 +9,41 @@
  * stripped of HTML comments (so no spoofed `muster:` marker), of `agent://` and `user://` link targets (those chips wake agents and notify people, which only
  * the person may do), and has secrets redacted. Only Muster itself appends markers and writes mentions.
  */
-// Bounded on both sides: an open-ended run on each side made a long run of name characters quadratic (server text is untrusted and can be large).
-const SECRET_NAME = '[A-Za-z0-9_.-]{0,64}(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|CREDENTIAL|AUTH|COOKIE|SESSION)[A-Za-z0-9_.-]{0,64}';
-const SECRET_PATTERNS: [RegExp, string | ((m: string, ...g: string[]) => string)][] = [
-  [new RegExp(`(["'])(${SECRET_NAME})\\1(\\s*:\\s*)(?:"[^"\\n]*"|'[^'\\n]*'|[^\\s,}]+)`, 'gi'), (_m, q: string, name: string, sep: string) => `${q}${name}${q}${sep}"[redacted]"`],
+const SECRET_WORD = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|CREDENTIAL|AUTH|COOKIE|SESSION/i;
+/** A whole run of name characters: the lookbehind makes each run start once, so scanning runs is linear on any input. */
+const NAME_RUN = /(?<![A-Za-z0-9_.-])[A-Za-z0-9_.-]+/g;
+const QUOTED_VALUE = /(\s*:\s*)(?:"[^"\n]*"|'[^'\n]*'|[^\s,}]+)/y;
+const ASSIGNED_VALUE = /(\s*[=:]\s*)(?:(?:Bearer|Basic|Token)\s+)?(?:"[^"\n]*"|'[^'\n]*'|[^\s"',;]+)/iy;
+/**
+ * `"api_key": "..."` and `GITHUB_TOKEN=...` with the value redacted. A regex with an open-ended run of name characters on each side of the secret word was
+ * quadratic on a long run of name characters (server text is untrusted and can be large), and bounding the runs let a long dotted name
+ * (`spring.datasource.hikari.data-source-properties.password`) keep its value. Each run is visited once and only a run holding a secret word is checked
+ * for a value after it.
+ */
+function redactNamedValues(text: string, quoted: boolean): string {
+  let out = '', from = 0;
+  NAME_RUN.lastIndex = 0;
+  for (let m = NAME_RUN.exec(text); m; m = NAME_RUN.exec(text)) {
+    const name = m[0], end = m.index + name.length;
+    if (!SECRET_WORD.test(name)) continue;
+    const q = text[m.index - 1];
+    if (quoted && !((q === '"' || q === "'") && text[end] === q)) continue;
+    const value = quoted ? QUOTED_VALUE : ASSIGNED_VALUE;
+    value.lastIndex = quoted ? end + 1 : end;
+    const v = value.exec(text);
+    if (!v) continue;
+    out += text.slice(from, value.lastIndex - v[0].length) + v[1] + (quoted ? '"[redacted]"' : '[redacted]');
+    from = NAME_RUN.lastIndex = value.lastIndex;
+  }
+  return out + text.slice(from);
+}
+const SECRET_PATTERNS: Array<[RegExp, string] | ((text: string) => string)> = [
+  text => redactNamedValues(text, true),
   [/\bhttps:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9/_-]+/g, '[redacted webhook]'],
   [/\b(?:npm_[A-Za-z0-9]{30,}|AIza[0-9A-Za-z_-]{30,}|(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{16,})\b/g, '[redacted key]'],
   [/(?<![a-z0-9+.-])([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/@:]+:[^\s/@]+@/gi, '$1[redacted]@'],
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[redacted private key]'],
-  [new RegExp(`(?<![A-Za-z0-9_.-])(${SECRET_NAME})\\b(\\s*[=:]\\s*)(?:(?:Bearer|Basic|Token)\\s+)?(?:"[^"\\n]*"|'[^'\\n]*'|[^\\s"',;]+)`, 'gi'), (_m, name: string, sep: string) => `${name}${sep}[redacted]`],
+  text => redactNamedValues(text, false),
   [/\bAKIA[0-9A-Z]{16}\b/g, '[redacted key]'],
   [/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g, '[redacted token]'],
   [/\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}\b/g, '[redacted key]'],
@@ -27,7 +53,7 @@ const SECRET_PATTERNS: [RegExp, string | ((m: string, ...g: string[]) => string)
 ];
 export function redactSecrets(text: string): string {
   let out = text;
-  for (const [pattern, to] of SECRET_PATTERNS) out = out.replace(pattern, to as never);
+  for (const step of SECRET_PATTERNS) out = typeof step === 'function' ? step(out) : out.replace(step[0], step[1]);
   return out;
 }
 /** Removes HTML comments (every marker) and link targets that mention or wake someone; `[@Ann](user://u1)` becomes plain `@Ann`. */
