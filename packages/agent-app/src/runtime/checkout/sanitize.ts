@@ -41,7 +41,8 @@ const SECRET_PATTERNS: Array<[RegExp, string] | ((text: string) => string)> = [
   text => redactNamedValues(text, true),
   [/\bhttps:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9/_-]+/g, '[redacted webhook]'],
   [/\b(?:npm_[A-Za-z0-9]{30,}|AIza[0-9A-Za-z_-]{30,}|(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{16,})\b/g, '[redacted key]'],
-  [/(?<![a-z0-9+.-])([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/@:]+:[^\s/@]+@/gi, '$1[redacted]@'],
+  // The password runs to the last '@' of the authority: it may hold a raw '@' (`user:p@ss@host`).
+  [/(?<![a-z0-9+.-])([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/@:]+:[^\s/?#]+@/gi, '$1[redacted]@'],
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[redacted private key]'],
   text => redactNamedValues(text, false),
   [/\bAKIA[0-9A-Z]{16}\b/g, '[redacted key]'],

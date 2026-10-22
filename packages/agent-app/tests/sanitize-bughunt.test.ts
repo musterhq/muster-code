@@ -17,6 +17,8 @@ test('secret assignments are still redacted', () => {
 
 test('credentials in a URL are still redacted', () => {
   assert.equal(redactSecrets('clone https://user:pw123@example.com/x.git now'), 'clone https://[redacted]@example.com/x.git now');
+  assert.equal(redactSecrets('push https://user:p@ssw0rd@github.com/o/r.git'), 'push https://[redacted]@github.com/o/r.git');
+  assert.equal(redactSecrets('see https://example.com/page?email=a:b@c.d'), 'see https://example.com/page?email=a:b@c.d');
 });
 
 test('a long run of secret words stays linear', () => {
