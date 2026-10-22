@@ -98,7 +98,36 @@ try {
   assert.match(branch, /^muster\/chat-\d{4}-\d{4}$|^muster\/[a-z0-9-]+-\d{4}-\d{4}$/, `worktree branch ${branch}`);
   await until('C dispatched in its worktree', () => dispatched.includes(c.id));
   for (const id of [...gates.keys()]) await settle(id);
-  console.log('PASS: same-checkout runs ask first; cancel, queue, run anyway and worktree each behave');
+
+  // #591: a chat with history moves to a NEW chat in the worktree, which keeps the original's access.
+  await service.invoke('chat.setPermissionMode', {id: a.id, permissionMode: 'read-only'});
+  await until('A read-only in snapshot', () => store.getState().snapshot?.chats.find(chat => chat.id === a.id)?.permissionMode === 'read-only');
+  await store.selectChat(a.id);
+  assert.equal(await guard.sendWithCheckoutGuard(b.id, {hasAttachments: false}, target => store.sendMessage(target, 'busy')), true);
+  await until('B running again', () => status(b.id) === 'running');
+  const before = new Set((await service.invoke('app.snapshot', undefined)).chats.map(chat => chat.id));
+  result = guard.sendWithCheckoutGuard(a.id, {hasAttachments: false}, target => store.sendMessage(target, 'into a worktree'));
+  await until('A is asked to move', () => guard.pendingParallelRun()?.chatId === a.id);
+  guard.answerParallelRun('worktree');
+  assert.equal(await result, true, (store.getState().notices ?? []).map((n: {message: string}) => n.message).join(' | '));
+  const spawned = (await service.invoke('app.snapshot', undefined)).chats.find(chat => !before.has(chat.id))!;
+  assert.ok(spawned, 'a new chat was opened in the worktree');
+  assert.notEqual(spawned.folderId, folder.id);
+  assert.equal(spawned.permissionMode, 'read-only', 'the worktree chat keeps the original chat\'s access');
+  for (const id of [...gates.keys()]) await settle(id);
+
+  // #591: the branch picker's "new worktree chat" inherits only from the chat in the folder being branched.
+  const picker = await import('../src/renderer/components/BranchPicker');
+  await service.invoke('chat.setPermissionMode', {id: other.id, permissionMode: 'full', acknowledgeFullAccess: true});
+  await store.selectChat(other.id);
+  await until('other selected with Full access', () => store.getState().activeChatId === other.id && store.getState().snapshot?.chats.find(chat => chat.id === other.id)?.permissionMode === 'full');
+  const unrelated = await (async () => { const ids = new Set(store.getState().snapshot!.chats.map(chat => chat.id)); assert.equal(await picker.startWorktreeChat(folder.id, 'opus-unrelated'), true); return (await service.invoke('app.snapshot', undefined)).chats.find(chat => !ids.has(chat.id))!; })();
+  assert.notEqual(unrelated.permissionMode, 'full', 'a chat from another folder never passes on its Full access');
+  await store.selectChat(a.id);
+  await until('A selected', () => store.getState().activeChatId === a.id);
+  const related = await (async () => { const ids = new Set((await service.invoke('app.snapshot', undefined)).chats.map(chat => chat.id)); assert.equal(await picker.startWorktreeChat(folder.id, 'opus-related'), true); return (await service.invoke('app.snapshot', undefined)).chats.find(chat => !ids.has(chat.id))!; })();
+  assert.equal(related.permissionMode, 'read-only', 'the branched folder\'s chat passes on its access');
+  console.log('PASS: same-checkout runs ask first; cancel, queue, run anyway and worktree each behave; worktree chats inherit only from their own chat');
 } catch (error) {
   failed = true; console.error(error instanceof Error ? error.stack : error);
 } finally {
