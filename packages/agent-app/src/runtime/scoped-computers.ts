@@ -10,11 +10,11 @@ import {SCOPED_COMPUTER_DEFAULT_LIMITS,SCOPED_COMPUTER_DEFAULT_TIMEOUT_MS,SCOPED
 import {createDockerRunner,ENSURE_USER_SCRIPT,SANDBOX_IMAGE,SANDBOX_USER,type DockerResult,type SandboxProcess,type SandboxRunner,type SandboxStream} from './sandbox-exec.ts';
 import {registerAgentSandboxHost,type AgentSandboxHost,type SandboxAgentTarget} from './sandbox-registry.ts';
 import {SandboxToolHost} from './sandbox-agent-tools.ts';
-import {BROWSER_SERVICE_COMMAND,BROWSER_SERVICE_NAME,countTree,ExtrasInputError,grantLimits,LAYER_IDS,LAYER_TARGETS,layerPath,MAX_SERVICES,mergeLimits,parseStats,restartDelay,serviceShell,snapshotLayer,validateServiceSpec,validLimits,writeWorkspaceArchive} from './scoped-computer-extras.ts';
+import {BROWSER_SERVICE_COMMAND,BROWSER_SERVICE_NAME,countTree,diskLimitBytes,ExtrasInputError,grantLimits,LAYER_IDS,LAYER_TARGETS,layerPath,MAX_SERVICES,mergeLimits,parseStats,restartDelay,savedLimits,serviceShell,snapshotLayer,validateServiceSpec,validLimits,writeWorkspaceArchive} from './scoped-computer-extras.ts';
 
 type Scope={kind:'session'|'workspace';id:string};
 type NetworkAccess='none'|'unrestricted';
-export interface ComputerDescriptor {owner:Scope;root:string;workDir:string;manifestPath:string;envAllowlist:readonly string[];toolPolicy:readonly string[];limits:{networkAccess:string;maxProcesses?:number;memoryMib?:number;cpus?:number;readOnlyMounts?:readonly {source:string;target:string}[]};policyDigest:string}
+export interface ComputerDescriptor {owner:Scope;root:string;workDir:string;manifestPath:string;envAllowlist:readonly string[];toolPolicy:readonly string[];limits:{networkAccess:string;maxProcesses?:number;maxDiskMb?:number;memoryMib?:number;cpus?:number;readOnlyMounts?:readonly {source:string;target:string}[]};policyDigest:string}
 export interface ComputerHandle {id:string;ownerDigest:string;image:string;createdAt:string}
 type BackendOptions={dockerBin:string;dockerHost:string;managementTimeoutMs:number;durableProvisioning:true;image?:string};
 export interface ComputerBackend {
@@ -29,7 +29,7 @@ export interface ComputerBackend {
 }
 export interface ComputerCore {
   LocalDockerSandbox:new(options:BackendOptions)=>ComputerBackend;
-  resolveScopedRuntime(scopes:Scope[],config:{rootDir:string;grants:{scope:Scope;envAllowlist:string[];toolPolicy:string[];limits:{networkAccess:NetworkAccess;maxProcesses:number;memoryMib?:number;cpus?:number;readOnlyMounts?:{source:string;target:string}[]}}[]}):ComputerDescriptor;
+  resolveScopedRuntime(scopes:Scope[],config:{rootDir:string;grants:{scope:Scope;envAllowlist:string[];toolPolicy:string[];limits:{networkAccess:NetworkAccess;maxProcesses:number;maxDiskMb?:number;memoryMib?:number;cpus?:number;readOnlyMounts?:{source:string;target:string}[]}}[]}):ComputerDescriptor;
   ensureRuntime(descriptor:ComputerDescriptor):Promise<unknown>;
 }
 type BundledSandboxCore = {
@@ -90,6 +90,8 @@ export interface ScopedComputerOptions {
   /** SBX-15: base delay of supervised restarts (doubles per restart within a minute). */
   serviceBackoffMs?:number;
   tarBin?:string;
+  /** How often a running command's or service's disk use is re-measured against the disk limit. Default 5 s; tests only go lower. */
+  diskCheckMs?:number;
 }
 interface Receipt {requestId:string;executionId:string;fingerprint:string;state:ScopedComputerExecution['state'];exitCode:number|null;computerStopped:boolean}
 interface RecordData {version:1;id:string;scope:ScopedComputerRef;handle:ComputerHandle|null;receipts:Receipt[];active?:{executionId:string;requestId:string;pgid?:number;ephemeral?:boolean;owner?:string};network?:ScopedComputerNetwork;limits?:ScopedComputerLimits;layers?:ScopedComputerLayer[]}
@@ -98,7 +100,7 @@ interface Context {id:string;scope:ScopedComputerRef;label:string;descriptor:Com
 interface ServiceEntry extends Omit<ScopedComputerService,'output'> {pgid?:number;/** What the user asked for; restart policies only act on services meant to be running. */desired:'running'|'stopped'}
 interface ServicesFile {version:1;generation:number;containerStartedAt?:string;services:ServiceEntry[]}
 interface ServiceRun {proc:SandboxProcess;generation:number}
-interface Execution {clientAbort:AbortController;context:Context;scopeKey:string;requestId:string;container:string;result:ScopedComputerExecution&{command:string;startedAt:string};done:Promise<void>;proc?:SandboxProcess;pgid?:number|null;pending:Record<SandboxStream,string>;flushTimer?:ReturnType<typeof setTimeout>;stopKind?:'cancelled'|'timed-out';settled?:boolean;timer?:ReturnType<typeof setTimeout>}
+interface Execution {/** Set when the disk watchdog stops the command: the plain notice it settles with. */stopReason?:string;clientAbort:AbortController;context:Context;scopeKey:string;requestId:string;container:string;result:ScopedComputerExecution&{command:string;startedAt:string};done:Promise<void>;proc?:SandboxProcess;pgid?:number|null;pending:Record<SandboxStream,string>;flushTimer?:ReturnType<typeof setTimeout>;stopKind?:'cancelled'|'timed-out';settled?:boolean;timer?:ReturnType<typeof setTimeout>}
 class ComputerInputError extends Error {}
 const MAX_OUTPUT=64*1024;
 const MAX_RECEIPTS=128;
@@ -108,6 +110,10 @@ const SERVICE_TAIL=16*1024;
 const SERVICE_STATES=new Set<ScopedComputerService['state']>(['starting','running','stopped','exited','failed','lost','backoff']);
 const MAX_IMPORT_BYTES=2*1024**3;
 const MAX_WALK=100_000;
+/** The disk watchdog's floor: the Resources usage meter already polls every 2 s, so disk is never sampled more often. */
+const DISK_CHECK_MS=5000;
+const formatGiB=(bytes:number)=>bytes>=1000*1024**2?`${(bytes/1024**3).toFixed(bytes>=10*1024**3?1:2)} GB`:`${Math.max(1,Math.round(bytes/1024**2))} MB`;
+const diskAdvice='Delete files in /workspace, or raise the Disk limit under Resources in the Sandbox tab.';
 const DAEMON=/Cannot connect to the Docker daemon|failed to connect to the docker API|Is the docker daemon running|error during connect/i;
 const IMAGE=/pull access denied|manifest unknown|failed to resolve reference|No such image|toomanyrequests|TLS handshake timeout|i\/o timeout|dial tcp/i;
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
@@ -178,6 +184,9 @@ export class ScopedComputers {
   private serviceRestarts=new Map<string,number[]>();
   private serviceOutputs=new Map<string,string>();
   private generations=new Map<string,number>();
+  /** Latest disk measurement per computer (/workspace walk + the container's writable layer) and the watchdog timers. */
+  private diskSamples=new Map<string,{at:number;bytes:number;tookMs:number}>();
+  private diskWatches=new Map<string,ReturnType<typeof setTimeout>>();
   constructor(private options:ScopedComputerOptions) {
     if(!isAbsolute(options.appData))throw new ComputerInputError('Computer app data must be an absolute path.');
     this.image=options.image??SANDBOX_IMAGE;
@@ -229,7 +238,7 @@ export class ScopedComputers {
     const network:ScopedComputerNetwork=saved?.network==='egress'?'egress':'none',networkAccess:NetworkAccess=network==='egress'?'unrestricted':'none';
     // Limits and layers are part of the policy digest too (SBX-08/16). Layer paths are recomputed, never read back.
     if(saved?.limits!==undefined&&!validLimits(saved.limits))integrity();
-    const limits:ScopedComputerLimits=saved?.limits?{...saved.limits as ScopedComputerLimits}:{...SCOPED_COMPUTER_DEFAULT_LIMITS};
+    const limits:ScopedComputerLimits={...SCOPED_COMPUTER_DEFAULT_LIMITS,...(saved?.limits as Partial<ScopedComputerLimits>|undefined)};
     const layers=this.savedLayers(root,saved?.layers);
     const descriptor=core.resolveScopedRuntime([owner],{rootDir:join(root,'runtimes'),grants:[{scope:owner,envAllowlist:[],toolPolicy:['computer.exec'],limits:{networkAccess,...grantLimits(limits,layers)}}]});
     if(descriptor.owner.kind!==owner.kind||descriptor.owner.id!==owner.id||descriptor.root!==join(root,'runtimes')||!descriptor.workDir.startsWith(descriptor.root+sep)||descriptor.envAllowlist.length||descriptor.limits.networkAccess!==networkAccess||(descriptor.limits.maxProcesses!==undefined&&descriptor.limits.maxProcesses!==limits.processes))integrity();
@@ -241,6 +250,11 @@ export class ScopedComputers {
     const registry=await readJSON(this.registryPath(context)) as {containerName?:unknown;ownerDigest?:unknown}|null;
     if(registry&&(registry.containerName!==this.expectedHandle(context).id||registry.ownerDigest!==this.expectedHandle(context).ownerDigest))integrity();
     return context;
+  }
+  /** Whether this scope ever had a computer, checked without loading the core or calling Docker (every start saves a record). */
+  private async hasRecord(scope:ScopedComputerRef):Promise<boolean> {
+    validateRef(scope);const {root,installation}=await this.init();
+    return existsSync(join(root,`computer_${hash(`${installation}:${scope.kind}:${scope.id}`).slice(0,32)}.json`));
   }
   private savedLayers(root:string,value:unknown):(ScopedComputerLayer&{source:string})[] {
     if(value===undefined)return [];
@@ -289,7 +303,7 @@ export class ScopedComputers {
     return data;
   }
   private async saveRecord(context:Context,data:RecordData):Promise<void>{
-    await saveJSON(context.recordPath,{...data,network:context.network,limits:context.limits,layers:context.layers.map(({id,label,version,target})=>({id,label,version,target}))});
+    await saveJSON(context.recordPath,{...data,network:context.network,limits:savedLimits(context.limits),layers:context.layers.map(({id,label,version,target})=>({id,label,version,target}))});
     if(data.active)this.observedActiveScopes.set(refKey(context.scope),context);else this.observedActiveScopes.delete(refKey(context.scope));
   }
   /** History is advisory (never authority): a damaged file reads as empty instead of blocking the sandbox. */
@@ -311,7 +325,7 @@ export class ScopedComputers {
   private status(context:Pick<Context,'id'|'scope'|'label'>&{network?:ScopedComputerNetwork;limits?:ScopedComputerLimits;layers?:ScopedComputerLayer[]},state:ScopedComputerStatus['state'],reason?:string,activeExecutionId?:string,extra:Pick<ScopedComputerStatus,'problem'|'repair'>={}):ScopedComputerStatus {
     const limits=context.limits??SCOPED_COMPUTER_DEFAULT_LIMITS,generation=this.generations.get(context.id);
     return {id:context.id,scope:context.scope,label:context.label,provider:'local-docker',state,reason,activeExecutionId,workspacePreserved:true,durability:context.scope.kind==='chat'?'scratch':'durable',image:this.image,user:SANDBOX_USER,
-      limits:{network:context.network??'none',memoryMiB:limits.memoryMiB,cpus:limits.cpus,processes:limits.processes,maxRunning:SCOPED_COMPUTER_MAX_RUNNING,maxTimeoutMs:SCOPED_COMPUTER_MAX_TIMEOUT_MS},
+      limits:{network:context.network??'none',memoryMiB:limits.memoryMiB,cpus:limits.cpus,processes:limits.processes,diskGiB:limits.diskGiB??SCOPED_COMPUTER_DEFAULT_LIMITS.diskGiB,maxRunning:SCOPED_COMPUTER_MAX_RUNNING,maxTimeoutMs:SCOPED_COMPUTER_MAX_TIMEOUT_MS},
       ...(context.layers?.length?{layers:context.layers.map(({id,label,version,target})=>({id,label,version,target}))}:{}),...(generation!==undefined?{bootGeneration:generation}:{}),...extra};
   }
   private failure(context:Pick<Context,'id'|'scope'|'label'>&{network?:ScopedComputerNetwork},state:ScopedComputerStatus['state'],error:unknown,activeExecutionId?:string):ScopedComputerStatus {
@@ -452,6 +466,9 @@ export class ScopedComputers {
     if(!input.ephemeral&&record.receipts.length>=MAX_RECEIPTS)throw new ComputerInputError('This computer has reached its durable execution receipt limit. New commands are blocked to preserve retry safety; use a new scope for new work.');
     // Ownership gate (registry, owner digest, live label) immediately before every exec.
     if(!(await context.backend.inspect(record.handle,context.descriptor)).running)throw new ComputerInputError('Start this scoped computer before running a command.');
+    // Only a sandbox last seen over its disk limit is re-measured here, so a normal start costs nothing extra.
+    const last=this.diskSamples.get(context.id),limit=diskLimitBytes(context.limits);
+    if(last&&last.bytes>limit){const fresh=await this.sampleDisk(context,record.handle.id);if(fresh.bytes>limit)throw new ComputerInputError(`This sandbox is over its ${context.limits.diskGiB} GB disk limit (it uses ${formatGiB(fresh.bytes)}), so no new command was started. ${diskAdvice}`);}
     for(const [id,old] of this.executions){if(this.executions.size<100)break;if(old.settled&&old.result.state!=='recovery-needed')this.executions.delete(id);}
     if(this.executions.size>=100)throw new ComputerInputError('Too many unresolved executions. Stop an existing computer before starting more work.');
     if(this.closed)throw new ComputerInputError('Scoped computers are shutting down.');
@@ -464,6 +481,7 @@ export class ScopedComputers {
     execution.clientAbort.signal.addEventListener('abort',()=>execution.proc?.detach(),{once:true});
     void execution.proc?.pgid.then(pgid=>{execution.pgid=pgid;if(pgid)return this.queue(key,async()=>{const latest=await this.record(context);if(latest?.active?.executionId!==executionId)return;latest.active.pgid=pgid;await this.saveRecord(context,latest);});}).catch(()=>{});
     execution.timer=setTimeout(()=>{void this.terminate(execution,'timed-out').catch(()=>{});},timeout);execution.timer.unref?.();
+    this.watchDisk(context);
     execution.done=this.perform(context,execution);this.pending.add(execution.done);void execution.done.finally(()=>this.pending.delete(execution.done)).catch(()=>{});
     return {executionId};
   });}
@@ -487,7 +505,7 @@ export class ScopedComputers {
       Object.assign(r,{exitCode:outcome.exitCode,endedAt:new Date().toISOString()});
       // Escalation already marked it uncertain (the container stop was not confirmed): keep the guard.
       if(r.state==='recovery-needed'){}
-      else if(execution.stopKind){r.state=execution.stopKind;r.reason=execution.stopKind==='timed-out'?'Stopped at its time limit. The sandbox kept running.':r.computerStopped?'Cancelled by stopping the whole sandbox; its workspace is kept.':'Cancelled. The sandbox kept running.';}
+      else if(execution.stopKind){r.state=execution.stopKind;r.reason=execution.stopReason??(execution.stopKind==='timed-out'?'Stopped at its time limit. The sandbox kept running.':r.computerStopped?'Cancelled by stopping the whole sandbox; its workspace is kept.':'Cancelled. The sandbox kept running.');}
       else if(outcome.error){r.state='failed';r.reason=outcome.error==='docker-missing'?classify(Object.assign(new Error(),{name:'DockerMissingError'})).reason:'The command could not be started in the sandbox.';}
       else r.state=outcome.exitCode===0?'completed':'failed';
       // Only the instance that still owns the execution may settle it: after a restart another instance may have
@@ -648,6 +666,7 @@ export class ScopedComputers {
       const context=await this.context(scope,authorized.label),{absolute,relative}=await this.workspaceEntry(context,into);
       await mkdir(absolute,{recursive:true,mode:0o700});
       let total=0;for(const source of sources){if(!isAbsolute(source))throw new ComputerInputError('Choose files to import.');const size=await measure(source);total+=size.bytes;if(size.truncated||total>MAX_IMPORT_BYTES)throw new ComputerInputError('That selection is too large to import (limit 2 GB or 100,000 items).');}
+      await this.assertDiskRoom(context,total,'import');
       const imported:string[]=[];
       // Copied on the host into the bind mount, so files keep the ownership mapping every other workspace file has.
       for(const source of sources){
@@ -709,18 +728,20 @@ export class ScopedComputers {
   setLimits(scope:ScopedComputerRef,patch:unknown):Promise<ScopedComputerStatus> {return this.withScope(scope,async authorized=>{
     const context=await this.context(scope,authorized.label),record=await this.record(context);
     const next=this.checked(()=>mergeLimits(context.limits,patch));
-    if(next.memoryMiB===context.limits.memoryMiB&&next.cpus===context.limits.cpus&&next.processes===context.limits.processes)
+    if(next.memoryMiB===context.limits.memoryMiB&&next.cpus===context.limits.cpus&&next.processes===context.limits.processes&&next.diskGiB===context.limits.diskGiB)
       return record?.handle?this.status(context,(await context.backend.inspect(record.handle,context.descriptor)).running?'running':'stopped'):this.status(context,'not-created');
     return this.reconfigure(scope,authorized.label,context,record,{limits:next},'limits');
   });}
   /** Live cgroup usage, read only after the ownership gate confirms this scope's container. */
   usage(scope:ScopedComputerRef):Promise<ScopedComputerUsage> {return this.withScope(scope,async authorized=>{
     const context=await this.context(scope,authorized.label),record=await this.record(context),sampledAt=new Date().toISOString();
-    const idle={computerId:context.id,running:false,memoryBytes:null,memoryLimitBytes:null,cpuPercent:null,pids:null,sampledAt};
+    const idle={computerId:context.id,running:false,memoryBytes:null,memoryLimitBytes:null,cpuPercent:null,pids:null,sampledAt,diskBytes:this.diskSamples.get(context.id)?.bytes??null,diskLimitBytes:diskLimitBytes(context.limits)};
     if(!record?.handle||!(await context.backend.inspect(record.handle,context.descriptor)).running)return idle;
     const stats=await this.runner.docker(['stats','--no-stream','--format','{{json .}}',record.handle.id],{timeoutMs:15_000});
     if(stats.code!==0)throw dockerError(stats);
-    return {...idle,running:true,...parseStats(stats.stdout)};
+    // The meter polls every 2 s; a disk sample is reused for the watchdog's interval instead of walking the tree each time.
+    const disk=await this.recentDisk(context,record.handle.id,Math.max(this.options.diskCheckMs??DISK_CHECK_MS,DISK_CHECK_MS)).catch(()=>null);
+    return {...idle,running:true,...parseStats(stats.stdout),diskBytes:disk?.bytes??null};
   });}
   private async layerSourceList():Promise<{id:ScopedComputerLayerId;label:string;path:string}[]> {
     const sources=await this.options.layerSources?.()??[];
@@ -816,6 +837,7 @@ export class ScopedComputers {
     try {run.proc=this.runner.exec(handle.id,serviceShell(entry),{onOutput:(_stream,data)=>{if(this.serviceRuns.get(key)===run)this.serviceOutputs.set(key,tail((this.serviceOutputs.get(key)??'')+data,SERVICE_TAIL));}});}
     catch {entry.state='failed';entry.reason='The service could not be started in the sandbox.';return;}
     this.serviceRuns.set(key,run);
+    this.watchDisk(context);
     void run.proc.pgid.then(pgid=>{if(pgid)return this.queue(scopeKey,async()=>{
       if(this.serviceRuns.get(key)!==run)return;const latest=await this.readServices(context),current=latest.services.find(item=>item.id===entry.id);
       if(current&&current.state==='running'){current.pgid=pgid;await this.writeServices(context,latest);}
@@ -995,6 +1017,84 @@ export class ScopedComputers {
     if(!gone)return;
     delete record.active;await this.saveRecord(context,record);
   }
+  // --- Disk limit (#654): /workspace plus the container's writable layer, measured with the same tree walk as the
+  // workspace size view and `docker inspect --size`. Writes are refused past it; running work that grows past it is stopped.
+  private async sampleDisk(context:Context,container?:string):Promise<{at:number;bytes:number;tookMs:number}> {
+    const started=Date.now();
+    const workspace=await measure(this.workspacePath(context)).catch(()=>({bytes:0}));
+    let layer=0;
+    if(container){const result=await this.runner.docker(['inspect','--size','-f','{{.SizeRw}}',container],{timeoutMs:15_000}).catch(()=>null);const value=Number(result?.code===0?result.stdout.trim():NaN);if(Number.isFinite(value)&&value>0)layer=value;}
+    const sample={at:Date.now(),bytes:workspace.bytes+layer,tookMs:Date.now()-started};
+    this.diskSamples.set(context.id,sample);return sample;
+  }
+  private async recentDisk(context:Context,container:string|undefined,maxAgeMs:number) {
+    const last=this.diskSamples.get(context.id);
+    return last&&Date.now()-last.at<maxAgeMs?last:this.sampleDisk(context,container);
+  }
+  /** Caller holds the scope lock. `extra` is how many bytes the change adds; a change that frees space is always allowed. */
+  private async assertDiskRoom(context:Context,extra:number,what:'write'|'import'):Promise<void> {
+    if(extra<=0)return;
+    const record=await this.record(context),limit=diskLimitBytes(context.limits);
+    const sample=await this.recentDisk(context,record?.handle?.id,2000);
+    if(sample.bytes+extra>limit)throw new ComputerInputError(`${what==='write'?'This write':'This import'} was refused: it would take the sandbox past its ${context.limits.diskGiB} GB disk limit (it already uses ${formatGiB(sample.bytes)}). ${diskAdvice}`);
+    sample.bytes+=extra;
+  }
+  /** While a command or service runs, re-measures disk use every few seconds (slower when measuring is slow). */
+  private watchDisk(context:Context):void {
+    if(this.closed||this.diskWatches.has(context.id))return;
+    const floor=this.options.diskCheckMs??DISK_CHECK_MS,key=refKey(context.scope);
+    const schedule=(ms:number)=>{const timer=setTimeout(()=>{void check().catch(()=>this.diskWatches.delete(context.id));},ms);timer.unref?.();this.diskWatches.set(context.id,timer);};
+    const check=async()=>{
+      const execution=[...this.executions.values()].find(item=>item.scopeKey===key&&!item.settled);
+      const services=[...this.serviceRuns.keys()].some(name=>name.startsWith(`${context.id}:`));
+      if(this.closed||(!execution&&!services)){this.diskWatches.delete(context.id);return;}
+      const sample=await this.sampleDisk(context,execution?.container??this.expectedHandle(context).id);
+      if(sample.bytes>diskLimitBytes(context.limits))await this.enforceDisk(context,sample.bytes,execution);
+      if(this.diskWatches.has(context.id))schedule(Math.max(floor,sample.tookMs*4));
+    };
+    schedule(floor);
+  }
+  private async enforceDisk(context:Context,bytes:number,execution:Execution|undefined):Promise<void> {
+    const notice=`Stopped: the sandbox went past its ${context.limits.diskGiB} GB disk limit (it uses ${formatGiB(bytes)}). ${diskAdvice}`;
+    if(execution&&!execution.settled&&!execution.stopKind){execution.stopReason=notice;this.output(execution,'stderr',`\n${notice}\n`);void this.terminate(execution,'cancelled').catch(()=>{});}
+    await this.queue(refKey(context.scope),async()=>{
+      const file=await this.readServices(context);let changed=false;
+      for(const entry of file.services)if(this.serviceRuns.has(this.serviceKey(context,entry.id))){await this.stopService(context,entry);entry.reason=notice;changed=true;}
+      if(changed)await this.writeServices(context,file);
+    });
+  }
+  /**
+   * #654: a chat was archived ('stop': the container stops, everything is kept) or deleted ('destroy': the container,
+   * its registry, workspace and saved state are removed). Running work is ended the same way Stop ends it.
+   */
+  async releaseScope(scope:ScopedComputerRef,mode:'stop'|'destroy'):Promise<void> {
+    if(!(await this.hasRecord(scope)))return;
+    const execution=await this.withScope(scope,async authorized=>{
+      const context=await this.context(scope,authorized.label),record=await this.record(context);
+      if(!record?.handle)return undefined;
+      if(mode==='destroy')this.forgetServiceRuns(context);
+      if(!record.active&&(mode==='destroy'||!(await context.backend.inspect(record.handle,context.descriptor)).running))return undefined;
+      const status=await this.stopContext(context);
+      if(status.state!=='stopped')throw new ComputerInputError(status.reason??'The sandbox could not be confirmed stopped.');
+      return status.activeExecutionId?this.executions.get(status.activeExecutionId):undefined;
+    });
+    // perform() reacquires the scope lock to record completion: wait for it outside withScope.
+    if(execution)await execution.done.catch(()=>{});
+    if(mode==='stop')return;
+    await this.withScope(scope,async authorized=>{
+      const context=await this.context(scope,authorized.label),record=await this.record(context);
+      if(record?.active&&this.executions.get(record.active.executionId)?.settled===false)throw new ComputerInputError('A command is still running in this sandbox. Stop it, then try again.');
+      if(record?.handle)await context.backend.destroy(record.handle,context.descriptor);
+      else if(await this.orphan(context)){const removed=await this.runner.docker(['rm','-f',this.expectedHandle(context).id],{timeoutMs:30_000});if(removed.code!==0)throw dockerError(removed);}
+      this.forgetServiceRuns(context);
+      const timer=this.diskWatches.get(context.id);if(timer)clearTimeout(timer);this.diskWatches.delete(context.id);this.diskSamples.delete(context.id);
+      for(const map of [this.serviceOutputs,this.serviceRestarts])for(const key of [...map.keys()])if(key.startsWith(`${context.id}:`))map.delete(key);
+      this.generations.delete(context.id);this.observedActiveScopes.delete(refKey(scope));
+      // rm never follows links; context() has already refused symlinked runtime and workspace folders.
+      await rm(context.descriptor.workDir,{recursive:true,force:true});
+      for(const path of [context.recordPath,context.historyPath,this.servicesPath(context)])await rm(path,{force:true});
+    });
+  }
   /** Single IPC entry for every `computer.*` command; inputs are re-validated by each method. */
   // --- Agent execution (SBX-01): the sandbox domain routes a chat's commands and edits here through the muster_sandbox MCP tools.
   /** Resolves once the execution has settled (or immediately for a restored receipt). */
@@ -1038,7 +1138,9 @@ export class ScopedComputers {
       }),
       write:(path,content)=>this.withScope(scope,async authorized=>{
         if(Buffer.byteLength(content)>16*1024*1024)throw new ComputerInputError('Writes are limited to 16 MiB.');
-        const {absolute}=await this.workspaceTarget(await this.context(scope,authorized.label),path);
+        const context=await this.context(scope,authorized.label),{absolute}=await this.workspaceTarget(context,path);
+        const replaced=await lstat(absolute).then(stat=>stat.isFile()?stat.size:0,()=>0);
+        await this.assertDiskRoom(context,Buffer.byteLength(content)-replaced,'write');
         await mkdir(dirname(absolute),{recursive:true});
         const temp=`${absolute}.${randomUUID()}.tmp`;await writeFile(temp,content,{flag:'wx',flush:true});await rename(temp,absolute);
       }),
@@ -1098,6 +1200,7 @@ export class ScopedComputers {
     this.toolHostInstance?.dispose();this.toolHostInstance=undefined;this.toolHost=undefined;registerAgentSandboxHost(undefined);
     // Services outlive the app inside their container: only the local clients close; the next launch finds them by process group.
     for(const timer of this.serviceTimers.values())clearTimeout(timer);this.serviceTimers.clear();
+    for(const timer of this.diskWatches.values())clearTimeout(timer);this.diskWatches.clear();
     const services=[...this.serviceRuns.values()];this.serviceRuns.clear();for(const run of services)run.proc.detach();
     // End active owned commands (their process groups; the container only as a fallback). Completion writes remain awaited.
     this.disposal=(async()=>{
