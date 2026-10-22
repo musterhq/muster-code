@@ -73,7 +73,7 @@ async function until(check:()=>Promise<boolean>|boolean,label:string){for(let i=
 test('SBX-08: limits are validated, recreate the container under a new policy digest, persist, and default limits keep the old digest',async t=>{
   const f=await fixture(t);
   const initial=await f.manager.start(a);
-  assert.deepEqual({memoryMiB:initial.limits.memoryMiB,cpus:initial.limits.cpus,processes:initial.limits.processes},SCOPED_COMPUTER_DEFAULT_LIMITS);
+  assert.deepEqual({memoryMiB:initial.limits.memoryMiB,cpus:initial.limits.cpus,processes:initial.limits.processes,diskGiB:initial.limits.diskGiB},SCOPED_COMPUTER_DEFAULT_LIMITS);
   const first=f.provisions[0];
   assert.deepEqual(first.limits,{networkAccess:'none',maxProcesses:256},'default limits stay undeclared so existing containers keep their digest');
   for(const bad of [{memoryMiB:100},{memoryMiB:1000},{cpus:0.3},{cpus:9},{processes:10},{disk:1}])await assert.rejects(f.manager.dispatch('computer.setLimits',{scope:a,limits:bad}),/must be between|Unknown sandbox limit/,JSON.stringify(bad));
