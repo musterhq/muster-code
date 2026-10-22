@@ -315,6 +315,7 @@ test('recall query uses the task and recent user messages, so a bare "continue" 
   queries.length = 0;
   await f.runtime.contributePrompt({chat: f.chat, folder: f.folder, prompt: 'y'.repeat(5_000)});
   assert.ok(queries.length >= 1 && queries.every(query => query.length <= 1_600), 'the query stays bounded');
+  assert.ok(queries.every(query => query.endsWith('y'.repeat(1_500))), 'a long current message keeps most of the budget');
 });
 
 test('the default recall timeout is raised to about four seconds', async () => {

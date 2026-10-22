@@ -529,7 +529,9 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
       recent = (rows.prepare("SELECT text FROM timeline WHERE chat_id = ? AND kind = 'user' ORDER BY seq DESC LIMIT ?").all(chatId, RECALL_RECENT_MESSAGES) as { text?: string }[]).map(row => row.text ?? '').reverse();
     } catch { /* no history: the current message alone */ }
     const parts: string[] = [];
-    for (const raw of [first ?? '', ...recent, current]) { const text = raw.trim().slice(0, 600); if (text && !parts.includes(text)) parts.push(text); }
+    // Earlier messages give at most 600 chars each; the current message may use the whole budget.
+    for (const raw of [first ?? '', ...recent]) { const text = raw.trim().slice(0, 600); if (text && !parts.includes(text) && text !== current.slice(0, 600)) parts.push(text); }
+    if (current) parts.push(current.slice(0, RECALL_QUERY_MAX_CHARS));
     // A long current message keeps priority: it is placed last and the oldest context is trimmed first.
     let joined = parts.join('\n');
     if (joined.length > RECALL_QUERY_MAX_CHARS) joined = joined.slice(joined.length - RECALL_QUERY_MAX_CHARS);
