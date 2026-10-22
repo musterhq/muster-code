@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Security: the agent's background-process and terminal tools now prove which chat is calling with the same per-chat token as Muster's other agent tools, so one chat can no longer start, read or stop processes, or read a terminal, as another chat. A call whose chat and token don't match is refused with a plain message.
 - Agent mode no longer ends a turn with a promise like "I'll report back when the build finishes": the agent is told to wait for the work inside the turn, and a run that ends on such a promise is no longer counted as completed.
 - In Agent mode with Full access, the agent can start a long build, test run or deploy as a background process of the chat (shown in Commands as the agent's). If it is still running when the turn ends, its exit sends the chat one follow-up (exit code and the last 40 lines of output) through the message queue, so the agent picks up where it left off.
 - Settings › Muster Server buttons (invite, revoke, connector and agent actions) ignore a second click while the first is still running, so they no longer fire twice.

@@ -202,13 +202,16 @@ test('the muster_background server is offered only in Agent mode with Full acces
   const dir = await fs.mkdtemp(join(tmpdir(), 'muster-bg-opts-')), launcher = join(dir, 'muster-background-mcp');
   await fs.writeFile(launcher, '#!/bin/sh\n', {mode: 0o700});
   try {
-    const opts = backgroundRunOptions({id: 'chat', mode: 'agent', permissionMode: 'full'}, launcher)!;
+    const issue = (id: string) => `token-for-${id}`;
+    const opts = backgroundRunOptions({id: 'chat', mode: 'agent', permissionMode: 'full'}, launcher, issue)!;
     assert.equal(opts.configOverrides[`mcp_servers.${BACKGROUND_MCP}.command`], launcher);
     assert.equal(opts.configOverrides[`mcp_servers.${BACKGROUND_MCP}.env.MUSTER_CHAT_ID`], 'chat');
+    assert.equal(opts.configOverrides[`mcp_servers.${BACKGROUND_MCP}.env.MUSTER_CHAT_TOKEN`], 'token-for-chat');
     assert.equal(opts.developerInstructions, BACKGROUND_TOOL_NOTE);
     assert.match(BACKGROUND_TOOL_NOTE, /run_background[\s\S]*wakes this chat/);
-    for (const chat of [{mode: 'agent', permissionMode: 'workspace'}, {mode: 'agent', permissionMode: 'read-only'}, {mode: 'ask', permissionMode: 'full'}, {mode: 'plan', permissionMode: 'full'}] as const) assert.equal(backgroundRunOptions({id: 'chat', ...chat}, launcher), null);
-    assert.equal(backgroundRunOptions({id: 'chat', mode: 'agent', permissionMode: 'full'}, join(dir, 'missing')), null);
+    for (const chat of [{mode: 'agent', permissionMode: 'workspace'}, {mode: 'agent', permissionMode: 'read-only'}, {mode: 'ask', permissionMode: 'full'}, {mode: 'plan', permissionMode: 'full'}] as const) assert.equal(backgroundRunOptions({id: 'chat', ...chat}, launcher, issue), null);
+    assert.equal(backgroundRunOptions({id: 'chat', mode: 'agent', permissionMode: 'full'}, join(dir, 'missing'), issue), null);
+    assert.equal(backgroundRunOptions({id: 'chat', mode: 'agent', permissionMode: 'full'}, launcher, undefined), null, 'no host to bind the chat, no server');
   } finally { await fs.rm(dir, {recursive: true, force: true}); }
 });
 
@@ -222,7 +225,7 @@ test('the stdio MCP server lists the tools and forwards a call with its argument
   t.after(async () => { host.dispose(); await fs.rm(dir, {recursive: true, force: true}); });
   await host.start();
   assert.match(resultText(await host.call('../x', 'run_background', {command: 'x'})), /without a chat/);
-  const child = spawn(process.execPath, [join(dir, 'muster-background-mcp.cjs'), join(dir, 'background-endpoint.json')], {env: {...process.env, MUSTER_CHAT_ID: 'chat'}, stdio: ['pipe', 'pipe', 'inherit']});
+  const child = spawn(process.execPath, [join(dir, 'muster-background-mcp.cjs'), join(dir, 'background-endpoint.json')], {env: {...process.env, MUSTER_CHAT_ID: 'chat', MUSTER_CHAT_TOKEN: host.chatToken('chat')}, stdio: ['pipe', 'pipe', 'inherit']});
   let out = '';
   child.stdout.setEncoding('utf8'); child.stdout.on('data', d => { out += d; });
   const send = (m: unknown) => child.stdin.write(JSON.stringify(m) + '\n');
