@@ -388,15 +388,19 @@ export function createTaskTools(d: TaskToolDeps) {
       const sug = d.store().getSuggestion(String(i.id ?? '')); if (!sug || sug.projectId !== projectId) throw new Error('That suggestion no longer exists.');
       const parent = d.tasks().getTask(sug.taskId); if (!parent) throw new Error('The task is gone.');
       const picks = Array.isArray(i.picks) ? new Set(i.picks.map(Number)) : null; let made = 0;
-      for (const [n, item] of sug.items.entries()) {
-        if (item.created || (picks && !picks.has(n))) continue;
-        const assignee = item.assignee ? findAgent(projectId, item.assignee) : undefined;
-        const t = d.tasks().createTask({ projectId, title: item.title, acceptance: item.acceptance, dependencies: [], owner: assignee ? { kind: 'agent', id: assignee.id } : parent.owner, parentId: parent.id, ...(item.priority === 0 || item.priority === 1 || item.priority === 2 || item.priority === 3 ? { priority: item.priority as TaskPriority } : {}) }, 'user');
-        item.created = t.id; made++;
-        if (assignee) d.onAssigned(projectId, t.id);
-      }
+      const assigned: string[] = [];
+      d.tasks().tx(() => {
+        for (const [n, item] of sug.items.entries()) {
+          if (item.created || (picks && !picks.has(n))) continue;
+          const assignee = item.assignee ? findAgent(projectId, item.assignee) : undefined;
+          const t = d.tasks().createSuggestedTask(JSON.stringify([sug.id, n]), { projectId, title: item.title, acceptance: item.acceptance, dependencies: [], owner: assignee ? { kind: 'agent', id: assignee.id } : parent.owner, parentId: parent.id, ...(item.priority === 0 || item.priority === 1 || item.priority === 2 || item.priority === 3 ? { priority: item.priority as TaskPriority } : {}) });
+          item.created = t.id; made++;
+          if (assignee) assigned.push(t.id);
+        }
+      });
       if (!made) throw new Error('Nothing left to create.');
       sug.state = sug.items.every(x => x.created) ? 'done' : 'open'; d.store().saveSuggestion(sug);
+      for (const taskId of assigned) d.onAssigned(projectId, taskId);
       d.record(projectId, 'task.delegated', `You created ${made} of ${sug.memberName}'s suggested ${made === 1 ? 'subtask' : 'subtasks'} under ${d.keyOf(parent)}.`, parent.id, 'user'); d.changed(projectId, parent.id, true);
       return sug;
     },
