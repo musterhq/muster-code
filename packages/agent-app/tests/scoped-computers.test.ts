@@ -66,7 +66,7 @@ test('authority fails before dependency or path access; view never provisions',a
   const f=await fixture(t);await assert.rejects(f.manager.inspect({kind:'chat',id:'missing'}),/no longer available/);assert.equal(f.calls.length,0);
   const status=await f.manager.inspect(a);assert.equal(status.state,'not-created');assert.deepEqual(f.calls.map(call=>call.method),['constructor']);assert.equal(f.runner.calls.length,0);
   assert.equal(status.durability,'scratch');assert.equal((await f.manager.inspect(b)).durability,'durable');
-  assert.deepEqual(status.limits,{network:'none',memoryMiB:512,cpus:1,processes:256,maxRunning:2,maxTimeoutMs:7_200_000});assert.equal(status.user,'1000:1000');
+  assert.deepEqual(status.limits,{network:'none',memoryMiB:512,cpus:1,processes:256,diskGiB:10,maxRunning:2,maxTimeoutMs:7_200_000});assert.equal(status.user,'1000:1000');
   const options=f.calls[0].options as any;assert.equal(options.dockerHost,'unix:///tmp/fixture.sock');assert.equal(options.image,SANDBOX_IMAGE);assert.match(SANDBOX_IMAGE,/^node:24-bookworm-slim@sha256:[0-9a-f]{64}$/);await f.manager.dispose();
 });
 test('bundled QM sandbox contract adapts to Agent Mode lifecycle without changing its ownership calls',async()=>{
