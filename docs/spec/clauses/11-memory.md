@@ -13,4 +13,17 @@ Boundaries:
 
 ## Acceptance cases
 
-No cases yet. A PR that changes this area adds its cases here first (see [acceptance-cases.md](../acceptance-cases.md)).
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-11-673A](11-memory.md#mus-spec-11-673a) | Repository evidence records the branch as release when a tag shares the name. | [`checkout and memory name the branch when a tag shares its name`](../../../packages/agent-app/tests/branch-tag-same-name.test.ts) |
+
+<a id="mus-spec-11-673a"></a>
+#### MUS-SPEC-11-673A: Memory records the branch when a tag has the same name
+
+- Precondition: A repository on branch release with a tag also named release.
+- Action: Read the repository evidence that memory saves.
+- Expected result: The branch recorded is release.
+- Test: `packages/agent-app/tests/branch-tag-same-name.test.ts::checkout and memory name the branch when a tag shares its name`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: Reads the evidence function only. It does not save a memory. The same test covers check-out (MUS-SPEC-12-673A).
+- Evidence: UNVERIFIED
