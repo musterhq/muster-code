@@ -127,7 +127,7 @@ export function userProcessNote(groups: readonly UserProcessGroup[], cwd: string
   const inFolder = (group: UserProcessGroup) => !!group.cwd && (group.cwd === cwd || group.cwd.startsWith(`${cwd}/`));
   const relevant = [...groups].sort((a, b) => Number(inFolder(b)) - Number(inFolder(a))).slice(0, 16);
   if (!relevant.length) return '';
-  return ['User-owned processes (started by the user in Muster, not by you). Never signal, kill or restart these process groups or their children, and do not free ports they hold; if a port is taken, use another port or ask:',
+  return ['User-owned local processes (started by the user in Muster, not by you). Never signal, kill or restart the process groups listed below or their children, and do not free ports they hold; if a local port is taken, use another port or ask. This applies to nothing else: remote hosts (ssh, servers), systemd or launchd services, and anything the user explicitly asks for are allowed:',
     ...relevant.map(group => `- process group ${group.pgid}: ${group.label.replace(/[\x00-\x1f]/g, ' ').slice(0, 80)}${group.cwd ? ` (cwd ${group.cwd.slice(0, 200)})` : ''}`)].join('\n');
 }
 const PROVIDER_LISTING_WAIT_MS = 15_000;
