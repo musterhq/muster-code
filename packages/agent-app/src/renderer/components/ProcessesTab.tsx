@@ -180,7 +180,7 @@ function CommandLauncher({chatId,active,commands}:{chatId:string;active:boolean;
   </div>;
 }
 
-const message=(cause:unknown)=>cause instanceof Error?cause.message:String(cause);
+const message=(cause:unknown)=>cleanIpcError(cause)||'Something went wrong with the terminal. Try again.';
 function Owner({who}:{who:'user'|'agent'}) {
   return <span className={`terminal-owner is-${who}`} title={who==='agent'?'Started by the agent':'Started by you'}>{who==='agent'?'Agent':'You'}</span>;
 }
@@ -226,7 +226,7 @@ function useTerminals(chatId:string,active:boolean,autoStart:boolean) {
   const create=async()=>{
     if(pending.current||archived)return;pending.current=true;setCreating(true);setError('');
     const box=body.current,cols=Math.max(20,Math.floor(((box?.clientWidth||640)-12)/7.25)),rows=Math.max(5,Math.floor(((box?.clientHeight||360)-8)/15));
-    try{const info=await invoke('terminal.create',{chatId,cols:Math.min(cols,1000),rows:Math.min(rows,500)});if(!alive.current)return;setTerminals(rows=>[...rows,info]);select(info.id);}
+    try{const info=await invoke('terminal.create',{chatId,cols:Math.min(cols,1000),rows:Math.min(rows,500)});if(!alive.current){void invoke('terminal.kill',{id:info.id}).catch(()=>{});return;}setTerminals(rows=>[...rows,info]);select(info.id);}
     catch(cause){if(alive.current)setError(message(cause));}
     finally{pending.current=false;if(alive.current)setCreating(false);}
   };
