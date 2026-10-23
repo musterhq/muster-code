@@ -98,6 +98,19 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
   db.exec('CREATE TABLE IF NOT EXISTS memory_deleted_documents (document_id TEXT NOT NULL, scope TEXT NOT NULL, bank_id TEXT, engine TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, next_at TEXT, job_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (scope, document_id))');
   db.exec('CREATE TABLE IF NOT EXISTS memory_offer_history (chat_id TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL)');
   db.exec('CREATE INDEX IF NOT EXISTS memory_offer_history_chat ON memory_offer_history (chat_id)');
+  // One surfaced offer per chat per local day; kept durably so a restart does not reset the throttle.
+  db.exec('CREATE TABLE IF NOT EXISTS memory_offer_days (chat_id TEXT PRIMARY KEY, day TEXT NOT NULL)');
+  const dayKey = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const offerDays = {
+    /** True (and records today) when this chat has not had an offer yet today. */
+    take(chatId: string): boolean {
+      const today = dayKey();
+      const row = db.prepare('SELECT day FROM memory_offer_days WHERE chat_id = ?').get(chatId) as { day: string } | undefined;
+      if (row?.day === today) return false;
+      db.prepare('INSERT INTO memory_offer_days (chat_id, day) VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET day = excluded.day').run(chatId, today);
+      return true;
+    },
+  };
   /** Recent run-summary offers per chat, so an active session iterating on the same task doesn't
    *  re-suggest remembering it after every turn. Kept in a small table so a restart doesn't re-offer what
    *  was just offered; rows past the dedupe window, beyond the per-chat cap, or for deleted chats are pruned. */
@@ -114,6 +127,8 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
       db.prepare('DELETE FROM memory_offer_history WHERE at < ?').run(now - OFFER_DEDUPE_WINDOW_MS);
       const chats = db.prepare('SELECT DISTINCT chat_id FROM memory_offer_history').all() as { chat_id: string }[];
       for (const { chat_id } of chats) if (!context.store.chat(chat_id)) db.prepare('DELETE FROM memory_offer_history WHERE chat_id = ?').run(chat_id);
+      // A throttle row only matters on its own day.
+      db.prepare('DELETE FROM memory_offer_days WHERE day <> ?').run(dayKey(new Date(now)));
     },
   };
   const archiveDir = join(context.dataDir, 'memory-archives');
@@ -593,8 +608,11 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
     offerHistory.set(chat.id, recordOffer(history, summary));
     const folderId = chat.folderId && context.store.folder(chat.folderId) ? chat.folderId : undefined;
     if (autoRetain === 'ask') {
+      // The Memory inbox reads these rows; the transcript hides them. Only the first candidate of the day is
+      // listed as an offer, later ones are kept as held rows (status 'held') so nothing is lost.
+      const listed = offerDays.take(chat.id);
       const before = revision(chat.id);
-      context.store.appendItem(chat.id, 'notice', 'Suggested a note about this run for memory. Review it in Memory to remember or dismiss it.', 'offer', { kind: 'memory-offer', chatId: chat.id, runId, summary });
+      context.store.appendItem(chat.id, 'notice', listed ? 'Suggested a note about this run for memory. Review it in Memory to remember or dismiss it.' : 'Held a note about this run for memory.', listed ? 'offer' : 'held', { kind: 'memory-offer', chatId: chat.id, runId, summary, ...(listed ? {} : { held: true }) });
       publish(chat.id, before);
       return;
     }
