@@ -13,6 +13,7 @@ test('tool output drops ANSI colour codes, including a sequence split across chu
   assert.equal(joined, 'ok green');
 });
 
+// Spec: MUS-SPEC-10-455A (docs/spec/clauses/10-terminal-and-processes.md#mus-spec-10-455a)
 test('the agent is told which live processes belong to the user', () => {
   assert.equal(userProcessNote([], '/repo'), '');
   const note = userProcessNote([{pgid: 4100, label: 'terminal zsh', chatId: 'c', cwd: '/elsewhere'}, {pgid: 4200, label: 'terminal zsh', chatId: 'c', cwd: '/repo/apps/web'}], '/repo');
@@ -21,6 +22,7 @@ test('the agent is told which live processes belong to the user', () => {
   assert.ok(note.indexOf('4200') < note.indexOf('4100'), 'processes in this folder are listed first');
 });
 
+// Spec: MUS-SPEC-10-455B (docs/spec/clauses/10-terminal-and-processes.md#mus-spec-10-455b)
 test('the process-ownership rule is scoped to local processes and names the allowed exceptions', () => {
   assert.match(PROCESS_OWNERSHIP_RULE, /local machine only/);
   assert.match(PROCESS_OWNERSHIP_RULE, /in-app terminals, Commands-tab commands and dev servers/);
