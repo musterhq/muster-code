@@ -27,6 +27,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Stopping a turn settles unfinished tool rows as Stopped, retaining partial output after reopening; denied commands say Did not run.
 
 - Codex offers GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna when its model cache is unavailable; a readable provider catalog keeps precedence.
+- Preserve single line breaks in assistant prose while keeping code blocks and tables unchanged; Markdown file previews still reflow hard-wrapped paragraphs.
 - Untracked files can be discarded to Trash with confirmation from Changes or a diff, file actions stay visible, and opening a diff preserves the Changes compare mode.
 
 - Commands stopped during startup now remain stopped when a launch error arrives, avoiding failure follow-ups.
