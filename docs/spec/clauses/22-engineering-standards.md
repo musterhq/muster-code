@@ -18,6 +18,9 @@ Boundaries:
 | [MUS-SPEC-22-1A](22-engineering-standards.md#mus-spec-22-1a) | A case and its test that name each other pass, and the checker reports the case count. | [`a case and its test that name each other pass`](../../../packages/agent-app/tests/check-spec.test.ts) |
 | [MUS-SPEC-22-1B](22-engineering-standards.md#mus-spec-22-1b) | A case missing one of the seven fields fails and names the case and the field. | [`a case missing one of its seven fields fails and names the field`](../../../packages/agent-app/tests/check-spec.test.ts) |
 | [MUS-SPEC-22-1C](22-engineering-standards.md#mus-spec-22-1c) | A case ID whose clause number differs from its file fails. | [`a case ID whose clause number does not match its file fails`](../../../packages/agent-app/tests/check-spec.test.ts) |
+| [MUS-SPEC-22-2F](22-engineering-standards.md#mus-spec-22-2f) | Only skip, todo or only set to true, a string or a number skips a test; a run-time skip variable, skip: false and only: false still link; test.skip and test.only do not. | [`a run-time skip variable or skip: false still links; skip: true and test.skip do not`](../../../packages/agent-app/tests/check-spec.test.ts) |
+| [MUS-SPEC-22-1D](22-engineering-standards.md#mus-spec-22-1d) | The same case ID twice fails, and two tests with one name fail. | [`the same case ID twice, or two tests with one name, fail`](../../../packages/agent-app/tests/check-spec.test.ts) |
+| [MUS-SPEC-22-2G](22-engineering-standards.md#mus-spec-22-2g) | A Spec comment separated from its test by a blank line does not link. | [`a blank line between the Spec comment and the test breaks the link`](../../../packages/agent-app/tests/check-spec.test.ts) |
 | [MUS-SPEC-22-2A](22-engineering-standards.md#mus-spec-22-2a) | A case naming a test that does not exist fails with the missing name. | [`a case whose test does not exist fails`](../../../packages/agent-app/tests/check-spec.test.ts) |
 | [MUS-SPEC-22-2B](22-engineering-standards.md#mus-spec-22-2b) | A test marked skip cannot prove a case. | [`a skipped test cannot prove a case`](../../../packages/agent-app/tests/check-spec.test.ts) |
 | [MUS-SPEC-22-2C](22-engineering-standards.md#mus-spec-22-2c) | A linked test with no Spec comment above it fails, naming the case. | [`a test without its Spec comment fails the link back`](../../../packages/agent-app/tests/check-spec.test.ts) |
@@ -59,6 +62,17 @@ Boundaries:
 - Action: Run the checker.
 - Expected result: It exits 1 and the message names the case and clause 04.
 - Test: `packages/agent-app/tests/check-spec.test.ts::a case ID whose clause number does not match its file fails`
+- Environment: Node test runner; the checker runs as a child process on a temp folder.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-22-1d"></a>
+#### MUS-SPEC-22-1D: IDs and test names are unique
+
+- Precondition: A clause file holding the same case twice; then a test file with two tests of one name.
+- Action: Run the checker on each.
+- Expected result: Both exit 1: the first says duplicate case ID, the second says 2 tests are named the same.
+- Test: `packages/agent-app/tests/check-spec.test.ts::the same case ID twice, or two tests with one name, fail`
 - Environment: Node test runner; the checker runs as a child process on a temp folder.
 - Known gaps: None known.
 - Evidence: UNVERIFIED
@@ -118,6 +132,28 @@ Boundaries:
 - Test: `packages/agent-app/tests/check-spec.test.ts::a DOM suite links through a named check in a file that imports dom-check`
 - Environment: Node test runner; the checker runs as a child process on a temp folder.
 - Known gaps: Does not run the DOM suite.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-22-2f"></a>
+#### MUS-SPEC-22-2F: A test is skipped only by a fixed skip setting
+
+- Precondition: Seven forms of the linked test: a run-time `{skip}` variable, `skip: false`, `only: false`, `skip: true`, `todo: 'later'`, `test.skip` and `test.only`.
+- Action: Run the checker on each.
+- Expected result: The first three exit 0. The last four exit 1.
+- Test: `packages/agent-app/tests/check-spec.test.ts::a run-time skip variable or skip: false still links; skip: true and test.skip do not`
+- Environment: Node test runner; the checker runs as a child process on a temp folder.
+- Known gaps: A skip decided while the test runs, such as a `{skip}` variable or t.skip(), is not seen.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-22-2g"></a>
+#### MUS-SPEC-22-2G: A Spec comment must touch its test
+
+- Precondition: The Spec comment is followed by a blank line, then the test.
+- Action: Run the checker.
+- Expected result: It exits 1 and says the comment must sit directly above a test call.
+- Test: `packages/agent-app/tests/check-spec.test.ts::a blank line between the Spec comment and the test breaks the link`
+- Environment: Node test runner; the checker runs as a child process on a temp folder.
+- Known gaps: None known.
 - Evidence: UNVERIFIED
 
 ### Evidence and the index

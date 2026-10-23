@@ -69,7 +69,9 @@ function testCalls(text, allowCheck) {
     const name = literal && !literal.interpolated ? literal.value : null;
     let skipped = written !== 'test' && written !== 'it' && written !== 'check';
     if (literal && !skipped) {
-      // An options object as the second argument with skip/todo/only also skips the test.
+      // An options object as the second argument skips the test when skip/todo/only is set to a literal that is not
+      // false (true, a reason string or a number). A bare `{skip}` or `skip: someVar` is decided at run time, which the
+      // checker cannot see (acceptance-cases.md "What the checker proves").
       let q = literal.end;
       while (/\s/.test(masked[q] ?? '')) q++;
       if (masked[q] === ',') {
@@ -77,7 +79,8 @@ function testCalls(text, allowCheck) {
         if (masked[q] === '{') {
           let depth = 0, r = q;
           for (; r < masked.length; r++) { if (masked[r] === '{') depth++; else if (masked[r] === '}' && --depth === 0) break; }
-          if (/\b(skip|todo|only)\b/.test(masked.slice(q, r + 1))) skipped = true;
+          const options = text.slice(q, r + 1);
+          if (/\b(skip|todo|only)\s*:\s*(?!false\b)(true\b|['"`]|\d)/.test(options)) skipped = true;
         }
       }
     }

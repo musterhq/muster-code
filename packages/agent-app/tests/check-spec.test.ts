@@ -160,6 +160,52 @@ test('a clause with cases must be listed in the traceability index, and one with
   assert.match(b.out, /test-traceability.*MUS-SPEC-04/);
 });
 
+// Spec: MUS-SPEC-22-2F (docs/spec/clauses/22-engineering-standards.md#mus-spec-22-2f)
+test('a run-time skip variable or skip: false still links; skip: true and test.skip do not', async t => {
+  const forms: Array<[string, number]> = [
+    ["const skip = false;\ntest('your window wins', {skip, timeout: 90_000}, () => {});", 0],
+    ["test('your window wins', {skip: false, timeout: 90_000}, () => {});", 0],
+    ["test('your window wins', {timeout: 90_000, only: false}, () => {});", 0],
+    ["test('your window wins', {skip: true}, () => {});", 1],
+    ["test('your window wins', {todo: 'later'}, () => {});", 1],
+    ["test.skip('your window wins', () => {});", 1],
+    ["test.only('your window wins', () => {});", 1],
+  ];
+  for (const [call, want] of forms) {
+    const [setup, testCall] = call.includes('\n') ? call.split('\n') : ['', call];
+    const fixed = `import {test} from 'node:test';\n${setup}\n\n// Spec: MUS-SPEC-04-1A (${CASE_PATH}#mus-spec-04-1a)\n${testCall}\n`;
+    const root = await tree({[CASE_PATH]: clause(block()), [TEST_PATH]: fixed});
+    t.after(() => removeTmp(root));
+    const result = run(root);
+    assert.equal(result.code, want, `${call}\n${result.out}`);
+  }
+});
+
+// Spec: MUS-SPEC-22-1D (docs/spec/clauses/22-engineering-standards.md#mus-spec-22-1d)
+test('the same case ID twice, or two tests with one name, fail', async t => {
+  const twice = clause(block() + '\n' + block());
+  const a = await tree({[CASE_PATH]: twice, [TEST_PATH]: LINKED_TEST});
+  t.after(() => removeTmp(a));
+  const first = run(a);
+  assert.equal(first.code, 1);
+  assert.match(first.out, /duplicate case ID/);
+  const b = await tree({[CASE_PATH]: clause(block()), [TEST_PATH]: LINKED_TEST + "\ntest('your window wins', () => {});\n"});
+  t.after(() => removeTmp(b));
+  const second = run(b);
+  assert.equal(second.code, 1);
+  assert.match(second.out, /2 tests are named/);
+});
+
+// Spec: MUS-SPEC-22-2G (docs/spec/clauses/22-engineering-standards.md#mus-spec-22-2g)
+test('a blank line between the Spec comment and the test breaks the link', async t => {
+  const gap = LINKED_TEST.replace("#mus-spec-04-1a)\ntest(", "#mus-spec-04-1a)\n\ntest(");
+  const root = await tree({[CASE_PATH]: clause(block()), [TEST_PATH]: gap});
+  t.after(() => removeTmp(root));
+  const result = run(root);
+  assert.equal(result.code, 1);
+  assert.match(result.out, /directly above/);
+});
+
 // Spec: MUS-SPEC-22-2E (docs/spec/clauses/22-engineering-standards.md#mus-spec-22-2e)
 test('a DOM suite links through a named check in a file that imports dom-check', async t => {
   const dom = `import {check} from './dom-check.ts';\n\n// Spec: MUS-SPEC-04-1A (${CASE_PATH}#mus-spec-04-1a)\nawait check('your window wins', async () => {});\n`;
