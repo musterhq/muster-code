@@ -29,6 +29,11 @@ jobs:
           node-version: "24"
           cache: pnpm
 
+      # Required check: every acceptance case names one real, non-skipped test and that test names it back
+      # (docs/spec/acceptance-cases.md). No install needed; runs before the build so a broken link fails fast.
+      - name: Spec links
+        run: node scripts/check-spec.mjs
+
       # packages/builtin depends on "link:../../../muster/packages/core", i.e. a sibling checkout of
       # github.com/musterhq/muster next to this repo. The npm release of @musterhq/core lags that source and
       # lacks the Codex app-server API builtin imports, so build core from a pinned commit instead.
