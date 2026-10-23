@@ -14,4 +14,17 @@ Boundaries:
 
 ## Acceptance cases
 
-No cases yet. A PR that changes this area adds its cases here first (see [acceptance-cases.md](../acceptance-cases.md)).
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-13-575A](13-muster-server.md#mus-spec-13-575a) | Server status and kind words named like object keys map to the defaults. | [`a server status or kind named like an Object.prototype member falls back to the default`](../../../packages/agent-app/tests/paperclip-map-bughunt.test.ts) |
+
+<a id="mus-spec-13-575a"></a>
+#### MUS-SPEC-13-575A: A server value named like an object key falls back to the default
+
+- Precondition: Server data whose status or kind is constructor, toString, hasOwnProperty or __proto__.
+- Action: Map an agent, a run, an attention item and an approval.
+- Expected result: The agent is idle, the run is failed, the item is kind other with "Needs your attention.", and the approval has a text title.
+- Test: `packages/agent-app/tests/paperclip-map-bughunt.test.ts::a server status or kind named like an Object.prototype member falls back to the default`
+- Environment: Node test runner; no network.
+- Known gaps: Tests the mapping functions. It does not read from a live server.
+- Evidence: UNVERIFIED
