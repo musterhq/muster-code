@@ -30,6 +30,7 @@ Boundaries:
 | [MUS-SPEC-22-3B](22-engineering-standards.md#mus-spec-22-3b) | A not-written-yet case passes only with UNVERIFIED evidence. | [`a not-written-yet case passes only with UNVERIFIED evidence and an issue number`](../../../packages/agent-app/tests/check-spec.test.ts) |
 | [MUS-SPEC-22-3C](22-engineering-standards.md#mus-spec-22-3c) | The traceability index must list exactly the clauses that have cases. | [`a clause with cases must be listed in the traceability index, and one without must not`](../../../packages/agent-app/tests/check-spec.test.ts) |
 | [MUS-SPEC-22-4A](22-engineering-standards.md#mus-spec-22-4a) | The real Muster spec in this repository passes the checker. | [`the real Muster spec passes the checker`](../../../packages/agent-app/tests/check-spec.test.ts) |
+| [MUS-SPEC-22-482A](22-engineering-standards.md#mus-spec-22-482a) | With no dist folder, the Hindsight service test file loads and the tests that use a fake core pass; only the tests that drive the real bundle are skipped. | [`unconfigured status is truthful and never includes a key`](../../../packages/agent-app/tests/hindsight-service.test.ts) |
 
 ### Case format
 
@@ -202,4 +203,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/check-spec.test.ts::the real Muster spec passes the checker`
 - Environment: Node test runner; the checker runs as a child process on the repository.
 - Known gaps: CI also runs the checker directly; this test keeps the unit suite honest when CI is skipped locally.
+- Evidence: UNVERIFIED
+
+### Tests that need the built core (#482)
+
+<a id="mus-spec-22-482a"></a>
+#### MUS-SPEC-22-482A: Tests that do not need the built core still run when it is not built
+
+- Precondition: A checkout where the app has not been built, so dist/runtime/core-hindsight.cjs does not exist.
+- Action: Run the Hindsight service test file.
+- Expected result: The file loads and the tests that use a fake core run and pass, including this one. Only the three tests that drive the real bundled core are skipped, with a message that says to run the build first. The file does not stop with a missing-module error.
+- Test: `packages/agent-app/tests/hindsight-service.test.ts::unconfigured status is truthful and never includes a key`
+- Environment: Node test runner in a checkout with no dist folder; no network.
+- Known gaps: This is a rule about the test suite, not a user feature. The linked test must keep running without a build, but no test asserts that the three bundle tests are skipped, and a skipped test cannot be linked. The same skip for the reasoning text test is not linked for that reason. On a built checkout the linked test passes on main too; it fails on main only when dist is missing.
 - Evidence: UNVERIFIED
