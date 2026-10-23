@@ -13,4 +13,17 @@ Boundaries:
 
 ## Acceptance cases
 
-No cases yet. A PR that changes this area adds its cases here first (see [acceptance-cases.md](../acceptance-cases.md)).
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-15-572A](15-settings-and-themes.md#mus-spec-15-572a) | A theme with extra fields or padded token values is refused. | [`a custom theme list with extra fields or untrimmed token values is rejected, not stored as given`](../../../packages/agent-app/tests/protocol-bughunt.test.ts) |
+
+<a id="mus-spec-15-572a"></a>
+#### MUS-SPEC-15-572A: A custom theme list with extra fields is rejected
+
+- Precondition: A valid custom theme with an id, a name, a base and one colour token.
+- Action: Validate the setting with an extra field on the theme, an extra token, or a token value padded with spaces.
+- Expected result: The valid theme is accepted as given. Each bad form is refused with an error that names customThemes.
+- Test: `packages/agent-app/tests/protocol-bughunt.test.ts::a custom theme list with extra fields or untrimmed token values is rejected, not stored as given`
+- Environment: Node test runner; no network.
+- Known gaps: Tests the settings validator. It does not save through the Settings screen.
+- Evidence: UNVERIFIED

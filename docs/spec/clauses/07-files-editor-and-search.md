@@ -14,4 +14,17 @@ Boundaries:
 
 ## Acceptance cases
 
-No cases yet. A PR that changes this area adds its cases here first (see [acceptance-cases.md](../acceptance-cases.md)).
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-07-572A](07-files-editor-and-search.md#mus-spec-07-572a) | Search prefixes named like object keys stay plain words in the all scope. | [`search scope prefixes named after Object.prototype keys are plain words`](../../../packages/agent-app/tests/protocol-bughunt.test.ts) |
+
+<a id="mus-spec-07-572a"></a>
+#### MUS-SPEC-07-572A: Search words named like object keys are plain text
+
+- Precondition: No setup.
+- Action: Parse the search text constructor:foo, toString:foo, __proto__:foo, hasOwnProperty:foo, valueOf:foo and the in: form of each.
+- Expected result: Each stays in the all scope with its text unchanged.
+- Test: `packages/agent-app/tests/protocol-bughunt.test.ts::search scope prefixes named after Object.prototype keys are plain words`
+- Environment: Node test runner; no network.
+- Known gaps: Tests the query parser. It does not type into the search box.
+- Evidence: UNVERIFIED
