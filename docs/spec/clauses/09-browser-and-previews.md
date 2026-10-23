@@ -13,4 +13,19 @@ Boundaries:
 
 ## Acceptance cases
 
-No cases yet. A PR that changes this area adds its cases here first (see [acceptance-cases.md](../acceptance-cases.md)).
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-09-564A](09-browser-and-previews.md#mus-spec-09-564a) | A download name with a right-to-left override keeps its real .exe extension and holds no direction control characters. | [`a downloaded file name cannot use text-direction controls to disguise its extension`](../../../packages/agent-app/tests/browser-download-name.test.ts) |
+
+### Downloads
+
+<a id="mus-spec-09-564a"></a>
+#### MUS-SPEC-09-564A: A downloaded file name has no hidden text-direction characters
+
+- Precondition: A page offers a download whose name has a right-to-left override character in the middle, so `invoice` + override + `fdp.exe` would read as `invoiceexe.pdf`.
+- Action: Work out the file name the in-app browser saves the download under.
+- Expected result: The saved name holds no invisible text-direction characters and still ends in `.exe`. A name that starts with an override character and then reads `report.pdf` is saved as `report.pdf`.
+- Test: `packages/agent-app/tests/browser-download-name.test.ts::a downloaded file name cannot use text-direction controls to disguise its extension`
+- Environment: Node test runner; no network, no provider.
+- Known gaps: Calls the name function used by the download handler, not a real download in the browser tab.
+- Evidence: UNVERIFIED
