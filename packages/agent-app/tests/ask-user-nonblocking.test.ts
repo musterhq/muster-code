@@ -37,6 +37,7 @@ async function setup(t: {after(fn: () => unknown): void}, steerable = true) {
 }
 const answer = (text: string) => ({answer: {answers: [text]}});
 
+// Spec: MUS-SPEC-02-476A (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-476a)
 test('ask_user returns at once with the default, posts a non-blocking question card, and the run keeps going', async t => {
   const {service, fake, chat, items, ask} = await setup(t);
   const reply = await ask({question: 'Which database?', options: ['Postgres', 'SQLite'], default: 'SQLite'});
@@ -58,6 +59,7 @@ test('ask_user returns at once with the default, posts a non-blocking question c
   fake.finish();
 });
 
+// Spec: MUS-SPEC-02-476B (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-476b)
 test('ask_user without a default or question is refused, and no card is posted', async t => {
   const {items, ask, fake} = await setup(t);
   const missing = await ask({question: 'Which?'});
@@ -68,6 +70,7 @@ test('ask_user without a default or question is refused, and no card is posted',
   fake.finish();
 });
 
+// Spec: MUS-SPEC-02-476C (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-476c)
 test('an answer while the run is going is delivered as a steer; answering twice is a no-op', async t => {
   const {service, fake, chat, items, ask} = await setup(t);
   await ask({question: 'Which database?', options: ['Postgres', 'SQLite'], default: 'SQLite'});
@@ -85,6 +88,7 @@ test('an answer while the run is going is delivered as a steer; answering twice 
   fake.finish();
 });
 
+// Spec: MUS-SPEC-02-476D (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-476d)
 test('an answer after the run ended is queued and starts the next turn', async t => {
   const {service, fake, chat, items, ask} = await setup(t);
   await ask({question: 'Dark mode too?', default: 'No, light only'});
@@ -103,6 +107,7 @@ test('an answer after the run ended is queued and starts the next turn', async t
   fake.finish();
 });
 
+// Spec: MUS-SPEC-02-476E (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-476e)
 test('a route that cannot steer gets the answer as the next turn', async t => {
   const {service, fake, items, ask} = await setup(t, false);
   await ask({question: 'Port?', default: '3000'});
@@ -115,6 +120,7 @@ test('a route that cannot steer gets the answer as the next turn', async t => {
   fake.finish();
 });
 
+// Spec: MUS-SPEC-02-476F (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-476f)
 test('dismissing an ask_user card delivers nothing; the agent keeps its default', async t => {
   const {service, fake, items, ask} = await setup(t);
   await ask({question: 'Port?', default: '3000'});
@@ -125,6 +131,7 @@ test('dismissing an ask_user card delivers nothing; the agent keeps its default'
   fake.finish();
 });
 
+// Spec: MUS-SPEC-02-476G (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-476g)
 test('the muster_ask server never raises an approval card, in any access mode', async t => {
   const {fake, items} = await setup(t);
   const onRequest = fake.inputs.at(-1)!.onRequest;
@@ -134,6 +141,7 @@ test('the muster_ask server never raises an approval card, in any access mode', 
   fake.finish();
 });
 
+// Spec: MUS-SPEC-02-476H (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-476h)
 test('CLI routes get the muster_ask MCP server when the tool host runs', async t => {
   const dataDir = await mkdtemp(join(tmpdir(), 'muster-ask-host-'));
   t.after(() => rm(dataDir, {recursive: true, force: true}));
@@ -151,6 +159,7 @@ test('CLI routes get the muster_ask MCP server when the tool host runs', async t
   fake.finish();
 });
 
+// Spec: MUS-SPEC-02-476I (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-476i)
 test('HTTP routes: ask_user is a native tool at every access level and returns at once', async () => {
   for (const access of ['read-only', 'workspace', 'full'] as const) {
     assert.ok(toolSpecs(access, false, true).some(tool => tool.function.name === ASK_USER_TOOL), access);
@@ -167,6 +176,7 @@ test('HTTP routes: ask_user is a native tool at every access level and returns a
   assert.deepEqual(events.map(([method, params]) => [method, (params.item as {server?: string}).server]), [['item/started', ASK_MCP], ['item/completed', ASK_MCP]]);
 });
 
+// Spec: MUS-SPEC-02-476J (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-476j)
 test('agent instructions prefer ask_user over ending the turn to ask (agent mode only)', () => {
   assert.ok(runInstructions('agent')!.includes(ASK_USER_RULE));
   assert.match(ASK_USER_RULE, /instead of ending your turn to ask/);
