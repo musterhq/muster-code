@@ -143,6 +143,7 @@ test('saved history is bounded and rejects entries outside the HTTP(S) policy',(
   assert.equal(savedBrowserHistory(many,500),undefined);
 });
 
+// Spec: MUS-SPEC-09-465A (docs/spec/clauses/09-browser-and-previews.md#mus-spec-09-465a)
 test('frame() on a frozen tab thaws it and on a discarded tab recreates it',async()=>{
   const {controller,open,show,hide,liveViews,views}=fixture();
   open('a');show('a');hide('a');
@@ -158,6 +159,7 @@ test('frame() on a frozen tab thaws it and on a discarded tab recreates it',asyn
   assert.equal(await controller.frame('browser:missing'),undefined);
 });
 
+// Spec: MUS-SPEC-09-465B (docs/spec/clauses/09-browser-and-previews.md#mus-spec-09-465b)
 test('a tab an agent tool is using is neither frozen nor discarded by the memory paths',()=>{
   const {controller,open,show,hide,tick,liveViews}=fixture({maxLiveViews:2,idleDiscardMs:1000});
   open('a');show('a');

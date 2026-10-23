@@ -135,6 +135,7 @@ test('bridge: one tab per sub-agent session, a hung call answers with a clear er
   retry.dispose();broken.dispose();bridge.dispose();
 });
 
+// Spec: MUS-SPEC-09-465C (docs/spec/clauses/09-browser-and-previews.md#mus-spec-09-465c)
 test('MCP server: connection resets retry read-only tools with backoff but never repeat a click',async()=>{
   let reads=0;
   const reset=async()=>{if(++reads<3)throw new Error('fetch failed: ECONNRESET');return {content:[{type:'text' as const,text:'ok'}]};};

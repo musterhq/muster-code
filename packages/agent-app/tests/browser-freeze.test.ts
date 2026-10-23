@@ -42,6 +42,7 @@ test('a hidden page is frozen, and showing it thaws it first',()=>{
   controller.dispose();
 });
 
+// Spec: MUS-SPEC-09-465D (docs/spec/clauses/09-browser-and-previews.md#mus-spec-09-465d)
 test('agent use thaws a hidden page; the sweeper refreezes it once idle',()=>{
   const {controller,views,show,hide,open,tick}=fixture();
   open('a');show('a');hide('a');
