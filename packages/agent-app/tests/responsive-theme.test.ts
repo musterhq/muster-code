@@ -1,3 +1,4 @@
+import {readFileSync} from 'node:fs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {resolveTheme} from '../src/renderer/components/settings/preferences.ts';
@@ -19,4 +20,7 @@ test('UX-19: theme setting validates, resolves and drives nativeTheme', () => {
   assert.equal(applyThemeSource(native, themeFromSettingsResult({values: {'appearance.theme': 'system'}})), false, 'no-op when unchanged');
   assert.equal(themeFromSettingsResult({path: null}), undefined, 'non-settings results are ignored');
   assert.equal(windowBackground(false), '#fbfbfb');
+  // The native window fill shows before first paint and behind reduced transparency: it must be the dark theme's --bg.
+  const css = readFileSync(new URL('../src/renderer/styles.css', import.meta.url), 'utf8');
+  assert.equal(windowBackground(true), /:root \{[^}]*?--bg: (#[0-9a-f]{6});/.exec(css)?.[1]);
 });
