@@ -9,7 +9,7 @@ import { promises as fs, existsSync, mkdirSync, copyFileSync, statSync } from 'n
 import { basename, join } from 'node:path';
 import { rescanProviderListings, setProviderListingStore } from './provider-instances.ts';
 import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, TimelineItem, WakeReason } from '../shared/protocol.ts';
-import { CONTEXT_OVERFLOW, musterCompactAt } from '../shared/context-window.ts';
+import { CONTEXT_OVERFLOW, musterCompactAt, withUserWindow } from '../shared/context-window.ts';
 import type { PendingAttentionSummary, AttentionRequest } from '../shared/attention-protocol.ts';
 import { discoverLocalProviders } from './provider-discovery.ts';
 import { homedir } from 'node:os';
@@ -47,7 +47,7 @@ import { createNativeThreadBridge } from './codex-native.ts';
 import { createNativeTurnObserver } from './native-turns.ts';
 import { createNativeQueueMirror } from './native-queue.ts';
 import { ChatAttachments, attachedFileLines } from './attachments.ts';
-import { admissionRetryText, withAdmissionRetry } from './admission-retry.ts';
+import { admissionRetryText, asSentence, retryClock, withAdmissionRetry } from './admission-retry.ts';
 import { ContextLedger, HISTORY_WINDOW_EVENT, TOOLS_UNAVAILABLE_EVENT, requestsConnectors, type ContextBlock } from './context-budget.ts';
 import { createDomainHooks } from './domains/hooks.ts';
 import { createDomains } from './domains/index.ts';
@@ -368,7 +368,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (item) store.updateItem(itemId, item.text, status, status === 'expired' ? {...item.data, expiredReason:'timeout'} : reason ? {...item.data, expiredReason:reason} : item.data);
     if (status === 'expired') store.appendItem(pending.chatId, 'notice', 'An approval request timed out before you answered, so the agent was told it was not approved. Use Ask again to have it re-ask.', 'completed', {kind:'attention-expired', itemId});
     const toolItemId = typeof item?.data?.toolItemId === 'string' ? item.data.toolItemId : undefined, tool = toolItemId ? store.item(toolItemId) : undefined;
-    if (tool?.data?.awaitingApproval === itemId) { const {awaitingApproval: _cleared, ...rest} = tool.data; store.updateItem(tool.id, tool.text, tool.status, rest); }
+    if (tool?.data?.awaitingApproval === itemId) { const {awaitingApproval: _cleared, ...rest} = tool.data; store.updateItem(tool.id, tool.text, tool.status, {...rest, ...(status === 'declined' ? {executionDenied:true} : status === 'expired' ? {executionDenied:true, deniedReason:'timeout'} : {})}); }
     timeline(pending.chatId); state(); pending.resolve(decision);
   }
   function finishQuestion(itemId: string, pending: PendingQuestionRequest, answers: QuestionAnswers, status: string, receiptAnswers?: Record<string, {answers:string[]}>, reason?: 'stale') {
@@ -398,6 +398,21 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     else if (native) store.updateItem(native, COMPACTION_TEXT, 'completed', data);
     else store.appendItem(chatId, 'notice', COMPACTION_TEXT, 'completed', data);
     timeline(chatId);
+  }
+  /** #583: a manual compaction the provider accepted is settled at once; Codex reports that same compaction (its
+   *  contextCompaction item, then thread/compacted) only afterwards. Those reports must not add an automatic row. */
+  const acceptedCompactions = new Map<string, number>();
+  const ACCEPTED_REPORT_MS = 120_000;
+  function acceptedReport(chatId: string): boolean {
+    const at = acceptedCompactions.get(chatId);
+    if (at === undefined) return false;
+    if (Date.now() - at <= ACCEPTED_REPORT_MS) return true;
+    acceptedCompactions.delete(chatId); return false;
+  }
+  /** Consumes the provider's report of an accepted manual compaction: the thread was compacted, and its row already says so. */
+  function absorbAcceptedReport(chatId: string): boolean {
+    if (!acceptedReport(chatId)) return false;
+    acceptedCompactions.delete(chatId); contextLedger.forget(chatId); return true;
   }
   /** #426: failure rows say why and offer Retry and "Continue in a fresh thread with a summary". */
   const COMPACTION_ACTIONS = ['retry', 'fresh'] as const;
@@ -433,7 +448,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const existing = options.rowId ? store.item(options.rowId) : undefined;
     const row = existing ?? store.appendItem(chatId, 'notice', 'Compacting context…', 'running', {kind:'compaction', status:'running', manual:true});
     if (existing) store.updateItem(row.id, 'Compacting context…', 'running', {kind:'compaction', status:'running', manual:true});
-    compactions.set(chatId, row.id); timeline(chatId);
+    compactions.set(chatId, row.id); acceptedCompactions.delete(chatId); timeline(chatId);
     let settle!: () => void;
     compactionRuns.set(chatId, new Promise<void>(resolve => { settle = resolve; }));
     const fail = (reason: string) => {
@@ -459,7 +474,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         throw error;
       }
       // The provider confirms with thread/compacted; a quiet provider still settles the row once the request was accepted.
-      compactionCompleted(chatId);
+      if (compactions.get(chatId) === row.id) { compactionCompleted(chatId); acceptedCompactions.set(chatId, Date.now()); }
     } finally {
       compactionRuns.delete(chatId); settle();
       if (!runs.has(chatId) && store.queue(chatId).length) dispatchQueued(chatId);
@@ -471,8 +486,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   async function autoCompactBeforeTurn(chat: Chat, route: ProviderInfo): Promise<boolean> {
     const telemetry = store.contextTelemetry(chat.id);
     if (telemetry.compacted || telemetry.usedTokens === null || compactions.has(chat.id)) return false;
-    const model = route.models.find(entry => entry.id === chat.model);
-    const {at, window} = musterCompactAt(route.driver, model, telemetry.windowTokens);
+    const model = withUserWindow(route.models.find(entry => entry.id === chat.model), domainHooks.contextWindowOverride(route.id, chat.model));
+    const {at, window} = musterCompactAt(route.driver, model, telemetry.windowTokens, telemetry.usedTokens);
     if (telemetry.usedTokens < at || !store.timeline(chat.id).some(item => item.kind === 'user')) return false;
     const used = `${Math.round(telemetry.usedTokens / 1000)}K of ${Math.round(window.tokens / 1000)}K tokens`;
     const row = store.appendItem(chat.id, 'notice', `Compacting context before this message (${used} in use)…`, 'running', {kind:'compaction', status:'running', auto:true});
@@ -662,6 +677,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const contextualPrompt = preamble ? `${preamble}\n\nCurrent user request:\n${request}` : request;
         let retryNotice: TimelineItem | undefined;
         let retryReason = 'admission' as 'admission' | 'transient';
+        let retryDetail: string | undefined;
         const stoppedBeforeDispatch: ProviderResult = {status:'failed',finalMessage:'',dispatchState:'not-dispatched',recovery:{kind:'cancelled',retryable:false,reason:'Stopped before the request was sent.'}};
         const attempt = () => run.stopped ? Promise.resolve(stoppedBeforeDispatch) : provider.run({ chat: {...chat,providerTurnId:undefined,recovery:undefined}, cwd, prompt: contextualPrompt,
           ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) ? {connectorsRequested: true} : {}),
@@ -692,10 +708,14 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             if (method === TOOLS_UNAVAILABLE_EVENT) { store.appendItem(chatId, 'notice', `${chat.model} can’t run commands or edit files through this route, so it answered without tools. Use “Switch to…” in the composer to pick a model with tools.`, 'completed', {kind: 'tools-unavailable', model: chat.model}); scheduleTimeline(chatId); return; }
             if (method === HISTORY_WINDOW_EVENT) { if (typeof params.retainedUserTurns === 'number') retainedTurns = params.retainedUserTurns; return; }
             const compactionItem = params.item && typeof params.item === 'object' && (params.item as Record<string, unknown>).type === 'contextCompaction';
-            if (method === 'item/started' && compactionItem && !compactions.has(chatId) && !nativeCompacting.has(chatId)) { seal(); nativeCompacting.set(chatId, store.appendItem(chatId, 'notice', 'Compacting context…', 'running', {kind:'compaction', status:'running', auto:true}).id); scheduleTimeline(chatId); return; }
+            if (method === 'item/started' && compactionItem && !compactions.has(chatId) && !nativeCompacting.has(chatId) && !acceptedReport(chatId)) { seal(); nativeCompacting.set(chatId, store.appendItem(chatId, 'notice', 'Compacting context…', 'running', {kind:'compaction', status:'running', auto:true}).id); scheduleTimeline(chatId); return; }
             // The compaction item and thread/compacted report the same compaction: whichever comes first settles it once.
-            if (method === 'item/completed' && compactionItem) { if (nativeCompacting.has(chatId) || compactions.has(chatId)) { seal(); compactionCompleted(chatId); compactedInRun = true; settledByItem = true; } return; }
-            if (method === 'thread/compacted') { seal(); if (settledByItem) settledByItem = false; else compactionCompleted(chatId); compactedInRun = true; }
+            if (method === 'item/completed' && compactionItem) {
+              if (nativeCompacting.has(chatId) || compactions.has(chatId)) { seal(); compactionCompleted(chatId); compactedInRun = true; settledByItem = true; }
+              else if (absorbAcceptedReport(chatId)) { seal(); compactedInRun = true; settledByItem = true; }
+              return;
+            }
+            if (method === 'thread/compacted') { seal(); if (settledByItem) settledByItem = false; else if (!absorbAcceptedReport(chatId)) compactionCompleted(chatId); compactedInRun = true; }
             const ownRun = runs.get(chatId) === run, parentThread0 = store.chat(chatId)?.providerThreadId, parentEvent = !(typeof params.threadId === 'string' && parentThread0 && params.threadId !== parentThread0);
             if (method === 'error') {
               // Codex retries a dropped model connection itself (willRetry): say so instead of looking stuck.
@@ -854,6 +874,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             // G13: the agent's own tool rules. Deny refuses with a visible notice; allow answers the card (never for a stop-the-user's-process request); ask shows it even in full access.
             const toolPolicy = (() => { const chat = store.chat(chatId); return chat ? domainHooks.toolPolicy(chat, method, params) : null; })();
             if (toolPolicy?.effect === 'deny') {
+              // #580: the refused tool's row must not read "Ran …" when the provider closes it.
+              const refused = typeof params.itemId === 'string' ? toolIds.get(params.itemId) : undefined, row = refused ? store.item(refused) : undefined;
+              if (row) store.updateItem(row.id, row.text, row.status, {...row.data, executionDenied: true});
               store.appendItem(chatId, 'notice', toolPolicy.message, 'failed', {kind: 'tool-policy', method});
               timeline(chatId);
               return {decision: 'decline'};
@@ -885,6 +908,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const retried = await withAdmissionRetry(attempt, {signal: run.retry.signal, onWait(wait) {
           if (disposed) return;
           retryReason = wait.reason ?? 'admission';
+          retryDetail = wait.detail;
           const data = {kind:'admission-retry', reason: retryReason, attempt: wait.attempt, max: wait.max, retryAt: wait.retryAt};
           if (retryNotice) store.updateItem(retryNotice.id, admissionRetryText(wait), 'running', data);
           else retryNotice = store.appendItem(chatId, 'notice', admissionRetryText(wait), 'running', data);
@@ -893,17 +917,16 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         let result = retried.result;
         if (retryNotice && !disposed) {
           const sent = !retried.cancelled && result.recovery?.kind !== 'admission-rejected' && result.recovery?.kind !== 'failed';
-          const lead = retryReason === 'transient' ? 'Provider attempt did not start.' : 'Provider at capacity.';
-          store.updateItem(retryNotice.id, retried.cancelled ? 'Stopped while waiting to retry the provider.' : sent ? `${lead} Sent after ${retried.retries} ${retried.retries === 1 ? 'retry' : 'retries'}.` : `${lead} Gave up after ${retried.retries} automatic retries.`, retried.cancelled ? 'cancelled' : sent ? 'completed' : 'failed', {...store.item(retryNotice.id)?.data, retryAt: null});
+          const lead = retryReason === 'transient' ? 'Provider attempt did not start.' : retryDetail ? asSentence(retryDetail) : 'The provider is temporarily unavailable.';
+          store.updateItem(retryNotice.id, retried.cancelled ? 'Stopped while waiting to retry the provider.' : sent ? `${lead} Sent after ${retried.retries} ${retried.retries === 1 ? 'retry' : 'retries'}.` : `${lead} Gave up after ${retried.retries} automatic ${retried.retries === 1 ? 'retry' : 'retries'}.`, retried.cancelled ? 'cancelled' : sent ? 'completed' : 'failed', {...store.item(retryNotice.id)?.data, retryAt: null});
         }
-        if (retried.cancelled) result = {...result, recovery: {kind:'cancelled',retryable:false,reason:'Stopped while waiting to retry the provider. No turn was dispatched.'}};
+        if (retried.cancelled) result = {...result, recovery: {kind:'cancelled',retryable:false,reason:'Stopped while waiting to retry the provider. The request was not accepted.'}};
         else if (retried.retries && result.recovery?.kind === 'failed') result = {...result, recovery: {...result.recovery, reason: `${result.recovery.reason} (after ${retried.retries} automatic ${retried.retries === 1 ? 'retry' : 'retries'})`}};
         else if (retried.retries && result.recovery?.kind === 'admission-rejected') {
-          // Carry the trailing "Resets in N min." sentence (if any) from the pre-retry reason
-          // instead of dropping it when the message is rebuilt for the gave-up-after-N-retries case.
-          const eta = / Resets [^.]*\.$/.exec(result.recovery.reason)?.[0] ?? '';
-          result = {...result, recovery: {...result.recovery, reason: `Provider admission stayed unavailable after ${retried.retries} automatic retries. No turn was dispatched; your message is back in the composer.${eta}`}};
+          result = {...result, recovery: {...result.recovery, reason: `${result.recovery.reason} Stopped after ${retried.retries} automatic ${retried.retries === 1 ? 'retry' : 'retries'}.`}};
         }
+        // The provider asked for a longer wait than a run is held open: say when, rather than retrying early.
+        if (retried.retryAt && result.recovery?.kind === 'admission-rejected') result = {...result, recovery: {...result.recovery, reason: `${result.recovery.reason} The provider asked to wait until ${retryClock(retried.retryAt)}.`}};
         if (disposed) return;
         seal();
         reconnected(result.status === 'completed' ? 'completed' : 'failed');
@@ -944,6 +967,16 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       } finally {
         // Background sub-agents can still be waiting on a card after the parent turn ended: keep it answerable.
         if (run.stopped || disposed || !provider.hasActiveWork?.(chatId)) { settleApprovals(chatId); settleQuestions(chatId); }
+        // Stop can close the provider before it sends item/completed. Persist the terminal
+        // state once, keeping completed tools and partial output intact.
+        if (run.stopped) for (const [providerId, localId] of toolIds) {
+          const item = store.item(localId);
+          if (item?.status === 'running') {
+            const startedAt = toolStarted.get(providerId);
+            store.updateItem(localId, item.text, 'interrupted', {...item.data, awaitingApproval:undefined,
+              ...(startedAt !== undefined ? {durationMs:Date.now() - startedAt} : {})});
+          }
+        }
         runs.delete(chatId);
         // #426: a compaction asked for during the turn runs now (before any queued message is dispatched).
         const deferred = deferredCompactions.get(chatId);
@@ -1116,6 +1149,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       if (!settled || runs.has(chatId)) throw new Error('The run did not stop in time, so the chat was kept. Try deleting it again.');
     }
     settleApprovals(chatId); settleQuestions(chatId);
+    // #654: what the chat owns outside the store (its sandbox) goes first; a failure keeps the chat so nothing leaks.
+    const doomed = store.chat(chatId);
+    if (doomed) await domainHooks.chatRemoval({chat: doomed, kind: 'delete'});
     try { domains.handlers.get('goals.clear')?.({chatId}); } catch { /* no goal */ }
     const timer = timers.get(chatId); if (timer) clearTimeout(timer); timers.delete(chatId);
     store.deleteChat(chatId);
@@ -1214,11 +1250,26 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const folderId = p.folderId === undefined ? undefined : id(p.folderId), projectId = p.projectId === undefined ? undefined : id(p.projectId);
         // A chat created before the first provider probe settles would otherwise skip every default (no provider reads as available yet).
         await firstProviderProbe();
-        const defaults = domainHooks.chatDefaults({...(folderId ? {folderId} : {}), ...(projectId ? {projectId} : {})});
+        // #591: a chat opened from another chat (a new worktree) continues with that chat's model, effort and access.
+        // An id that names no chat inherits nothing; the new chat takes the usual defaults.
+        const parent = p.inheritFrom === undefined ? undefined : store.chat(id(p.inheritFrom));
+        const defaults = {...domainHooks.chatDefaults({...(folderId ? {folderId} : {}), ...(projectId ? {projectId} : {})})};
+        // Folder, Project and user defaults never grant Full access: only a chat where the user confirmed it passes it on.
+        if (defaults.permissionMode === 'full') delete defaults.permissionMode;
+        if (parent) {
+          // The parent's model only when it can still run; an unbound or signed-out parent keeps the defaults' model.
+          let runnable = false;
+          if (parent.providerId && parent.model?.trim()) { try { validateRunnableModel(parent.model, parent.providerId); runnable = true; } catch { /* unavailable now */ } }
+          if (runnable) {
+            defaults.providerId = parent.providerId; defaults.model = parent.model; delete defaults.effort;
+            const parentEffort = efforts.get(parent.id); if (parentEffort) defaults.effort = parentEffort;
+          }
+          if (parent.permissionMode) defaults.permissionMode = parent.permissionMode;
+        }
         // UR-SR-a: there is no Ask mode picker any more; a legacy 'ask' default means Agent with read-only access.
         const legacyAsk = defaults.mode === 'ask';
         const mode = defaults.mode === 'plan' ? 'plan' : 'agent';
-        const permissionMode = defaults.permissionMode && ['read-only','workspace'].includes(defaults.permissionMode) ? defaults.permissionMode : legacyAsk ? 'read-only' : undefined;
+        const permissionMode = defaults.permissionMode && ['read-only','workspace','full'].includes(defaults.permissionMode) ? defaults.permissionMode : legacyAsk ? 'read-only' : undefined;
         // Nothing chosen anywhere: the first ready provider. Nothing ready: an unbound chat that shows "Connect a model".
         const initial = defaults.providerId && defaults.model?.trim() ? {providerId: defaults.providerId, model: defaults.model.trim()} : firstReadyModel(provider.info());
         let result = store.createChat({folderId, projectId, model: initial.model, ...(initial.providerId ? {providerId: initial.providerId} : {}), mode, ...(permissionMode ? {permissionMode} : {})});
@@ -1273,6 +1324,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const result = store.updateChat(chatId, patch);
         // Archiving is only a filing action: say so in the chat when work is still going.
         if (patch.archived && !chat.archived && (busy(chat) || approvalsFor(chatId))) { store.appendItem(chatId, 'notice', ARCHIVE_RUNNING_WARNING, 'completed', {kind:'archived-running'}); timeline(chatId); }
+        // #654: an archived chat's sandbox stops (kept, not destroyed) in the background; archiving never waits on Docker.
+        if (patch.archived && !chat.archived) void domainHooks.chatRemoval({chat: result, kind: 'archive'});
         state(); return result;
       }
       case 'chat.markUnread': {
@@ -1864,6 +1917,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     for (const chat of store.snapshot().chats) if (chat.unread || chat.recovery?.kind === 'recovery-needed' || provider.hasActiveWork?.(chat.id)) keep.add(chat.id);
     const archived = store.autoArchiveIdle(new Date(Date.now() - days * 86_400_000).toISOString(), keep);
     if (!archived.length) return;
+    for (const chatId of archived) { const chat = store.chat(chatId); if (chat) void domainHooks.chatRemoval({chat, kind: 'archive'}); }
     state();
     emit({type:'notice', message:`Archived ${plural(archived.length, 'chat')} idle for over ${days} days. Find ${archived.length === 1 ? 'it' : 'them'} under Archived.`});
   }

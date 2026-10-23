@@ -61,3 +61,33 @@ test('DOGFOOD F51: a failed worker row carries the provider\'s reason, or says n
   assert.equal(subagentRowReason(silent),'No reason reported by the provider');
   assert.equal(subagentRowReason({event:'started',agents:[{reason:'x'}]}),undefined);
 });
+
+test('a finished sub-agent is announced once when its reports span separate activity groups',()=>{
+  const first=item('w1',{type:'collabAgentToolCall',tool:'wait',receiverThreadIds:['c1'],agentsStates:{c1:'completed'}});
+  const second=item('w2',{type:'collabAgentToolCall',tool:'wait',receiverThreadIds:['c1'],agentsStates:{c1:'completed'}});
+  const entries=groupActivity([spawn('s1','c1','Mira'),first,{id:'m',chatId:'chat',kind:'assistant',text:'x',createdAt:''},second]);
+  const labels=entries.flatMap(entry=>entry.kind==='activity'?segmentActivity(entry.items,entry.prior).filter(row=>row.kind==='subagents').map(subagentRowLabel):[]);
+  assert.deepEqual(labels,['Mira started working','Mira finished']);
+});
+
+test('#582: the timeline projection shows each finish once and numbers agents the same in every group',async()=>{
+  const {createTimelineProjection}=await import('../src/renderer/components/timeline-navigation-model.ts');
+  const ids=[1,2,3].map(n=>`019a1b2c-000${n}-7000-8000-00000000000${n}`);
+  const wait=(id:string,states:Record<string,string>)=>item(id,{type:'collabAgentToolCall',tool:'wait',senderThreadId:'parent',receiverThreadIds:Object.keys(states),agentsStates:states});
+  const say=(id:string):TimelineItem=>({id,chatId:'chat',kind:'assistant',text:'…',createdAt:'',status:'completed'});
+  const items=[...ids.map((child,index)=>item(`s${index}`,{type:'collabAgentToolCall',tool:'spawnAgent',senderThreadId:'parent',receiverThreadIds:[child],agentsStates:{[child]:{status:'running'}}})),
+    wait('w1',{[ids[0]]:'completed',[ids[1]]:'running',[ids[2]]:'running'}),say('a1'),
+    wait('w2',{[ids[0]]:'completed',[ids[1]]:'completed',[ids[2]]:'running'}),say('a2'),
+    wait('w3',{[ids[2]]:'completed'})];
+  const project=createTimelineProjection();
+  const labels=(rows:readonly any[])=>rows.flatMap(row=>row.kind==='activity'?segmentActivity(row.items,row.prior,row.agents).filter(segment=>segment.kind==='subagents').map(subagentRowLabel):[]);
+  const expected=['Agent 1, Agent 2 and Agent 3 started working','Agent 1 finished','Agent 2 finished','Agent 3 finished'];
+  const first=project(items);
+  assert.deepEqual(labels(first.rows),expected);
+  assert.deepEqual(labels(groupActivity(items)),expected,'groupActivity agrees with the projection');
+  // A streamed update re-projects: rows that saw no new lifecycle keep the same prior map.
+  const second=project([...items,say('a3')]);
+  assert.deepEqual(labels(second.rows),expected);
+  const priors=(rows:readonly any[])=>rows.filter(row=>row.kind==='activity').map(row=>row.prior);
+  priors(second.rows).forEach((prior,index)=>assert.equal(prior,priors(first.rows)[index]));
+});

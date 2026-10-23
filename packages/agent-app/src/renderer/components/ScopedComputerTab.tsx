@@ -136,7 +136,7 @@ function SandboxView({scope}:{scope:ScopedComputerRef}) {
         :<button className="is-primary" disabled={!!busy||!computer||state==='recovery-needed'||!!computer.repair} onClick={()=>void lifecycle('start')}><Play size={12}/>{busy==='start'?'Starting…':state==='stopped'?'Start':'Create and start'}</button>}
       {created&&<button disabled={!!busy||!!active} onClick={()=>void openConfirm(scratch?'dispose':'remove')}><Trash2 size={12}/>{scratch?'Dispose…':'Remove container…'}</button>}
       {!scratch&&<button disabled={!!busy||!!active||!files.entries.length&&!files.path} onClick={()=>void openConfirm('delete')}>Delete files…</button>}
-      <span className="sbx-limits">{limits?`${limits.memoryMiB} MiB · ${limits.cpus} CPU · ${limits.processes} processes · user ${computer!.user.split(':')[0]} · up to ${limits.maxRunning} running`:''}</span>
+      <span className="sbx-limits">{limits?`${limits.memoryMiB} MiB · ${limits.cpus} CPU · ${limits.processes} processes · ${limits.diskGiB} GB disk · user ${computer!.user.split(':')[0]} · up to ${limits.maxRunning} running`:''}</span>
       <button className={`sbx-toggle${settingsOpen?' is-on':''}`} aria-pressed={settingsOpen} title="Resources, services, read-only layers and export" onClick={()=>setSettingsOpen(open=>!open)}><Settings2 size={12}/>Settings</button>
       <button className={`sbx-toggle${filesOpen?' is-on':''}`} aria-pressed={filesOpen} onClick={()=>setFilesOpen(open=>!open)}><FolderOpen size={12}/>Files</button>
     </div>
