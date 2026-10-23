@@ -28,7 +28,7 @@ test('#426 window and threshold: a 1M model and a 200K model compact at differen
   assert.deepEqual(effectiveContextWindow({contextWindow:1_000_000},200_000),{tokens:1_000_000,source:'catalog'});
   assert.deepEqual(effectiveContextWindow(undefined,200_000),{tokens:200_000,source:'reported'});
   assert.deepEqual(effectiveContextWindow({},null),{tokens:DEFAULT_CONTEXT_WINDOW,source:'default'},'no window at all uses the default');
-  assert.equal(musterCompactAt('gemini-cli',undefined,null).at,Math.floor(DEFAULT_CONTEXT_WINDOW*AUTO_COMPACT_RATIO));
+  assert.equal(musterCompactAt('gemini-cli',undefined,null).at,Infinity,'#668: a guessed window never compacts ahead of time');
   // A catalog's own auto_compact_token_limit is the threshold.
   assert.deepEqual(compactionThreshold({tokens:272_000,source:'catalog'},200_000),{tokens:200_000,source:'catalog-limit'});
   assert.equal(catalogModels('gateway',[{slug:'m',context_window:272_000,auto_compact_token_limit:200_000}]).models[0]!.autoCompactTokenLimit,200_000);
@@ -129,6 +129,20 @@ test('#426 the same usage compacts a 200K model but not a 1M model',async t=>{
     await send(service,chat.id,'a');await send(service,chat.id,'b');
     assert.equal((await rows(service,chat.id)).filter(row=>row.data?.auto).length,expected,`${window}`);
   }
+});
+
+// Spec: MUS-SPEC-04-2C (docs/spec/clauses/04-context-window-and-compaction.md#mus-spec-04-2c)
+test('#668 a router combo with no listed window keeps working at 300K tokens: no automatic compaction, turns complete',async t=>{
+  const fake:Fake={inputs:[],usage:300_000,compacts:0};
+  const {service,folder}=await serviceOn(t,'openai-chat-completions',undefined,fake);
+  const chat=await service.invoke('chat.create',{folderId:folder.id});
+  await send(service,chat.id,'First, a long piece of work.');await send(service,chat.id,'Next step.');await send(service,chat.id,'And one more.');
+  assert.equal((await rows(service,chat.id)).filter(row=>row.data?.auto).length,0,'no automatic compaction on a guessed window');
+  assert.equal(fake.compacts,0,'the provider was never asked to compact');
+  assert.equal(fake.inputs.length,3,'every message reached the model');
+  assert.equal(fake.inputs.at(-1)!.chat.providerThreadId,'thread-2','the conversation continues on the same thread');
+  const row=(await service.invoke('app.snapshot',undefined)).chats.find(c=>c.id===chat.id)!;
+  assert.equal(row.status,'completed');
 });
 
 test('#426 /compact during a running turn compacts when the turn settles, before any queued message',async t=>{
