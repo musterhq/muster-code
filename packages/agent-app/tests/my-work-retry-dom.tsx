@@ -1,6 +1,7 @@
 /** My work: a failed read offers Retry, and Retry reads again. */
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
+import {check} from './dom-check.ts';
 import {setTimeout as delay} from 'node:timers/promises';
 const require=createRequire(import.meta.url);
 const {parseHTML}=require('linkedom');
@@ -20,12 +21,15 @@ const {createRoot}=await import('react-dom/client');
 const {MyWorkPage}=await import('../src/renderer/components/MyWorkPage');
 const until=async(cond:()=>boolean)=>{for(let i=0;i<100&&!cond();i++)await delay(10);assert.ok(cond(),'condition');};
 const root=createRoot(document.getElementById('root')!);
-root.render(<MyWorkPage/>);
-await until(()=>/could not be read/.test(document.body.textContent??''));
-const retry=[...document.querySelectorAll('button')].find(b=>/retry/i.test(b.textContent??''));
-assert.ok(retry,'a failed read offers Retry');
-retry!.dispatchEvent(new window.Event('click',{bubbles:true}));
-await until(()=>!/could not be read/.test(document.body.textContent??''));
-assert.equal(reads,2);
+// Spec: MUS-SPEC-12-556D (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-556d)
+await check('My work offers Retry after a failed read, and Retry reads again', async () => {
+  root.render(<MyWorkPage/>);
+  await until(()=>/could not be read/.test(document.body.textContent??''));
+  const retry=[...document.querySelectorAll('button')].find(b=>/retry/i.test(b.textContent??''));
+  assert.ok(retry,'a failed read offers Retry');
+  retry!.dispatchEvent(new window.Event('click',{bubbles:true}));
+  await until(()=>!/could not be read/.test(document.body.textContent??''));
+  assert.equal(reads,2);
+});
 console.log('my-work-retry-dom ok');
 process.exit(0);
