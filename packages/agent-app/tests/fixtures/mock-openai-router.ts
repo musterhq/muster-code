@@ -12,7 +12,7 @@ export interface MockRouter {base: string; origin: string; log: RouterRequest[];
 
 export const ROUTER_MODELS = ['claude/claude-opus-4.1', 'codex/gpt-5.6-terra', 'auto/best-coding'];
 
-export async function startMockRouter(token: string, options: {reply?: string; echoHeaders?: string[]; responseUsage?: Record<string, unknown>; truncateAfter?: number} = {}): Promise<MockRouter> {
+export async function startMockRouter(token: string, options: {reply?: string; echoHeaders?: string[]; responseUsage?: Record<string, unknown> | ((request: number) => Record<string, unknown>); truncateAfter?: number} = {}): Promise<MockRouter> {
   const log: RouterRequest[] = [];
   let responses = 0;
   const reply = options.reply ?? 'pong from mock router';
@@ -51,7 +51,7 @@ export async function startMockRouter(token: string, options: {reply?: string; e
         ['response.output_text.delta', {type: 'response.output_text.delta', item_id: 'msg_1', output_index: 0, content_index: 0, delta: reply}],
         ['response.output_item.done', {type: 'response.output_item.done', output_index: 0, item}],
         ['response.completed', {type: 'response.completed', response: {id: 'resp_1', object: 'response', status: 'completed', model, output: [item],
-          usage: options.responseUsage ?? {input_tokens: 3, input_tokens_details: {cached_tokens: 0}, output_tokens: 4, output_tokens_details: {reasoning_tokens: 0}, total_tokens: 7}}}],
+          usage: (typeof options.responseUsage === 'function' ? options.responseUsage(responses) : options.responseUsage) ?? {input_tokens: 3, input_tokens_details: {cached_tokens: 0}, output_tokens: 4, output_tokens_details: {reasoning_tokens: 0}, total_tokens: 7}}}],
       ];
       if (options.truncateAfter !== undefined && responses > options.truncateAfter) events.pop();
       return sse(events);

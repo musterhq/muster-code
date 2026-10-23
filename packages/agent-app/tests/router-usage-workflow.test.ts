@@ -23,7 +23,7 @@ const partialUsage = {input_tokens: 3, input_tokens_details: {}, output_tokens: 
 async function fixture(t: TestContext, truncateAfter?: number) {
   const root = await mkdtemp(join(tmpdir(), 'muster-router-678-'));
   t.after(() => removeTmp(root));
-  const router = await startMockRouter(token, {responseUsage: partialUsage, truncateAfter});
+  const router = await startMockRouter(token, {responseUsage: request => request === 4 ? {...partialUsage, input_tokens_details: {cached_tokens: 2}, output_tokens_details: {reasoning_tokens: 1}} : partialUsage, truncateAfter});
   t.after(() => router.close());
   const home = join(root, 'home'), codex = join(home, '.codex'), cwd = join(root, 'work');
   await mkdir(codex, {recursive: true}); await mkdir(cwd);
@@ -36,8 +36,15 @@ async function fixture(t: TestContext, truncateAfter?: number) {
   const env = {...process.env, HOME: home, CODEX_HOME: codex, MUSTER_CODEX_COMMAND: cli!, MUSTER_PROVIDER_NODE: process.execPath};
   delete (env as Record<string, unknown>).OPENAI_API_KEY;
   invalidateProviderInstances();
-  const core = createRequire(join(appDir, 'fixture.cjs'))(coreBundle) as CoreClient;
-  const provider = createProviderAdapter({core, instances: () => configuredProviderInstances({directory: appDir, home, env})});
+  const realCore = createRequire(join(appDir, 'fixture.cjs'))(coreBundle) as CoreClient;
+  const usage: Array<{cachedInputTokens?: number; reasoningOutputTokens?: number}> = [];
+  // Observe the real core's results; the real client and provider still do every request.
+  const core: CoreClient = {...realCore, async runCodexAppServer(input) {
+    const result = await realCore.runCodexAppServer(input);
+    usage.push((result as typeof result & {tokenUsage?: typeof usage[number]}).tokenUsage ?? {});
+    return result;
+  }};
+  const provider = createProviderAdapter({core, instances: () => configuredProviderInstances({directory: join(appDir, 'dist/runtime'), home, env})});
   const dataDir = join(root, 'data');
   let reconnects = 0;
   const service = createAgentService({dataDir, provider, onEvent(event) {
@@ -60,7 +67,7 @@ async function fixture(t: TestContext, truncateAfter?: number) {
     }
     assert.fail('chat did not settle within 30 seconds');
   }
-  return {router, service, chat, send, reconnects: () => reconnects};
+  return {router, service, chat, send, usage, reconnects: () => reconnects};
 }
 
 // Spec: MUS-SPEC-02-678A (docs/spec/clauses/02-providers.md#mus-spec-02-678a--router-completions-with-partial-usage-metadata)
@@ -75,12 +82,14 @@ test('router usage compatibility: two independent chats complete successive turn
     if (threads.has(id)) assert.equal(chat.providerThreadId, threads.get(id), 'continuation retains its own thread');
     threads.set(id, chat.providerThreadId!);
     const timeline = await f.service.invoke('chat.timeline', {id});
-    assert.ok(timeline.items.some(item => item.role === 'assistant' && item.text.includes(f.router.reply)));
+    assert.ok(timeline.items.some(item => item.kind === 'assistant' && item.text.includes(f.router.reply)));
   }
   assert.equal(new Set(threads.values()).size, 2);
   assert.equal(f.reconnects(), 0);
   assert.equal(f.router.log.filter(r => r.path === '/v1/responses').length, 4, 'one upstream request per turn');
   assert.ok(f.router.log.every(r => r.auth === 'bearer:valid'));
+  assert.equal(f.usage.at(-1)?.cachedInputTokens, 2, 'reported cache usage is preserved');
+  assert.equal(f.usage.at(-1)?.reasoningOutputTokens, 1, 'reported reasoning usage is preserved');
 });
 
 // Spec: MUS-SPEC-02-678B (docs/spec/clauses/02-providers.md#mus-spec-02-678b--genuine-stream-failures-remain-failures-after-compatibility-handling)
