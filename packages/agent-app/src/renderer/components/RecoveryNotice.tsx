@@ -7,7 +7,7 @@ import './recovery-notice.css';
 
 /** Checking reads the saved provider attempt; it never sends the message again.
  * Retry is offered only for an admission rejection the runtime classified as
- * retryable, i.e. it proved no turn was dispatched; it resends the retained draft. */
+ * retryable, i.e. it proved the provider did not accept the request; it resends the retained draft. */
 /** While the provider reports the saved turn as active, status is re-read on this cadence until it settles or the cap passes. */
 export const RECONCILE_POLL_MS=30_000, RECONCILE_POLL_LIMIT_MS=30*60_000;
 export function RecoveryNotice({chat}:{chat:Chat}) {
@@ -64,7 +64,7 @@ export function RecoveryNotice({chat}:{chat:Chat}) {
   return <div className={interrupted||stopped?'chat-error-banner is-interrupted':'chat-error-banner'} role="status" data-recovery={chat.recovery?.kind}>
     <span>{stillRunning?'Still running at the provider. This updates when it finishes.':chat.recovery?.reason || chat.error}</span>
     {uncertain && <><p>Your draft is retained. Check the existing attempt before sending again.</p><button type="button" className="workspace-inline-link" disabled={checking || active} onClick={()=>void check()}>{checking?'Checking provider status…':stillRunning?'Check now':'Check provider status'}</button> <button type="button" className="workspace-inline-link" data-testid="recovery-continue-anyway" disabled={active} title="Skip the check. The earlier attempt may still be working; nothing is resent." onClick={()=>void proceed()}>Continue anyway</button></>}
-    {rejected && <><p>{draft?'No turn was dispatched; your draft is retained.':'No turn was dispatched. Write a message to retry.'}</p><button type="button" className="workspace-inline-link" aria-busy={retrying||undefined} disabled={retrying || sending || active || !draft} onClick={()=>void retry()}>{retrying?'Retrying…':'Retry now'}</button></>}
+    {rejected && <><p>{draft?'Your draft is retained.':'Write a message to retry.'}</p><button type="button" className="workspace-inline-link" aria-busy={retrying||undefined} disabled={retrying || sending || active || !draft} onClick={()=>void retry()}>{retrying?'Retrying…':'Retry now'}</button></>}
     {chat.recovery?.auth && <button type="button" className="workspace-inline-link" data-testid="recovery-open-providers" onClick={()=>openProvidersTab()}>Open Accounts &amp; providers</button>}
     {result && <p>{result}</p>}
   </div>;

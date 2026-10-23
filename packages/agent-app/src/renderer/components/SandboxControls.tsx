@@ -9,6 +9,7 @@ const message=(cause:unknown)=>cause instanceof Error?cause.message:String(cause
 export const MEMORY_CHOICES=[256,512,1024,2048,4096,8192,16384];
 export const CPU_CHOICES=[0.25,0.5,1,1.5,2,3,4,6,8];
 export const PROCESS_CHOICES=[64,128,256,512,1024,2048,4096];
+export const DISK_CHOICES=[1,2,5,10,20,50,100,200];
 const RESTART_LABEL:Record<ScopedComputerRestartPolicy,string>={never:'Never restart','on-failure':'Restart on failure',always:'Always restart'};
 const SERVICE_STATE_LABEL:Record<ScopedComputerService['state'],string>={starting:'Starting',running:'Running',stopped:'Stopped',exited:'Exited',failed:'Failed',lost:'Lost',backoff:'Restarting'};
 /** Percent of a limit, clamped for the meter; null when either side is unknown. */
@@ -44,9 +45,9 @@ export function SandboxControls({scope,computer,busy,onStatus}:{scope:ScopedComp
 type Act=<T,>(label:string,task:()=>Promise<T>,apply?:(value:T)=>void)=>Promise<void>;
 
 function ResourcesSection({scope,computer,disabled,working,act,onStatus}:{scope:ScopedComputerRef;computer?:ScopedComputerStatus;disabled:boolean;working:string;act:Act;onStatus:(status:ScopedComputerStatus)=>void}) {
-  const current:ScopedComputerLimits|undefined=computer?{memoryMiB:computer.limits.memoryMiB,cpus:computer.limits.cpus,processes:computer.limits.processes}:undefined;
+  const current:ScopedComputerLimits|undefined=computer?{memoryMiB:computer.limits.memoryMiB,cpus:computer.limits.cpus,processes:computer.limits.processes,diskGiB:computer.limits.diskGiB}:undefined;
   const [draft,setDraft]=useState<ScopedComputerLimits>();
-  useEffect(()=>{setDraft(current);},[current?.memoryMiB,current?.cpus,current?.processes]);
+  useEffect(()=>{setDraft(current);},[current?.memoryMiB,current?.cpus,current?.processes,current?.diskGiB]);
   const [usage,setUsage]=useState<ScopedComputerUsage>();
   const running=computer?.state==='running';
   useEffect(()=>{
@@ -55,14 +56,15 @@ function ResourcesSection({scope,computer,disabled,working,act,onStatus}:{scope:
     const poll=async()=>{try {const value=await invoke('computer.usage',{scope});if(!stopped)setUsage(value);}catch {}if(!stopped)timer=setTimeout(()=>void poll(),2000);};
     void poll();return()=>{stopped=true;clearTimeout(timer);};
   },[scope.kind,scope.id,running]);
-  const changed=!!draft&&!!current&&(draft.memoryMiB!==current.memoryMiB||draft.cpus!==current.cpus||draft.processes!==current.processes);
-  const memory=usagePercent(usage?.memoryBytes??null,usage?.memoryLimitBytes??null),cpu=usage?.cpuPercent!=null&&current?Math.min(100,Math.round(usage.cpuPercent/current.cpus)):null,pids=usagePercent(usage?.pids??null,current?.processes??null);
+  const changed=!!draft&&!!current&&(draft.memoryMiB!==current.memoryMiB||draft.cpus!==current.cpus||draft.processes!==current.processes||draft.diskGiB!==current.diskGiB);
+  const disk=usagePercent(usage?.diskBytes??null,usage?.diskLimitBytes??null),memory=usagePercent(usage?.memoryBytes??null,usage?.memoryLimitBytes??null),cpu=usage?.cpuPercent!=null&&current?Math.min(100,Math.round(usage.cpuPercent/current.cpus)):null,pids=usagePercent(usage?.pids??null,current?.processes??null);
   return <div className="sbx-section" role="group" aria-label="Resources">
     <h3><Cpu size={13} aria-hidden="true"/>Resources <small>enforced by the container’s cgroup</small></h3>
     {draft&&<div className="sbx-limit-row">
       <label>Memory<select aria-label="Memory limit" value={draft.memoryMiB} disabled={disabled} onChange={event=>setDraft({...draft,memoryMiB:Number(event.target.value)})}>{withMax(MEMORY_CHOICES,draft.memoryMiB).filter(v=>v>=SCOPED_COMPUTER_LIMIT_BOUNDS.memoryMiB.min).map(v=><option key={v} value={v}>{v>=1024?`${v/1024} GB`:`${v} MB`}</option>)}</select></label>
       <label>CPUs<select aria-label="CPU limit" value={draft.cpus} disabled={disabled} onChange={event=>setDraft({...draft,cpus:Number(event.target.value)})}>{withMax(CPU_CHOICES,draft.cpus).map(v=><option key={v} value={v}>{v}</option>)}</select></label>
       <label>Processes<select aria-label="Process limit" value={draft.processes} disabled={disabled} onChange={event=>setDraft({...draft,processes:Number(event.target.value)})}>{withMax(PROCESS_CHOICES,draft.processes).map(v=><option key={v} value={v}>{v}</option>)}</select></label>
+      <label>Disk<select aria-label="Disk limit" title="Caps /workspace plus files written elsewhere in the container" value={draft.diskGiB} disabled={disabled} onChange={event=>setDraft({...draft,diskGiB:Number(event.target.value)})}>{withMax(DISK_CHOICES,draft.diskGiB).map(v=><option key={v} value={v}>{v} GB</option>)}</select></label>
       <button className="is-primary" disabled={disabled||!changed} title="Recreates the container with the new limits; /workspace files are kept" onClick={()=>void act('limits',()=>invoke('computer.setLimits',{scope,limits:draft}),onStatus)}>{working==='limits'?'Applying…':'Apply'}</button>
     </div>}
     {changed&&<p className="sbx-hint">Applying recreates the container. Anything running stops; files in /workspace are kept.</p>}
@@ -70,6 +72,7 @@ function ResourcesSection({scope,computer,disabled,working,act,onStatus}:{scope:
       <Meter label="Memory" percent={memory} text={usage?.memoryBytes!=null?`${formatBytes(usage.memoryBytes)} of ${formatBytes(usage.memoryLimitBytes??current!.memoryMiB*1024**2)}`:running?'measuring…':'not running'}/>
       <Meter label="CPU" percent={cpu} text={usage?.cpuPercent!=null?`${usage.cpuPercent.toFixed(1)}% of ${current?.cpus} CPU${current?.cpus===1?'':'s'}`:running?'measuring…':'not running'}/>
       <Meter label="Processes" percent={pids} text={usage?.pids!=null?`${usage.pids} of ${current?.processes}`:running?'measuring…':'not running'}/>
+      <Meter label="Disk" percent={disk} text={usage?.diskBytes!=null?`${formatBytes(usage.diskBytes)} of ${formatBytes(usage.diskLimitBytes??current!.diskGiB*1024**3)}`:running?'measuring…':'not running'}/>
     </div>
   </div>;
 }
