@@ -21,6 +21,7 @@ function failingTransport(settleOnClose = false) {
   return {adapter, closed: () => closed, emit(params = proxyError) {(args.onEvent as ProviderInput['onEvent'])('error', params);}, delta() {(args.onEvent as ProviderInput['onEvent'])('item/agentMessage/delta', {itemId: 'm', delta: 'late'}); (args.onDelta as (text: string) => void)('late');}, finish() {finish({status: 'completed', finalMessage: 'done'});}};
 }
 
+// Spec: MUS-SPEC-02-608A (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-608a)
 test('failing transport stops after three reconnect failures, explains proxy and allows manual retry', async () => {
   const f = failingTransport();
   let events = 0, deltas = 0;
@@ -44,6 +45,7 @@ test('failing transport stops after three reconnect failures, explains proxy and
   } finally { f.finish(); f.adapter.dispose(); }
 });
 
+// Spec: MUS-SPEC-02-608B (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-608b)
 test('stalled reconnect stops by deadline without further transport events', async t => {
   t.mock.timers.enable({apis: ['setTimeout']});
   const f = failingTransport();
@@ -101,6 +103,7 @@ test('429 retry handling remains unchanged, including structured HTTP status', a
   guard.dispose();
 });
 
+// Spec: MUS-SPEC-02-608C (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-608c)
 test('HTTP fetch failures explain nested proxy, DNS, TLS and refused causes without credentials', async () => {
   for (const [code, expected] of [['HTTPS_PROXY_FAILED', /HTTPS proxy/], ['ENOTFOUND', /DNS/], ['CERT_HAS_EXPIRED', /TLS certificate/], ['ECONNREFUSED', /connection was refused/]] as const) {
     const error = new TypeError('fetch failed', {cause: Object.assign(new Error('https://user:secret@invalid'), {code})});
