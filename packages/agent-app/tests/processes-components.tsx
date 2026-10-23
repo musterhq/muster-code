@@ -1,6 +1,7 @@
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 (globalThis as any).require=require;
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
@@ -45,20 +46,23 @@ const count=(name:string)=>calls.filter(call=>call.command===name).length;
 const summaryForDock=await import('../src/renderer/processSummary');
 const {TerminalDock:BrowsingDock}=await import('../src/renderer/components/TerminalDock');
 summaryForDock.setTerminalDock({placement:'panel',open:true},false);
-for(let index=0;index<5;index++){
-  root.render(<><button onClick={()=>openTerminalTab(`browse:${index}`,'Terminal','terminals')}>Open Terminal</button><BrowsingDock chatId={`browse:${index}`}/></>);
-  await delay(40);
-  assert.match(text(),/No terminal is open/);
-  assert.ok(document.querySelector('.terminal-start'),'the empty state offers New terminal');
-}
-assert.equal(count('terminal.create'),0,'switching through five chats with the dock open starts no shells');
-const listsBeforeOpen=count('terminal.list');
-click('button');await delay(60);
-assert.equal(count('terminal.create'),1,'explicitly opening Terminal in the visible dock starts exactly one shell');
-assert.equal(calls.find(call=>call.command==='terminal.create')?.input.chatId,'browse:4');
-assert.equal(count('terminal.list'),listsBeforeOpen+1,'opening only reloads the current chat once');
-click('button');await delay(20);
-assert.equal(count('terminal.create'),1,'focusing Terminal again does not duplicate the shell');
+// Spec: MUS-SPEC-10-642A (docs/spec/clauses/10-terminal-and-processes.md#mus-spec-10-642a)
+await check('browsing chats with the terminal dock open starts no shell; opening Terminal starts exactly one',async()=>{
+  for(let index=0;index<5;index++){
+    root.render(<><button onClick={()=>openTerminalTab(`browse:${index}`,'Terminal','terminals')}>Open Terminal</button><BrowsingDock chatId={`browse:${index}`}/></>);
+    await delay(40);
+    assert.match(text(),/No terminal is open/);
+    assert.ok(document.querySelector('.terminal-start'),'the empty state offers New terminal');
+  }
+  assert.equal(count('terminal.create'),0,'switching through five chats with the dock open starts no shells');
+  const listsBeforeOpen=count('terminal.list');
+  click('button');await delay(60);
+  assert.equal(count('terminal.create'),1,'explicitly opening Terminal in the visible dock starts exactly one shell');
+  assert.equal(calls.find(call=>call.command==='terminal.create')?.input.chatId,'browse:4');
+  assert.equal(count('terminal.list'),listsBeforeOpen+1,'opening only reloads the current chat once');
+  click('button');await delay(20);
+  assert.equal(count('terminal.create'),1,'focusing Terminal again does not duplicate the shell');
+});
 // #614: a rejected automatic open still leaves New terminal available for retry.
 terminalList=[];failTerminalCreate=true;
 root.render(<BrowsingDock chatId="browse:retry"/>);await delay(40);
