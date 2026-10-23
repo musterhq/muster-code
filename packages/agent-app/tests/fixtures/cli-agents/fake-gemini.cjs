@@ -5,7 +5,8 @@ if (args[0] === '--version') { console.log('0.11.3'); process.exit(0); }
 if (args[0] === '--help') { console.log('Options:\n  -m, --model\n  --output-format  [choices: "text", "json", "stream-json"]\n  --approval-mode  [choices: "default", "auto_edit", "yolo", "plan"]\n  -r, --resume'); process.exit(0); }
 fs.writeFileSync(path.join(process.cwd(), 'argv.json'), JSON.stringify(args));
 fs.writeFileSync(path.join(process.cwd(), 'env.json'), JSON.stringify(process.env));
-const prompt = args[args.indexOf('--prompt') + 1];
+// Like yargs: `--prompt <value>` or `--prompt=<value>`.
+const prompt = args.includes('--prompt') ? args[args.indexOf('--prompt') + 1] : (args.find(arg => arg.startsWith('--prompt=')) ?? '').slice(9);
 out({type: 'init', timestamp: 't', session_id: 'gemini-session-1', model: 'gemini-2.5-pro'});
 out({type: 'message', role: 'user', content: prompt});
 if (/HANG/.test(prompt)) {

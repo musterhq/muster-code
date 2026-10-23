@@ -1,11 +1,12 @@
 import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {cliSpawn, jsonLines, loadImages, text} from './shared.ts';
+import {killTree} from './cli-common.ts';
 import {launcherSpec} from '../launcher-script.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
 import {CLAUDE_CODE_ALIASES, CLAUDE_CODE_DEFAULT} from './claude-models.ts';
 
-export type Spawn = (command: string, args: string[], options: {cwd: string; env: NodeJS.ProcessEnv; stdio: ['pipe', 'pipe', 'pipe']; windowsHide?: boolean}) => ChildProcess;
+export type Spawn = (command: string, args: string[], options: {cwd: string; env: NodeJS.ProcessEnv; stdio: ['pipe', 'pipe', 'pipe']; windowsHide?: boolean; detached?: boolean}) => ChildProcess;
 /** Claude Code's default and family aliases only; the versioned list comes from claude-models.ts. */
 export const CLAUDE_CODE_MODELS = [CLAUDE_CODE_DEFAULT, ...CLAUDE_CODE_ALIASES];
 
@@ -128,7 +129,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       const env = {...(options.env ?? process.env), ...(input.env ?? {})}; delete env.ANTHROPIC_API_KEY;
       let child: ChildProcess;
       const launch = cliSpawn(options.binary, claudeArgs(input, sessionId), env);
-      try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true}); }
+      try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32'}); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `Claude Code could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let accepted = false, settled = false, final: {ok: boolean; text: string} | undefined, stderr = '', streamedText = false;
       // `pending` counts results still owed. The CLI folds a message that arrives mid-turn into that turn, so several
@@ -215,7 +216,10 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       const threadFor = (parent: unknown) => typeof parent === 'string' && parent ? `${sessionId}:${parent}` : sessionId;
       const finish = (result: AdapterRunResult) => { if (settled) return; settled = true; input.signal.removeEventListener('abort', abort); clearTimeout(killer); clearTimeout(watchdog); clearTimeout(grace); resolve(result); };
       let killer: ReturnType<typeof setTimeout> | undefined;
-      const abort = () => { child.kill('SIGINT'); killer = setTimeout(() => child.kill('SIGKILL'), options.killGraceMs ?? 3000); };
+      // SIGINT lets the CLI stop its own work; then the whole process group goes, so a tool command it started (which still
+      // holds stdout) cannot keep the run open after Stop.
+      const abort = () => { child.kill('SIGINT'); killer = setTimeout(() => killTree(child, 'SIGKILL'), options.killGraceMs ?? 3000); };
+      child.on('exit', () => { if (input.signal.aborted) killTree(child, 'SIGKILL'); });
       if (input.signal.aborted) abort(); else input.signal.addEventListener('abort', abort, {once: true});
       child.stderr?.setEncoding('utf8');
       child.stderr?.on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-4096); });
