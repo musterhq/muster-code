@@ -7,6 +7,7 @@ import {contextView} from '../src/renderer/contextView.ts';
 
 const telemetry=(usedTokens:number|null,windowTokens:number|null=null)=>({usedTokens,windowTokens,source:'live' as const,compacted:false,updatedAt:null});
 
+// Spec: MUS-SPEC-04-1A (docs/spec/clauses/04-context-window-and-compaction.md#mus-spec-04-1a)
 test('#668 resolver order: override > catalog > listing > reported > observed > default',()=>{
   const all={contextWindow:200_000,contextWindowSource:'catalog' as const,userContextWindow:1_000_000};
   assert.deepEqual(effectiveContextWindow(all,64_000,900_000),{tokens:1_000_000,source:'override'},'your window beats everything, even observed usage');
@@ -17,6 +18,7 @@ test('#668 resolver order: override > catalog > listing > reported > observed > 
   assert.deepEqual(effectiveContextWindow(undefined,null),{tokens:DEFAULT_CONTEXT_WINDOW,source:'default'});
 });
 
+// Spec: MUS-SPEC-04-1B (docs/spec/clauses/04-context-window-and-compaction.md#mus-spec-04-1b)
 test('#668 observed usage only raises a guess: it never lowers a window and never overrides a declared one',()=>{
   assert.equal(effectiveContextWindow(undefined,null,100_000).source,'default','usage under the guess changes nothing');
   assert.equal(effectiveContextWindow({contextWindow:128_000,contextWindowSource:'listing'},null,300_000).source,'observed','a listed window below accepted usage is raised');
@@ -24,6 +26,7 @@ test('#668 observed usage only raises a guess: it never lowers a window and neve
   assert.equal(effectiveContextWindow({},500_000,900_000).source,'reported');
 });
 
+// Spec: MUS-SPEC-04-2A (docs/spec/clauses/04-context-window-and-compaction.md#mus-spec-04-2a)
 test('#668 a default or observed window never starts a proactive compaction; a declared one does',()=>{
   const combo=musterCompactAt('http-chat',undefined,null,299_984);
   assert.equal(combo.window.source,'observed');
@@ -37,6 +40,7 @@ test('#668 a default or observed window never starts a proactive compaction; a d
   assert.equal(musterCompactAt('http-chat',withUserWindow(undefined,100_000),null,95_000).at,85_000,'your smaller window compacts once it is over');
 });
 
+// Spec: MUS-SPEC-04-2B (docs/spec/clauses/04-context-window-and-compaction.md#mus-spec-04-2b)
 test('#668 the meter and the trigger resolve the same window',()=>{
   const model=withUserWindow({contextWindow:128_000,contextWindowSource:'listing'},1_000_000);
   const view=contextView(telemetry(299_984),model),trigger=musterCompactAt('http-chat',model,null,299_984);
@@ -48,6 +52,7 @@ test('#668 the meter and the trigger resolve the same window',()=>{
   assert.match(view.source,/set by you/);
 });
 
+// Spec: MUS-SPEC-04-3A (docs/spec/clauses/04-context-window-and-compaction.md#mus-spec-04-3a)
 test('#668 meter: observed usage reads "at least N" with no percentage; a default estimate is labelled and never compacts',()=>{
   const observed=contextView(telemetry(299_984),undefined);
   assert.equal(observed.windowSource,'observed');
@@ -63,6 +68,7 @@ test('#668 meter: observed usage reads "at least N" with no percentage; a defaul
   assert.match(guess.source,/estimate/);
 });
 
+// Spec: MUS-SPEC-04-4A (docs/spec/clauses/04-context-window-and-compaction.md#mus-spec-04-4a)
 test('#668 the policy keeps valid windows per model and drops the rest',()=>{
   const policy=normalizeModelPolicy({contextWindows:{'omni::intelligent-planner':1_000_000,'omni::tiny':5,'bad key':200_000,'omni::frac':1.5}});
   assert.deepEqual(policy.contextWindows,{'omni::intelligent-planner':1_000_000});
@@ -72,6 +78,7 @@ test('#668 the policy keeps valid windows per model and drops the rest',()=>{
   assert.throws(()=>validateContextWindow(999),/whole number of tokens/);
 });
 
+// Spec: MUS-SPEC-04-4B (docs/spec/clauses/04-context-window-and-compaction.md#mus-spec-04-4b)
 test('#668 the Settings field reads 1M, 200k and 1,000,000',()=>{
   assert.equal(parseTokenCount('1M'),1_000_000);
   assert.equal(parseTokenCount('1.5m'),1_500_000);
