@@ -23,6 +23,8 @@ async function runAndCall(h: Wave1, title: string, owner: string) {
   return { task, run, call, tool, url, token, chatToken };
 }
 
+// Spec: MUS-SPEC-12-462A (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-462a)
+// Spec: MUS-SPEC-12-462B (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-462b)
 test('G40: task runs get the muster_tasks MCP server; the host refuses callers without the token', async t => {
   const h = await wave1(t); const cto = await h.member('CTO');
   const r = await runAndCall(h, 'First task', cto.id);
