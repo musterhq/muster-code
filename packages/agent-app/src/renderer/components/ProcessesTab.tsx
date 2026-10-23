@@ -21,7 +21,6 @@ import './process-saved-actions.css';
 import { ResourceState } from './ResourceState';
 import {cleanIpcError} from './resourceErrors';
 import {Tip} from './Tooltip';
-import {cleanIpcError} from './resourceErrors';
 
 const PURPOSES=[{id:'command',label:'Command',Icon:SquareTerminal},{id:'test',label:'Test',Icon:FlaskConical},{id:'build',label:'Build',Icon:Hammer},{id:'server',label:'Server',Icon:Globe},{id:'task',label:'Task',Icon:Wrench}] as const;
 const STATUS={starting:'Starting',running:'Running',stopping:'Stopping',exited:'Finished',failed:'Failed',stopped:'Stopped',lost:'Connection lost'} as const;

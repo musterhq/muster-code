@@ -1,6 +1,7 @@
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 (globalThis as any).require=require;
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
@@ -181,7 +182,8 @@ assert.ok(calls.some(call=>call.command==='terminal.kill'&&call.input.id==='term
 assert.equal(calls.filter(call=>call.command==='terminal.kill').length,killsBefore+1,'only the running terminal — an already-ended one is left alone');
 assert.deepEqual(errors,[]);
 // #586: a shell whose create resolves after its pane is gone is closed, not left running with nothing to show it.
-{
+// Spec: MUS-SPEC-10-634A (docs/spec/clauses/10-terminal-and-processes.md#mus-spec-10-634a)
+await check('a terminal that finishes starting after its pane closed is shut down',async()=>{
   terminalList=[];
   let open!:()=>void;createGate=new Promise<void>(resolve=>{open=resolve;});
   const host=document.createElement('div');document.body.append(host);const late=createRoot(host);
@@ -193,9 +195,10 @@ assert.deepEqual(errors,[]);
   for(let end=Date.now()+3000;Date.now()<end&&!calls.some(call=>call.command==='terminal.kill'&&call.input.id===id);)await delay(10);
   assert.ok(calls.some(call=>call.command==='terminal.kill'&&call.input.id===id),'a shell created after its pane closed is killed');
   host.remove();
-}
+});
 // #586: the terminal cap reads as a plain sentence, not the IPC wrapper.
-{
+// Spec: MUS-SPEC-10-634B (docs/spec/clauses/10-terminal-and-processes.md#mus-spec-10-634b)
+await check('a terminal error shows as plain text without the internal call wrapper',async()=>{
   terminalList=[];
   createError="Error invoking remote method 'muster:invoke': Error: Close a terminal before opening another (maximum 12).";
   const host=document.createElement('div');document.body.append(host);const capped=createRoot(host);
@@ -203,6 +206,6 @@ assert.deepEqual(errors,[]);
   for(let end=Date.now()+3000;Date.now()<end&&!host.querySelector('.terminal-error');)await delay(10);
   assert.equal(host.querySelector('.terminal-error')?.textContent,'Close a terminal before opening another (maximum 12).');
   capped.unmount();host.remove();createError=undefined;
-}
+});
 assert.deepEqual(errors,[]);
 console.log('Process component checks passed: one-level Terminal list (shells, commands, agent commands and servers with owner/status/ports, open in browser, confirmed agent stops), PTY terminals (auto-open, new, exit, close, restart note), Full gate, subscribe/snapshot race, stale lease exclusion, detach/reopen, Stop after downgrade, agent commands, the bottom terminal panel, and closing the Terminal tab ending its running shells.');
