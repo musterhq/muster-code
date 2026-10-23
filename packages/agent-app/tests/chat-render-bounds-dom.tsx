@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
 (window.document as any).oninput=null;// React only wires native input events when the document advertises them.
@@ -68,8 +69,17 @@ for(let i=1;i<=20;i++){listener({type:'timelinePatch',chatId:'one',patch:{after:
 await delay(60);
 console.log('composer commits for 20 streamed tokens',commits.composer,'links',commits.links,'changes',commits.changes,'sidebar',commits.sidebar,'summary',commits.summary);
 assert.match(JSON.stringify(store.getState().timelines.one.value),/tok tok tok/);
-assert.ok(commits.composer<=2,`streaming a token must not re-render the composer (${commits.composer} commits for 20 tokens)`);
-assert.ok(commits.links<=2,`streaming a token must not re-render resource links (${commits.links} commits for 20 tokens)`);
-assert.ok(commits.changes<=2,`streaming a token must not re-render the changes view (${commits.changes} commits for 20 tokens)`);
+// Spec: MUS-SPEC-20-553A (docs/spec/clauses/20-performance.md#mus-spec-20-553a)
+await check('streaming 20 tokens does not re-render the composer',async()=>{
+  assert.ok(commits.composer<=2,`streaming a token must not re-render the composer (${commits.composer} commits for 20 tokens)`);
+});
+// Spec: MUS-SPEC-20-553B (docs/spec/clauses/20-performance.md#mus-spec-20-553b)
+await check('streaming 20 tokens does not re-render resource links',async()=>{
+  assert.ok(commits.links<=2,`streaming a token must not re-render resource links (${commits.links} commits for 20 tokens)`);
+});
+// Spec: MUS-SPEC-20-553C (docs/spec/clauses/20-performance.md#mus-spec-20-553c)
+await check('streaming 20 tokens does not re-render the changes view',async()=>{
+  assert.ok(commits.changes<=2,`streaming a token must not re-render the changes view (${commits.changes} commits for 20 tokens)`);
+});
 assert.deepEqual(errors,[]);
 process.exit(0);
