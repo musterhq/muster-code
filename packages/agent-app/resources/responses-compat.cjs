@@ -82,8 +82,11 @@ async function startResponsesCompatibility(baseUrl) {
     const request = (upstream.protocol === 'https:' ? https : http).request(target, {method: req.method, headers});
     pending.add(request);
     request.once('close', () => pending.delete(request));
-    const fail = () => {
-      if (!res.headersSent) { res.writeHead(502, {'content-type': 'application/json'}); res.end('{"error":{"message":"Configured provider transport failed."}}'); }
+    // Keep why the router could not be used (a system error code such as ECONNREFUSED, or a TLS reason) so the chat can
+    // say it. Never echo the message itself: it can carry the router address.
+    const fail = error => {
+      const code = typeof error?.code === 'string' && /^[A-Z0-9_]{2,40}$/.test(error.code) ? error.code : 'unknown error';
+      if (!res.headersSent) { res.writeHead(502, {'content-type': 'application/json'}); res.end(JSON.stringify({error: {message: `Configured provider transport failed (${code}).`}})); }
       else res.destroy();
     };
     request.on('error', fail);
