@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { redactSecrets } from '../src/runtime/secret-redaction.ts';
 
+// Spec: MUS-SPEC-19-674A (docs/spec/clauses/19-security-and-redaction.md#mus-spec-19-674a)
 test('a secret whose key name is longer than 70 characters is redacted', () => {
   const dotted = 'spring.datasource.hikari.data-source-properties.connection-pool.extra.settings.password';
   assert.ok(dotted.length > 70);
