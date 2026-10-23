@@ -41,6 +41,9 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Terminal panes retry failed loads twice and offer a Retry action if loading still fails.
 - A chat started in a new worktree from an existing chat now keeps that chat's model, reasoning effort and access mode instead of the app defaults
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
+- After switching org, a slower earlier read of the workspace or My work can no longer bring the previous org's projects and tasks back onto the page
+- Opening a task or project from another org now says why when the org cannot be opened, instead of doing nothing
+- My work now offers Retry when it could not be read, instead of an error with no way out
 - The Dashboard follows the org you switched to. Before, a read of the previous org that was still running when you switched could answer for the new one, so the Dashboard showed the old org's spend, budget and tasks by day.
 - The Dashboard's Recent activity and the Activity list name the agent or person who acted instead of a short id such as "agent a8782383".
 - The Dashboard opens faster on a large org: it reuses the org's last read instead of reading every task page again.
