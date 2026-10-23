@@ -9,7 +9,7 @@ import {authFailureStatus, authRecovery, coreBudgetOptions, classifyProviderFail
 import {currentProviderUsage, formatResetEta} from './provider-usage.ts';
 import {asSentence} from './admission-retry.ts';
 import {connectorPolicy, leanCodexFeatureOverrides} from './context-budget.ts';
-import type { Chat, ProviderInfo } from '../shared/protocol.ts';
+import type { Chat, ChatPermissionMode, ProviderInfo } from '../shared/protocol.ts';
 import {NativeUnavailableError} from './codex-native.ts';
 import {splitSecretOverrides} from './thread-config.ts';
 import {CODEX_LAUNCHER, envFromOverrides, mcpServersFromOverrides} from './adapters/shared.ts';
@@ -137,15 +137,17 @@ const modeInstructions = (mode: Chat['mode'], subagents = true) => mode === 'ask
 export const PROCESS_OWNERSHIP_RULE = 'Process ownership: only stop, kill or restart processes you started yourself in this conversation. Never kill processes by port or name without confirming you started them; the user\'s terminals and dev servers are theirs even when they look orphaned. If a port you need is busy, pick another port. Stop long-running processes you started (dev servers, watchers) before ending your turn unless the user asked you to keep them running.';
 /** #385: agent mode keeps going instead of ending turns with a permission question. Never added in ask or plan mode. */
 export const AGENT_AUTONOMY_RULE = 'Work autonomously until the task is done. Do the next obvious step without asking. Ask only before destructive or irreversible actions, or when a choice is genuinely ambiguous and changes the outcome. Do not end a turn with "Should I...?" or "Want me to...?" for work that is clearly part of the task: do it. End with a short summary of what you did and what is left, not a question.';
-export const runInstructions = (mode: Chat['mode'], extra?: string, subagents = true) => [modeInstructions(mode, subagents), mode === 'agent' ? AGENT_AUTONOMY_RULE : undefined, mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, extra].filter(Boolean).join('\n\n') || undefined;
+/** Full access: the user already granted everything, so a turn never ends asking permission to proceed (same wording as the goal rules). */
+export const FULL_ACCESS_NO_ASKING_RULE = 'Never ask the user for permission or confirmation to proceed (no "should I push?", "reply go", "want me to continue?", "shall I…"): Full access is already granted. Commit, push, install, restart and run commands yourself. Stop to ask only before irreversibly deleting user data, or when you are truly blocked on information only the user has.';
+export const runInstructions = (mode: Chat['mode'], extra?: string, subagents = true, permissionMode?: ChatPermissionMode) => [modeInstructions(mode, subagents), mode === 'agent' ? AGENT_AUTONOMY_RULE : undefined, mode === 'agent' && permissionMode === 'full' ? FULL_ACCESS_NO_ASKING_RULE : undefined, mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, extra].filter(Boolean).join('\n\n') || undefined;
 /** #424: the instructions, Muster's MCP servers and the native browser flag for a non-Codex route. Each route names the
  *  browser tools exactly as its model sees them, or says plainly that it has none; the browser server goes only to routes
  *  that load it (Claude Code, OpenCode, Grok), and HTTP routes get native browser tools wired to the same bridge. */
-export function adapterBrowser(driver: string | undefined, mode: Chat['mode'], developerInstructions: string | undefined, overrides: ProviderInput['configOverrides'], subagents = true): {instructions?: string; mcpServers?: Record<string, McpServerSpec>; browserTools?: true} {
+export function adapterBrowser(driver: string | undefined, mode: Chat['mode'], developerInstructions: string | undefined, overrides: ProviderInput['configOverrides'], subagents = true, permissionMode?: ChatPermissionMode): {instructions?: string; mcpServers?: Record<string, McpServerSpec>; browserTools?: true} {
   const style = browserToolStyle(driver), offered = !!developerInstructions?.includes(BROWSER_NOTE);
   const servers = mcpServersFromOverrides(overrides);
   if (style === 'native' || style === 'none') delete servers[BROWSER_MCP];
-  const instructions = runInstructions(mode, routeBrowserNote(developerInstructions, style), subagents);
+  const instructions = runInstructions(mode, routeBrowserNote(developerInstructions, style), subagents, permissionMode);
   return {...(instructions ? {instructions} : {}), ...(Object.keys(servers).length ? {mcpServers: servers} : {}), ...(offered && style === 'native' ? {browserTools: true as const} : {})};
 }
 /** Test runners construct many services; they opt into real CLI/API adapters by passing a catalog. */
@@ -219,7 +221,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         chat: input.chat, cwd: input.cwd, prompt: input.prompt, model, permissionMode: access.permissionMode, signal: owned.controller.signal,
         ...(input.images?.length ? {images: input.images} : {}), ...(route.info.models.find(entry => entry.id === model)?.images === true ? {vision: true} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),
         ...(resumeThreadId ? {resumeThreadId} : {}),
-        ...adapterBrowser(route.info.driver, input.chat.mode, input.developerInstructions, input.configOverrides, subagentSupport(route.info.driver) !== 'none'),
+        ...adapterBrowser(route.info.driver, input.chat.mode, input.developerInstructions, input.configOverrides, subagentSupport(route.info.driver) !== 'none', access.permissionMode),
         ...(Object.keys(envFromOverrides(input.configOverrides)).length ? {env: envFromOverrides(input.configOverrides)} : {}),
         // The adapter runs its own tools (HTTP routes): they meet the same Project tool rules, user-process guard and approval cards as Codex's.
         authorize: async (method, params) => {
@@ -343,7 +345,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         const commands=new Map<string,{params:Record<string,unknown>;item:Record<string,unknown>;turnId:string;output:string}>();
         const model = model0;
         const reasoning = input.reasoningEffort ?? 'medium';
-        const developerInstructions = runInstructions(input.chat.mode, input.developerInstructions);
+        const developerInstructions = runInstructions(input.chat.mode, input.developerInstructions, true, providerAccessPolicy(input.chat).permissionMode);
         const split = splitSecretOverrides(input.configOverrides);
         const extraOverrides = Object.entries(split.args).filter(([name]) => /^[A-Za-z0-9_.-]{1,128}$/.test(name) && !/^(sandbox|approval_policy)/.test(name)).map(([name, value]) => `${name}=${JSON.stringify(value)}`);
         const launch = {
