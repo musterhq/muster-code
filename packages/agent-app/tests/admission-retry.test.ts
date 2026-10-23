@@ -73,6 +73,7 @@ test('service retries a not-dispatched 503 with one in-place notice, then comple
   mock.timers.tick(100);await service.dispose();
 });
 
+// Spec: MUS-SPEC-02-479N (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479n)
 test('chat.stop cancels a pending retry; exhausted retries keep the admission recovery',async t=>{
   const dataDir=await directory(t);
   mock.timers.enable({apis:['setTimeout','Date'],now:0});t.after(()=>mock.timers.reset());

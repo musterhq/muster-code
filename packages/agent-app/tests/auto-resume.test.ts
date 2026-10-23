@@ -38,6 +38,7 @@ const limited=(text:string,extra:Partial<ProviderResult>={}):ProviderResult=>({s
 const snapshotChat=async(service:ReturnType<typeof createAgentService>,id:string)=>(await service.invoke('app.snapshot',undefined)).chats.find(chat=>chat.id===id)!;
 const items=async(service:ReturnType<typeof createAgentService>,id:string)=>(await service.invoke('chat.timeline',{id})).items;
 
+// Spec: MUS-SPEC-02-479A (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479a)
 test('limits are classified and the reset time is read from usage windows, the provider’s words, or a backoff',()=>{
   assert.equal(limitClass('You\'ve hit your usage limit. Upgrade to Pro or try again in 2 hours 5 minutes.'),'quota');
   assert.equal(limitClass('Claude AI usage limit reached|1760000000'),'quota');
@@ -70,6 +71,7 @@ test('limits are classified and the reset time is read from usage windows, the p
   assert.equal(hasNativeSession({providerId:'claude-code'}),false,'no session id, nothing to resume');
 });
 
+// Spec: MUS-SPEC-02-479B (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479b)
 test('a usage limit shows Limited with its reset, queued messages wait, and the turn continues at reset in order',async t=>{
   fastTiming(t);
   const dataDir=await directory(t);
@@ -115,6 +117,7 @@ test('a turn refused before it started re-runs its own prompt once, without a se
   assert.equal((await snapshotChat(service,chat.id)).draft,'','the restored draft was the prompt that ran');
 });
 
+// Spec: MUS-SPEC-02-479C (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479c)
 test('a limited turn that never started waits as Limited without handing its prompt back as a draft, then re-runs it at reset',async t=>{
   fastTiming(t);
   const dataDir=await directory(t);
@@ -131,6 +134,7 @@ test('a limited turn that never started waits as Limited without handing its pro
   assert.equal((await items(service,chat.id)).filter(item=>item.kind==='user').length,1);
 });
 
+// Spec: MUS-SPEC-02-479D (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479d)
 test('a provider that still refuses backs off, says so once, and gives up instead of looping',async t=>{
   fastTiming(t);
   const dataDir=await directory(t);
@@ -148,6 +152,7 @@ test('a provider that still refuses backs off, says so once, and gives up instea
   await settle(400);assert.equal(calls.length,1+LIMIT_MAX_ATTEMPTS.quota,'never loops');
 });
 
+// Spec: MUS-SPEC-02-479E (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479e)
 test('Don’t resume and the Settings switch keep the chat Limited without continuing',async t=>{
   fastTiming(t);
   const dataDir=await directory(t);
@@ -166,6 +171,7 @@ test('Don’t resume and the Settings switch keep the chat Limited without conti
   await settle(1300);assert.equal(calls.length,2);
 });
 
+// Spec: MUS-SPEC-02-479F (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479f)
 test('a stored resume survives an app restart and is re-armed at launch',async t=>{
   fastTiming(t);
   const dataDir=await directory(t);
@@ -185,6 +191,7 @@ test('a stored resume survives an app restart and is re-armed at launch',async t
   assert.equal(second.calls[0]!.prompt,NATIVE_CONTINUATION);
 });
 
+// Spec: MUS-SPEC-02-479G (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479g)
 test('an opt-in fallback model continues a limited chat at once',async t=>{
   fastTiming(t);
   const dataDir=await directory(t);
@@ -201,6 +208,7 @@ test('an opt-in fallback model continues a limited chat at once',async t=>{
   assert.ok((await items(service,chat.id)).some(item=>item.data?.reason==='fallback'));
 });
 
+// Spec: MUS-SPEC-02-479H (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479h)
 test('chats working when Muster crashed continue: native sessions resume, HTTP routes get the message, approvals are left alone',async t=>{
   fastTiming(t);
   const dataDir=await directory(t);
@@ -221,6 +229,7 @@ test('chats working when Muster crashed continue: native sessions resume, HTTP r
   assert.equal((await snapshotChat(service,asking)).status,'interrupted');
 });
 
+// Spec: MUS-SPEC-02-479I (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479i)
 test('a quit keeps the live turn and continues it after launch, once; the setting turns it off',async t=>{
   fastTiming(t);
   const dataDir=await directory(t);
@@ -264,6 +273,7 @@ test('a quit keeps the live turn and continues it after launch, once; the settin
   assert.ok((await items(fifth,chat.id)).some(item=>/Send a message to continue/.test(item.text)));
 });
 
+// Spec: MUS-SPEC-02-479J (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479j)
 test('the queue survives a quit in order with its files and chips, sends each message once, and drops one already sent',async t=>{
   fastTiming(t);
   const dataDir=await directory(t);
@@ -311,6 +321,7 @@ test('a queued message leaves the queue only with its send receipt; a racing dis
   assert.equal(store.queue(chat.id).length,0);assert.ok(store.receipt('q-next'));store.close();
 });
 
+// Spec: MUS-SPEC-02-479K (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479k)
 test('tool rows left running settle as interrupted on stop and at launch',async t=>{
   const dataDir=await directory(t);
   const store=new AgentStore(dataDir);
@@ -329,6 +340,7 @@ test('tool rows left running settle as interrupted on stop and at launch',async 
   assert.deepEqual((await items(service,chat.id)).filter(item=>item.kind==='tool').map(item=>item.status),['interrupted']);
 });
 
+// Spec: MUS-SPEC-18-479L (docs/spec/clauses/18-updates-release-and-packaging.md#mus-spec-18-479l)
 test('an update install waits for running work, says so once, and installs when it finishes',async()=>{
   let running=2,installs=0;const notes:string[]=[];
   const gate=createUpdateGate({running:()=>running,install:async()=>{installs++;return 'ok';},notify:message=>notes.push(message)});
@@ -362,6 +374,7 @@ test('#579: after a crash, Continue anyway and then Steer on the queued message 
   assert.equal((await snapshotChat(service,seeded.id)).queue,undefined);
 });
 
+// Spec: MUS-SPEC-02-479M (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479m)
 test('#450: a queued message whose dispatch was cut short by a quit is sent once at the next launch',async t=>{
   fastTiming(t);
   const dataDir=await directory(t);

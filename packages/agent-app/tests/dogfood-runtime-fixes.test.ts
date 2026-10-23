@@ -27,6 +27,7 @@ test('goal completion is read from the update line; a plain declaration is only 
   assert.equal(goalDeclaredDone('Once all requirements are met I will report.'), false);
 });
 
+// Spec: MUS-SPEC-02-479O (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479o)
 test('a never-dispatched provider failure is retried automatically, bounded', async () => {
   type Outcome = {status: 'failed' | 'completed'; dispatchState?: string; turnId?: string; recovery?: {kind: string; retryable?: boolean; reason: string}};
   const failed: Outcome = {status: 'failed', dispatchState: 'not-dispatched', recovery: {kind: 'failed', retryable: true, reason: 'The provider attempt failed: app-server exited'}};
