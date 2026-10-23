@@ -14,4 +14,17 @@ Boundaries:
 
 ## Acceptance cases
 
-No cases yet. A PR that changes this area adds its cases here first (see [acceptance-cases.md](../acceptance-cases.md)).
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-12-572A](12-projects-orgs-and-tasks.md#mus-spec-12-572a) | A priority named like an object key is dropped, not sent. | [`creating a task ignores a priority that is an Object.prototype key`](../../../packages/agent-app/tests/protocol-bughunt.test.ts) |
+
+<a id="mus-spec-12-572a"></a>
+#### MUS-SPEC-12-572A: A task priority named like an object key is ignored
+
+- Precondition: A workspace with one project and a fake command channel.
+- Action: Create a task whose priority is constructor, toString, __proto__ or hasOwnProperty.
+- Expected result: Each task is still created, and none of them carries a priority.
+- Test: `packages/agent-app/tests/protocol-bughunt.test.ts::creating a task ignores a priority that is an Object.prototype key`
+- Environment: Node test runner; no network.
+- Known gaps: The command channel is fake. It does not use the New task form.
+- Evidence: UNVERIFIED

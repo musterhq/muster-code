@@ -12,11 +12,11 @@
 export const SEARCH_SCOPES = ['all', 'tasks', 'agents', 'projects', 'documents', 'comments', 'outputs', 'decisions'] as const;
 export type SearchScope = typeof SEARCH_SCOPES[number];
 export const SEARCH_SCOPE_LABEL: Record<SearchScope, string> = { all: 'All', tasks: 'Tasks', agents: 'Agents', projects: 'Projects', documents: 'Documents', comments: 'Comments', outputs: 'Outputs', decisions: 'Decisions' };
-const ALIAS: Record<string, SearchScope> = {
+const ALIAS: Record<string, SearchScope> = Object.assign(Object.create(null) as Record<string, SearchScope>, {
   all: 'all', task: 'tasks', tasks: 'tasks', issue: 'tasks', issues: 'tasks', agent: 'agents', agents: 'agents', project: 'projects', projects: 'projects',
   doc: 'documents', docs: 'documents', document: 'documents', documents: 'documents', comment: 'comments', comments: 'comments', thread: 'comments', message: 'comments', messages: 'comments',
   output: 'outputs', outputs: 'outputs', artifact: 'outputs', artifacts: 'outputs', decision: 'decisions', decisions: 'decisions',
-};
+});
 /** A task key: letters then a dash then digits (OSS-12, RAG-5). */
 export const IDENTIFIER = /^([A-Za-z][A-Za-z0-9]{0,9})-(\d{1,7})$/;
 
