@@ -29,7 +29,7 @@ export type LeaseEventName = 'checkout' | 'handback' | 'release';
 export type MarkerKind = LeaseEventName | 'activity';
 export interface LeaseMarker { v: 1; event: LeaseEventName; deviceId: string; device: string; by: string; at: string }
 const encode = (value: string): string => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/-->/g, '--&gt;');
-const decode = (value: string): string => value.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+const decode = (value: string): string => value.replace(/--&gt;/g, '-->').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
 export const markerFor = (kind: MarkerKind, attrs: Record<string, string | undefined> = {}): string => {
   const rendered = Object.entries(attrs).filter((e): e is [string, string] => typeof e[1] === 'string' && e[1] !== '').map(([k, v]) => `${k}="${encode(v)}"`).join(' ');
   return `<!-- muster:${kind}${rendered ? ` ${rendered}` : ''} -->`;
