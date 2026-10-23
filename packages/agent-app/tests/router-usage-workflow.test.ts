@@ -78,7 +78,7 @@ test('router usage compatibility: two independent chats complete successive turn
   const threads = new Map<string, string>();
   for (let turn = 0; turn < 2; turn++) for (const id of ids) {
     const chat = await f.send(id);
-    assert.equal(chat.status, 'completed', chat.error);
+    assert.equal(chat.status, 'completed', chat.error ?? 'turn did not complete');
     assert.ok(chat.providerThreadId);
     if (threads.has(id)) assert.equal(chat.providerThreadId, threads.get(id), 'continuation retains its own thread');
     threads.set(id, chat.providerThreadId!);
@@ -97,7 +97,7 @@ test('router usage compatibility: two independent chats complete successive turn
 test('router usage compatibility: a genuinely truncated stream still fails', {skip, timeout: 60_000}, async t => {
   const f = await fixture(t, 1), id = await f.chat();
   const first = await f.send(id);
-  assert.equal(first.status, 'completed', first.error);
+  assert.equal(first.status, 'completed', first.error ?? 'first turn did not complete');
   assert.equal(f.reconnects(), 0, 'partial usage did not cause a reconnect');
   const truncated = await f.send(id);
   assert.equal(truncated.status, 'failed');
