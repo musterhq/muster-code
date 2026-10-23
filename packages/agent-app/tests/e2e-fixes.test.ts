@@ -294,4 +294,12 @@ test('S64 a token budget works with unpriced models, and the Inbox says so at 80
   await assert.rejects(() => s.invoke('project.team.settings.set', { projectId: project.id, monthlyBudgetTokens: 1.5 }), /whole number of tokens/);
   await s.invoke('project.team.settings.set', { projectId: project.id, monthlyBudgetTokens: null });
   assert.equal((await s.invoke('paperclip.snapshot', {})).inbox.filter(i => i.kind === 'budget').length, 0);
+  // A price set in Settings › Models prices the unpriced turn on the Dashboard, and to the same amount as the Costs tab.
+  const receipt = (await s.invoke('paperclip.ledger', {})).entries.find(e => e.chatId === task.started!.chatId && e.source === 'local')!;
+  await s.invoke('models.policy.setPricing', { key: `${receipt.provider}::${receipt.model}`, pricing: { inputPerMTok: 1000, outputPerMTok: 2000 } });
+  const priced = await s.invoke('paperclip.dashboard', { utcOffsetMinutes: -new Date().getTimezoneOffset(), projectId: project.id });
+  const costs = await s.invoke('insight.costs', { days: 30, utcOffsetMinutes: -new Date().getTimezoneOffset(), projectId: project.id });
+  assert.ok(priced.spend.usd !== null && priced.spend.usd > 0, 'the user price applies');
+  assert.equal(priced.spend.unpricedTurns, 0);
+  assert.ok(Math.abs(priced.spend.usd - costs.totals.costUsd!) < 1e-6, `Dashboard ${priced.spend.usd} matches Costs ${costs.totals.costUsd}`);
 });
