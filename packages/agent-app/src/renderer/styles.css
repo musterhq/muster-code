@@ -8,13 +8,13 @@
   --md-leading: 1.52; --md-gap: 0.55em; --md-heading-gap: 1.05em; --md-strong-weight: 630;
   /* Neutral surfaces matched to the observed Cursor Agents window and its
      installed Cursor Dark palette; native material supplies sidebar blur. */
-  --bg: #161616;
-  --bg-raised: #1d1d1d;
+  --bg: #0e0e0e;
+  --bg-raised: #161616;
   --bg-hover: rgb(255 255 255 / 5.5%);
   --bg-active: rgb(255 255 255 / 8%);
   --hairline: rgb(255 255 255 / 6%);
-  --nav-material: rgb(19 19 19 / 46%);
-  --nav-solid: #1a1a1a;
+  --nav-material: rgb(8 8 8 / 74%);
+  --nav-solid: #0c0c0c;
   --text: #e8e8e8;
   --text-strong: #ffffff;
   --text-dim: rgb(232 232 232 / 72%);
@@ -52,8 +52,8 @@
   --sidebar-trail-w: 66px;
   /* UX-19 theme tokens: overlays are rgb(var(--fg-rgb) / a), so they invert with the theme. */
   --fg-rgb: 255 255 255;
-  --bg-menu: #252525;
-  --selection: #404040;
+  --bg-menu: #1c1c1c;
+  --selection: #353535;
   --primary-bg: #e6e6e6;
   --primary-fg: #171717;
   /* UX-01 type scale: every font-size in component CSS is one of these steps (tests/design-tokens.test.ts). */
@@ -504,6 +504,9 @@ textarea:focus-visible {
 }
 /* One-line activity (thinking, tools, notices) stacks tightly; replies and messages keep their breathing room. */
 .timeline-row:is([data-kind='reasoning'], [data-kind='tool'], [data-kind='activity'], [data-kind='notice']) { padding-block: 1px; }
+/* "Today 0:52": marks where a chat starts or resumes after a pause. */
+.day-divider { display: flex; justify-content: center; padding: 14px 0 18px; color: var(--text-faint); font-size: var(--fs-13); font-variant-numeric: tabular-nums; user-select: none; }
+.day-divider b { color: var(--text-dim); font-weight: 500; }
 
 .msg { max-width: 720px; }
 .msg-user {
@@ -597,6 +600,21 @@ textarea:focus-visible {
   width: min(380px, calc(100vw - 32px));
   z-index: 30;
   pointer-events: none;
+}
+/* The stack keeps its corner (16px in, up to 380px wide) unless the chat summary card (anchor
+   --chat-summary, summary-card.css) reaches into it: then it ends 10px left of the card, following
+   the card as the right pane opens, resizes or the card folds. The --notice-shift-* flags are 1 when
+   the card reaches in, else 0. A hidden or absent card resolves the anchor() fallbacks to a card far
+   outside the window. In left, anchor() is measured from the window's left edge; in right, from its
+   right edge. Without anchor positioning or sign() the corner placement above applies. */
+@supports (anchor-name: --a) and (width: calc(1px * sign(1px))) {
+  .notices {
+    width: auto;
+    --notice-shift-left: clamp(0, sign(anchor(--chat-summary right, -100000px) - (100vw - 396px)), 1);
+    --notice-shift-right: clamp(0, sign(396px - anchor(--chat-summary right, 100000px)), 1);
+    left: max(16px, calc(100vw - 396px - var(--notice-shift-left) * (100vw - 6px - anchor(--chat-summary left, 0px))));
+    right: calc(16px + var(--notice-shift-right) * (anchor(--chat-summary left, 0px) - 6px));
+  }
 }
 .notice {
   display: flex;
