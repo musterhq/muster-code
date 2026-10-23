@@ -65,13 +65,16 @@ const rpc:{command:string;input:any}[]=[];
 const people=[{id:'u1',username:'olivia',displayName:'Olivia Owner',role:'owner',status:'active',activeSessions:1,projects:[],lastLoginAt:null},
   {id:'u2',username:'mel',displayName:'Mel Member',role:'member',status:'active',activeSessions:2,projects:[{projectId:'p1',name:'Support desk',role:'editor'}],lastLoginAt:null}];
 let me:any=people[0];
+// A test can hold `server.invites.create` open (to see the pending state) and decide how it settles.
+let holdCreate:null|{promise:Promise<unknown>;resolve:(v:unknown)=>void;reject:(e:unknown)=>void}=null;
+const hold=()=>{let resolve:any,reject:any;const promise=new Promise((a,b)=>{resolve=a;reject=b;});holdCreate={promise,resolve,reject};};
 (window as any).muster={host:'web',subscribe(){return()=>{};},async invoke(){return undefined;}};
 (window as any).musterServer={ready:Promise.resolve(),info:()=>({user:me,server:{version:'0.2.10',name:'Muster Server'}}),signOut:async()=>{rpc.push({command:'signOut',input:null});},
   async invoke(command:string,input:any={}){
     rpc.push({command,input});
     if(command==='server.users.list')return people;
     if(command==='server.invites.list')return [];
-    if(command==='server.invites.create')return {url:'https://muster.example.com/invite/mi_abc',invite:{role:input.role}};
+    if(command==='server.invites.create'){if(holdCreate)return holdCreate.promise;return {url:'https://muster.example.com/invite/mi_abc',invite:{role:input.role}};}
     if(command==='server.access.list')return {projects:[{id:'p1',name:'Support desk'}],access:[{projectId:'p1',userId:'u2',role:'editor'}]};
     if(command==='server.cost')return {lines:[{key:'u2',label:'Mel Member (@mel)',turns:3,inputTokens:3600,outputTokens:120,costUsd:0.0126,unpricedTurns:0}],totals:{key:'total',label:'Total',turns:3,inputTokens:3600,outputTokens:120,costUsd:0.0126,unpricedTurns:0},ledger:{ok:true,entries:3}};
     if(command==='server.sessions.list')return [{id:'s1',username:'olivia',lastSeenAt:'2026-10-01T00:00:00Z',ip:'127.0.0.1',current:true},{id:'s2',username:'mel',lastSeenAt:'2026-10-01T00:00:00Z',ip:'10.0.0.2',current:false}];
@@ -93,6 +96,24 @@ assert.match(text(host2),/disc.*coming soon/);
 await click(byText(host2,'button','Create link'));await settle();
 assert.match(text(host2),/https:\/\/muster\.example\.com\/invite\/mi_abc/);
 assert.deepEqual(rpc.find(c=>c.command==='server.invites.create')?.input,{role:'member',expires:'7d'});
+{const before=rpc.filter(c=>c.command==='server.invites.create').length;const create=byText(host2,'button','Create link') as HTMLButtonElement;
+  await act(async()=>{create.click();create.click();await delay(30);});await settle();
+  assert.equal(rpc.filter(c=>c.command==='server.invites.create').length-before,1,'a double click creates one invite');}
+{// While an invite is being made its section's buttons are disabled; other sections stay usable; a failure unlocks it.
+  const invites=host2.querySelector('section[aria-label="Invites"]')!,sessions=host2.querySelector('section[aria-label="Active sessions"]')!;
+  const createBtn=()=>byText(invites,'button','Create link') as HTMLButtonElement;
+  hold();await click(createBtn());
+  assert.equal(createBtn().disabled,true,'Create link is disabled while its invite is being made');
+  assert.equal((byText(sessions,'button','End') as HTMLButtonElement).disabled,false,'another section is not held up');
+  await click(byText(sessions,'button','End'));
+  assert.ok(rpc.some(c=>c.command==='server.sessions.revoke'&&c.input.id==='s2'),'another section still acts while an invite is pending');
+  const n=rpc.filter(c=>c.command==='server.invites.create').length;
+  await click(createBtn());assert.equal(rpc.filter(c=>c.command==='server.invites.create').length,n,'a click on the disabled button does nothing');
+  await act(async()=>{holdCreate!.reject(new Error('The server is busy.'));await delay(20);});holdCreate=null;await settle();
+  assert.match(text(invites),/The server is busy\./,'the failure is shown');
+  assert.equal(createBtn().disabled,false,'a failed action unlocks the section');
+  await click(createBtn());await settle();
+  assert.equal(rpc.filter(c=>c.command==='server.invites.create').length,n+1,'and the next click runs');}
 const melRow=[...host2.querySelectorAll('tr')].find(r=>text(r).includes('@mel')&&text(r).includes('Mel Member'))!;
 await click(byText(melRow,'button','Revoke'));await settle();
 assert.deepEqual(rpc.find(c=>c.command==='server.users.revoke')?.input,{userId:'u2'});
