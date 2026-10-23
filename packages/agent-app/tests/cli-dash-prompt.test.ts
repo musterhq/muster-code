@@ -10,6 +10,7 @@ import type {AdapterRunInput} from '../src/runtime/adapters/types.ts';
 
 const input=(prompt:string):AdapterRunInput=>({chat:{id:'c',mode:'agent'} as AdapterRunInput['chat'],cwd:'/w',prompt,model:'m',permissionMode:'workspace',signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){}});
 
+// Spec: MUS-SPEC-03-567A (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-567a)
 test('Gemini: a prompt starting with a dash is never a separate argv token after --prompt',()=>{
   const args=geminiArgs(input('- fix the list bullets'),{plan:true,resume:true,approvalMode:true});
   const at=args.findIndex(arg=>arg==='--prompt'||arg.startsWith('--prompt='));
@@ -20,6 +21,7 @@ test('Gemini: a prompt starting with a dash is never a separate argv token after
   assert.equal(value.trim(),'- fix the list bullets');
 });
 
+// Spec: MUS-SPEC-03-567B (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-567b)
 test('OpenCode: a message starting with dashes is not passed as a flag',async()=>{
   let argv:string[]=[];
   const child=new EventEmitter() as EventEmitter&{stdout:PassThrough;stderr:PassThrough;stdin:PassThrough;kill():boolean};

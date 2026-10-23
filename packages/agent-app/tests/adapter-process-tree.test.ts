@@ -36,10 +36,12 @@ async function stopWithGrandchild(t: import('node:test').TestContext, make: (bin
   assert.equal(alive(grandchild), false, 'the command the agent started is ended with it');
 }
 
+// Spec: MUS-SPEC-02-567A (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-567a)
 test('Claude Code: Stop ends the commands the CLI started and the run settles', {skip: !posix && 'POSIX process groups'}, async t => {
   await stopWithGrandchild(t, binary => claudeCodeAdapter({binary, killGraceMs: 200}), '{"type":"system","subtype":"init"}');
 });
 
+// Spec: MUS-SPEC-02-567B (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-567b)
 test('OpenCode: Stop ends the commands the CLI started and the run settles', {skip: !posix && 'POSIX process groups'}, async t => {
   await stopWithGrandchild(t, binary => openCodeAdapter({binary, killGraceMs: 200}), '{"type":"step_start","sessionID":"ses_1"}');
 });
