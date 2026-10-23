@@ -157,6 +157,7 @@ test('an edit refused before dispatch leaves no empty fork behind, and a refused
   assert.equal((await service.invoke('app.snapshot',undefined)).chats.find(c=>c.id===chat.id)?.draft,'third','the replaced prompt survives in the composer');
 });
 
+// Spec: MUS-SPEC-03-463A (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-463a)
 test('digest on a busy turn still leads with the task: first request, last 5 user messages, last summary and git state',async t=>{
   const repo=await directory(t),run=(...a:string[])=>execFileSync('git',['-C',repo,...a],{stdio:'ignore'});
   run('init','-q','-b','feature-x');await writeFile(join(repo,'a.txt'),'a');run('add','.');run('-c','user.name=t','-c','user.email=t@t','commit','-qm','init');await writeFile(join(repo,'dirty.txt'),'x');
