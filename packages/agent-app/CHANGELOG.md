@@ -44,6 +44,10 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - The Dashboard follows the org you switched to. Before, a read of the previous org that was still running when you switched could answer for the new one, so the Dashboard showed the old org's spend, budget and tasks by day.
 - The Dashboard's Recent activity and the Activity list name the agent or person who acted instead of a short id such as "agent a8782383".
 - The Dashboard opens faster on a large org: it reuses the org's last read instead of reading every task page again.
+- The Inbox no longer shows an empty list when the group you filtered by has no items left
+- Archive and delete project confirmations offer Try again when the impact check fails
+- In Settings > Memory, a failed save no longer undoes a later toggle that went through
+- In Settings, a quiet-hours or device-name value the app rejects is put back to the saved one instead of staying on screen as if saved
 
 ## 0.3.13
 

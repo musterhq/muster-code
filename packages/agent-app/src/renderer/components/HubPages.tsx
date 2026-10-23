@@ -49,7 +49,7 @@ const KIND_LABEL: Record<string, string> = { ...INBOX_KIND_LABEL, completed: 'Do
 export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | null; nav: HubNav }): React.ReactElement {
   const { snapshot: app } = useStore();
   const [filter, setFilter] = useState<'all' | InboxBucket>('all');
-  const [group, setGroup] = useState('all');
+  const [chosenGroup, setGroup] = useState('all');
   const [view, setView] = useState<InboxView>('all');
   const [clock, setClock] = useState(0);
   const { meta, reload: reloadMeta } = useInboxMeta();
@@ -68,6 +68,8 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
   const inView = useMemo(() => applyView(items, view, meta, owner, now), [items, view, meta, snapshot?.tasks, clock]);
   const viewCounts = useMemo<Record<InboxView, number>>(() => ({ all: applyView(items, 'all', meta, owner, now).length, mine: applyView(items, 'mine', meta, owner, now).length, unread: applyView(items, 'unread', meta, owner, now).length, snoozed: applyView(items, 'snoozed', meta, owner, now).length }), [items, meta, snapshot?.tasks, clock]);
   const groups = useMemo(() => [...new Set(inView.map(i => i.group))], [inView]);
+  // A group whose items are gone falls back to Everything: the Group menu is hidden with one group left, so a stale choice could not be undone.
+  const group = chosenGroup !== 'all' && groups.includes(chosenGroup) ? chosenGroup : 'all';
   const counts = useMemo(() => { const c = new Map<string, number>(); for (const i of inView) c.set(i.bucket, (c.get(i.bucket) ?? 0) + 1); return c; }, [inView]);
   const visible = decisionOrder(inView.filter(i => (filter === 'all' || i.bucket === filter) && (group === 'all' || i.group === group)), meta);
   // The tidy policy runs when the Inbox is on screen and its items change; it never touches a question, approval, review or problem.
