@@ -25,6 +25,10 @@ export async function setModelHidden(key: string, hidden: boolean): Promise<void
 export async function setModelPricing(key: string, pricing: ModelPolicy['pricing'][string] | null): Promise<void> {
   publish(await invoke('models.policy.setPricing', {key, pricing}));
 }
+/** #668: your own context window for a model (tokens), or null to forget it. */
+export async function setModelContextWindow(key: string, tokens: number | null): Promise<void> {
+  publish(await invoke('models.policy.setContextWindow', {key, tokens}));
+}
 export async function resetModelPolicy(): Promise<void> { publish(await invoke('models.policy.reset', {})); }
 
 type UsageState = {report?: UsageReport; error?: string};
