@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import type {TimelineItem} from '../src/shared/protocol';
 import {createRequire} from 'node:module';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url);
 const {window}=require('linkedom').parseHTML('<html><body><div id="root"></div></body></html>');
 window.innerWidth=1000;window.innerHeight=800;(window.document as any).oninput=null;(window as any).getSelection=()=>({anchorNode:null,anchorOffset:0,focusNode:null,focusOffset:0,rangeCount:0});// React only wires native input events when the document advertises them.
@@ -28,8 +29,14 @@ root.render(<Timeline chatId="one" items={[item('u1','user','مرحبا، هل �
 await until(()=>document.querySelector('[data-item-id="u2"]'));
 assert.deepEqual(errors,[]);
 const dirOf=(id:string)=>document.querySelector(`[data-item-id="${id}"] .msg-user .msg-text`)!.getAttribute('dir');
-assert.equal(dirOf('u1'),'auto','a right-to-left message takes its direction from its own text');
-assert.equal(dirOf('u2'),'auto','every message decides its direction from its first strong character');
+// Spec: MUS-SPEC-01-554C (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-554c)
+await check('each user message takes its text direction from its own first strong character',async()=>{
+  assert.equal(dirOf('u1'),'auto','a right-to-left message takes its direction from its own text');
+  assert.equal(dirOf('u2'),'auto','every message decides its direction from its first strong character');
+});
 await until(()=>document.querySelector('[data-item-id="a1"] li'));
-for(const el of ['p','ul','li'])assert.equal(document.querySelector(`[data-item-id="a1"] .md-body ${el}`)!.getAttribute('dir'),'auto',`${el} in a reply takes its own direction (list markers follow it)`);
+// Spec: MUS-SPEC-01-554D (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-554d)
+await check('paragraphs and list items in a reply take their own text direction',async()=>{
+  for(const el of ['p','ul','li'])assert.equal(document.querySelector(`[data-item-id="a1"] .md-body ${el}`)!.getAttribute('dir'),'auto',`${el} in a reply takes its own direction (list markers follow it)`);
+});
 process.exit(0);

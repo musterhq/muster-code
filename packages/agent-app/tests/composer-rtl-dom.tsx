@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
 (window.document as any).oninput=null;// React only wires native input events when the document advertises them.
@@ -58,10 +59,16 @@ await store.boot();root.render(<Screen/>);await delay(500);
 assert.deepEqual(errors,[]);assert.ok(document.querySelector('[data-testid="composer-input"]'),'the composer is mounted');
 const reset=()=>{for(const key of Object.keys(commits))commits[key]=0;};
 
-const field=document.querySelector('[data-testid="composer-input"]')!;
-assert.equal(field.getAttribute('dir'),'auto','the message field follows the direction of what is typed');
-const titles=[...document.querySelectorAll('.chat-title')];
-assert.ok(titles.length>0,'sidebar rows rendered');
-for(const title of titles)assert.equal(title.getAttribute('dir'),'auto','sidebar chat titles follow their own direction');
+// Spec: MUS-SPEC-01-554A (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-554a)
+await check('the message field follows the direction of what is typed',async()=>{
+  const field=document.querySelector('[data-testid="composer-input"]')!;
+  assert.equal(field.getAttribute('dir'),'auto','the message field follows the direction of what is typed');
+});
+// Spec: MUS-SPEC-01-554B (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-554b)
+await check('sidebar chat titles follow their own text direction',async()=>{
+  const titles=[...document.querySelectorAll('.chat-title')];
+  assert.ok(titles.length>0,'sidebar rows rendered');
+  for(const title of titles)assert.equal(title.getAttribute('dir'),'auto','sidebar chat titles follow their own direction');
+});
 assert.deepEqual(errors,[]);
 process.exit(0);
