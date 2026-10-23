@@ -25,6 +25,8 @@ import {accessibilityText,captureSource,captureSources,computerPermissions} from
 import {NativePreviewController} from './native-preview.ts';
 import { buildMenuTemplate } from './menu.ts';
 import {AppUpdater,bundlePathOf,detectInstallMethod,plistString} from './app-updater.ts';
+import {createUpdateGate,type UpdateGate} from './update-gate.ts';
+import type {UpdateStatus} from '../shared/update-protocol.ts';
 import {unpackedPath} from '../runtime/unpacked-path.ts';
 import {resolveUpdateChannel} from './update-channel.ts';
 import { createQuitCoordinator, quitChoice, quitPrompt, withinDeadline } from './quit-coordinator.ts';
@@ -75,6 +77,7 @@ async function main(): Promise<void> {
   });
   let service: AgentService | null = null;
   let runningChats = 0;
+  let updateGate: UpdateGate<UpdateStatus> | undefined;
   let repaintPolicy: (() => void) | undefined;
   let disposal: Promise<void> | undefined;
   let shutdownStarted = false;
@@ -210,6 +213,8 @@ async function main(): Promise<void> {
       const before = runningChats;
       runningChats = event.snapshot.chats.filter((c) => c.status === 'running' || c.status === 'stopping').length;
       if ((before === 0) !== (runningChats === 0)) repaintPolicy?.();
+      // #449: an update Install that waited for running work starts once nothing runs.
+      if (runningChats === 0) updateGate?.idle();
       applyBadge(event.snapshot.attention?.totalRequests ?? 0);
       notifySettled(event.snapshot);
       lastAttention = event.snapshot.attention;
@@ -488,6 +493,7 @@ async function main(): Promise<void> {
     quit:()=>app.quit(),
     openExternal:url=>{void shell.openExternal(url);},
   });
+  updateGate=createUpdateGate({running:()=>runningChats,install:()=>updater.install(),notify:message=>{if(window&&!window.isDestroyed())window.webContents.send('muster:event',{type:'notice',message} satisfies AgentEvent);}});
   void updater.start();
   app.on('browser-window-focus', () => updater.checkIfStale());
 
@@ -513,7 +519,8 @@ async function main(): Promise<void> {
         if(!request||typeof request.enabled!=='boolean')throw new Error('Invalid update setting.');
         return updater.setAutoCheck(request.enabled);
       }
-      case 'updates.install': return updater.install();
+      // #449: never install (and quit) over running turns; it waits for them and says so.
+      case 'updates.install': return (await updateGate!.install()) ?? updater.snapshot();
       case 'chat.contextMenu': {
         const request=input as Commands['chat.contextMenu']['input'];
         if(!request||typeof request.id!=='string'||request.id.length>256||!Number.isFinite(request.x)||!Number.isFinite(request.y)||(request.surface!==undefined&&request.surface!=='sidebar'&&request.surface!=='header'))throw new Error('Invalid chat menu request.');

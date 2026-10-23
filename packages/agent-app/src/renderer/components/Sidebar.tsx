@@ -128,7 +128,7 @@ function ChatRowImpl({ chat, now, tabbable, onFocusRow, selected, selectionMode,
   const hasDraft = useStoreSelector(state => { const local = state.composerDrafts[chat.id]; return local ? local.text.length > 0 : Boolean(chat.draft); });
   // Timeline items are only kept live for the active chat (and a couple of open-tab edge cases);
   // everywhere else this stays undefined and the row just shows the chat's plain status.
-  const rowStatus = useStoreSelector(state => { const items = state.timelines[chat.id]?.value; return items ? displayStatus(chat, items) : chat.status; });
+  const rowStatus = useStoreSelector(state => { const items = state.timelines[chat.id]?.value; return items ? displayStatus(chat, items) : chat.autoResume ? displayStatus(chat, []) : chat.status; });
   const age=compactAge(chat.updatedAt,now),exact=exactTime(chat.updatedAt),updated=relativeLabel(chat.updatedAt,now);
   const togglePin=()=>void updateChat(chat.id,{pinned:!chat.pinned});
   const snoozed=isSnoozed(chat),wakes=snoozed?snoozeLabel(chat,new Date(now)):'';

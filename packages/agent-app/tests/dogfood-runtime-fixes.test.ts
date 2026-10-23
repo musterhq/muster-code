@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {test} from 'node:test';
+import {mock,test} from 'node:test';
 import {stripAnsi,appendCommandOutput} from '../src/runtime/command-output-buffer.ts';
 import {userProcessNote} from '../src/runtime/service.ts';
 import {goalDeclaredDone,goalUpdate} from '../src/runtime/domains/goals.ts';
@@ -27,6 +27,7 @@ test('goal completion is read from the update line; a plain declaration is only 
   assert.equal(goalDeclaredDone('Once all requirements are met I will report.'), false);
 });
 
+// Spec: MUS-SPEC-02-479O (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479o)
 test('a never-dispatched provider failure is retried automatically, bounded', async () => {
   type Outcome = {status: 'failed' | 'completed'; dispatchState?: string; turnId?: string; recovery?: {kind: string; retryable?: boolean; reason: string}};
   const failed: Outcome = {status: 'failed', dispatchState: 'not-dispatched', recovery: {kind: 'failed', retryable: true, reason: 'The provider attempt failed: app-server exited'}};
@@ -35,7 +36,14 @@ test('a never-dispatched provider failure is retried automatically, bounded', as
   let calls = 0; const waits: string[] = [];
   const ok = await withAdmissionRetry(async (): Promise<Outcome> => ++calls === 1 ? failed : {status: 'completed'}, {signal: new AbortController().signal, onWait: wait => waits.push(wait.reason ?? '')});
   assert.equal(calls, 2); assert.deepEqual(waits, ['transient']); assert.equal(ok.result.status, 'completed');
-  calls = 0;
-  const exhausted = await withAdmissionRetry(async () => { calls++; return failed; }, {signal: new AbortController().signal, onWait() {}});
-  assert.equal(calls, TRANSIENT_RETRY_MAX + 1); assert.equal(exhausted.result.recovery?.kind, 'failed');
+  calls = 0; const delays: number[] = [];
+  // Exponential and bounded: about five tries over half a minute (#448). Timers are mocked so the test stays fast.
+  mock.timers.enable({apis: ['setTimeout']});
+  try {
+    const exhausting = withAdmissionRetry(async () => { calls++; return failed; }, {signal: new AbortController().signal, onWait: wait => delays.push(wait.delayMs)});
+    for (let i = 0; i < TRANSIENT_RETRY_MAX; i++) { for (let j = 0; j < 20; j++) await new Promise(resolve => setImmediate(resolve)); mock.timers.tick(20_000); }
+    const exhausted = await exhausting;
+    assert.equal(calls, TRANSIENT_RETRY_MAX + 1); assert.equal(exhausted.result.recovery?.kind, 'failed');
+    assert.equal(TRANSIENT_RETRY_MAX, 5); assert.deepEqual(delays, [1000, 2000, 4000, 8000, 16000]);
+  } finally { mock.timers.reset(); }
 });

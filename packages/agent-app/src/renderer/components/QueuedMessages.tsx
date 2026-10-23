@@ -115,7 +115,7 @@ export function QueuedMessages({ chatId, items, paused, running = false, skills 
   };
   return <section className={`composer-queue${paused ? ' is-paused' : ''}`} aria-label={plural(items.length, 'queued follow-up')}>
     {paused && <div className="composer-queue-banner" role="status">
-      <span>{paused === 'interrupted' ? 'Queue paused because you interrupted' : 'Queue paused because the last run did not finish'}</span>
+      <span>{paused === 'interrupted' ? 'Queue paused because you interrupted' : paused === 'limited' ? 'Queue waits for the usage limit to reset' : 'Queue paused because the last run did not finish'}</span>
       <button type="button" disabled={Boolean(busy)} onClick={() => void run('resume', () => invoke('chat.queue.resume', { id: chatId }))}><Play size={11} />Resume</button>
     </div>}
     <ol onDragOver={event => { if (dragging) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; } }} onDrop={drop}>
