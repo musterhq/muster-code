@@ -406,3 +406,49 @@ const active=await waitPgid();console.log('READY '+active.executionId);await new
   note('SBX-13','resume',{agentWorkspaceRunning:ws.running,orphanedAgentCommandEnded:true,serviceStillRunning:true,sameContainer:true});
   await resumed.workspaceDelete(scope,true,true);
 });
+
+sbx('#654: no swap on top of memory; disk limit refuses writes and stops growth; archive stops, delete leaves no container',async t=>{
+  const appData=await appDir('disk');const {manager}=makeManager(t,appData,{diskCheckMs:500});
+  const db=new DatabaseSync(':memory:');t.after(()=>db.close());
+  const chats=new Map<string,Chat>([['disk-chat',{id:'disk-chat',title:'d',pinned:false,archived:false,draft:'',status:'idle',updatedAt:'now',model:'m',mode:'agent',permissionMode:'workspace'} as Chat]]);
+  const hooks=createDomainHooks();
+  const ctx={dataDir:base,db:()=>db,hooks:hooks.hooks,emit(){},emitSnapshot(){},folderFor:()=>{throw new Error('no folder');},store:{chat:(id:string)=>chats.get(id),snapshot:()=>({chats:[...chats.values()]})},
+    invoke:async(_c:string,input:{id:string;permissionMode:Chat['permissionMode']})=>{chats.set(input.id,{...chats.get(input.id)!,permissionMode:input.permissionMode});return chats.get(input.id);}} as unknown as DomainContext;
+  registerAgentSandboxHost(manager);t.after(()=>registerAgentSandboxHost(undefined));
+  const domain=createSandboxDomain(ctx);t.after(()=>domain.dispose?.());
+  const scope:ScopedComputerRef={kind:'chat',id:'disk-chat'};
+  await domain.handlers['sandbox.chatEnvironment.set']!({chatId:'disk-chat',env:'sandbox',mode:'copy'});
+  const started=await manager.start(scope);assert.equal(started.state,'running',started.reason??'');assert.equal(started.limits.diskGiB,10);
+  const name=await containerOf(appData,started.id);
+  const host=(await inspectJSON(name)).HostConfig;
+  assert.equal(host.Memory,512*1024**2);assert.equal(host.MemorySwap,host.Memory,'MemorySwap equals Memory: no swap doubling');
+  // A 1 GB disk limit (recreates the container; still no swap on top).
+  const limited=await manager.setLimits(scope,{diskGiB:1});assert.equal(limited.state,'running',limited.reason??'');assert.equal(limited.limits.diskGiB,1);
+  const host1=(await inspectJSON(name)).HostConfig;assert.equal(host1.MemorySwap,host1.Memory);
+  // Fill /workspace to just under 1 GB, then a sandbox_write that would cross it is refused and writes nothing.
+  const fill=await run(manager,scope,'dd if=/dev/zero of=/workspace/fill.bin bs=1M count=1012 conv=fsync 2>&1 | tail -1',120_000);assert.equal(fill.state,'completed',fill.stdout+fill.stderr);
+  await delay(2100);
+  const target=manager.agentTarget(scope);
+  await assert.rejects(target.write('over.txt','x'.repeat(15*1024*1024)),/This write was refused: it would take the sandbox past its 1 GB disk limit/);
+  assert.equal((await run(manager,scope,'test -e /workspace/over.txt && echo present || echo absent')).stdout,'absent\n');
+  await target.write('small.txt','fits');
+  // A command that keeps writing (here into the container's own layer, outside /workspace) is stopped with a notice.
+  const {executionId}=await manager.exec({scope,command:'for i in $(seq 1 80); do dd if=/dev/zero of=/tmp/grow-$i bs=1M count=8 conv=fsync 2>/dev/null; sleep 0.1; done; echo finished',requestId:randomUUID(),timeoutMs:120_000});
+  const grown=await settle(manager,scope,executionId);
+  assert.equal(grown.state,'cancelled',`${grown.state} ${grown.reason}`);assert.doesNotMatch(grown.stdout,/finished/);
+  assert.match(grown.reason??'',/^Stopped: the sandbox went past its 1 GB disk limit/);assert.equal(grown.computerStopped,false);
+  await assert.rejects(manager.exec({scope,command:'true',requestId:randomUUID()}),/over its 1 GB disk limit/);
+  note('#654','disk',{memory:host1.Memory,memorySwap:host1.MemorySwap,storageOpt:host1.StorageOpt??null,writeRefused:true,growthStopped:grown.reason});
+  // Archive: the container stops and is kept.
+  chats.set('disk-chat',{...chats.get('disk-chat')!,archived:true});
+  await hooks.chatRemoval({chat:chats.get('disk-chat')!,kind:'archive'});
+  const archived=await inspectJSON(name);assert.equal(archived.State.Running,false,'archiving stops the container');
+  // Delete: container, workspace and the chat_environments row are gone.
+  const workDir=archived.Mounts[0].Source.replace(/\/workspace$/,'');
+  await hooks.chatRemoval({chat:chats.get('disk-chat')!,kind:'delete'});
+  const left=await docker('ps','-a','--filter',`name=^${name}$`,'--format','{{.Names}}');assert.equal(left.stdout,'','no container left after deleting the chat');
+  const anyUnderRun=await docker('ps','-a','--filter','label=muster.sandbox=1','--format','{{.Mounts}}');assert.doesNotMatch(anyUnderRun.stdout,new RegExp(appData.split('/').at(-1)!));
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM chat_environments').get()!.n,0,'environment row cleared');
+  await assert.rejects(readdir(workDir),/ENOENT/,'workspace deleted');
+  note('#654','cleanup',{archivedRunning:archived.State.Running,containersLeft:0,envRows:0,workspaceDeleted:true});
+});

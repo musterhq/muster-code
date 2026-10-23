@@ -19,6 +19,7 @@ import type {FileRunAction} from '../../shared/domains/files-protocol';
 import './processes-tab.css';
 import './process-saved-actions.css';
 import { ResourceState } from './ResourceState';
+import {cleanIpcError} from './resourceErrors';
 import {Tip} from './Tooltip';
 
 const PURPOSES=[{id:'command',label:'Command',Icon:SquareTerminal},{id:'test',label:'Test',Icon:FlaskConical},{id:'build',label:'Build',Icon:Hammer},{id:'server',label:'Server',Icon:Globe},{id:'task',label:'Task',Icon:Wrench}] as const;
@@ -217,6 +218,7 @@ const chosen=new Map<string,string>(),autoOpened=new Set<string>();
 function useTerminals(chatId:string,active:boolean,autoStart:boolean) {
   const archived=useStoreSelector(state=>!!state.snapshot?.chats.find(chat=>chat.id===chatId)?.archived);
   const [terminals,setTerminals]=useState<TerminalInfo[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[creating,setCreating]=useState(false);
+  const [loadError,setLoadError]=useState(''),[attempt,setAttempt]=useState(0);
   const [selected,setSelected]=useState<string|undefined>(()=>chosen.get(chatId));
   const body=useRef<HTMLDivElement>(null),pending=useRef(false),alive=useRef(true);
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
@@ -230,23 +232,29 @@ function useTerminals(chatId:string,active:boolean,autoStart:boolean) {
   };
   useEffect(()=>{
     if(!active)return;
-    let disposed=false;setLoading(true);setError('');
+    let disposed=false,retries=0;let retryTimer:ReturnType<typeof setTimeout>|undefined;
+    setLoading(true);setLoadError('');setError('');
     const unsubscribe=subscribe(event=>{if(event.type==='terminalExit')setTerminals(rows=>rows.map(row=>row.id===event.id?{...row,status:'exited',exitCode:event.code}:row));});
     const load=()=>invoke('terminal.list',{chatId}).then(value=>{
       const list=Array.isArray(value)?value:[];
       if(disposed)return list;
-      setTerminals(list);for(const row of list)reconcileTerminal(row.id,row.end);return list;
+      setLoadError('');setTerminals(list);for(const row of list)reconcileTerminal(row.id,row.end);return list;
     });
-    void load().then(list=>{
+    const initialLoad=()=>{void load().then(list=>{
       if(disposed)return;setLoading(false);
       // Opening Terminal on a conversation with no terminal starts one, once per window.
       if(autoStart&&!list.length&&!autoOpened.has(chatId)&&!archived){autoOpened.add(chatId);void create();}
-    },cause=>{if(!disposed){setError(message(cause));setLoading(false);}});
+    },cause=>{
+      if(disposed)return;
+      if(retries<2){retryTimer=setTimeout(initialLoad,250*2**retries++);return;}
+      setLoadError(cleanIpcError(cause));setLoading(false);
+    });};
+    initialLoad();
     // A hidden window receives no events; catch up any stream that moved on meanwhile.
     const returned=()=>{if(document.visibilityState!=='hidden')void load().catch(()=>{});};
     document.addEventListener('visibilitychange',returned);window.addEventListener('focus',returned);
-    return()=>{disposed=true;unsubscribe();document.removeEventListener('visibilitychange',returned);window.removeEventListener('focus',returned);};
-  },[chatId,active,autoStart]);
+    return()=>{disposed=true;clearTimeout(retryTimer);unsubscribe();document.removeEventListener('visibilitychange',returned);window.removeEventListener('focus',returned);};
+  },[chatId,active,autoStart,attempt]);
   const current=terminals.find(row=>row.id===selected)??[...terminals].reverse().find(row=>row.status==='running')??terminals[terminals.length-1];
   const close=async(row:TerminalInfo)=>{
     setError('');
@@ -259,7 +267,7 @@ function useTerminals(chatId:string,active:boolean,autoStart:boolean) {
     }catch(cause){if(alive.current)setError(message(cause));}
   };
   const labelOf=(row:TerminalInfo)=>`${row.title} ${terminals.findIndex(item=>item.id===row.id)+1}`;
-  return {archived,terminals,loading,error,setError,creating,create,close,current,select,body,labelOf};
+  return {archived,terminals,loading,loadError,retry:()=>setAttempt(value=>value+1),error,setError,creating,create,close,current,select,body,labelOf};
 }
 type Shells=ReturnType<typeof useTerminals>;
 
@@ -279,11 +287,13 @@ function ShellBody({shells,active}:{shells:Shells;active:boolean}) {
   const {current,creating,archived,loading}=shells;
   return <>
     {current&&current.status!=='running'&&<p className="terminal-ended" role="status">{current.status==='ended'?'Terminal ended when Muster quit. Its last output is shown below; shells do not outlive the app.':`Process exited${current.exitCode!==null?` with code ${current.exitCode}`:''}.`} <button type="button" disabled={creating||archived} onClick={()=>void shells.create()}>Start a new terminal</button></p>}
+    {shells.loadError&&<ResourceState kind="error" compact message="Terminals could not be loaded." detail={shells.loadError} onRetry={shells.retry}/>}
     {shells.error&&<p className="process-error terminal-error" role="alert">{shells.error}</p>}
     <div className="terminal-body" ref={shells.body}>
       {current?<TerminalView key={current.id} id={current.id} readOnly={current.status!=='running'} visible={active}/>
         :creating?<p className="process-note terminal-empty" role="status">Starting terminal…</p>
         :loading?<ResourceState kind="loading" label="Loading terminals" rows={3}/>
+        :shells.loadError?null
         :<div className="processes-empty"><SquareTerminal size={24} aria-hidden="true"/><p>{archived?'Restore this conversation to open a terminal.':'No terminal is open.'}</p>{!archived&&<button type="button" className="terminal-start" onClick={()=>void shells.create()}><Plus size={12}/>New terminal</button>}</div>}
     </div>
   </>;
