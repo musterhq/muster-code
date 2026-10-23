@@ -7,10 +7,14 @@ on:
     paths:
       - "packages/agent-app/**"
       - ".github/workflows/agent-app-ci.yml"
+      - "docs/spec/**"
+      - "scripts/check-spec.mjs"
   pull_request:
     paths:
       - "packages/agent-app/**"
       - ".github/workflows/agent-app-ci.yml"
+      - "docs/spec/**"
+      - "scripts/check-spec.mjs"
   workflow_dispatch:
 
 concurrency:
@@ -61,6 +65,11 @@ jobs:
 
       - name: Install
         run: npm ci --no-audit --no-fund
+
+      # Every acceptance case names one real, non-skipped test and that test names the case back (docs/spec/acceptance-cases.md).
+      - name: Spec links
+        working-directory: .
+        run: node scripts/check-spec.mjs
 
       - name: Typecheck (tsc-rs)
         run: npm run typecheck
