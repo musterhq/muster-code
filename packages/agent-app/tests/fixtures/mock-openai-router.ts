@@ -12,8 +12,9 @@ export interface MockRouter {base: string; origin: string; log: RouterRequest[];
 
 export const ROUTER_MODELS = ['claude/claude-opus-4.1', 'codex/gpt-5.6-terra', 'auto/best-coding'];
 
-export async function startMockRouter(token: string, options: {reply?: string; echoHeaders?: string[]} = {}): Promise<MockRouter> {
+export async function startMockRouter(token: string, options: {reply?: string; echoHeaders?: string[]; responseUsage?: Record<string, unknown>; truncateAfter?: number} = {}): Promise<MockRouter> {
   const log: RouterRequest[] = [];
+  let responses = 0;
   const reply = options.reply ?? 'pong from mock router';
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const chunks: Buffer[] = [];
@@ -42,15 +43,18 @@ export async function startMockRouter(token: string, options: {reply?: string; e
         [undefined, {id: 'c1', object: 'chat.completion.chunk', choices: [{index: 0, delta: {}, finish_reason: 'stop'}], usage: {prompt_tokens: 3, completion_tokens: 4, total_tokens: 7}}], [undefined, '[DONE]']]);
     }
     if (req.method === 'POST' && path === '/v1/responses') {
+      responses++;
       const item = {type: 'message', id: 'msg_1', role: 'assistant', status: 'completed', content: [{type: 'output_text', text: reply, annotations: []}]};
-      return sse([
+      const events: Array<[string | undefined, unknown]> = [
         ['response.created', {type: 'response.created', response: {id: 'resp_1', object: 'response', status: 'in_progress', model}}],
         ['response.output_item.added', {type: 'response.output_item.added', output_index: 0, item: {...item, status: 'in_progress', content: []}}],
         ['response.output_text.delta', {type: 'response.output_text.delta', item_id: 'msg_1', output_index: 0, content_index: 0, delta: reply}],
         ['response.output_item.done', {type: 'response.output_item.done', output_index: 0, item}],
         ['response.completed', {type: 'response.completed', response: {id: 'resp_1', object: 'response', status: 'completed', model, output: [item],
-          usage: {input_tokens: 3, input_tokens_details: {cached_tokens: 0}, output_tokens: 4, output_tokens_details: {reasoning_tokens: 0}, total_tokens: 7}}}],
-      ]);
+          usage: options.responseUsage ?? {input_tokens: 3, input_tokens_details: {cached_tokens: 0}, output_tokens: 4, output_tokens_details: {reasoning_tokens: 0}, total_tokens: 7}}}],
+      ];
+      if (options.truncateAfter !== undefined && responses > options.truncateAfter) events.pop();
+      return sse(events);
     }
     return send(404, {error: {message: 'Not found'}});
   });
