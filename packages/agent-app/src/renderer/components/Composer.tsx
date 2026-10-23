@@ -17,7 +17,7 @@ import { useStoreSlice } from '../useStore';
 import { AttachmentStrip, type ComposerAttachment } from './AttachmentStrip';
 import { CaptureSourcePicker, type CaptureResult } from './CaptureSourcePicker';
 import { accessibilityAttachment, utf8Base64 } from '../captureRegion';
-import { ProviderUsageHover } from './ProviderUsage';
+import { ProviderUsageHover, ProviderUsageWarning } from './ProviderUsage';
 import type { ComputerCaptureSource } from '../../shared/domains/computer-protocol';
 import { baseFileName, buildAddRows, buildMentionRows, buildSlashRows, ComposerMenuList, connectorEntries, firstRow, nextRow, pluginLabel, pluginRow, skillRow, skillUsable, type MenuRow } from './ComposerMenu';
 import { ComposerQuestionPanel, useQuestionFlow } from './ComposerQuestionPanel';
@@ -1117,6 +1117,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     <div className="composer-attachments"><AttachmentStrip chatId={chat.id} items={attachments} onRemove={removeAttachment} onRetry={retryAttachment}
       onOpen={item => { if (!sketches.current.has(item.localId)) return false; openSketch(item.localId); return true; }} /></div>
     {toolBlind && <p className="composer-tools-warning" role="status" data-testid="tools-blind-warning">{TOOLS_BLIND_NOTICE}.{toolAlternative && <> <button type="button" data-testid="tools-blind-switch" disabled={settingsBlocked || running} onClick={() => void chooseModel(toolAlternative.model, toolAlternative.providerId)}>Switch to {toolAlternative.name}</button></>}</p>}
+    <ProviderUsageWarning providerId={chat.providerId || undefined} />
     {imageBlind && attachments.some(item => item.kind === 'image') && <p className="composer-image-warning" role="status" data-testid="image-blind-warning">{imageBlindWarning(imageBlind)}</p>}
     {largePaste && <div className="composer-paste-offer" role="group" aria-label="Large paste">
       <FileText size={14} aria-hidden="true" /><span>Large paste · {formatBytes(largePaste.bytes)}</span>
