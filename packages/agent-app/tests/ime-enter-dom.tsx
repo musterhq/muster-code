@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
 (window.document as any).oninput=null;
@@ -61,12 +62,15 @@ spotlight.openSpotlightSearch();await delay(40);
 await type('OSS-12');
 const enter=(init:Record<string,unknown>)=>input().dispatchEvent(Object.assign(new window.Event('keydown',{bubbles:true,cancelable:true}),{key:'Enter'},init));
 const before=store.getState().screen;
-enter({isComposing:true});await delay(60);
-assert.equal(store.getState().screen,before,'Enter that confirms a composition does not open the row');
-assert.ok(spotlight.isSpotlightSearchOpen(),'the palette stays open');
-enter({keyCode:229});await delay(60);
-assert.equal(store.getState().screen,before,'the keyCode 229 keydown that follows compositionend is ignored too');
-enter({});await delay(60);
-assert.equal(store.getState().screen,'hub','a plain Enter still opens the row');
+// Spec: MUS-SPEC-01-560A (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-560a)
+await check('Enter that confirms an IME composition does not open the highlighted search row',async()=>{
+  enter({isComposing:true});await delay(60);
+  assert.equal(store.getState().screen,before,'Enter that confirms a composition does not open the row');
+  assert.ok(spotlight.isSpotlightSearchOpen(),'the palette stays open');
+  enter({keyCode:229});await delay(60);
+  assert.equal(store.getState().screen,before,'the keyCode 229 keydown that follows compositionend is ignored too');
+  enter({});await delay(60);
+  assert.equal(store.getState().screen,'hub','a plain Enter still opens the row');
+});
 console.log('PASS: spotlight ignores Enter during IME composition');
 process.exit(0);

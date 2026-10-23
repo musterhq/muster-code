@@ -218,6 +218,7 @@ test('NAV-11: folders, Projects and files as explicit result types', () => {
   assert.deepEqual(files[0].nameRanges, [[0, 4]]);
 });
 
+// Spec: MUS-SPEC-01-560B (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-560b)
 test('fuzzyMatch ranges never cut an emoji in half', () => {
   const single = fuzzyMatch('😀', 'ship 😀 now')!;
   assert.deepEqual(single.ranges, [[5, 7]], 'the whole surrogate pair is one highlighted span');
