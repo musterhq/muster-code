@@ -291,6 +291,7 @@ test('MEM-X2: the recall chip previews the next turn locally and a removed note 
   assert.match(restored.text, /id mem_a/, 'restoring brings it back');
 });
 
+// Spec: MUS-SPEC-11-467A (docs/spec/clauses/11-memory.md#mus-spec-11-467a)
 test('folder chats still get Personal directives and Personal facts the user already gave', async t => {
   const f = await fixture(t);
   await f.call('memory.directives.save', {directive: {kind: 'directive', text: 'Always answer in British English', priority: 5, tags: [], enabled: true}});
@@ -300,6 +301,7 @@ test('folder chats still get Personal directives and Personal facts the user alr
   assert.match(result.text, /prefer pnpm/, 'the Personal fact reaches a folder chat');
 });
 
+// Spec: MUS-SPEC-11-467B (docs/spec/clauses/11-memory.md#mus-spec-11-467b)
 test('recall query uses the task and recent user messages, so a bare "continue" still recalls', async t => {
   const queries: string[] = [];
   const f = await fixture(t, {client: {recall: async input => { queries.push(String(input.query)); return {bankId: 'bank', results: []}; }}});
@@ -318,6 +320,7 @@ test('recall query uses the task and recent user messages, so a bare "continue" 
   assert.ok(queries.every(query => query.endsWith('y'.repeat(1_500))), 'a long current message keeps most of the budget');
 });
 
+// Spec: MUS-SPEC-11-467C (docs/spec/clauses/11-memory.md#mus-spec-11-467c)
 test('the default recall timeout is raised to about four seconds', async () => {
   const {RECALL_TIMEOUT_MS} = await import('../src/runtime/domains/memory.ts');
   assert.equal(RECALL_TIMEOUT_MS, 4_000);
