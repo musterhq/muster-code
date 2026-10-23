@@ -23,6 +23,7 @@ function gatedProvider(){
   return {provider,inputs,stops,marks,finish(chatId:string){const gate=gates.get(chatId)!;gates.delete(chatId);gate.resolve({status:'completed',finalMessage:'done'});},open:(chatId:string)=>gates.has(chatId)};
 }
 
+// Spec: MUS-SPEC-14-480E (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-480e)
 test('installedPlugin reads marketplace installs and added MCP servers, nothing else',()=>{
   const ext=installedPlugin('extensions.install',{id:'notion',name:'notion',version:'1.2.0',installedAt:'2026-10-18T00:00:00Z',manifest:{displayName:'Notion',capabilities:{apps:['notion'],mcpServers:[]}}});
   assert.equal(ext?.name,'Notion');assert.equal(ext?.connectors,true);assert.deepEqual(ext?.aliases,['Notion','notion']);
@@ -33,6 +34,7 @@ test('installedPlugin reads marketplace installs and added MCP servers, nothing 
   assert.equal(installedPlugin('extensions.install',undefined),null);
 });
 
+// Spec: MUS-SPEC-14-480D (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-480d)
 test('a turn is about a plugin only when it names it and ended recently',()=>{
   assert.equal(mentions('Can you file this in Google Drive?',['google-drive']),true);
   assert.equal(mentions('use the linear connector',['linear']),true);
@@ -49,6 +51,9 @@ test('a turn is about a plugin only when it names it and ended recently',()=>{
   assert.equal(pluginReloadNotice('Linear'),'Linear installed — restarted the session and re-sent your last message');
 });
 
+// Spec: MUS-SPEC-14-480A (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-480a)
+// Spec: MUS-SPEC-14-480B (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-480b)
+// Spec: MUS-SPEC-14-480C (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-480c)
 test('an MCP server added mid-run restarts the running chat once and re-sends its prompt through the queue with the new tools',async t=>{
   const dataDir=await directory(t),fake=gatedProvider();
   const service=createAgentService({dataDir,provider:fake.provider,onEvent(){}});
