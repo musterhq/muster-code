@@ -13,4 +13,43 @@ Boundaries:
 
 ## Acceptance cases
 
-No cases yet. A PR that changes this area adds its cases here first (see [acceptance-cases.md](../acceptance-cases.md)).
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-01-569A](01-chat-and-composer.md#mus-spec-01-569a) | Searching "checklist" in a message holding "İzmir" returns a highlight range that covers "checklist". | [`the index returns a correct highlight for such a message`](../../../packages/agent-app/tests/chat-search-casefold.test.ts) |
+| [MUS-SPEC-01-569B](01-chat-and-composer.md#mus-spec-01-569b) | In "İİİİ İstanbul deploy notes" the one highlight covers "deploy". | [`a snippet after a dotted capital I highlights the matched word itself`](../../../packages/agent-app/tests/chat-search-casefold.test.ts) |
+| [MUS-SPEC-01-569C](01-chat-and-composer.md#mus-spec-01-569c) | In a 200-"İ" message the snippet window holds "needle" and the highlight covers it. | [`a long message: the window is centred on the match, not shifted by earlier dotted capitals`](../../../packages/agent-app/tests/chat-search-casefold.test.ts) |
+
+### Search highlights
+
+<a id="mus-spec-01-569a"></a>
+#### MUS-SPEC-01-569A: Chat search highlights the right word in a message with "İ"
+
+- Precondition: A chat message reads "İzmir İzmir release checklist".
+- Action: Search the chat index for "checklist".
+- Expected result: The first hit's highlight range covers exactly "checklist".
+- Test: `packages/agent-app/tests/chat-search-casefold.test.ts::the index returns a correct highlight for such a message`
+- Environment: Node test runner; no network, no provider.
+- Known gaps: Checks the range from the index, not the highlight drawn in the search panel.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-569b"></a>
+#### MUS-SPEC-01-569B: A snippet after "İİİİ" highlights the matched word
+
+- Precondition: Text that starts with several dotted capital I letters.
+- Action: Build the search snippet for "deploy".
+- Expected result: There is one highlight range and it covers exactly "deploy".
+- Test: `packages/agent-app/tests/chat-search-casefold.test.ts::a snippet after a dotted capital I highlights the matched word itself`
+- Environment: Node test runner; no network, no provider.
+- Known gaps: Tests the snippet builder directly.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-569c"></a>
+#### MUS-SPEC-01-569C: A long message with many "İ" shows the match in its snippet
+
+- Precondition: A message with 200 "İ" characters, filler, then "needle here".
+- Action: Build the search snippet for "needle".
+- Expected result: One highlight range, covering exactly "needle".
+- Test: `packages/agent-app/tests/chat-search-casefold.test.ts::a long message: the window is centred on the match, not shifted by earlier dotted capitals`
+- Environment: Node test runner; no network, no provider.
+- Known gaps: Tests the snippet builder directly.
+- Evidence: UNVERIFIED
