@@ -1,6 +1,7 @@
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 (globalThis as any).require=require;
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
@@ -16,7 +17,7 @@ const emit=(event:any)=>{for(const listener of listeners)listener(event);};
 const row={chatId:'chat',processId:'process:fixture',generation:1,sequence:1,status:'running',label:'Fixture server',purpose:'server',startedAt:'2026-09-19T01:00:00Z',updatedAt:'2026-09-19T01:00:00Z',command:'fixture',output:'old output',truncated:false,exitCode:null};
 let pendingAttach:((value:any)=>void)|undefined,leaseId='';
 const terminal={id:'',chatId:'chat',title:'zsh',cwd:'/work',shell:'/bin/zsh',owner:'user',status:'running',startedAt:'2026-09-19T01:00:00Z',exitCode:null};
-let terminalList:any[]=[],created=0,timeline:any[]=[];
+let terminalList:any[]=[],created=0,timeline:any[]=[],failTerminalCreate=false;
 // S3-E: the shell listens on :5173 (yours); the agent left a verification server on :5174.
 let ports:any[]=[{id:'listener:user',port:5173,address:'*',name:'node',owner:'user',source:{kind:'terminal',id:'terminal:1'}},{id:'listener:agent',port:5174,address:'127.0.0.1',name:'vite',owner:'agent',source:{kind:'agent'}}];
 let confirmAnswer=false;const confirms:string[]=[];(window as any).confirm=(text:string)=>{confirms.push(text);return confirmAnswer;};
@@ -26,7 +27,7 @@ let confirmAnswer=false;const confirms:string[]=[];(window as any).confirm=(text
   if(command==='processes.attach'){leaseId=input.leaseId;return new Promise(resolve=>{pendingAttach=resolve;});}
   if(command==='processes.stop')return {...row,status:'stopped',sequence:6,signal:'SIGTERM'};
   if(command==='terminal.list')return terminalList;
-  if(command==='terminal.create'){const info={...terminal,id:`terminal:${++created}`};terminalList=[...terminalList,info];return info;}
+  if(command==='terminal.create'){if(failTerminalCreate){failTerminalCreate=false;throw new Error('Close a terminal before opening another (maximum 12).');}const info={...terminal,id:`terminal:${++created}`};terminalList=[...terminalList,info];return info;}
   if(command==='terminal.kill'){terminalList=terminalList.filter(item=>item.id!==input.id);return;}
   if(command==='terminal.snapshot')return {data:'',truncatedBytes:0,omittedLines:0,end:0};
   if(command==='chat.timeline')return {items:timeline,revision:1};
@@ -35,15 +36,55 @@ let confirmAnswer=false;const confirms:string[]=[];(window as any).confirm=(text
   return undefined;
 }};
 const React=await import('react'),{createRoot}=await import('react-dom/client');
-const {ProcessesTab}=await import('../src/renderer/components/ProcessesTab');
+const {ProcessesTab,openTerminalTab}=await import('../src/renderer/components/ProcessesTab');
 const store=await import('../src/renderer/store');
 const errors:unknown[]=[],root=createRoot(document.getElementById('root')!,{onUncaughtError:error=>errors.push(error)});
 const text=()=>document.body.textContent??'';
 const click=(selector:string)=>{const node=document.querySelector(selector) as HTMLButtonElement|null;assert.ok(node,`missing ${selector}`);node!.click();};
 const count=(name:string)=>calls.filter(call=>call.command===name).length;
+// #586: an already-open dock must not interpret browsing chats as opening Terminal.
+const summaryForDock=await import('../src/renderer/processSummary');
+const {TerminalDock:BrowsingDock}=await import('../src/renderer/components/TerminalDock');
+summaryForDock.setTerminalDock({placement:'panel',open:true},false);
+// Spec: MUS-SPEC-10-642A (docs/spec/clauses/10-terminal-and-processes.md#mus-spec-10-642a)
+await check('browsing chats with the terminal dock open starts no shell; opening Terminal starts exactly one',async()=>{
+  for(let index=0;index<5;index++){
+    root.render(<><button onClick={()=>openTerminalTab(`browse:${index}`,'Terminal','terminals')}>Open Terminal</button><BrowsingDock chatId={`browse:${index}`}/></>);
+    await delay(40);
+    assert.match(text(),/No terminal is open/);
+    assert.ok(document.querySelector('.terminal-start'),'the empty state offers New terminal');
+  }
+  assert.equal(count('terminal.create'),0,'switching through five chats with the dock open starts no shells');
+  const listsBeforeOpen=count('terminal.list');
+  click('button');await delay(60);
+  assert.equal(count('terminal.create'),1,'explicitly opening Terminal in the visible dock starts exactly one shell');
+  assert.equal(calls.find(call=>call.command==='terminal.create')?.input.chatId,'browse:4');
+  assert.equal(count('terminal.list'),listsBeforeOpen+1,'opening only reloads the current chat once');
+  click('button');await delay(20);
+  assert.equal(count('terminal.create'),1,'focusing Terminal again does not duplicate the shell');
+});
+// #614: a rejected automatic open still leaves New terminal available for retry.
+terminalList=[];failTerminalCreate=true;
+root.render(<BrowsingDock chatId="browse:retry"/>);await delay(40);
+openTerminalTab('browse:retry','Terminal','terminals');await delay(40);
+assert.match(text(),/Close a terminal before opening another/);
+assert.match(text(),/No terminal is open/);
+click('.terminal-start');await delay(40);
+assert.equal(count('terminal.create'),3,'New terminal retries once after a failed open');
+assert.ok(!document.querySelector('.terminal-error'),'retry clears the error');
+// #586: "Show panel" in the right-pane Terminal is an explicit open too, so it never reveals an empty dock.
+summaryForDock.setTerminalDock({placement:'panel',open:false},false);terminalList=[];
+const createsBeforeShow=count('terminal.create');
+root.render(<><ProcessesTab chatId="browse:show"/><BrowsingDock chatId="browse:show"/></>);await delay(60);
+const showPanel=[...document.querySelectorAll('button')].find(button=>button.textContent==='Show panel') as HTMLButtonElement|undefined;
+assert.ok(showPanel,'the pane offers Show panel');showPanel!.click();await delay(60);
+assert.ok(document.querySelector('section.terminal-dock'),'Show panel opens the dock');
+assert.equal(count('terminal.create'),createsBeforeShow+1,'Show panel starts the chat\'s first shell');
+root.render(null);await delay(20);
+terminalList=[];created=0;calls.length=0;
 // Terminals default to the bottom panel; these checks cover the right-pane (Settings › Right) form.
 {const dock=await import('../src/renderer/processSummary');assert.equal(dock.terminalDock().placement,'panel','bottom panel is the default');dock.setTerminalDock({placement:'pane',open:false},false);}
-await store.boot();root.render(<ProcessesTab chatId="chat"/>);await delay(60);
+await store.boot();store.openProcessesTab('chat','Terminal');root.render(<ProcessesTab chatId="chat"/>);await delay(60);
 assert.deepEqual(errors,[]);
 // S3-E: one resource, one level. No Terminals/Commands/Agent tabs inside the pane; a conversation
 // without a shell gets one, without Full access.

@@ -23,6 +23,7 @@ const listeners=new Set<(event:any)=>void>();
 }};
 const React=await import('react'),{createRoot}=await import('react-dom/client');
 const {TerminalsPanel}=await import('../src/renderer/components/ProcessesTab');
+const {requestTerminal}=await import('../src/renderer/processSummary');
 const store=await import('../src/renderer/store');
 await store.boot();
 const root=createRoot(document.getElementById('root')!);
@@ -58,7 +59,8 @@ assert.equal(calls,1,'unmount cancels the pending retry');
 // Switching chats while a retry is scheduled cancels it: the old chat is never listed again.
 calls=0;listed.length=0;failures=100;mount();
 await until(()=>calls===1,'initial load before the switch');
-failures=0;root.render(<TerminalsPanel chatId="live-chat" active/>);
+// A shell starts only for a chat whose Terminal was opened (#586); opening it is what this request stands for.
+failures=0;requestTerminal('live-chat');root.render(<TerminalsPanel chatId="live-chat" active/>);
 await until(()=>creates===1,'the new chat loads and auto-starts its one shell');
 await delay(800);
 assert.deepEqual(listed,['retry-chat','live-chat'],'the old chat retry was cancelled by the switch');
@@ -67,7 +69,7 @@ assert.equal(creates,1,'one shell for the live chat');
 // Two failed loads then an empty list on a fresh chat: exactly one shell, and a revisit starts none.
 root.render(null);await delay(30);
 calls=0;failures=2;creates=0;
-root.render(<TerminalsPanel chatId="fresh-chat" active/>);
+requestTerminal('fresh-chat');root.render(<TerminalsPanel chatId="fresh-chat" active/>);
 await until(()=>creates===1,'auto-start after the retried load succeeds');
 await delay(800);
 assert.equal(calls,3,'two retries, then success');

@@ -26,7 +26,7 @@ import {cleanIpcError, isNotGitRepository} from './components/resourceErrors';
 import { BridgeError, getBridge, invoke, subscribe } from './bridge';
 import { runtimeMessage } from './composerBridge';
 import { focusComposer } from './focus';
-import { killChatTerminals } from './processSummary';
+import { killChatTerminals, requestTerminal } from './processSummary';
 import { shareStructure } from './structuralShare';
 import { TimelineReplica } from './timeline-replica';
 import { recordTransport } from './connectionHealth';
@@ -1099,6 +1099,7 @@ export function openComputerTab(scope:ScopedComputerRef,label:string):void {
 }
 export function openProcessesTab(chatId:string,label:string):void {
   void label; // every terminal surface is simply "Terminal"
+  requestTerminal(chatId);
   openTab({id:`processes:${chatId}`,kind:'processes',chatId,title:'Terminal'});
 }
 
