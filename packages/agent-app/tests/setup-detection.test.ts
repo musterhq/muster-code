@@ -248,6 +248,7 @@ test('the picker does not offer an installed but signed-out Claude Code as ready
   assert.match(out.error ?? '', /not signed in/);
 });
 
+// Spec: MUS-SPEC-16-658A (docs/spec/clauses/16-notifications-and-attention.md#mus-spec-16-658a)
 test('the connected notice marks a real change only: not a launch check finishing, not a re-check (#590)', async t => {
   type Row = 'ready' | 'checking' | 'error' | 'absent';
   let rows: Record<string, Row> = {};
