@@ -8,6 +8,7 @@ import {test} from 'node:test';
 process.env.PATH = '/nonexistent';
 const {searchContent} = await import('../src/runtime/files.ts');
 
+// Spec: MUS-SPEC-07-563C (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-563c)
 test('a catastrophic regular expression is cut off at the search deadline', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'muster-regex-'));
   t.after(() => rm(dir, {recursive: true, force: true}));

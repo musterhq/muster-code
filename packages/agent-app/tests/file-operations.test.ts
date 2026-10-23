@@ -74,12 +74,14 @@ test('files.write refuses a stale revision and otherwise writes atomically',asyn
   assert.equal(await readFile(join(dir,'doc.txt'),'utf8'),'v3');
 });
 
+// Spec: MUS-SPEC-07-563A (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-563a)
 test('a folder cannot be moved into itself and says so plainly',async()=>{
   const dir=await workspace();
   await mkdir(join(dir,'a'));
   await assert.rejects(moveFile(dir,'a','a/b'),/into itself/i);
 });
 
+// Spec: MUS-SPEC-07-563B (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-563b)
 test('renaming a file or folder to a different capitalisation works on case-insensitive disks',async()=>{
   const dir=await workspace();
   await writeFile(join(dir,'probe.tmp'),'');
