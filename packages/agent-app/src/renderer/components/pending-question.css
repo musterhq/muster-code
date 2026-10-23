@@ -19,3 +19,4 @@
 .pending-question-dismiss:hover, .pending-question-dismiss:focus-visible { background: var(--bg-hover); color: var(--text); }
 .pending-question-outcome { display: flex; flex-direction: column; gap: 3px; margin: 0; font-size: var(--fs-11); color: var(--text-faint); }
 .pending-question-outcome strong { font-weight: 500; color: var(--text-dim); }
+.pending-question-default { margin: 0 0 10px; }

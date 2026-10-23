@@ -5,7 +5,8 @@ import {classifyTool} from './toolPresentation.ts';
  *  Kept in its own non-JSX module so it (and planCardId below) can be unit tested with plain `node --test`, no DOM. */
 export function displayStatus(chat:Pick<Chat,'status'|'queue'>,items:readonly TimelineItem[],stalled=false):ChatStatus {
   const live=chat.status==='running'||chat.status==='stopping';
-  if(live&&items.some(item=>(item.kind==='approval'||item.kind==='question')&&item.status==='pending'))return 'waiting';
+  // An ask_user question (nonBlocking) does not hold the run: the agent keeps working on its default.
+  if(live&&items.some(item=>(item.kind==='approval'||item.kind==='question')&&item.status==='pending'&&item.data?.nonBlocking!==true))return 'waiting';
   if(live&&stalled)return 'reconnecting';
   if(!live&&chat.queue?.length&&chat.status!=='failed'&&chat.status!=='interrupted')return 'queued';
   return chat.status;

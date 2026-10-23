@@ -830,7 +830,8 @@ export class CheckoutService {
     if (/error|fail|stop|cancel|interrupt|abort/i.test(receipt.outcome)) return;
     if (this.d.queued?.(chatId)) return;
     const timeline = await this.d.chats.timeline(chatId).catch(() => [] as TimelineEntry[]);
-    if (timeline.some(e => (e.kind === 'question' || e.kind === 'approval') && e.status === 'pending')) return;
+    // An ask_user question (nonBlocking) never held the run: the agent went on with its default, so it does not hold the hand-back either.
+    if (timeline.some(e => (e.kind === 'question' || e.kind === 'approval') && e.status === 'pending' && e.data?.nonBlocking !== true)) return;
     // "Run tests and hand back" was pressed: this turn is the one that ran them, so it counts as the person saying it is done (the test gate below still applies).
     const said = userSaysDone(lastUserText(timeline)) || lease.afterTests === true;
     if (lease.afterTests) this.d.store.putLease({ ...this.d.store.lease(taskId)!, afterTests: false });

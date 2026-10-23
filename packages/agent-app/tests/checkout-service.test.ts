@@ -81,7 +81,7 @@ function setup(opts: { tests?: number; lazy?: boolean } = {}) {
   let salt = 0, statFails = false, stat = { count: 7, added: 120, removed: 30 }, queuedMore = false, wait: { fn: () => void; ms: number; live: boolean }[] = [];
   const homeDir = mkdtempSync(join(tmpdir(), 'muster-home-'));
   // The local chat as the timeline shows it: the person's message, a file change, a test run (tool output), and the agent's last message.
-  const tl = { user: 'Implement it.', change: true, test: 'ℹ pass 12\nℹ fail 1' as string | null, testStatus: 'completed', exit: 0 as number, testCommand: 'npm test', after: null as { command: string } | null, final: 'Worked on it.', trailingTool: null as string | null, outcome: 'completed', question: false };
+  const tl = { user: 'Implement it.', change: true, test: 'ℹ pass 12\nℹ fail 1' as string | null, testStatus: 'completed', exit: 0 as number, testCommand: 'npm test', after: null as { command: string } | null, final: 'Worked on it.', trailingTool: null as string | null, outcome: 'completed', question: false as boolean | 'nonBlocking' };
   const events: unknown[] = [];
   const chatList: { id: string; path: string; activeAt: number }[] = [], sent: [string, string][] = [];
   const settings: Record<string, never> = {};
@@ -93,7 +93,7 @@ function setup(opts: { tests?: number; lazy?: boolean } = {}) {
     ...(tl.after ? [{ kind: 'tool', text: tl.after.command, data: { type: 'commandExecution', command: tl.after.command, output: '', status: 'completed', exitCode: 0 } }] : []),
     ...(tl.trailingTool !== null ? [{ kind: 'tool', text: tl.trailingTool, data: { type: 'commandExecution', command: 'env', output: tl.trailingTool, status: 'completed' } }] : []),
     { kind: 'assistant', text: tl.final },
-    ...(tl.question ? [{ kind: 'question', text: 'Which database?', status: 'pending' }] : []),
+    ...(tl.question ? [{ kind: 'question', text: 'Which database?', status: 'pending', ...(tl.question === 'nonBlocking' ? { data: { nonBlocking: true } } : {}) }] : []),
   ];
   const deps: CheckoutDeps = {
     store, backend: () => server.backend(), reader,
@@ -1241,6 +1241,7 @@ test('#345 never on a turn that errored or was stopped, while a later turn is qu
   const queued = await finishedGit(); queued.h.setHead('def456'); queued.h.tl.test = GREEN; queued.h.setQueued(true); await queued.h.svc.onTurn(queued.chat, 'r1', 'completed'); assert.deepEqual(queued.h.countdownMs(), [], 'a follow-up is waiting');
   queued.h.setQueued(false); await queued.h.svc.onTurn(queued.chat, 'r2', 'completed'); assert.deepEqual(queued.h.countdownMs(), [60_000], 'the queue drained: it starts');
   const asked = await finishedGit(); asked.h.setHead('def456'); asked.h.tl.test = GREEN; asked.h.tl.question = true; await asked.h.svc.onTurn(asked.chat, 'r1', 'completed'); assert.deepEqual(asked.h.countdownMs(), [], 'the agent is waiting for an answer');
+  const told = await finishedGit(); told.h.setHead('def456'); told.h.tl.test = GREEN; told.h.tl.question = 'nonBlocking'; await told.h.svc.onTurn(told.chat, 'r1', 'completed'); assert.deepEqual(told.h.countdownMs(), [60_000], 'an ask_user question did not hold the run, so it does not hold the hand-back');
 });
 
 test('#345 not finished: failing tests (parsed or by exit code), no changes, the agent’s words alone, a change after the run; and after Undo only a turn with new work starts it again', async () => {
