@@ -265,7 +265,7 @@ export class BrowserWorkspaceController {
     this.profileIds.add(entry.profileId);
     const view=this.runtime.createView({webPreferences:{session,...SECURE_PREFERENCES}});
     entry.emulation=undefined;
-    view.setVisible(false);view.setBackgroundColor('#0e0e0e');view.webContents.setAudioMuted(true);
+    view.setVisible(false);view.setBackgroundColor('#ffffff');view.webContents.setAudioMuted(true);
     // A new view has 0×0 bounds until the pane positions it. An agent's tab can be driven long before that, and a 0×0
     // page captures as an empty image, so the live preview never got a frame and the pane sat on "Starting…" (#423).
     // The view is not in the window, so these bounds are never on screen; position() replaces them when it is shown.
