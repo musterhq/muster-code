@@ -9,7 +9,7 @@ import {copyText} from '../clipboard';
 import {openNewChat,setNewChatText} from '../newChatDraft';
 import {setTerminalDock,setTerminalPaneView,terminalDock} from '../processSummary';
 import {applyProviders,getState,loadProviders,notifyError,notifySuccess,openAppSettings,openProcessesTab,pickFolder,setSetting} from '../store';
-import {useStore} from '../useStore';
+import {useStore,useStoreSlice} from '../useStore';
 import {closeSetupGuide,nextStep,openSetupGuide,previousStep,resumeStep,setSetupStep,setupChecklist,SETUP_SUGGESTIONS,shouldAutoOpenSetup,skipStep,stepIndex,useSetupGuide,type ChecklistItem} from '../setupFlow';
 import {openCloneSheet} from './CloneRepositorySheet';
 import {ModalSheet} from './ModalSheet';
@@ -330,6 +330,6 @@ export function ConnectModelPrompt({emphasis=false}:{emphasis?:boolean}): React.
 }
 /** True once providers loaded and none can run a chat. */
 export function useNoProvider(): boolean {
-  const providers=useStore().providers;
+  const providers=useStoreSlice('providers').providers;
   return providers.phase==='ready'&&!(providers.value??[]).some(provider=>provider.available);
 }
