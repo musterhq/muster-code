@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { globMatches } from '../src/shared/domains/project-governance-protocol.ts';
 
+// Spec: MUS-SPEC-05-573A (docs/spec/clauses/05-access-modes-and-approvals.md#mus-spec-05-573a)
 test('a tool-rule glob with many stars matches in linear-ish time against a long command', () => {
   const pattern = '*a*a*a*a*a*a*a*a*a*a*a*a*b';
   const subject = 'a'.repeat(400);

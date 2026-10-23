@@ -21,6 +21,7 @@ function queue(task: { live: boolean } = { live: false }) {
   return { q, store, clock, delivered, done: () => { q.dispose(); store.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
 
+// Spec: MUS-SPEC-12-573A (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-573a)
 test('two simultaneous wakes inside the minimum gap coalesce into one waiting wake and one timer', async () => {
   const h = queue();
   try {
@@ -38,6 +39,7 @@ test('two simultaneous wakes inside the minimum gap coalesce into one waiting wa
   } finally { h.done(); }
 });
 
+// Spec: MUS-SPEC-12-573B (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-573b)
 test('the minimum gap is measured from when a delayed wake actually started, not from when it was first requested', async () => {
   const h = queue();
   try {
@@ -56,6 +58,7 @@ test('the minimum gap is measured from when a delayed wake actually started, not
   } finally { h.done(); }
 });
 
+// Spec: MUS-SPEC-12-573C (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-573c)
 test('a wake asked for while a deferred follow-up is being started joins it instead of starting a second run', async () => {
   const task = { live: true }, h = queue(task);
   try {

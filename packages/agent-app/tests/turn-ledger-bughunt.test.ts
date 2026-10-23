@@ -6,6 +6,7 @@ import { TurnLedger, type Body } from '../src/runtime/turn-ledger.ts';
 
 const body = (n: number): Body => ({ id: `c:r${n}`, chatId: 'c', runId: `r${n}`, taskId: null, projectId: null, trigger: 'chat', agent: 'A', provider: 'p', model: 'm', tokens: null, costUsd: null, tools: [], approvals: 0, tests: 0, files: null, startedAt: '2026-01-01T00:00:00.000Z', endedAt: `2026-01-01T00:00:0${n}.000Z`, durationMs: 1, outcome: 'completed' });
 
+// Spec: MUS-SPEC-17-573A (docs/spec/clauses/17-usage-cost-and-ledger.md#mus-spec-17-573a)
 test('verify() notices entries deleted from the end of the chain', () => {
   const db = new DatabaseSync(':memory:'), ledger = new TurnLedger(db);
   for (const n of [1, 2, 3]) ledger.append(body(n));
