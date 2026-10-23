@@ -14,4 +14,19 @@ Boundaries:
 
 ## Acceptance cases
 
-No cases yet. A PR that changes this area adds its cases here first (see [acceptance-cases.md](../acceptance-cases.md)).
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-02-555A](02-turns-streaming-and-queue.md#mus-spec-02-555a) | After the message you were editing is sent and leaves the queue, Alt+Down on another queued message still sends a reorder request. | [`Alt+Down still reorders the queue after the message being edited has been sent`](../../../packages/agent-app/tests/queue-stale-edit-dom.tsx) |
+
+### Editing a queued message
+
+<a id="mus-spec-02-555a"></a>
+#### MUS-SPEC-02-555A: A queued message that is sent while you edit it does not lock the queue
+
+- Precondition: Three messages are queued. The first one is open in the queue editor. The runtime then sends it, so only two remain.
+- Action: Press Alt+Down on the first remaining queued message.
+- Expected result: The editor for the sent message is closed, and the queue sends one reorder request for the key press.
+- Test: `packages/agent-app/tests/queue-stale-edit-dom.tsx::Alt+Down still reorders the queue after the message being edited has been sent`
+- Environment: Real QueuedMessages component in a DOM suite (linkedom); fake app bridge; no network.
+- Known gaps: The queue is fed by the test, not by a real running turn. It checks the reorder request, not the new order on screen.
+- Evidence: UNVERIFIED
