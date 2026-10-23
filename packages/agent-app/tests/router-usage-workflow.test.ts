@@ -17,6 +17,7 @@ const appDir = resolve(import.meta.dirname, '..');
 const coreBundle = join(appDir, 'dist/runtime/core-client.cjs');
 const cli = process.env.MUSTER_CODEX_COMMAND || (() => {try {return execFileSync('/bin/sh', ['-c', 'command -v codex'], {encoding: 'utf8'}).trim();} catch {return undefined;}})();
 const skip = !cli ? 'coding client unavailable' : !existsSync(coreBundle) ? 'build core-client.cjs first' : false;
+if (skip && process.env.MUSTER_REQUIRE_CODEX_E2E === '1') throw new Error(String(skip));
 const token = 'sk-fixture-678-not-a-real-key';
 const partialUsage = {input_tokens: 3, input_tokens_details: {}, output_tokens: 4, output_tokens_details: {}, total_tokens: 7};
 
