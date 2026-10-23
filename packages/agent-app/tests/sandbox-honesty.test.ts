@@ -22,6 +22,7 @@ import type {Chat} from '../src/shared/protocol.ts';
 const SANDBOX_OVERRIDES = {'mcp_servers.muster_sandbox.command': '/tmp/launcher', 'mcp_servers.muster_sandbox.env.MUSTER_CHAT_ID': 'c'};
 const fullChat = {id: 'c', mode: 'agent', permissionMode: 'full', providerId: 'fixture'} as Chat;
 
+// Spec: MUS-SPEC-06-665A (docs/spec/clauses/06-sandbox.md#mus-spec-06-665a)
 test('#652 route gating: only routes that load the sandbox tools can be sandboxed', () => {
   for (const driver of [undefined, 'codex-app-server', 'claude-code-cli', 'opencode-cli', 'grok-acp']) assert.equal(sandboxToolsReach(driver), true, String(driver));
   for (const driver of ['openai-chat-completions', 'anthropic-messages', 'gemini-cli', 'cursor-cli']) assert.equal(sandboxToolsReach(driver), false, driver);
@@ -48,6 +49,7 @@ async function domainFixture(providers: {id: string; driver?: string}[]) {
   return {chats, invoked, call, async close() { domain.dispose?.(); registerAgentSandboxHost(undefined); db.close(); await rm(dir, {recursive: true, force: true}); }};
 }
 
+// Spec: MUS-SPEC-06-665B (docs/spec/clauses/06-sandbox.md#mus-spec-06-665b)
 test('#652 the runtime refuses to sandbox a chat whose model cannot load the sandbox tools', async () => {
   const f = await domainFixture([{id: 'gem', driver: 'gemini-cli'}, {id: 'cc', driver: 'claude-code-cli'}]);
   try {
@@ -58,6 +60,7 @@ test('#652 the runtime refuses to sandbox a chat whose model cannot load the san
   } finally { await f.close(); }
 });
 
+// Spec: MUS-SPEC-06-665C (docs/spec/clauses/06-sandbox.md#mus-spec-06-665c)
 test('#653 leaving the sandbox to raise access sets the chosen level, and Full still needs its acknowledgement', async () => {
   const f = await domainFixture([{id: 'cc', driver: 'claude-code-cli'}]);
   try {
@@ -71,6 +74,7 @@ test('#653 leaving the sandbox to raise access sets the chosen level, and Full s
   } finally { await f.close(); }
 });
 
+// Spec: MUS-SPEC-06-665D (docs/spec/clauses/06-sandbox.md#mus-spec-06-665d)
 test('#652 the sandbox note names sandbox_exec only on routes that have it, and claims no host access it lacks', () => {
   assert.match(SANDBOX_NOTE, /sandbox_exec/);
   assert.match(SANDBOX_NOTE, /shell and file-editing tools are turned off/);
@@ -90,12 +94,14 @@ test('#652 the sandbox note names sandbox_exec only on routes that have it, and 
   }
 });
 
+// Spec: MUS-SPEC-06-665E (docs/spec/clauses/06-sandbox.md#mus-spec-06-665e)
 test('#653 a sandboxed run is read-only on the host whatever the chat says', () => {
   assert.equal(runAccessPolicy(fullChat, SANDBOX_OVERRIDES).permissionMode, 'read-only');
   assert.equal(runAccessPolicy(fullChat, SANDBOX_OVERRIDES).sandbox, 'read-only');
   assert.equal(runAccessPolicy(fullChat, {}).permissionMode, 'full', 'a host chat keeps its own level');
 });
 
+// Spec: MUS-SPEC-06-665F (docs/spec/clauses/06-sandbox.md#mus-spec-06-665f)
 test('#653 Codex: a sandboxed chat raised to Full still launches read-only with its shell tools off', async () => {
   const runs: Record<string, unknown>[] = [];
   const core: CoreClient = {
@@ -116,6 +122,7 @@ test('#653 Codex: a sandboxed chat raised to Full still launches read-only with 
   assert.ok(overrides.includes('features.shell_tool=false') && overrides.includes('features.unified_exec=false'), overrides.join(' '));
 });
 
+// Spec: MUS-SPEC-06-665G (docs/spec/clauses/06-sandbox.md#mus-spec-06-665g)
 test('#653 Claude Code: a sandboxed run denies its host shell and edit tools and stays in plan mode', () => {
   const input = {chat: fullChat, cwd: '/w', prompt: 'p', model: 'claude-code/default', permissionMode: 'full', sandboxed: true, mcpServers: {muster_sandbox: {command: '/tmp/launcher'}}} as unknown as AdapterRunInput;
   const args = claudeArgs(input, 's');
@@ -131,6 +138,7 @@ test('#653 Claude Code: a sandboxed run denies its host shell and edit tools and
   assert.equal(host[host.indexOf('--permission-mode') + 1], 'bypassPermissions');
 });
 
+// Spec: MUS-SPEC-06-665H (docs/spec/clauses/06-sandbox.md#mus-spec-06-665h)
 test('#653 OpenCode: a sandboxed run uses the plan agent with bash and edits removed and denied', async () => {
   const env = JSON.parse(openCodeMcpEnv({muster_sandbox: {command: '/tmp/launcher', args: []}}, JSON.stringify({agent: {plan: {model: 'x'}}}), true).OPENCODE_CONFIG_CONTENT!);
   for (const tool of ['bash', 'edit', 'write', 'patch']) { assert.equal(env.tools[tool], false, tool); assert.equal(env.agent.plan.tools[tool], false, tool); }
@@ -144,6 +152,7 @@ test('#653 OpenCode: a sandboxed run uses the plan agent with bash and edits rem
   assert.match(launched!.env.OPENCODE_CONFIG_CONTENT ?? '', /"bash":"deny"/);
 });
 
+// Spec: MUS-SPEC-06-665I (docs/spec/clauses/06-sandbox.md#mus-spec-06-665i)
 test('#653 Grok: a sandboxed run never auto-approves and rejects host commands and edits', () => {
   assert.deepEqual(grokLaunchArgs('full', true), ['--permission-mode', 'default', 'agent', 'stdio']);
   assert.deepEqual(grokLaunchArgs('full'), ['agent', '--always-approve', 'stdio'], 'control: a host chat at Full');
@@ -154,6 +163,7 @@ test('#653 Grok: a sandboxed run never auto-approves and rejects host commands a
   assert.equal(grokPermissionChoice('read-only', 'read', options, {title: 'Read a.txt'}), 'yes');
 });
 
+// Spec: MUS-SPEC-06-665J (docs/spec/clauses/06-sandbox.md#mus-spec-06-665j)
 test('#653 HTTP, Gemini and Cursor routes run a sandboxed chat read-only and are told plainly they have no sandbox tools', async () => {
   for (const driver of ['openai-chat-completions', 'gemini-cli', 'cursor-cli']) {
     let seen: AdapterRunInput | undefined;
