@@ -40,7 +40,7 @@
       "branch": "(detached HEAD)",
       "commit": "215b8d3ec53b3762b8fe53f67af15f4c5b31f998",
       "sourcePath": null,
-      "note": "Includes uncommitted working-tree changes in the files listed under uncommittedFiles.",
+      "note": "Includes uncommitted working-tree changes in the files listed under uncommittedFiles. Local edit 2026-10-18 (#654): local-docker-sandbox.ts sets --memory-swap equal to --memory and tries --storage-opt size= (see vendor/README.md); the hash below is the synced copy, before that edit.",
       "uncommittedFiles": [
         "packages/core/src/local-docker-sandbox.ts",
         "packages/core/src/scoped-runtime.ts"

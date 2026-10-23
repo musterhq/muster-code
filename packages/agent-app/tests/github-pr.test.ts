@@ -275,3 +275,58 @@ test('pull request tabs persist as references and restore into the folder\'s Git
   ]);
   assert.equal(saved.activeTabId, 'git:f1');
 });
+
+test('checks: same-named jobs from different workflows are kept separate, and named by workflow', async () => {
+  const {repo: dir} = await repo();
+  mockGitHub(PULL,
+    on('GET', /commits\/abc123\/check-runs/, () => ok({check_runs: [
+      {id: 1, name: 'build', status: 'completed', conclusion: 'failure', check_suite: {id: 10}, app: {id: 15368, slug: 'github-actions'}},
+      {id: 2, name: 'build', status: 'completed', conclusion: 'success', check_suite: {id: 20}, app: {id: 15368, slug: 'github-actions'}},
+    ]})),
+    on('GET', /actions\/runs\?head_sha=abc123/, () => ok({workflow_runs: [{id: 100, workflow_id: 1, name: 'CI', event: 'pull_request', check_suite_id: 10}, {id: 200, workflow_id: 2, name: 'Release', event: 'pull_request', check_suite_id: 20}]})),
+    on('GET', /commits\/abc123\/status/, () => ok({statuses: []})));
+  const checks = await listChecks(dir, 7);
+  assert.deepEqual(checks.items.map(check => [check.name, check.conclusion]), [['CI / build', 'failure'], ['Release / build', 'success']]);
+  assert.deepEqual(checks.summary, {passed: 1, failed: 1, pending: 0, skipped: 0});
+});
+
+test('checks: a workflow that ran again on the same commit shows its newest run once; push and pull_request runs stay apart', async () => {
+  const {repo: dir} = await repo();
+  const actions = {id: 15368, slug: 'github-actions'};
+  mockGitHub(PULL,
+    on('GET', /commits\/abc123\/check-runs/, () => ok({check_runs: [
+      // "Release" ran three times (workflow_run after each upstream workflow): only the newest counts, so the old failure is not "failing".
+      {id: 11, name: 'plan', status: 'completed', conclusion: 'failure', check_suite: {id: 31}, app: actions},
+      {id: 12, name: 'plan', status: 'completed', conclusion: 'skipped', check_suite: {id: 32}, app: actions},
+      {id: 13, name: 'plan', status: 'completed', conclusion: 'success', check_suite: {id: 33}, app: actions},
+      {id: 21, name: 'test', status: 'completed', conclusion: 'success', check_suite: {id: 41}, app: actions},
+      {id: 22, name: 'test', status: 'completed', conclusion: 'failure', check_suite: {id: 42}, app: actions},
+      {id: 30, name: 'lint', status: 'completed', conclusion: 'success', check_suite: {id: 41}, app: actions},
+    ]})),
+    on('GET', /actions\/runs\?head_sha=abc123/, () => ok({workflow_runs: [
+      ...[31, 32, 33].map(suite => ({id: suite * 10, workflow_id: 7, name: 'Release', event: 'workflow_run', check_suite_id: suite})),
+      {id: 410, workflow_id: 8, name: 'CI', event: 'push', check_suite_id: 41}, {id: 420, workflow_id: 8, name: 'CI', event: 'pull_request', check_suite_id: 42},
+    ]})),
+    on('GET', /commits\/abc123\/status/, () => ok({statuses: []})));
+  const checks = await listChecks(dir, 7);
+  assert.deepEqual(checks.items.map(check => [check.id, check.name, check.conclusion]), [
+    ['check:22', 'CI / test (pull_request)', 'failure'], ['check:21', 'CI / test (push)', 'success'], ['check:30', 'lint', 'success'], ['check:13', 'plan', 'success'],
+  ]);
+  assert.deepEqual(checks.summary, {passed: 3, failed: 1, pending: 0, skipped: 0});
+});
+
+test('checks: workflows are only looked up when a name is shared across suites, and an unreadable lookup loses no check', async () => {
+  const {repo: dir} = await repo();
+  const plain = mockGitHub(PULL,
+    on('GET', /commits\/abc123\/check-runs/, () => ok({check_runs: [{id: 1, name: 'test', status: 'completed', conclusion: 'success', check_suite: {id: 10}}, {id: 2, name: 'lint', status: 'completed', conclusion: 'success', check_suite: {id: 20}}]})),
+    on('GET', /commits\/abc123\/status/, () => ok({statuses: []})));
+  assert.equal((await listChecks(dir, 7, true)).items.length, 2);
+  assert.equal(plain.filter(call => call.path.includes('/actions/runs')).length, 0, 'no extra request on the common path');
+  const denied = mockGitHub(PULL,
+    on('GET', /commits\/abc123\/check-runs/, () => ok({check_runs: [{id: 1, name: 'build', status: 'completed', conclusion: 'failure', check_suite: {id: 10}}, {id: 2, name: 'build', status: 'completed', conclusion: 'success', check_suite: {id: 20}}]})),
+    on('GET', /actions\/runs/, () => ok({message: 'Resource not accessible by integration'}, 403)),
+    on('GET', /commits\/abc123\/status/, () => ok({statuses: []})));
+  const checks = await listChecks(dir, 7, true);
+  assert.equal(denied.filter(call => call.path.includes('/actions/runs')).length, 1);
+  assert.deepEqual(checks.summary, {passed: 1, failed: 1, pending: 0, skipped: 0}, 'each suite counts on its own: the failure is not hidden');
+});
