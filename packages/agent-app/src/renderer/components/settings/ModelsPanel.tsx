@@ -1,9 +1,9 @@
 import React, {useMemo, useEffect, useState} from 'react';
 import {RotateCcw} from 'lucide-react';
-import {effectivePricing, formatUsd, isModelHidden, modelBadges, modelKey, type ModelPolicy, type PricingInput} from '../../../shared/model-catalog';
+import {effectivePricing, formatUsd, parseTokenCount, isModelHidden, modelBadges, modelKey, type ModelPolicy, type PricingInput} from '../../../shared/model-catalog';
 import {loadProviders, notifyError} from '../../store';
 import {useStore} from '../../useStore';
-import {resetModelPolicy, setModelHidden, setModelPricing, useModelPolicy} from '../../modelPolicy';
+import {resetModelPolicy, setModelContextWindow, setModelHidden, setModelPricing, useModelPolicy} from '../../modelPolicy';
 import './models-panel.css';
 
 const priceText = (pricing: PricingInput) => `${formatUsd(pricing.inputPerMTok)} in · ${formatUsd(pricing.outputPerMTok)} out${pricing.cachedInputPerMTok !== undefined ? ` · ${formatUsd(pricing.cachedInputPerMTok)} cached` : ''} per 1M tokens`;
@@ -27,15 +27,31 @@ function PriceEditor({label, initial, onSave, onCancel}: {label: string; initial
   </form>;
 }
 
+/** #668: your own context window for a model. It beats the catalog, the router's list and the provider's report. */
+function ContextWindowEditor({label, initial, onSave, onCancel}: {label: string; initial?: number; onSave: (tokens: number) => Promise<void>; onCancel: () => void}): React.ReactElement {
+  const [text, setText] = useState(initial ? String(initial) : ''), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true); setError('');
+    try { await onSave(parseTokenCount(text)); }
+    catch (cause) { setError(cause instanceof Error ? cause.message.replace(/^.*?: /, '') : String(cause)); }
+    finally { setBusy(false); }
+  };
+  return <form className="models-price-form" aria-label={`Context window for ${label}`} onSubmit={event => { event.preventDefault(); void save(); }}>
+    <label>Context window (tokens)<input inputMode="numeric" placeholder="e.g. 1000000 or 1M" value={text} onChange={event => setText(event.target.value)} autoFocus /></label>
+    <span className="models-price-actions"><button type="submit" className="settings-button" disabled={busy}>Save window</button><button type="button" className="settings-button secondary" onClick={onCancel}>Cancel</button></span>
+    {error && <p className="models-error" role="alert">{error}</p>}
+  </form>;
+}
+
 /** PRO-04/05: every catalog model with its capabilities, a picker visibility switch and a price; excluded catalog entries with reasons. */
 export function ModelsPanel(): React.ReactElement {
   const state = useStore(), policy = useModelPolicy();
-  const [editing, setEditing] = useState<string | null>(null), [confirmReset, setConfirmReset] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null), [editingWindow, setEditingWindow] = useState<string | null>(null), [confirmReset, setConfirmReset] = useState(false);
   useEffect(() => { if (state.providers.phase === 'idle') void loadProviders(); }, [state.providers.phase]);
   const providers = state.providers.value ?? [];
   const runnable = providers.filter(provider => provider.available && provider.models.length);
   const toggle = (key: string, hidden: boolean) => { void setModelHidden(key, hidden).catch(cause => notifyError(cause)); };
-  const customized = policy.hidden.length + Object.keys(policy.pricing).length;
+  const customized = policy.hidden.length + Object.keys(policy.pricing).length + Object.keys(policy.contextWindows).length;
   return <div className="models-panel">
     {state.providers.phase === 'loading' && !providers.length && <p className="settings-muted" role="status">Loading models…</p>}
     {state.providers.phase === 'error' && <p className="models-error" role="alert">{state.providers.error ?? 'Models could not be loaded.'}</p>}
@@ -55,9 +71,13 @@ export function ModelsPanel(): React.ReactElement {
                 <span className="models-id">{model.id}</span>
                 <span className="models-badges">{modelBadges(model).map(badge => <span key={badge.id} className={`models-badge${badge.known ? '' : ' is-unknown'}`} title={badge.title}>{badge.label}</span>)}</span>
                 <span className="preference-scope">{pricing ? `${priceText(pricing)} · ${pricing.source === 'user' ? 'your price' : 'from the catalog'}` : 'Price unknown · cost shows “—”'}</span>
+                <span className="preference-scope">{policy.contextWindows[key] ? `Context window ${policy.contextWindows[key]!.toLocaleString()} tokens · set by you` : model.contextWindow ? `Context window ${model.contextWindow.toLocaleString()} tokens · from the ${model.contextWindowSource === 'listing' ? 'router’s list' : 'catalog'}` : 'Context window unknown · estimated at 128,000 until the provider reports usage'}</span>
+                {editingWindow === key && <ContextWindowEditor label={model.name} initial={policy.contextWindows[key] ?? model.contextWindow} onCancel={() => setEditingWindow(null)} onSave={async tokens => { await setModelContextWindow(key, tokens); setEditingWindow(null); }} />}
                 {editing === key && <PriceEditor label={model.name} initial={policy.pricing[key] ?? model.pricing} onCancel={() => setEditing(null)} onSave={async value => { await setModelPricing(key, value); setEditing(null); }} />}
               </span>
               <span className="preference-control models-controls">
+                {editingWindow !== key && <button type="button" className="settings-button secondary" onClick={() => setEditingWindow(key)}>{policy.contextWindows[key] ? 'Edit context window' : 'Set context window'}</button>}
+                {policy.contextWindows[key] && editingWindow !== key && <button type="button" className="settings-button secondary" title="Forget your window and use the catalog, the router’s list or the provider’s report" onClick={() => void setModelContextWindow(key, null).catch(cause => notifyError(cause))}>Clear window</button>}
                 {editing !== key && <button type="button" className="settings-button secondary" onClick={() => setEditing(key)}>{policy.pricing[key] ? 'Edit price' : 'Set price'}</button>}
                 {policy.pricing[key] && editing !== key && <button type="button" className="settings-button secondary" title={model.pricing ? 'Use the catalog price again' : 'Forget this price'} onClick={() => void setModelPricing(key, null).catch(cause => notifyError(cause))}>{model.pricing ? 'Use catalog price' : 'Clear price'}</button>}
                 <button type="button" role="switch" className="preference-switch" aria-label={`Show ${model.name} in the model picker`} aria-checked={!hidden} onClick={() => toggle(key, !hidden)}><span /></button>
@@ -76,7 +96,7 @@ export function ModelsPanel(): React.ReactElement {
     <h3 className="preference-group-title">Policy</h3>
     <div className="preference-group">
       <div className="preference-row" role="group" aria-label="Reset model policy">
-        <span className="preference-copy"><strong>Reset model settings</strong><span>Show every model again and forget prices you entered. Catalog prices stay.</span><span className="preference-scope">{customized ? `${policy.hidden.length} hidden · ${Object.keys(policy.pricing).length} custom ${Object.keys(policy.pricing).length === 1 ? 'price' : 'prices'}` : 'Nothing customized · following the catalogs'}</span></span>
+        <span className="preference-copy"><strong>Reset model settings</strong><span>Show every model again and forget prices and context windows you entered. Catalog prices stay.</span><span className="preference-scope">{customized ? `${policy.hidden.length} hidden · ${Object.keys(policy.pricing).length} custom ${Object.keys(policy.pricing).length === 1 ? 'price' : 'prices'}` : 'Nothing customized · following the catalogs'}</span></span>
         <span className="preference-control">{confirmReset
           ? <><button type="button" className="settings-button danger" onClick={() => { setConfirmReset(false); void resetModelPolicy().catch(cause => notifyError(cause)); }}>Reset</button><button type="button" className="settings-button secondary" onClick={() => setConfirmReset(false)}>Cancel</button></>
           : <button type="button" className="settings-button secondary" disabled={!customized} onClick={() => setConfirmReset(true)}><RotateCcw size={14} />Reset…</button>}</span>
