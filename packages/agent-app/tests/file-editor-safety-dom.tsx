@@ -1,6 +1,7 @@
 // The in-pane file editor must never rewrite a file it did not read faithfully, and must keep text typed while a save is in flight.
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
+import {check} from './dom-check.ts';
 import {setTimeout as delay} from 'node:timers/promises';
 const require = createRequire(import.meta.url);
 const {parseHTML} = require('linkedom');
@@ -31,49 +32,59 @@ const until = async (check: () => boolean, label: string) => { for (let i = 0; i
 const mount = async (path: string) => { root.render(<FileEditor key={path} folderId="f" path={path} tabId={path} onSaved={() => {}}/>); await delay(0); };
 const area = () => document.querySelector<HTMLTextAreaElement>('textarea.file-editor-textarea');
 
-// 1. A file with bytes that are not valid UTF-8 would be rewritten with replacement characters on save.
-readFull = {path: 'latin1.txt', text: 'caf�', truncated: false, revision: 'r1', encodingWarning: true};
-await mount('latin1.txt');
-await until(() => !!document.querySelector('.file-editor, .resource-state-error'), 'editor settles');
-assert.ok(!area(), 'a file that is not valid UTF-8 is not offered for editing');
-assert.ok(!document.querySelector('.file-editor-status button'), 'no Save button for it');
 
-// 2. A file past the full-read limit is cut short in memory; saving would truncate it on disk.
-readFull = {path: 'big.txt', text: 'first 10 MB', truncated: true, revision: 'r1', encodingWarning: false};
-await mount('big.txt');
-await until(() => !!document.querySelector('.file-editor, .resource-state-error'), 'editor settles');
-assert.ok(!area(), 'a file larger than the full-read limit is not offered for editing');
+// Spec: MUS-SPEC-07-559A (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-559a)
+await check('a file that is not valid UTF-8 is not offered for editing', async () => {
+  readFull = {path: 'latin1.txt', text: 'caf�', truncated: false, revision: 'r1', encodingWarning: true};
+  await mount('latin1.txt');
+  await until(() => !!document.querySelector('.file-editor, .resource-state-error'), 'editor settles');
+  assert.ok(!area(), 'a file that is not valid UTF-8 is not offered for editing');
+  assert.ok(!document.querySelector('.file-editor-status button'), 'no Save button for it');
+});
 
-// 3. Text typed while a save is in flight survives the save.
-readFull = {path: 'a.txt', text: 'hello', truncated: false, revision: 'r1', encodingWarning: false};
-await mount('a.txt');
-await until(() => !!area(), 'editor opens for a normal file');
+// Spec: MUS-SPEC-07-559B (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-559b)
+await check('a file larger than the full-read limit is not offered for editing', async () => {
+  readFull = {path: 'big.txt', text: 'first 10 MB', truncated: true, revision: 'r1', encodingWarning: false};
+  await mount('big.txt');
+  await until(() => !!document.querySelector('.file-editor, .resource-state-error'), 'editor settles');
+  assert.ok(!area(), 'a file larger than the full-read limit is not offered for editing');
+});
+
 const type = async (value: string) => { const el = area()!; let proto = Object.getPrototypeOf(el), descriptor; while (proto && !(descriptor = Object.getOwnPropertyDescriptor(proto, 'value'))) proto = Object.getPrototypeOf(proto); descriptor!.set!.call(el, value); el.dispatchEvent(new window.Event('input', {bubbles: true})); await delay(35); };
-await type('hello world');
-await until(() => !document.querySelector<HTMLButtonElement>('.file-editor-status button')!.disabled, 'dirty enables Save');
-document.querySelector<HTMLButtonElement>('.file-editor-status button')!.click();
-await until(() => writes.length === 1, 'save started');
-assert.equal(writes[0].text, 'hello world');
-await type('hello world, and more');
-releaseWrite!();
-await until(() => !document.querySelector('.file-editor-status')!.textContent!.includes('Saving'), 'save finished');
-assert.equal(area()!.value, 'hello world, and more', 'keystrokes typed during the save are kept');
-assert.match(document.querySelector('.file-editor-status')!.textContent!, /Unsaved changes/, 'and still count as unsaved');
 
-// 4. A failed "Discard your edit and reload" keeps the conflict banner and says why, instead of vanishing with an unhandled rejection.
-const rejections: unknown[] = [];
-process.on('unhandledRejection', reason => rejections.push(reason));
-conflictNext = true;
-await mount('c.txt');
-await until(() => !!area(), 'editor opens');
-await type('changed');
-document.querySelector<HTMLButtonElement>('.file-editor-status button')!.click();
-await until(() => !!document.querySelector('.file-editor-conflict'), 'conflict banner');
-failRead = true;
-[...document.querySelectorAll<HTMLButtonElement>('.file-editor-conflict button')].find(b => /Discard/.test(b.textContent ?? ''))!.click();
-await delay(60);
-assert.ok(document.querySelector('.file-editor-conflict'), 'the conflict banner stays when the reload fails');
-assert.match(document.querySelector('.file-action-error')?.textContent ?? '', /disk gone|could not|Could not/i, 'the failure is shown');
-assert.equal(rejections.length, 0, 'no unhandled rejection');
+// Spec: MUS-SPEC-07-559C (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-559c)
+await check('text typed while a save is in flight is kept', async () => {
+  readFull = {path: 'a.txt', text: 'hello', truncated: false, revision: 'r1', encodingWarning: false};
+  await mount('a.txt');
+  await until(() => !!area(), 'editor opens for a normal file');
+  await type('hello world');
+  await until(() => !document.querySelector<HTMLButtonElement>('.file-editor-status button')!.disabled, 'dirty enables Save');
+  document.querySelector<HTMLButtonElement>('.file-editor-status button')!.click();
+  await until(() => writes.length === 1, 'save started');
+  assert.equal(writes[0].text, 'hello world');
+  await type('hello world, and more');
+  releaseWrite!();
+  await until(() => !document.querySelector('.file-editor-status')!.textContent!.includes('Saving'), 'save finished');
+  assert.equal(area()!.value, 'hello world, and more', 'keystrokes typed during the save are kept');
+  assert.match(document.querySelector('.file-editor-status')!.textContent!, /Unsaved changes/, 'and still count as unsaved');
+});
+
+// Spec: MUS-SPEC-07-559D (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-559d)
+await check('a failed Discard and reload keeps the conflict banner and shows the error', async () => {
+  const rejections: unknown[] = [];
+  process.on('unhandledRejection', reason => rejections.push(reason));
+  conflictNext = true;
+  await mount('c.txt');
+  await until(() => !!area(), 'editor opens');
+  await type('changed');
+  document.querySelector<HTMLButtonElement>('.file-editor-status button')!.click();
+  await until(() => !!document.querySelector('.file-editor-conflict'), 'conflict banner');
+  failRead = true;
+  [...document.querySelectorAll<HTMLButtonElement>('.file-editor-conflict button')].find(b => /Discard/.test(b.textContent ?? ''))!.click();
+  await delay(60);
+  assert.ok(document.querySelector('.file-editor-conflict'), 'the conflict banner stays when the reload fails');
+  assert.match(document.querySelector('.file-action-error')?.textContent ?? '', /disk gone|could not|Could not/i, 'the failure is shown');
+  assert.equal(rejections.length, 0, 'no unhandled rejection');
+});
 assert.deepEqual(errors, []);
 process.exit(0);
