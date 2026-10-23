@@ -16,6 +16,8 @@ const repoWith = (setup: (g: (...a: string[]) => string) => void) => {
   return { dir, g, done: () => rmSync(dir, { recursive: true, force: true }) };
 };
 
+// Spec: MUS-SPEC-12-673A (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-673a)
+// Spec: MUS-SPEC-11-673A (docs/spec/clauses/11-memory.md#mus-spec-11-673a)
 test('checkout and memory name the branch when a tag shares its name', async () => {
   const r = repoWith(g => { g('tag', 'release'); });
   try {
@@ -24,6 +26,7 @@ test('checkout and memory name the branch when a tag shares its name', async () 
   } finally { r.done(); }
 });
 
+// Spec: MUS-SPEC-12-673B (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-673b)
 test('a detached HEAD: checkout falls back to the short sha, memory records no branch', async () => {
   const r = repoWith(g => g('checkout', '-q', '--detach'));
   try {
