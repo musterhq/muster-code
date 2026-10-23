@@ -7,6 +7,7 @@ import {normalizeGitUrl} from '../src/runtime/plugin-install.ts';
 // Obviously fake credentials.
 const TOKEN = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
 
+// Spec: MUS-SPEC-19-577A (docs/spec/clauses/19-security-and-redaction.md#mus-spec-19-577a)
 test('clone URLs whose username is a token are rejected', () => {
   const bad = [
     `https://${TOKEN}@github.com/o/r.git`,
