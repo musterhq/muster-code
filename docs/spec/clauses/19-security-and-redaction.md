@@ -13,4 +13,19 @@ Boundaries:
 
 ## Acceptance cases
 
-No cases yet. A PR that changes this area adds its cases here first (see [acceptance-cases.md](../acceptance-cases.md)).
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-19-564A](19-security-and-redaction.md#mus-spec-19-564a) | On Windows, `file://host/share`, `\\host\share` and `//host/share` references are refused with "Choose a file". | [`Windows network (UNC) paths are not opened from transcript references`](../../../packages/agent-app/tests/open-with.test.ts) |
+
+### Paths from replies
+
+<a id="mus-spec-19-564a"></a>
+#### MUS-SPEC-19-564A: A network share link in a reply is refused on Windows
+
+- Precondition: The app runs on Windows and a reply holds a link to a file on a network share (UNC path).
+- Action: Resolve each of the three forms of that link the way the files domain does before it inspects or opens a file.
+- Expected result: Each one throws "Choose a file on this computer." so Windows never contacts the share.
+- Test: `packages/agent-app/tests/open-with.test.ts::Windows network (UNC) paths are not opened from transcript references`
+- Environment: Node test runner; no network, no provider. The Windows rule is switched on by a parameter, so it runs on any system.
+- Known gaps: Tests the path check on its own, not a click on a link in a reply.
+- Evidence: UNVERIFIED
