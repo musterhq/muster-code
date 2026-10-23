@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import path from 'node:path';import {test} from 'node:test';
 import {build} from 'esbuild';
 
+// Spec: MUS-SPEC-20-566A (docs/spec/clauses/20-performance.md#mus-spec-20-566a)
 test('the startup bundle leaves the hub setup forms and the project task page to their lazy chunks',async t=>{
   const root=path.resolve(import.meta.dirname,'..');const outdir=await mkdtemp(path.join(tmpdir(),'muster-bundle-'));t.after(()=>rm(outdir,{recursive:true,force:true}));
   const result=await build({entryPoints:[path.join(root,'src/renderer/main.tsx')],outdir,bundle:true,splitting:true,platform:'browser',format:'esm',target:'es2022',jsx:'automatic',loader:{'.ttf':'file','.woff2':'file'},minify:true,define:{'process.env.NODE_ENV':'"production"'},metafile:true,write:false,logLevel:'error',absWorkingDir:root});
