@@ -9,6 +9,7 @@ import type {ProviderAdapter} from '../src/runtime/provider.ts';
 
 const info:ProviderAdapter['info']=()=>[{id:'fx',name:'Fixture',available:true,identityMasked:'fx',models:[{id:'m',name:'M'}]}];
 
+// Spec: MUS-SPEC-02-569A (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-569a)
 test('2000 deltas in one burst are stored with a handful of writes, and the final text is complete',async t=>{
   const dataDir=await mkdtemp(join(tmpdir(),'muster-stream-'));t.after(()=>rm(dataDir,{recursive:true,force:true}));
   let release!:()=>void;const finished=new Promise<void>(resolve=>{release=resolve;});

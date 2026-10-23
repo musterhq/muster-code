@@ -14,4 +14,19 @@ Boundaries:
 
 ## Acceptance cases
 
-No cases yet. A PR that changes this area adds its cases here first (see [acceptance-cases.md](../acceptance-cases.md)).
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-02-569A](02-turns-streaming-and-queue.md#mus-spec-02-569a) | 2000 streamed pieces in one burst end up as the full text with a timeline revision below 50. | [`2000 deltas in one burst are stored with a handful of writes, and the final text is complete`](../../../packages/agent-app/tests/stream-write-cost.test.ts) |
+
+### Streaming cost
+
+<a id="mus-spec-02-569a"></a>
+#### MUS-SPEC-02-569A: A streamed reply is saved in a few writes, not one per token
+
+- Precondition: A chat whose provider streams 2000 small pieces of text in one burst.
+- Action: Send a message and wait for the turn to complete.
+- Expected result: The saved reply is the whole text, completed, and the timeline revision stays under 50 (one write per piece would pass 2000).
+- Test: `packages/agent-app/tests/stream-write-cost.test.ts::2000 deltas in one burst are stored with a handful of writes, and the final text is complete`
+- Environment: Node test runner; no network, no provider. Real agent service with a fake provider and a temp data folder.
+- Known gaps: Counts writes by the timeline revision, not time. The "about a third of the time" figure for 20 chats of 600 KB is from the author's run and is not tested.
+- Evidence: UNVERIFIED
