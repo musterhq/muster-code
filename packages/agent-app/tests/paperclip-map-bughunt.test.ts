@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mapAgent, mapApproval, mapAttention, mapRun } from '../src/runtime/paperclip-map.ts';
 
+// Spec: MUS-SPEC-13-575A (docs/spec/clauses/13-muster-server.md#mus-spec-13-575a)
 test('a server status or kind named like an Object.prototype member falls back to the default', () => {
   for (const word of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
     assert.equal(mapAgent({ id: 'a', status: word }).status, 'idle', word);

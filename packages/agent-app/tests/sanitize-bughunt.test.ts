@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { redactSecrets } from '../src/runtime/checkout/sanitize.ts';
 
+// Spec: MUS-SPEC-19-575A (docs/spec/clauses/19-security-and-redaction.md#mus-spec-19-575a)
 test('redacting a long run of name-like characters is not quadratic', () => {
   const started = Date.now();
   redactSecrets('a-'.repeat(30_000));
@@ -15,12 +16,14 @@ test('secret assignments are still redacted', () => {
   assert.equal(redactSecrets('my.service-password: hunter2'), 'my.service-password: [redacted]');
 });
 
+// Spec: MUS-SPEC-19-575B (docs/spec/clauses/19-security-and-redaction.md#mus-spec-19-575b)
 test('credentials in a URL are still redacted', () => {
   assert.equal(redactSecrets('clone https://user:pw123@example.com/x.git now'), 'clone https://[redacted]@example.com/x.git now');
   assert.equal(redactSecrets('push https://user:p@ssw0rd@github.com/o/r.git'), 'push https://[redacted]@github.com/o/r.git');
   assert.equal(redactSecrets('see https://example.com/page?email=a:b@c.d'), 'see https://example.com/page?email=a:b@c.d');
 });
 
+// Spec: MUS-SPEC-19-575C (docs/spec/clauses/19-security-and-redaction.md#mus-spec-19-575c)
 test('a long run of secret words stays linear', () => {
   for (const input of ['KEY'.repeat(20_000), 'TOKEN.'.repeat(10_000), `"${'KEY'.repeat(20_000)}`, 'KEY='.repeat(15_000)]) {
     const started = Date.now();
