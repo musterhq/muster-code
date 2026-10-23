@@ -325,7 +325,8 @@ jobs:
       matrix:
         include:
           - os: linux
-            runner: ubuntu-latest
+            # Build on the oldest supported Ubuntu so native modules (node-pty) run there and on anything newer (#680).
+            runner: ubuntu-24.04
             target: --linux
           - os: windows
             runner: windows-latest
@@ -466,7 +467,7 @@ jobs:
             platform: darwin-arm64
           - runner: macos-15-intel
             platform: darwin-x64
-          - runner: ubuntu-latest
+          - runner: ubuntu-24.04
             platform: linux-x64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
