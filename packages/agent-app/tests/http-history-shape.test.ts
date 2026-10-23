@@ -9,6 +9,7 @@ const sse=(events:unknown[])=>new Response(new ReadableStream({start(c){for(cons
 const input=(extra:Partial<AdapterRunInput>={}):AdapterRunInput=>({chat:{id:'c',mode:'agent'} as AdapterRunInput['chat'],cwd:'/w',prompt:'hi',model:'claude-x',permissionMode:'workspace',signal:new AbortController().signal,
   onThreadReady:()=>{},onTurnAccepted:()=>{},onDelta:()=>{},onReasoning:()=>{},onEvent:()=>{},...extra});
 
+// Spec: MUS-SPEC-03-568D (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-568d)
 test('trimming to the newest 80 messages never leaves the history starting with a reply',()=>{
   const memory=new ConversationMemory();
   // A steer with no reply in between makes two user messages in a row, so the count is odd.
@@ -20,6 +21,7 @@ test('trimming to the newest 80 messages never leaves the history starting with 
   assert.equal(history[0]?.role,'user');
 });
 
+// Spec: MUS-SPEC-03-568E (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-568e)
 test('trimming by size never leaves the history starting with a reply',()=>{
   const memory=new ConversationMemory(64,100);
   const messages:ChatMessage[]=[{role:'user',content:'x'.repeat(60)},{role:'user',content:'steer'},{role:'assistant',content:'y'.repeat(60)},{role:'user',content:'q'},{role:'assistant',content:'z'}];
@@ -28,6 +30,7 @@ test('trimming by size never leaves the history starting with a reply',()=>{
   assert.equal(memory.open(threadId).history[0]?.role,'user');
 });
 
+// Spec: MUS-SPEC-03-568F (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-568f)
 test('a history saved by an older build is resent from its first user message, with no empty reply',async()=>{
   const {mkdtemp,rm,writeFile}=await import('node:fs/promises');const {tmpdir}=await import('node:os');const {join}=await import('node:path');const {randomUUID}=await import('node:crypto');
   const dir=await mkdtemp(join(tmpdir(),'muster-history-'));
@@ -40,6 +43,7 @@ test('a history saved by an older build is resent from its first user message, w
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 
+// Spec: MUS-SPEC-03-568G (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-568g)
 test('a turn that produced no text is not resent as an empty assistant message',async()=>{
   const bodies:Array<{messages:Array<{role:string;content:unknown}>}>=[];
   const replies=[[{type:'message_start',message:{usage:{input_tokens:3}}},{type:'content_block_delta',delta:{type:'thinking_delta',thinking:'hmm'}},{type:'message_stop'}],

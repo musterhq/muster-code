@@ -10,6 +10,7 @@ async function folder(t:TestContext){const root=await mkdtemp(join(tmpdir(),'mus
 const ctx=(cwd:string,access:ToolContext['access']):ToolContext=>({cwd,access,signal:new AbortController().signal,emit:()=>{},threadId:'t',turnId:'u'});
 const call=(name:string,args:object)=>({id:'1',name,arguments:JSON.stringify(args)});
 
+// Spec: MUS-SPEC-03-568A (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-568a)
 test('run_command output keeps multi-byte characters that straddle pipe chunks',{skip:process.platform==='win32'&&'POSIX shell'},async t=>{
   const cwd=await folder(t);
   // 30k three-byte characters after one ASCII byte: ~90 KB, so pipe chunk boundaries fall inside characters.
@@ -20,6 +21,7 @@ test('run_command output keeps multi-byte characters that straddle pipe chunks',
   assert.ok(result.content.startsWith('xy'+'€'.repeat(1000)));
 });
 
+// Spec: MUS-SPEC-03-568B (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-568b)
 test('read_file cut at the size limit does not end in a broken character',async t=>{
   const cwd=await folder(t);
   await writeFile(join(cwd,'big.txt'),'a'+'é'.repeat(MAX_FILE_READ));
@@ -28,6 +30,7 @@ test('read_file cut at the size limit does not end in a broken character',async 
   assert.equal(result.content.includes('�'),false);
 });
 
+// Spec: MUS-SPEC-03-568C (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-568c)
 test('edit_file refuses a file that is not UTF-8 instead of rewriting its other bytes',async t=>{
   const cwd=await folder(t),file=join(cwd,'latin1.txt');
   const original=Buffer.from('caf\xe9 = 1\nvalue = 2\n','latin1');
