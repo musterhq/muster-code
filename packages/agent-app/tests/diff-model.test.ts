@@ -154,6 +154,7 @@ test('the shared diff worker client cancels superseded requests, releases after 
   } finally { mock.timers.reset(); }
 });
 
+// Spec: MUS-SPEC-08-561A (docs/spec/clauses/08-git-changes-and-review.md#mus-spec-08-561a)
 test('a new, deleted or heavily extended file still previews instead of reporting a change that is too complex', () => {
   const big = lines(3000);
   const created = buildDiff('', big);

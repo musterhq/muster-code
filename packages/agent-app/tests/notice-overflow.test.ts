@@ -40,6 +40,7 @@ const store = await loadStore();
 test.after(async () => { if (dir) await rm(dir, {recursive: true, force: true}); });
 
 
+// Spec: MUS-SPEC-16-561A (docs/spec/clauses/16-notifications-and-attention.md#mus-spec-16-561a)
 test('a confirmation or Undo notice is not lost while persistent errors fill the stack', () => {
   for (const n of [...store.getState().notices]) store.dismissNotice(n.id);
   for (let i = 1; i <= 4; i++) store.pushNotice(`Problem ${i}`, {kind: 'error'});

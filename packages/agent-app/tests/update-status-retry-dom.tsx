@@ -1,6 +1,7 @@
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
 Object.assign(globalThis,{window,document:window.document});
@@ -14,9 +15,12 @@ const React=await import('react');const {createRoot}=await import('react-dom/cli
 const {useUpdateStatus}=await import('../src/renderer/updates');
 function Probe(){const s=useUpdateStatus();return <p id="p">{s?.phase??'none'}</p>;}
 const root=createRoot(document.getElementById('root')!);root.render(<Probe/>);
-await delay(50);
-assert.equal(document.getElementById('p')!.textContent,'none');
-assert.equal(timers.length,1,'a failed first status read schedules a retry');
-timers[0]();await delay(50);
-assert.equal(document.getElementById('p')!.textContent,'ready','the retry fills in the update status');
+// Spec: MUS-SPEC-18-561A (docs/spec/clauses/18-updates-release-and-packaging.md#mus-spec-18-561a)
+await check('the update status is read again after a failed first read', async () => {
+  await delay(50);
+  assert.equal(document.getElementById('p')!.textContent,'none');
+  assert.equal(timers.length,1,'a failed first status read schedules a retry');
+  timers[0]();await delay(50);
+  assert.equal(document.getElementById('p')!.textContent,'ready','the retry fills in the update status');
+});
 console.log('update-status-retry-dom: ok');process.exit(0);
