@@ -20,6 +20,7 @@ async function upstream(t: TestContext) {
   return {base: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`, seen};
 }
 
+// Spec: MUS-SPEC-03-1C (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-1c)
 test('router bridge: a request without the private path prefix is refused and never forwarded', async t => {
   const up = await upstream(t);
   const bridge = await startResponsesCompatibility(up.base);
@@ -33,6 +34,7 @@ test('router bridge: a request without the private path prefix is refused and ne
   assert.deepEqual(up.seen, [{url: '/v1/responses', auth: 'Bearer sk-fixture'}], 'the real request keeps its path and credentials');
 });
 
+// Spec: MUS-SPEC-03-1D (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-1d)
 test('router bridge: when the router cannot be reached the 502 says why, without the address or credentials', async t => {
   const closed = createServer();
   await new Promise<void>(resolve => closed.listen(0, '127.0.0.1', resolve));

@@ -71,7 +71,7 @@ async function fixture(t: TestContext, truncateAfter?: number) {
   return {router, service, chat, send, usage, reconnects: () => reconnects};
 }
 
-// Spec: MUS-SPEC-02-678A (docs/spec/clauses/02-providers.md#mus-spec-02-678a--router-completions-with-partial-usage-metadata)
+// Spec: MUS-SPEC-03-1A (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-1a)
 test('router usage compatibility: two independent chats complete successive turns without reconnecting', {skip, timeout: 90_000}, async t => {
   const f = await fixture(t);
   const ids = [await f.chat(), await f.chat()];
@@ -93,7 +93,7 @@ test('router usage compatibility: two independent chats complete successive turn
   assert.equal(f.usage.at(-1)?.reasoningOutputTokens, 1, 'reported reasoning usage is preserved');
 });
 
-// Spec: MUS-SPEC-02-678B (docs/spec/clauses/02-providers.md#mus-spec-02-678b--genuine-stream-failures-remain-failures-after-compatibility-handling)
+// Spec: MUS-SPEC-03-1B (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-1b)
 test('router usage compatibility: a genuinely truncated stream still fails', {skip, timeout: 60_000}, async t => {
   const f = await fixture(t, 1), id = await f.chat();
   const first = await f.send(id);
