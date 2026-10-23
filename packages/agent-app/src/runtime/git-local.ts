@@ -67,8 +67,8 @@ export function redactGitText(text: string): string {
   return text
     // The scheme is bounded: an unbounded `[a-z0-9+.-]*` rescans every long kebab/dotted run to its end from
     // each word boundary (quadratic: 150k chars of `sk-sk-…` took seconds). Real schemes are short.
-    // Userinfo ends at the authority: a '?' or '#' means the '@' is in a query/fragment (`?q=a@b`), not a credential.
-    .replace(/\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/@?#]+@/gi, '$1***@')
+    // Userinfo runs to the LAST '@' of the authority (a password may hold a raw '@'); a '?' or '#' means the '@' is in a query/fragment (`?q=a@b`), not a credential.
+    .replace(/\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/?#]+@/gi, '$1***@')
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,})\b/g, '***');
 }
 
