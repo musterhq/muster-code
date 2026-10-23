@@ -104,20 +104,26 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
   const remember = (tail: string): ChatMessage[] => [...history, {role: 'user', content: input.prompt}, ...injected, ...(tail.trim() || !injected.length ? [{role: 'assistant' as const, content: tail}] : [])];
   try {
     for (let round = 0, roundStart = 0; ; round++, roundStart = answer.length) {
+      // The last round allowed: a steer sent from here on could never be read, so it queues instead (the sender returns false).
+      if (round >= MAX_TOOL_ROUNDS) lane.open = false;
       const streamed = await stream(response, delta => { answer += delta; input.onDelta(delta); });
       if (streamed?.usage) usages.push(streamed.usage as {inputTokens?: number; outputTokens?: number; totalTokens?: number});
       let calls = streamed?.calls ?? [];
       if (input.signal.aborted) break;
       if (!toolsOn || !calls.length) {
-        // A steer that arrived during the last stream gets one more round, after the reply it interrupted.
-        if (!steers.length || round >= MAX_TOOL_ROUNDS) break;
+        // A steer that arrived during the last stream gets one more round, after the reply it interrupted. The lane closes
+        // in the same synchronous step as the decision to stop, so no steer is accepted and then left unread.
+        if (!steers.length) { lane.open = false; break; }
         extra.push({role: 'assistant', content: answer.slice(roundStart) || '(no reply)'});
         takeSteers();
         response = await send(history, extra, toolsOn);
         if (!response.ok || !response.body) throw new Error(response.ok ? `${label} returned an empty stream.` : await responseError(response, label));
         continue;
       }
-      if (round >= MAX_TOOL_ROUNDS || callsThisTurn >= MAX_CALLS_PER_TURN || Date.now() > deadline) { await closingStatus(); break; }
+      if (round >= MAX_TOOL_ROUNDS || callsThisTurn >= MAX_CALLS_PER_TURN || Date.now() > deadline) {
+        // No more rounds: stop taking steers, and let the closing status read the ones already accepted.
+        lane.open = false; takeSteers(); await closingStatus(); break;
+      }
       calls = calls.slice(0, Math.min(MAX_CALLS_PER_ROUND, MAX_CALLS_PER_TURN - callsThisTurn));
       callsThisTurn += calls.length;
       extra.push({role: 'assistant', content: null, tool_calls: calls.map(call => ({id: call.id, type: 'function', function: {name: call.name, arguments: resent(call.arguments)}}))});
@@ -148,6 +154,8 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
     }
   } catch (error) {
     lane.open = false;
+    // Steers accepted before the failure stay in what the next turn remembers.
+    takeSteers();
     const stopped = input.signal.aborted;
     if (answer || used.length) memory.commit(threadId, remember(`${answer.slice(mark)}${used.length ? `\n\n[Tools used before this stopped: ${used.slice(0, 40).join(', ')}]` : ''}`));
     return {status: 'failed', finalMessage: '', threadId, turnId, dispatchState: 'dispatched', errorMessage: stopped ? 'Stopped.' : error instanceof Error ? error.message.slice(0, 300) : `${label} stream failed.`};

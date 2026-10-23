@@ -131,6 +131,12 @@ export function steerFailure(error: unknown): false | {refused: string} | 'retry
   return 'retry';
 }
 
+/** A steer that failed for a reason the user should see: the composer queues the message and shows this. */
+export function steerRefusal(error: unknown): {refused: string} {
+  const message = (error instanceof Error ? error.message : String(error)).replace(/[\x00-\x1f]+/g, ' ').trim().slice(0, 200);
+  return {refused: message ? `The agent couldn’t take this message mid-run (${message.replace(/[.\s]+$/, '')}).` : 'The agent couldn’t take this message mid-run.'};
+}
+
 /** Bundled from the existing headless core client; no VSCode or private provider APIs. */
 const modeInstructions = (mode: Chat['mode'], subagents = true) => mode === 'ask' ? 'Answer and inspect only. Do not modify files, execute mutations or request expanded access.' : mode === 'plan' ? 'Produce a reviewable plan. Do not change files or request expanded access. ' + (subagents ? 'Do not spawn sub-agents to implement changes: implementation starts only after the user executes the plan. ' : 'Implementation starts only after the user executes the plan. ') + 'Put the complete plan in your final message.' : undefined;
 /** Process ownership (F41/F50): the agent may only clean up what it started itself. */
@@ -492,6 +498,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       const session = sessions.get(id);
       if (disposed || !session?.active || session.stop || session.controller.signal.aborted || !core) return false;
       // Codex `turn/steer` always names the turn it expects, so a steer never lands in a newer turn.
+      let failure: unknown;
       if (session.threadId && session.turnId) {
         try {
           await core.callCodexConversation(session.key, 'turn/steer', {threadId: session.threadId, expectedTurnId: session.turnId, input: [{type: 'text', text}]}, {transportOwner: session.owner, requireOwner: true, timeoutMs: 15_000});
@@ -502,10 +509,19 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           if (verdict === 'uncertain') return true;
           if (verdict !== 'retry') return verdict;
           // Mismatch or transport trouble: retry once against the core's own view of the active turn.
+          failure = error;
         }
       }
-      if (!core.steerActiveCodexTurn) return false;
-      try { return (await core.steerActiveCodexTurn(text, session.owner, session.key)) === true; } catch { return false; }
+      // The message queues instead; the error says why, so it is never swallowed.
+      if (!core.steerActiveCodexTurn) return failure === undefined ? false : steerRefusal(failure);
+      try {
+        if ((await core.steerActiveCodexTurn(text, session.owner, session.key)) === true) return true;
+        return failure === undefined ? false : steerRefusal(failure);
+      } catch (error) {
+        const verdict = steerFailure(error);
+        if (verdict === 'uncertain') return true;
+        return verdict === 'retry' ? steerRefusal(error) : verdict;
+      }
     },
     async compact(id) {
       const session = sessions.get(id);
