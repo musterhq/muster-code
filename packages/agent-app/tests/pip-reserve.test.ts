@@ -7,6 +7,7 @@ const textEnd = (width: number, px: number, max = 804) => { const w = width - px
 test('no reserve when the preview card sits clear of the centred transcript column', () => {
   assert.equal(pipReserveFor({left: 260, right: 1660, width: 1400}, 804, 1680, {right: 20, width: 300}, 'right'), undefined);
 });
+// Spec: MUS-SPEC-09-629B (docs/spec/clauses/09-browser-and-previews.md#mus-spec-09-629b)
 test('the smallest reserve that clears the card: the text ends at the card minus the gap', () => {
   // Wide pane, card overlaps the column's right side by about 100px.
   const box = {left: 270, right: 1600, width: 1330}, anchor = {right: 624, width: 300}; // card at 756..1056 (pane-relative 486..786)

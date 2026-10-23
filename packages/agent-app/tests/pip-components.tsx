@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
 const require=createRequire(import.meta.url);
 const {parseHTML}=require('linkedom');
+import {check} from './dom-check.ts';
 const {window}=parseHTML('<html><body><main class="center"><div class="chat"><div class="timeline-shell"><div class="timeline"></div></div></div></main><div id="root"></div></body></html>');
 const storage=new Map<string,string>();
 const memory={getItem:(key:string)=>storage.get(key)??null,setItem:(key:string,value:string)=>{storage.set(key,String(value));},removeItem:(key:string)=>{storage.delete(key);}};
@@ -63,12 +64,15 @@ const tabsText=()=>[...document.querySelectorAll('[role="tab"]')].map(tab=>tab.t
 // 5. No auto-start: two idle PiPs, no tab, no sidebar, no browser session.
 assert.deepEqual(errors,[]);
 assert.equal(cards().length,2,'both live sessions show as PiPs, the past transcript session does not');
-const stack=document.querySelector<HTMLElement>('.pip-stack')!;
-// The 804px column centres in the 1000px pane, so its text ends at 870px; the card either clears that or gets a reserve.
-const previewLeft=window.innerWidth-Number.parseFloat(stack.style.right)-Number.parseFloat(stack.style.width);
-const center=document.querySelector<HTMLElement>('main.center')!;
-assert.ok(previewLeft>=870+8||Number.parseFloat(center.style.getPropertyValue('--pip-reserve'))>0,'the visible browser preview never covers transcript text');
-assert.equal(!!center.dataset.pipSide,previewLeft<870+8,'space is reserved only when the card would cover text');
+// Spec: MUS-SPEC-09-629A (docs/spec/clauses/09-browser-and-previews.md#mus-spec-09-629a)
+await check('the visible browser preview never covers transcript text',async()=>{
+  const stack=document.querySelector<HTMLElement>('.pip-stack')!;
+  // The 804px column centres in the 1000px pane, so its text ends at 870px; the card either clears that or gets a reserve.
+  const previewLeft=window.innerWidth-Number.parseFloat(stack.style.right)-Number.parseFloat(stack.style.width);
+  const center=document.querySelector<HTMLElement>('main.center')!;
+  assert.ok(previewLeft>=870+8||Number.parseFloat(center.style.getPropertyValue('--pip-reserve'))>0,'the visible browser preview never covers transcript text');
+  assert.equal(!!center.dataset.pipSide,previewLeft<870+8,'space is reserved only when the card would cover text');
+});
 assert.equal(document.querySelector('.pip-empty'),null,'a card with a frame never shows a placeholder');
 assert.equal(cards().every(card=>!!card.querySelector('img')),true,'every card shows its real frame');
 assert.ok(!document.body.textContent!.includes('Ended'),'live sessions are not labelled ended');
