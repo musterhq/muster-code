@@ -70,7 +70,9 @@ test('there are 27 built-ins: stock pair, six classics and 19 studio palettes', 
   assert.equal(new Set(BUILT_IN_THEMES.map(t => t.id)).size, 27);
 });
 
+// Spec: MUS-SPEC-15-622A (docs/spec/clauses/15-settings-and-themes.md#mus-spec-15-622a)
 test('contrast: every theme meets WCAG AA on its text/background pairs (the six new ones on every pair at 4.5:1)', () => {
+  assert.equal(BUILT_IN_THEMES.length, 27, 'the 8 earlier themes and the 19 new ones are all loaded, so the checks below cover every one');
   for (const theme of BUILT_IN_THEMES) {
     const t = effectiveTokens(theme);
     for (const key of TOKEN_KEYS) if (key !== 'bg-sunken') assert.ok(Number.isFinite(contrastRatio(t[key], t.bg)) || key === 'fg-rgb' || key === 'hue-l', `${theme.id} --${key} parses`);
