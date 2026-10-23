@@ -20,6 +20,7 @@ Boundaries:
 | [MUS-SPEC-04-1B](04-context-window-and-compaction.md#mus-spec-04-1b) | Observed usage raises a guessed or listed window that is too small, and never lowers a window or overrides a catalog or reported one. | [`#668 observed usage only raises a guess: it never lowers a window and never overrides a declared one`](../../../packages/agent-app/tests/context-window-668.test.ts) |
 | [MUS-SPEC-04-2A](04-context-window-and-compaction.md#mus-spec-04-2a) | A chat on a default or observed window is never compacted automatically; a window you set compacts at 85%. | [`#668 a default or observed window never starts a proactive compaction; a declared one does`](../../../packages/agent-app/tests/context-window-668.test.ts) |
 | [MUS-SPEC-04-2B](04-context-window-and-compaction.md#mus-spec-04-2b) | The meter shows the same window size and compaction point that the trigger uses. | [`#668 the meter and the trigger resolve the same window`](../../../packages/agent-app/tests/context-window-668.test.ts) |
+| [MUS-SPEC-04-2C](04-context-window-and-compaction.md#mus-spec-04-2c) | Through a running chat on a router model with no listed window, three turns at 300K tokens each complete on the same thread with no automatic compaction and no compaction request. | [`#668 a router combo with no listed window keeps working at 300K tokens: no automatic compaction, turns complete`](../../../packages/agent-app/tests/compaction-426.test.ts) |
 | [MUS-SPEC-04-3A](04-context-window-and-compaction.md#mus-spec-04-3a) | On an observed window the meter reads "at least N" with no percentage and no compaction point; a default estimate is labelled as one. | [`#668 meter: observed usage reads "at least N" with no percentage; a default estimate is labelled and never compacts`](../../../packages/agent-app/tests/context-window-668.test.ts) |
 | [MUS-SPEC-04-4A](04-context-window-and-compaction.md#mus-spec-04-4a) | Saved per-model windows keep only valid sizes on valid model keys; invalid sizes are refused with a plain message. | [`#668 the policy keeps valid windows per model and drops the rest`](../../../packages/agent-app/tests/context-window-668.test.ts) |
 | [MUS-SPEC-04-4B](04-context-window-and-compaction.md#mus-spec-04-4b) | The Settings field accepts 1M, 1.5m, 200k and 1,000,000, and rejects text that is not a size. | [`#668 the Settings field reads 1M, 200k and 1,000,000`](../../../packages/agent-app/tests/context-window-668.test.ts) |
@@ -70,6 +71,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/context-window-668.test.ts::#668 the meter and the trigger resolve the same window`
 - Environment: Node test runner; renderer view model only, no DOM.
 - Known gaps: Checks the meter's view model, not the rendered composer.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-04-2c"></a>
+#### MUS-SPEC-04-2C: A chat on a router model with no listed window keeps working
+
+- Precondition: A chat on an HTTP router model that lists no context window. Each turn reports 300K tokens used, past 85% of the 128K default.
+- Action: Send three messages in a row through the running app.
+- Expected result: All three reach the model and complete on the same provider thread. No automatic compaction row appears and the provider is never asked to compact.
+- Test: `packages/agent-app/tests/compaction-426.test.ts::#668 a router combo with no listed window keeps working at 300K tokens: no automatic compaction, turns complete`
+- Environment: Node test runner; the agent service with a fake provider that reports token usage; no network.
+- Known gaps: Uses a fake provider, not a live router.
 - Evidence: UNVERIFIED
 
 ### What the meter says
