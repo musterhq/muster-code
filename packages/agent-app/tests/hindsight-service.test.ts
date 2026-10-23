@@ -46,6 +46,7 @@ function blockingClient(released: {signal?: AbortSignal}): HindsightClientLike {
   } as HindsightClientLike;
 }
 
+// Spec: MUS-SPEC-22-482A (docs/spec/clauses/22-engineering-standards.md#mus-spec-22-482a)
 test('unconfigured status is truthful and never includes a key', () => {
   const service = new HindsightService({core, env:{HINDSIGHT_API_KEY:'secret'}, resolveFolderScope:()=>({kind:'workspace',id:'w'})});
   const status = service.status('folder');
