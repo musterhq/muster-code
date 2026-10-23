@@ -11,4 +11,7 @@ One row per clause file that has at least one case. The checker reports a clause
 | Clause | Area |
 |---|---|
 | `MUS-SPEC-04` | [Context window and compaction](clauses/04-context-window-and-compaction.md) |
+| `MUS-SPEC-08` | [Git, changes and review](clauses/08-git-changes-and-review.md) |
+| `MUS-SPEC-16` | [Notifications and attention](clauses/16-notifications-and-attention.md) |
+| `MUS-SPEC-18` | [Updates, release and packaging](clauses/18-updates-release-and-packaging.md) |
 | `MUS-SPEC-22` | [Engineering standards](clauses/22-engineering-standards.md) |

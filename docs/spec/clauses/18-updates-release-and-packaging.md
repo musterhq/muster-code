@@ -12,4 +12,20 @@ Boundaries:
 
 ## Acceptance cases
 
-No cases yet. A PR that changes this area adds its cases here first (see [acceptance-cases.md](../acceptance-cases.md)).
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-18-561A](18-updates-release-and-packaging.md#mus-spec-18-561a) | After a failed first read a 15-second retry is scheduled, and when it runs the update status appears. | [`the update status is read again after a failed first read`](../../../packages/agent-app/tests/update-status-retry-dom.tsx) |
+
+### Update status
+
+<a id="mus-spec-18-561a"></a>
+#### MUS-SPEC-18-561A: The update status is read again after a failed first read
+
+- Precondition: The runtime is still starting, so the first read of the update status fails.
+- Action: A component that shows the update status is drawn, the first read fails, and then the scheduled retry runs.
+- Expected result: At first no status is shown and one retry is scheduled. When the retry runs, the status (ready) is shown, so the update button is not missing for the whole session.
+- Test: `packages/agent-app/tests/update-status-retry-dom.tsx::the update status is read again after a failed first read`
+- Environment: Node and linkedom: a DOM suite with the real update status hook and a fake bridge; the 15-second timer is run by hand, so it does not wait.
+- Known gaps: The retry timer is run by the test, not waited for. Retries stop after 8 failed attempts; that limit is not tested.
+- Evidence: UNVERIFIED
+
