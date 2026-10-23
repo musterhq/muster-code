@@ -66,6 +66,3 @@ Boundaries:
 - Known gaps: Only the system error code is shown, not the router's own error text.
 - Evidence: UNVERIFIED
 
-A PR that changes this area adds its cases here first: one row in this table, then the case block below it (see [acceptance-cases.md](../acceptance-cases.md)).
-
-|---|---|---|
