@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Usage stats and Receipts now count only approvals that actually showed you a card; requests accepted automatically in Full access are no longer counted as prompts.
 - Settings › Muster Server buttons (invite, revoke, connector and agent actions) ignore a second click while the first is still running, so they no longer fire twice.
 - The Dashboard prices turns the provider reported no cost for from the model catalog or your Settings › Models prices; turns with no known price still count as unpriced.
 - Sandboxes now have a disk limit (10 GB by default, set under Resources next to memory and CPUs). A file write that would go past it is refused with a plain message, and a command or service that keeps filling the disk is stopped with a notice, so a runaway command can no longer fill your Mac's disk. A sandbox also no longer gets swap on top of its memory limit, so a 512 MB sandbox really stops at 512 MB. Deleting a chat now removes its sandbox container and files; archiving a chat stops its sandbox and keeps its files. A Project's shared sandbox keeps running while other chats in the Project still use it.
