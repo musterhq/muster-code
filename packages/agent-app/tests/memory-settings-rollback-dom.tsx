@@ -1,6 +1,7 @@
 /** Settings > Memory: a failed save must not undo a later toggle that succeeded. */
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
+import {check} from './dom-check.ts';
 import {setTimeout as delay} from 'node:timers/promises';
 const require=createRequire(import.meta.url);
 const {parseHTML}=require('linkedom');
@@ -26,15 +27,18 @@ const React=await import('react');
 const {createRoot}=await import('react-dom/client');
 const {PreferencesScreen}=await import('../src/renderer/components/PreferencesScreen');
 const root=createRoot(document.getElementById('root')!);
-root.render(<PreferencesScreen/>);
-const until=async(cond:()=>boolean)=>{for(let i=0;i<200&&!cond();i++)await delay(10);assert.ok(cond(),'condition');};
-await until(()=>document.querySelector('[aria-label="Use memory in agent runs"]')!==null);
-(document.querySelector('[aria-label="Use memory in agent runs"]') as HTMLButtonElement).click();
-await delay(10);
-const retain=()=>[...document.querySelectorAll('[aria-label="After a run completes"] button')] as HTMLButtonElement[];
-retain().find(b=>b.textContent==='After runs')!.click();
-await delay(250);
-const picked=retain().find(b=>b.getAttribute('aria-checked')==='true')!.textContent;
-assert.equal(picked,'After runs','the later toggle that succeeded is still shown');
+// Spec: MUS-SPEC-11-558A (docs/spec/clauses/11-memory.md#mus-spec-11-558a)
+await check('a failed memory save does not undo a later toggle that went through', async () => {
+  root.render(<PreferencesScreen/>);
+  const until=async(cond:()=>boolean)=>{for(let i=0;i<200&&!cond();i++)await delay(10);assert.ok(cond(),'condition');};
+  await until(()=>document.querySelector('[aria-label="Use memory in agent runs"]')!==null);
+  (document.querySelector('[aria-label="Use memory in agent runs"]') as HTMLButtonElement).click();
+  await delay(10);
+  const retain=()=>[...document.querySelectorAll('[aria-label="After a run completes"] button')] as HTMLButtonElement[];
+  retain().find(b=>b.textContent==='After runs')!.click();
+  await delay(250);
+  const picked=retain().find(b=>b.getAttribute('aria-checked')==='true')!.textContent;
+  assert.equal(picked,'After runs','the later toggle that succeeded is still shown');
+});
 console.log('memory-settings-rollback-dom ok');
 process.exit(0);

@@ -1,6 +1,7 @@
 /** Local checkouts settings: a value the runtime rejects is not left showing as if saved. */
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
+import {check} from './dom-check.ts';
 import {setTimeout as delay} from 'node:timers/promises';
 const require=createRequire(import.meta.url);
 const {parseHTML}=require('linkedom');
@@ -17,16 +18,19 @@ const {createRoot}=await import('react-dom/client');
 const {LocalCheckoutsCard}=await import('../src/renderer/components/OrgsCard');
 const until=async(cond:()=>boolean)=>{for(let i=0;i<100&&!cond();i++)await delay(10);assert.ok(cond(),'condition');};
 const root=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>console.log('UNCAUGHT',String(e))});
-root.render(<LocalCheckoutsCard/>);
-await until(()=>document.querySelector('input[type="number"]')!==null);
-const input=document.querySelector('input[type="number"]') as any;
-{let proto=Object.getPrototypeOf(input),d:any;while(proto&&!(d=Object.getOwnPropertyDescriptor(proto,'value')))proto=Object.getPrototypeOf(proto);input.dispatchEvent(new window.Event('focusin',{bubbles:true}));d.set.call(input,'9999');}
-input.dispatchEvent(new window.Event('input',{bubbles:true}));
-await delay(20);
-input.dispatchEvent(new window.Event('focusout',{bubbles:true}));
-input.dispatchEvent(new window.Event('blur'));
-await delay(150);
-const shown=(document.querySelector('input[type="number"]') as any).value;
-assert.equal(String(shown),'8','the rejected 9999 is replaced by the saved value');
+// Spec: MUS-SPEC-12-558C (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-558c)
+await check('a quiet-hours value the runtime rejects is replaced by the saved value', async () => {
+  root.render(<LocalCheckoutsCard/>);
+  await until(()=>document.querySelector('input[type="number"]')!==null);
+  const input=document.querySelector('input[type="number"]') as any;
+  {let proto=Object.getPrototypeOf(input),d:any;while(proto&&!(d=Object.getOwnPropertyDescriptor(proto,'value')))proto=Object.getPrototypeOf(proto);input.dispatchEvent(new window.Event('focusin',{bubbles:true}));d.set.call(input,'9999');}
+  input.dispatchEvent(new window.Event('input',{bubbles:true}));
+  await delay(20);
+  input.dispatchEvent(new window.Event('focusout',{bubbles:true}));
+  input.dispatchEvent(new window.Event('blur'));
+  await delay(150);
+  const shown=(document.querySelector('input[type="number"]') as any).value;
+  assert.equal(String(shown),'8','the rejected 9999 is replaced by the saved value');
+});
 console.log('checkout-settings-reject-dom ok');
 process.exit(0);
