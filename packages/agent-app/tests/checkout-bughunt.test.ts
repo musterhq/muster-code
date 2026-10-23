@@ -122,6 +122,7 @@ async function bound(h: ReturnType<typeof setup>) { await h.reader.part(CO); awa
 
 // --- the state machine ----------------------------------------------------------------------------------------------------------------
 
+// Spec: MUS-SPEC-12-574A (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-574a)
 test('two simultaneous check-outs of one task make one worktree, one chat and one check-out post', async () => {
   const h = setup(); await h.reader.part(CO);
   await h.svc.bind(CO.id, 'p-redis', REPO, 'dev');
@@ -132,6 +133,7 @@ test('two simultaneous check-outs of one task make one worktree, one chat and on
   assert.equal(h.server.comments.get('t1')!.length, 1, 'one check-out comment');
 });
 
+// Spec: MUS-SPEC-12-574B (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-574b)
 test('a check-out by id and one by key at the same time make one worktree', async () => {
   const h = setup(); await h.reader.part(CO);
   await h.svc.bind(CO.id, 'p-redis', REPO, 'dev');
@@ -144,6 +146,7 @@ test('a check-out by id and one by key at the same time make one worktree', asyn
   await h.svc.start({ taskId: 'RAG-1', model: OWN, confirm: true });
 });
 
+// Spec: MUS-SPEC-12-574C (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-574c)
 test('a release while a hand-back is under way is refused', async () => {
   const h = setup(); await h.reader.part(CO);
   await h.svc.bind(CO.id, 'p-redis', REPO, 'dev');
@@ -155,6 +158,7 @@ test('a release while a hand-back is under way is refused', async () => {
   assert.equal(h.server.comments.get('t1')!.filter(c => /Handed back for review/.test(c.body)).length, 1);
 });
 
+// Spec: MUS-SPEC-12-574D (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-574d)
 test('two simultaneous hand-backs of one task push once and hand back once', async () => {
   const h = setup(); await h.reader.part(CO);
   await h.svc.bind(CO.id, 'p-redis', REPO, 'dev');
