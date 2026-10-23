@@ -41,6 +41,10 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Terminal panes retry failed loads twice and offer a Retry action if loading still fails.
 - A chat started in a new worktree from an existing chat now keeps that chat's model, reasoning effort and access mode instead of the app defaults
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
+- A long text file with accents, symbols or non-Latin text no longer shows a false "not valid UTF-8" warning (and a stray replacement character) at the end of its preview.
+- Saving a script from Muster's editor no longer removes its executable permission.
+- Searching file contents no longer lists results as "./src/a.ts" when ripgrep is installed, so a result opens the same tab as the file tree entry.
+- A folder added at a drive root (D:\\ or /) now lists, reads and searches normally instead of reporting that every path escapes the folder.
 - The Dashboard follows the org you switched to. Before, a read of the previous org that was still running when you switched could answer for the new one, so the Dashboard showed the old org's spend, budget and tasks by day.
 - The Dashboard's Recent activity and the Activity list name the agent or person who acted instead of a short id such as "agent a8782383".
 - The Dashboard opens faster on a large org: it reuses the org's last read instead of reading every task page again.
