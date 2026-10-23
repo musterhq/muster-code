@@ -14,4 +14,20 @@ Boundaries:
 
 ## Acceptance cases
 
-No cases yet. A PR that changes this area adds its cases here first (see [acceptance-cases.md](../acceptance-cases.md)).
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-12-557A](12-projects-orgs-and-tasks.md#mus-spec-12-557a) | An emoji or a rare character is shown whole, leading spaces are skipped, and an empty name shows a question mark. | [`an org avatar shows the whole first emoji or character of the name`](../../../packages/agent-app/tests/org-avatar-emoji.tsx) |
+
+### Org avatars
+
+<a id="mus-spec-12-557a"></a>
+#### MUS-SPEC-12-557A: An org avatar shows the whole first character of the name
+
+- Precondition: Orgs named "🚀 Launch", "  ragnar", "𝔸lpha" and "   " (spaces only).
+- Action: Render the org avatar for each name.
+- Expected result: The avatar shows 🚀, R, 𝔸 and ?. An emoji is never cut in half into a broken character.
+- Test: `packages/agent-app/tests/org-avatar-emoji.tsx::an org avatar shows the whole first emoji or character of the name`
+- Environment: Node and react-dom/server: the real OrgAvatar component rendered to markup; no server.
+- Known gaps: Renders to static markup, so colour and size are not checked.
+- Evidence: UNVERIFIED
+
