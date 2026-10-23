@@ -25,7 +25,7 @@ import {OutputLog} from './output-log.ts';
 import {ProjectEventLog} from './project-event-log.ts';
 import { toolEventDetails } from './tool-event-details.ts';
 import { applyProviderEvent, COMPACTION_TEXT, isForeignThreadEvent } from './context-telemetry.ts';
-import { listFiles, readFile, searchFiles } from './files.ts';
+import { forgetQuickOpen, listFiles, readFile, searchFiles } from './files.ts';
 import { readAsset, readChatImage } from './file-assets.ts';
 import {readDocument} from './document-preview.ts';
 import {readWorkbook} from './workbook-preview.ts';
@@ -199,6 +199,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const projectFeed = new ProjectEventLog(store.database());
   const emit = (event: AgentEvent) => {
     if (disposed) return;
+    if (event.type === 'workspaceChanged') forgetQuickOpen();
     if (event.type === 'projectChanged' && event.seq === undefined) { try { event = {...event, seq: projectFeed.append(event.projectId, event.taskId)}; } catch { /* An unsequenced event still reloads; the next replay resets. */ } }
     options.onEvent(event);
   };
