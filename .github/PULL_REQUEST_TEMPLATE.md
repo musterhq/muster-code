@@ -1,27 +1,25 @@
 ## Summary
 
-<!-- What changes and why. Link the issue: Fixes #123 -->
+<!-- What changes and why, in plain words. Link the issue: Fixes #123 -->
 
-## Spec
+## Cases
 
-<!-- Link the spec in this PR: docs/specs/<issue>-<slug>.md. Every change has one (see docs/specs/README.md). -->
+<!-- The acceptance cases this PR adds or changes, in docs/spec/clauses/NN-<area>.md (see docs/spec/README.md). One row per case, with its result on this PR's exact head. -->
 
-## Acceptance criteria → tests
-
-<!-- One row per acceptance criterion in the spec. Each test drives the user's workflow, not internals. -->
-
-| AC | Test (file › name) | Red before | Green after |
-|----|--------------------|------------|-------------|
-| AC1 |  | ✗ | ✓ |
+| Case | Test (file › name) | Red before | Green on this head |
+|---|---|---|---|
+| MUS-SPEC-NN-1A |  | ✗ | ✓ |
 
 ## Red: the tests fail without the change
 
-<!-- Paste the failing run (tests committed before the code, or run against main). -->
+<!-- The real failing run: command, failure, and the commit it ran on (tests committed before the code, or run against main). -->
 
 ```
 ```
 
 ## Green: the same tests pass with the change
+
+<!-- Command, exit code, counts (passed / failed / skipped) and the commit SHA of this head. -->
 
 ```
 ```
@@ -32,9 +30,10 @@
 
 ## Checklist
 
-- [ ] Spec written first, with numbered acceptance criteria
-- [ ] Every AC has a workflow test, and every one of those tests failed before the change
-- [ ] No test only checks implementation details, mocks the code under test, or is snapshot-only
+- [ ] Cases written first, in the clause file for the area, with Evidence UNVERIFIED
+- [ ] Every case names one test that drives the user's workflow, and that test carries its `// Spec:` comment
+- [ ] Every one of those tests failed before the change (red output above)
+- [ ] `node scripts/check-spec.mjs` passes
 - [ ] Typecheck and the related suites pass locally
 - [ ] Screenshots for visible changes
 - [ ] CHANGELOG updated if behaviour changed
