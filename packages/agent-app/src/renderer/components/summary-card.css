@@ -3,6 +3,7 @@
    --summary-top/--summary-bottom (header bottom, transcript bottom) and --summary-width/-reserve on
    .center from one ResizeObserver; .center[data-summary] tells the chat how much room to leave. */
 .summary-card {
+  anchor-name: --chat-summary;
   position: absolute;
   top: var(--summary-top, 56px);
   right: 14px;
