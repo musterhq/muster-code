@@ -33,3 +33,20 @@ test('PER-10: one notices file, a full license bundle, and a size record per bun
   for(const row of bundled)assert.ok(licenses.includes(`${row.name}@${row.version}`),`license bundle covers ${row.name}`);
   assert.ok(licenses.includes('node-pty@'));assert.ok(licenses.includes('Adapted source: t3code-MIT'));
 });
+
+// Spec: MUS-SPEC-18-89A (docs/spec/clauses/18-updates-release-and-packaging.md#mus-spec-18-89a)
+test('no bundled dependency has an unknown license',()=>{
+  const report=JSON.parse(read('perf/dependency-sizes.json'));
+  assert.deepEqual(report.packages.filter((row:any)=>/unknown/i.test(row.license)).map((row:any)=>row.name),[],'every bundled package has a declared license');
+  const buffers=report.packages.find((row:any)=>row.name==='buffers');
+  assert.ok(buffers,'buffers is still bundled (XLSX reader); if it is removed this case no longer applies');
+  assert.equal(buffers.license,'MIT');
+  const licenses=read('licenses/THIRD-PARTY-LICENSES.txt');
+  const start=licenses.indexOf('buffers@0.1.1 (MIT)');
+  assert.ok(start>=0,'license bundle lists buffers@0.1.1 as MIT');
+  const entry=licenses.slice(start,licenses.indexOf('\n====',start));
+  assert.match(entry,/Permission is hereby granted, free of charge/);
+  assert.match(entry,/James Halliday/);
+  assert.match(entry,/package\.json/i,'says where the license was confirmed');
+  assert.doesNotMatch(licenses,/declared license: UNKNOWN/);
+});
