@@ -19,6 +19,7 @@ function repo(): string {
   return dir;
 }
 
+// Spec: MUS-SPEC-08-570A (docs/spec/clauses/08-git-changes-and-review.md#mus-spec-08-570a)
 test('branch list names a branch correctly when a tag has the same name', async () => {
   const dir = repo();
   g(dir, 'tag', 'release'); g(dir, 'branch', 'release'); g(dir, 'switch', '-q', 'release');
@@ -28,6 +29,7 @@ test('branch list names a branch correctly when a tag has the same name', async 
   assert.equal((await gitInfo(dir)).branch, 'release');
 });
 
+// Spec: MUS-SPEC-08-570B (docs/spec/clauses/08-git-changes-and-review.md#mus-spec-08-570b)
 test('blame accepts a file whose name starts with a dash', async () => {
   const dir = repo();
   writeFileSync(join(dir, '-dash.txt'), 'x\n'); g(dir, 'add', '--', '-dash.txt'); g(dir, 'commit', '-q', '-m', 'dash');
@@ -35,6 +37,7 @@ test('blame accepts a file whose name starts with a dash', async () => {
   assert.equal(blame.lines.length, 1);
 });
 
+// Spec: MUS-SPEC-08-570C (docs/spec/clauses/08-git-changes-and-review.md#mus-spec-08-570c)
 test('markResolved accepts a dash-named conflicted file', async () => {
   const dir = repo();
   writeFileSync(join(dir, '-c.txt'), 'base\n'); g(dir, 'add', '--', '-c.txt'); g(dir, 'commit', '-q', '-m', 'c');
@@ -46,11 +49,13 @@ test('markResolved accepts a dash-named conflicted file', async () => {
   assert.equal(state.files.length, 0);
 });
 
+// Spec: MUS-SPEC-08-570D (docs/spec/clauses/08-git-changes-and-review.md#mus-spec-08-570d)
 test('GitHub remotes are recognised whatever the case of the host name', () => {
   assert.equal(githubWebUrl('https://GitHub.com/o/r.git'), 'https://github.com/o/r');
   assert.equal(githubWebUrl('git@GITHUB.COM:o/r.git'), 'https://github.com/o/r');
 });
 
+// Spec: MUS-SPEC-08-570E (docs/spec/clauses/08-git-changes-and-review.md#mus-spec-08-570e)
 test('ref diff shows a submodule pointer as a Subproject commit line', async () => {
   const dir = repo(), sub = repo();
   g(dir, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', sub, 'sm');
