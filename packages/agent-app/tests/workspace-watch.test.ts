@@ -163,6 +163,7 @@ const git = (cwd: string, ...args: string[]) => {
 };
 const hasGit = spawnSync('git', ['--version']).status === 0;
 
+// Spec: MUS-SPEC-07-565B (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-565b)
 test('always-generated caches (.next, .turbo, __pycache__) never trigger refreshes', async (t) => {
   const root = await makeRoot(t);
   for (const dir of ['.next', '.turbo', '__pycache__']) await mkdir(join(root, dir));
@@ -174,6 +175,7 @@ test('always-generated caches (.next, .turbo, __pycache__) never trigger refresh
   assert.deepEqual(changed, []);
 });
 
+// Spec: MUS-SPEC-07-565C (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-565c)
 test('a git-ignored dist/ or target/ does not refresh; source files still do', { skip: !hasGit && 'git not installed' }, async (t) => {
   const root = await makeRoot(t);
   git(root, 'init', '-q');
@@ -207,6 +209,7 @@ test('a committed dist/ (not git-ignored) keeps refreshing', { skip: !hasGit && 
   await waitFor(() => changed.length > 0);
 });
 
+// Spec: MUS-SPEC-07-565D (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-565d)
 test('ignoring dist/ in .gitignore takes effect without re-watching the folder', { skip: !hasGit && 'git not installed' }, async (t) => {
   const root = await makeRoot(t);
   git(root, 'init', '-q');

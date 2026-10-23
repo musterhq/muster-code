@@ -9,6 +9,7 @@ import type {ProviderAdapter} from '../src/runtime/provider.ts';
 const provider: ProviderAdapter = {info: () => [{id: 'hybrow', name: 'Fixture', available: true, identityMasked: 'fixture', models: [{id: 'claude/claude-fable-5', name: 'Fixture'}]}], run: async () => ({status: 'completed', finalMessage: 'ok'}), stop: async () => true, dispose() {}};
 const call = <T>(service: ReturnType<typeof createAgentService>, command: string, input?: unknown) => (service.invoke as unknown as (c: string, i: unknown) => Promise<T>)(command, input);
 
+// Spec: MUS-SPEC-07-565A (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-565a)
 test('quick open finds a file created after its first search', async t => {
   const dataDir = await mkdtemp(join(tmpdir(), 'muster-qo-data-')), work = await mkdtemp(join(tmpdir(), 'muster-qo-work-'));
   t.after(() => Promise.all([rm(dataDir, {recursive: true, force: true}), rm(work, {recursive: true, force: true})]));
