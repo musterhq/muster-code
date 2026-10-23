@@ -14,4 +14,31 @@ Boundaries:
 
 ## Acceptance cases
 
-No cases yet. A PR that changes this area adds its cases here first (see [acceptance-cases.md](../acceptance-cases.md)).
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-02-469A](02-turns-streaming-and-queue.md#mus-spec-02-469a) | In the composer, the draft the runtime hands back after a stopped run appears in the empty input. | [`a run stopped before dispatch brings its text back into the composer`](../../../packages/agent-app/tests/composer-components.tsx) |
+| [MUS-SPEC-02-469B](02-turns-streaming-and-queue.md#mus-spec-02-469b) | With the queue paused, Enter sends at once with no confirm sheet and does not clear the held messages. | [`a paused queue no longer asks to confirm a send: the message sends and held items stay queued`](../../../packages/agent-app/tests/composer-components.tsx) |
+
+### After Stop
+
+<a id="mus-spec-02-469a"></a>
+#### MUS-SPEC-02-469A: The composer takes back a draft the runtime restored
+
+- Precondition: The composer is empty and a run is going. The run then ends as interrupted (stopped before its message was sent) and the chat now carries the draft "do not lose me".
+- Action: Deliver the updated chat to the composer.
+- Expected result: The composer input shows "do not lose me", so the text is not lost.
+- Test: `packages/agent-app/tests/composer-components.tsx::a run stopped before dispatch brings its text back into the composer`
+- Environment: Node script with a fake DOM (linkedom); the real composer and store; no Electron.
+- Known gaps: The fake DOM has no layout or real typing. The runtime side (the service saving the text as the draft) is covered by a test in codex-alignment.test.ts that also passes without this change, so it is not linked here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-469b"></a>
+#### MUS-SPEC-02-469B: A send while the queue is paused goes straight through
+
+- Precondition: The queue is paused after a stop, one message is held, and the composer holds a new message.
+- Action: Press Enter in the composer.
+- Expected result: No "Send message?" sheet appears. The message is sent, and the composer never asks to clear the queue, so the held message is kept.
+- Test: `packages/agent-app/tests/composer-components.tsx::a paused queue no longer asks to confirm a send: the message sends and held items stay queued`
+- Environment: Node script with a fake DOM (linkedom); the real composer and store; no Electron.
+- Known gaps: Does not show the held message running after the new one; the runtime test "Stop then send keeps the held queue" in codex-alignment.test.ts does, but it also passes without this change, so it is not linked here.
+- Evidence: UNVERIFIED

@@ -1,6 +1,7 @@
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 (globalThis as any).require=require;
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
@@ -448,6 +449,30 @@ assert.deepEqual(calls.filter(call=>call.command==='stashes.restore').at(-1)!.in
 assert.equal(store.getState().composerDrafts.chat.text,'Already typed\n\nRefactor the parser\nand add tests','restored text joins the draft');
 assert.ok((document.querySelector('.composer-attachments')?.textContent??'').includes('notes.txt'),'the stashed file is back in the attachment strip');
 assert.equal(stashPanel(),null);assert.equal(stashes.length,1);
+// Spec: MUS-SPEC-02-469A (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-469a)
+await check('a run stopped before dispatch brings its text back into the composer',async()=>{
+  // The runtime hands the text back as chat.draft; the empty local draft must not hide it.
+  chat={...chat,status:'running',draft:''};emit();await delay(30);
+  store.setComposerDraft('chat','');await delay(20);
+  chat={...chat,status:'interrupted',draft:'do not lose me'};emit();await delay(50);
+  assert.equal(store.getState().composerDrafts.chat.text,'do not lose me','stop-before-dispatch restores the draft');
+});
+// Spec: MUS-SPEC-02-469B (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-469b)
+await check('a paused queue no longer asks to confirm a send: the message sends and held items stay queued',async()=>{
+  chat={...chat,status:'interrupted',queuePaused:'interrupted',queue:[{id:'h1',text:'held',requestId:'rh',attachmentIds:[],createdAt:''}]};emit();await delay(30);
+  calls.length=0;
+  await key(byTest('composer-input') as HTMLTextAreaElement,'Enter');await delay(40);
+  assert.ok(!byTest('queue-send-confirm'));
+  assert.ok(calls.some(call=>call.command==='chat.send'&&call.input.text==='do not lose me'),'sent without a prompt');
+  assert.ok(!calls.some(call=>call.command==='chat.queue.clear'),'held messages are never cleared');
+});
+await check('a draft save with no run ending never brings back text the user deleted',async()=>{
+  chat={...chat,status:'interrupted',queuePaused:undefined,queue:undefined,draft:''};emit();await delay(30);
+  store.setComposerDraft('chat','');await delay(20);
+  chat={...chat,draft:'typed then deleted'};emit();await delay(50);
+  assert.equal(store.getState().composerDrafts.chat.text,'','a draft save without a run ending is not adopted');
+});
+chat={...chat,status:'completed',queuePaused:undefined,queue:undefined,draft:''};emit();await delay(30);
 store.setComposerDraft('chat','');await delay(20);
 assert.deepEqual(errors,[]);root.unmount();await delay(15);
 console.log('Composer component checks passed: Codex toolbar without a mode picker, + menu (Add/Plugins/Skills, icons, filter, plan toggle, project, goal strip, record a skill, sketch), mid-run access, access levels with confirmation, provider-grouped model picker with effort, / skills+commands chips, @ files/plugins chips with Backspace selection, structured send payload, attachments, queue/steer, Esc-Esc stop and stopping state.');
