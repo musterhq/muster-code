@@ -146,6 +146,12 @@ function Heading({
 
 const components: Components = {
   pre: Pre,
+  // Right-to-left prose: each block takes its direction (and list-marker side) from its own first strong character.
+  p: ({node: _node, ...props}) => <p dir="auto" {...props}/>,
+  ul: ({node: _node, ...props}) => <ul dir="auto" {...props}/>,
+  ol: ({node: _node, ...props}) => <ol dir="auto" {...props}/>,
+  li: ({node: _node, ...props}) => <li dir="auto" {...props}/>,
+  blockquote: ({node: _node, ...props}) => <blockquote dir="auto" {...props}/>,
   table: ({node: _node, ...props}) => <MarkdownTable {...props}/>,
   a: ({ children, href, ...props }: any) => <ResourceLink href={href} auto={props['data-auto-file'] === 'true'}>{children}</ResourceLink>,
   h1: ({node, children, ...props}) => <Heading level={1} node={node} {...props}>{children}</Heading>,
