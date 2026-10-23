@@ -7,6 +7,7 @@ import {HighlightedSourceTable} from '../src/renderer/components/HighlightedCode
 import {VirtualFileSource} from '../src/renderer/components/VirtualFileSource';
 import {getState, openFile} from '../src/renderer/store';
 import '../src/renderer/styles.css';
+import {check} from './dom-check.ts';
 const assert = (condition: unknown, message: string) => {if (!condition) throw new Error(message);};
 const frame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
 const settle = async () => {await frame(); await frame();};
@@ -26,7 +27,7 @@ window.muster = {
     return undefined;
   }) as typeof window.muster.invoke,
 };
-async function run() {
+async function body() {
   const host = document.getElementById('root')!, root = createRoot(host);
   await settle();
   const beforeStart = performance.now();
@@ -140,5 +141,13 @@ async function run() {
   assert(left > 0 && plain.scrollLeft === left, `horizontal scroll stays at ${left} after scrolling down (got ${plain.scrollLeft})`);
   plainRoot.unmount();
   return {bytes: source.length, lines: lines.length, before, after, longTasks};
+}
+async function run() {
+  let result: unknown;
+  // Spec: MUS-SPEC-07-630A (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-630a)
+  // Spec: MUS-SPEC-07-630B (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-630b)
+  // Spec: MUS-SPEC-07-630C (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-630c)
+  await check('a 21,184-line file loads in full with bounded rows, and selection, copy and find still work', async () => {result = await body();});
+  return result;
 }
 (globalThis as typeof globalThis & {testResult: Promise<unknown>}).testResult = run();

@@ -16,7 +16,8 @@ const server = createServer(async (req, res) => {
   catch {res.statusCode = 404; res.end();}
 });
 try {
-  await build({entryPoints: [path.join(root, 'tests/virtual-file-source.browser.tsx')], outfile: path.join(outdir, 'test.js'), bundle: true, platform: 'browser', format: 'esm', jsx: 'automatic', define: {'process.env.NODE_ENV': '"production"'}, logLevel: 'warning'});
+  // dom-check.ts reports with process.stdout.write, which a browser page does not have.
+  await build({entryPoints: [path.join(root, 'tests/virtual-file-source.browser.tsx')], outfile: path.join(outdir, 'test.js'), bundle: true, platform: 'browser', format: 'esm', jsx: 'automatic', define: {'process.env.NODE_ENV': '"production"'}, banner: {js: 'globalThis.process ??= {stdout: {write: text => console.log(String(text).trimEnd())}};'}, logLevel: 'warning'});
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   chrome = spawn(chromePath, ['--headless=new', '--no-sandbox', '--disable-gpu', '--no-first-run', '--remote-debugging-port=0', `--user-data-dir=${path.join(outdir, 'profile')}`, 'about:blank'], {stdio: ['ignore', 'ignore', 'pipe']});
   const endpoint = await new Promise((resolve, reject) => {
