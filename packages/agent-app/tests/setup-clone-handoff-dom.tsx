@@ -1,5 +1,6 @@
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
+import {check} from './dom-check.ts';
 import {setTimeout as delay} from 'node:timers/promises';
 const require=createRequire(import.meta.url);
 const {parseHTML}=require('linkedom');
@@ -60,15 +61,22 @@ const unmount=await mount(<SetupGuideHost/>);
 assert.match(text(),/Add a folder/,'the guide is on the folder step');
 const realSetInterval=globalThis.setInterval;let intervals=0;
 (globalThis as any).setInterval=((...args:any[])=>{intervals++;return (realSetInterval as any)(...args);}) as any;
-await act(async()=>{button('Clone a repository…').click();});await settle();
-assert.equal(flow.getSetupGuide().open,false,'the guide steps aside for the clone sheet');
-assert.equal(intervals,0,'no background poll is left running after the clone sheet is closed');
-// The user abandons the clone, and later adds a folder some other way: the guide must stay closed.
-const sheet=await import('../src/renderer/components/CloneRepositorySheet');
-sheet.closeCloneSheet();
-await act(async()=>{emit({type:'snapshot',snapshot:{folders:[{id:'f9',name:'late',path:'/late'}],chats:[],projects:[],version:2}});});
-await delay(1300);
-assert.equal(flow.getSetupGuide().open,false,'a folder added later does not pop the setup guide back open');
+// Spec: MUS-SPEC-01-670A (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-670a)
+await check('cloning from the setup guide hands back through the clone sheet and leaves no background poll',async()=>{
+  await act(async()=>{button('Clone a repository…').click();});await settle();
+  assert.equal(flow.getSetupGuide().open,false,'the guide steps aside for the clone sheet');
+  assert.equal(intervals,0,'no background poll is left running after the clone sheet is closed');
+});
+// Spec: MUS-SPEC-01-670B (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-670b)
+await check('a folder added later does not reopen the setup guide after an abandoned clone',async()=>{
+  // The user abandons the clone, and later adds a folder some other way: the guide must stay closed.
+  // Unchanged from before the check() wrap.
+  const sheet=await import('../src/renderer/components/CloneRepositorySheet');
+  sheet.closeCloneSheet();
+  await act(async()=>{emit({type:'snapshot',snapshot:{folders:[{id:'f9',name:'late',path:'/late'}],chats:[],projects:[],version:2}});});
+  await delay(1300);
+  assert.equal(flow.getSetupGuide().open,false,'a folder added later does not pop the setup guide back open');
+});
 (globalThis as any).setInterval=realSetInterval;
 await unmount();
 assert.deepEqual(errors,[]);
