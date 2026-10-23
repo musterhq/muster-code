@@ -120,6 +120,7 @@ test('turn splitting and receipt matching hold for same-millisecond sends and re
   assert.deepEqual(matchReceipts(turns,[{run_id:'r1',created_at:at},{run_id:'r2',created_at:at},{run_id:'retry',created_at:later}]),[['r1'],['r2','retry']]);
 });
 
+// Spec: MUS-SPEC-17-458A (docs/spec/clauses/17-usage-cost-and-ledger.md#mus-spec-17-458a)
 test('ledger approvals count only cards shown to the user, never Full-access auto-accepts',async t=>{
   const {DatabaseSync}=await import('node:sqlite');
   const db=new DatabaseSync(':memory:');t.after(()=>db.close());
