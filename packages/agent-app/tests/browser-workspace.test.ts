@@ -90,6 +90,7 @@ test('geometry is clipped, zoom-aware and rejects malformed numbers',()=>{
   assert.throws(()=>browserBounds({x:0,y:0,width:-1,height:1},100,100));
 });
 
+// Spec: MUS-SPEC-09-611A (docs/spec/clauses/09-browser-and-previews.md#mus-spec-09-611a)
 test('web pages use a white background independent of the app theme',()=>{
   const {controller,open,views}=fixture();open();
   assert.equal(views[0].backgroundColor,'#ffffff');
