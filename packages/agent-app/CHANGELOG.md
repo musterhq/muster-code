@@ -40,6 +40,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Rate limit retries respect Retry-After on every attempt, show the provider’s explanation and retry time, and no longer claim an unsent message is in the composer. When the provider asks to wait more than five minutes, Muster stops and says when to try again instead of retrying early.
 - Terminal panes retry failed loads twice and offer a Retry action if loading still fails.
 - A chat started in a new worktree from an existing chat now keeps that chat's model, reasoning effort and access mode instead of the app defaults
+- Large text files use a bounded source view, keeping full-file search and selection responsive when loading the full file.
+
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 - The Dashboard follows the org you switched to. Before, a read of the previous org that was still running when you switched could answer for the new one, so the Dashboard showed the old org's spend, budget and tasks by day.
 - The Dashboard's Recent activity and the Activity list name the agent or person who acted instead of a short id such as "agent a8782383".
