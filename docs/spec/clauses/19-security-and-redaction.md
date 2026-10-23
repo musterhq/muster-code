@@ -13,4 +13,17 @@ Boundaries:
 
 ## Acceptance cases
 
-No cases yet. A PR that changes this area adds its cases here first (see [acceptance-cases.md](../acceptance-cases.md)).
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-19-674A](19-security-and-redaction.md#mus-spec-19-674a) | Values under key names longer than 70 characters are redacted. | [`a secret whose key name is longer than 70 characters is redacted`](../../../packages/agent-app/tests/secret-redaction-long-names.test.ts) |
+
+<a id="mus-spec-19-674a"></a>
+#### MUS-SPEC-19-674A: A secret with a very long key name is redacted
+
+- Precondition: Text with secret values under key names longer than 70 characters: dotted, hyphen-prefixed, JSON and .env styles.
+- Action: Redact the text.
+- Expected result: Each value becomes [redacted] and the key name is kept.
+- Test: `packages/agent-app/tests/secret-redaction-long-names.test.ts::a secret whose key name is longer than 70 characters is redacted`
+- Environment: Node test runner; no network.
+- Known gaps: Unit test of the redactor. It does not export a chat or save a memory. The time-limit test in the same file passes on main, so it is not linked.
+- Evidence: UNVERIFIED
