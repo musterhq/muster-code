@@ -24,6 +24,7 @@ function fakeChild(){
   let stdin='';child.stdin.on('data',d=>{stdin+=d;});
   return {child,emit:(...lines:unknown[])=>{for(const l of lines)child.stdout.write(JSON.stringify(l)+'\n');},close:(code:number)=>{child.stdout.end();child.stderr.end();setImmediate(()=>child.emit('close',code));},stdin:()=>stdin};
 }
+// Spec: MUS-SPEC-02-478A (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-478a)
 test('Claude Code: a steer tells the model to continue the current task, and the run stays open until the work after it ends',async()=>{
   const fake=fakeChild();let ended=false;fake.child.stdin.on('finish',()=>{ended=true;});
   const adapter=claudeCodeAdapter({binary:'/bin/claude',steerGraceMs:30,spawn:(()=>fake.child as unknown as ChildProcess) as Spawn});
@@ -47,6 +48,7 @@ test('Claude Code: a steer tells the model to continue the current task, and the
 // ---- HTTP route: a steer the loop can no longer read is refused (so it queues), never accepted and dropped ----
 const enc=new TextEncoder();
 const sse=(...events:unknown[])=>new Response(new ReadableStream({start(c){for(const e of events)c.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n\n`));c.enqueue(enc.encode('data: [DONE]\n\n'));c.close();}}),{status:200});
+// Spec: MUS-SPEC-02-478B (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-478b)
 test('HTTP route: at the turn’s tool-call cap, accepted steers reach the closing request and later ones are refused',async()=>{
   let send!:(text:string)=>boolean;const bodies:any[]=[];let rounds=0,lateSteer:boolean|undefined,acceptedSteer:boolean|undefined;
   const calls=Array.from({length:16},(_,i)=>({index:i,id:`c${i}`,function:{name:'nope',arguments:'{}'}}));
@@ -84,6 +86,7 @@ function codex(core:Partial<CoreClient>&{steerActiveCodexTurn?:CoreClient['steer
   const pending=adapter.run({chat:{id:'x',mode:'agent',providerId:'fixture',model:'fixture-model'},cwd:'/w',prompt:'p',onDelta(){},onReasoning(){},onEvent(){},async onRequest(){return undefined;}} as unknown as ProviderInput);
   return {adapter,async done(){resolve({status:'completed',finalMessage:'',dispatchState:'dispatched',threadId:'th',turnId:'turn-1'});await pending;adapter.dispose();}};
 }
+// Spec: MUS-SPEC-02-478C (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-478c)
 test('Codex: when the fallback steer throws, the reason comes back and the message is not reported as steered',async()=>{
   const run=codex({async callCodexConversation(){throw new Error('expected turn mismatch');},async steerActiveCodexTurn(){throw new Error('app-server connection closed');}} as any);
   await tick();
@@ -91,6 +94,7 @@ test('Codex: when the fallback steer throws, the reason comes back and the messa
   assert.deepEqual(outcome,{refused:'The agent couldn’t take this message mid-run (app-server connection closed).'});
   await run.done();
 });
+// Spec: MUS-SPEC-02-478D (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-478d)
 test('Codex: a transport error with no fallback is surfaced too; "no active turn" still queues quietly',async()=>{
   const run=codex({async callCodexConversation(){throw new Error('socket hang up.');},steerActiveCodexTurn:undefined} as any);
   await tick();
@@ -101,6 +105,7 @@ test('Codex: a transport error with no fallback is surfaced too; "no active turn
   assert.equal(await idle.adapter.steer!('x','also this'),false);
   await idle.done();
 });
+// Spec: MUS-SPEC-02-478E (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-478e)
 test('Codex: a fallback that answers false after a failed steer reports the first error',async()=>{
   const run=codex({async callCodexConversation(){throw new Error('expected turn mismatch');},async steerActiveCodexTurn(){return false;}} as any);
   await tick();

@@ -1,6 +1,7 @@
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 (globalThis as any).require=require;
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
@@ -323,19 +324,25 @@ assert.equal(byTest('composer-primary')!.getAttribute('aria-label'),'Stop','empt
 store.setComposerDraft('chat','follow up');await delay(20);
 let textarea=byTest('composer-input') as HTMLTextAreaElement;
 assert.equal(textarea.getAttribute('placeholder'),'Working…');
-assert.equal(store.getState().followUpMode,'steer','Steer is the default with nothing stored');
-assert.equal(byTest('composer-primary')!.getAttribute('aria-label'),'Steer (Enter) · Queue ⌘Enter');assert.ok(document.querySelector('.composer-stop.is-ghost'));
-await key(textarea,'Enter');await delay(30);
-assert.ok(calls.some(call=>call.command==='chat.steer'&&call.input.text==='follow up'),'Enter while running steers by default');
-const queued=calls.find(call=>call.command==='chat.queue.add')!;assert.ok(queued,'a refused steer falls back to the queue');
-assert.equal(queued.input.text,'follow up');
-assert.match(document.querySelector('.composer-status')?.textContent??'',/Queued: agent could not accept a steer right now/);
-assert.equal(store.getState().composerDrafts.chat.text,'','queued text leaves the draft');
-assert.ok(document.querySelector('[data-testid="queue-item"]')?.textContent?.includes('follow up'),'queued row appears immediately');
-store.setComposerDraft('chat','queue me');await delay(20);
-await key(byTest('composer-input')!,'Enter',{metaKey:true});await delay(30);
-assert.ok(!calls.some(call=>call.command==='chat.steer'&&call.input.text==='queue me'),'Cmd+Enter does the opposite: it queues without steering');
-assert.ok(calls.some(call=>call.command==='chat.queue.add'&&call.input.text==='queue me'));
+// Spec: MUS-SPEC-02-478F (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-478f)
+await check('while a run goes, Enter steers by default and a refused steer falls back to the queue',async()=>{
+  assert.equal(store.getState().followUpMode,'steer','Steer is the default with nothing stored');
+  assert.equal(byTest('composer-primary')!.getAttribute('aria-label'),'Steer (Enter) · Queue ⌘Enter');assert.ok(document.querySelector('.composer-stop.is-ghost'));
+  await key(textarea,'Enter');await delay(30);
+  assert.ok(calls.some(call=>call.command==='chat.steer'&&call.input.text==='follow up'),'Enter while running steers by default');
+  const queued=calls.find(call=>call.command==='chat.queue.add')!;assert.ok(queued,'a refused steer falls back to the queue');
+  assert.equal(queued.input.text,'follow up');
+  assert.match(document.querySelector('.composer-status')?.textContent??'',/Queued: agent could not accept a steer right now/);
+  assert.equal(store.getState().composerDrafts.chat.text,'','queued text leaves the draft');
+  assert.ok(document.querySelector('[data-testid="queue-item"]')?.textContent?.includes('follow up'),'queued row appears immediately');
+});
+// Spec: MUS-SPEC-02-478G (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-478g)
+await check('Cmd+Enter while a run goes queues the message instead of steering',async()=>{
+  store.setComposerDraft('chat','queue me');await delay(20);
+  await key(byTest('composer-input')!,'Enter',{metaKey:true});await delay(30);
+  assert.ok(!calls.some(call=>call.command==='chat.steer'&&call.input.text==='queue me'),'Cmd+Enter does the opposite: it queues without steering');
+  assert.ok(calls.some(call=>call.command==='chat.queue.add'&&call.input.text==='queue me'));
+});
 // #380: a steer that failed in flight may already have reached the agent, so it is not queued as well (no double send).
 store.setComposerDraft('chat','steer in flight');await delay(20);
 await key(byTest('composer-input')!,'Enter');await delay(30);
