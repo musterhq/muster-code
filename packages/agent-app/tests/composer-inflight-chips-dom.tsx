@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
 (window.document as any).oninput=null;// React only wires native input events when the document advertises them.
@@ -74,7 +75,10 @@ addComposerContext(chip('c2','late-chip'));await delay(30);
 assert.match(document.querySelector('[data-testid="composer-context"]')?.textContent??'',/late-chip/);
 release();await until(()=>!store.getState().sending.one);await delay(80);
 const shown=document.querySelector('[data-testid="composer-context"]')?.textContent??'';
-assert.doesNotMatch(shown,/sent-chip/,'the chip that was sent is cleared');
-assert.match(shown,/late-chip/,'a chip added while the send was in flight is kept');
+// Spec: MUS-SPEC-01-555A (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-555a)
+await check('a context chip added while a send is in flight is kept, and only the sent chip is cleared',async()=>{
+  assert.doesNotMatch(shown,/sent-chip/,'the chip that was sent is cleared');
+  assert.match(shown,/late-chip/,'a chip added while the send was in flight is kept');
+});
 assert.deepEqual(errors,[]);
 process.exit(0);

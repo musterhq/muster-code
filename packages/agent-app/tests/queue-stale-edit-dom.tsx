@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
 (window.document as any).oninput=null;// React only wires native input events when the document advertises them.
@@ -70,6 +71,9 @@ root.render(view(['b','c']));await delay(60); // the runtime sent it while it wa
 const before=calls.filter(call=>call.command==='chat.queue.reorder').length;
 const row=items()[0];
 row.dispatchEvent(Object.assign(new window.Event('keydown',{bubbles:true,cancelable:true}),{key:'ArrowDown',altKey:true}));await delay(60);
-assert.equal(calls.filter(call=>call.command==='chat.queue.reorder').length,before+1,'Alt+Down still reorders after the edited message left the queue');
+// Spec: MUS-SPEC-02-555A (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-555a)
+await check('Alt+Down still reorders the queue after the message being edited has been sent',async()=>{
+  assert.equal(calls.filter(call=>call.command==='chat.queue.reorder').length,before+1,'Alt+Down still reorders after the edited message left the queue');
+});
 assert.deepEqual(errors,[]);
 process.exit(0);
