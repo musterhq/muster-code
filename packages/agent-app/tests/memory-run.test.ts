@@ -266,6 +266,7 @@ test('offer history survives a restart and is dropped for deleted chats', async 
   assert.equal(rows(f.chat.id), 0, 'a deleted chat\'s history is pruned');
 });
 
+// Spec: MUS-SPEC-11-471B (docs/spec/clauses/11-memory.md#mus-spec-11-471b)
 test('many turns in one chat list at most one offer per day, the rest are held, and the throttle survives a restart', async t => {
   const f = await fixture(t);
   const turn = async (n: number) => {

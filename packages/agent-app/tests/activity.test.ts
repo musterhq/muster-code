@@ -34,6 +34,7 @@ test('metadata is bounded and typed; mixed or unreported shell actions stay comm
  assert.deepEqual(agent,{agentNickname:'Mira',agentRole:'reviewer'});
  assert.equal(String(toolEventDetails({agentNickname:'x'.repeat(1000)}).agentNickname).length,256);
 });
+// Spec: MUS-SPEC-11-471A (docs/spec/clauses/11-memory.md#mus-spec-11-471a)
 test('memory offers stay out of the transcript (they live in the Memory inbox)',()=>{
   const offer:TimelineItem={id:'o',chatId:'chat',kind:'notice',text:'Suggested a note',createdAt:'',status:'offer',data:{kind:'memory-offer',runId:'r',summary:'s'}};
   const other:TimelineItem={...offer,id:'n',text:'Compacted',status:undefined,data:{kind:'compaction'}};
