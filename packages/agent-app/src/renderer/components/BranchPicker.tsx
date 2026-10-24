@@ -1,11 +1,12 @@
 import React, {useEffect, useId, useMemo, useRef, useState} from 'react';
+import {imeComposing} from '../ime';
 import {Popover} from '@base-ui/react/popover';
 import {ArrowLeft, Check, FolderGit2, GitBranch, GitBranchPlus, Loader2, Search} from 'lucide-react';
 import type {Snapshot} from '../../shared/protocol';
 import type {GitBranches} from '../../shared/domains/git-protocol';
 import {invoke} from '../bridge';
 import {createChat, getState, loadGitChanges, notifyError, notifySuccess, openChangesTab, openConflictTab} from '../store';
-import {useStore} from '../useStore';
+import {useStoreSlice} from '../useStore';
 import {GitSync} from './GitStatus';
 import './branch-picker.css';
 import { plural } from '../../shared/wording.ts';
@@ -67,7 +68,7 @@ export function BranchPicker({folder, className, children, label, side = 'bottom
 }
 
 function BranchPickerContent({folder, initialMode, close}: {folder: Folder; initialMode: BranchMode; close: () => void}): React.ReactElement {
-  const state = useStore();
+  const state = useStoreSlice('snapshot');
   const running = folderRunning(state.snapshot, folder.id);
   const [mode, setMode] = useState<BranchMode>(initialMode);
   const [query, setQuery] = useState('');
@@ -161,7 +162,7 @@ function BranchPickerContent({folder, initialMode, close}: {folder: Folder; init
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown') { event.preventDefault(); move(1); }
     else if (event.key === 'ArrowUp') { event.preventDefault(); move(-1); }
-    else if (event.key === 'Enter' && focused && !busy) { event.preventDefault(); focused.run(); }
+    else if (event.key === 'Enter' && focused && !busy && !imeComposing(event)) { event.preventDefault(); focused.run(); }
     else if (event.key === 'Backspace' && !query && mode !== initialMode) { event.preventDefault(); setMode(initialMode); }
   };
 

@@ -11,6 +11,7 @@ import {join} from 'node:path';
 import {BROWSER_MCP, COMPUTER_USE_NOTE} from '../shared/computer-use.ts';
 import type {ChatPermissionMode} from '../shared/protocol.ts';
 import {BACKGROUND_MCP, BACKGROUND_TOOL_NOTE} from './background-agent-tools.ts';
+import {ASK_MCP} from './ask-user.ts';
 import {CANVAS_MCP, CANVAS_NOTE} from './canvas-agent-tools.ts';
 import {ClaudeConversationMemory, claudeMessagesAdapter} from './adapters/claude-messages.ts';
 import {sseEvents} from './adapters/shared.ts';
@@ -21,10 +22,10 @@ const GPT_MODEL_ID = /^(?:gpt-|chatgpt-|o[1-9]|codex\/|openai\/)/i;
 export const PROBE_TTL_MS = 10 * 60_000, PROBE_FAILURE_TTL_MS = 60_000, PROBE_TIMEOUT_MS = 15_000;
 const MAX_PROBES = 256;
 
-/** Tool servers the service adds to every Agent chat. The Messages lane has no MCP client: the browser is offered as native
- *  tools, the others are simply not offered (their notes are dropped). Any other server carries user or Project state
- *  (mailbox, terminal consent, SSH, sandbox, Project tasks, the user's own servers) and keeps the turn on Codex. */
-const LANE_SERVERS: Record<string, true> = {[BROWSER_MCP]: true, [CANVAS_MCP]: true, [BACKGROUND_MCP]: true};
+/** Tool servers the service adds to every Agent chat. The Messages lane has no MCP client: the browser and ask_user are
+ *  offered as native tools, the others are simply not offered (their notes are dropped). Any other server carries user or
+ *  Project state (mailbox, terminal consent, SSH, sandbox, Project tasks, the user's own servers) and keeps the turn on Codex. */
+const LANE_SERVERS: Record<string, true> = {[BROWSER_MCP]: true, [CANVAS_MCP]: true, [BACKGROUND_MCP]: true, [ASK_MCP]: true};
 const SERVER_KEY = /^(?:secret\.)?mcp_servers\.([^.]+)\./;
 
 /** Whether a turn may leave Codex: Full access, and no tool server or goal that only the Codex client can run. */
@@ -43,7 +44,7 @@ export function withoutUnavailableToolNotes(instructions: string | undefined): s
   return text || undefined;
 }
 /** Server names the lane drops from the run's tool servers (the browser has its own native tools). */
-export const LANE_DROPPED_SERVERS: readonly string[] = [BROWSER_MCP, CANVAS_MCP, BACKGROUND_MCP];
+export const LANE_DROPPED_SERVERS: readonly string[] = [BROWSER_MCP, CANVAS_MCP, BACKGROUND_MCP, ASK_MCP];
 
 export interface ClaudeLaneConfig {
   /** Router base URL, e.g. https://router.example/v1 ( /messages is appended). */

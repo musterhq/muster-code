@@ -709,6 +709,15 @@ export class AgentStore {
     }
   }
 
+  /** Tool rows still 'running' after their run ended (a stop, a crash, a quit) are settled as interrupted, never left spinning.
+   *  With no chat id: every chat that is not running (used at launch, when nothing runs yet). Returns how many rows changed. */
+  settleRunningTools(chatId?: string): number {
+    const result = chatId
+      ? this.db.prepare("UPDATE timeline SET status = 'interrupted' WHERE chat_id = ? AND kind = 'tool' AND status = 'running'").run(chatId)
+      : this.db.prepare("UPDATE timeline SET status = 'interrupted' WHERE kind = 'tool' AND status = 'running' AND chat_id IN (SELECT id FROM chats WHERE status NOT IN ('running', 'stopping'))").run();
+    return Number(result.changes);
+  }
+
   item(id: string): TimelineItem | undefined {
     const row = this.db.prepare('SELECT * FROM timeline WHERE id = ?').get(id) as TimelineRow | undefined;
     return row ? rowToItem(row) : undefined;
@@ -907,7 +916,9 @@ export class AgentStore {
         this.settleSubagentItems(id);
         this.interruptRunningChildren(id);
       }
-      if (rows.length > 0) this.bumpVersion();
+      // Every run ended with the previous process: tool rows it left running (in these chats or any other) settle now.
+      const settled = this.settleRunningTools();
+      if (rows.length > 0 || settled > 0) this.bumpVersion();
       return rows.map((row) => row.id);
     });
   }

@@ -10,10 +10,24 @@ One row per clause file that has at least one case. The checker reports a clause
 
 | Clause | Area |
 |---|---|
+| `MUS-SPEC-01` | [Chat and composer](clauses/01-chat-and-composer.md) |
 | `MUS-SPEC-02` | [Turns, streaming and the message queue](clauses/02-turns-streaming-and-queue.md) |
 | `MUS-SPEC-03` | [Providers, models and accounts](clauses/03-providers-models-and-accounts.md) |
 | `MUS-SPEC-04` | [Context window and compaction](clauses/04-context-window-and-compaction.md) |
-| `MUS-SPEC-17` | [Usage, cost and the ledger](clauses/17-usage-cost-and-ledger.md) |
 | `MUS-SPEC-05` | [Access modes, approvals and tool permissions](clauses/05-access-modes-and-approvals.md) |
+| `MUS-SPEC-06` | [Sandbox and scoped computers](clauses/06-sandbox.md) |
+| `MUS-SPEC-07` | [Files, editor and search](clauses/07-files-editor-and-search.md) |
+| `MUS-SPEC-08` | [Git, changes and review](clauses/08-git-changes-and-review.md) |
+| `MUS-SPEC-09` | [Browser and previews](clauses/09-browser-and-previews.md) |
 | `MUS-SPEC-10` | [Terminal and background processes](clauses/10-terminal-and-processes.md) |
+| `MUS-SPEC-11` | [Memory](clauses/11-memory.md) |
+| `MUS-SPEC-12` | [Projects, orgs, tasks and check-out](clauses/12-projects-orgs-and-tasks.md) |
+| `MUS-SPEC-13` | [Muster Server](clauses/13-muster-server.md) |
+| `MUS-SPEC-14` | [Sub-agents, skills, plugins and automations](clauses/14-agents-skills-plugins-and-automations.md) |
+| `MUS-SPEC-15` | [Settings and themes](clauses/15-settings-and-themes.md) |
+| `MUS-SPEC-16` | [Notifications and attention](clauses/16-notifications-and-attention.md) |
+| `MUS-SPEC-17` | [Usage, cost and the ledger](clauses/17-usage-cost-and-ledger.md) |
+| `MUS-SPEC-18` | [Updates, release and packaging](clauses/18-updates-release-and-packaging.md) |
+| `MUS-SPEC-19` | [Security and redaction](clauses/19-security-and-redaction.md) |
+| `MUS-SPEC-20` | [Performance](clauses/20-performance.md) |
 | `MUS-SPEC-22` | [Engineering standards](clauses/22-engineering-standards.md) |

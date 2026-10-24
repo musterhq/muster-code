@@ -17,6 +17,8 @@ export const MAX_LIVE_BROWSER_VIEWS=3;
 export const BROWSER_IDLE_DISCARD_MS=10*60_000;
 /** PER-04: a hidden page an agent touched stays running this long before it is frozen again. */
 export const BROWSER_FREEZE_AFTER_MS=15_000;
+/** A tab an agent tool used this recently is never frozen or discarded, even while its panel is closed. */
+export const BROWSER_AGENT_HOLD_MS=3*60_000;
 const MAX_SAVED_HISTORY=50, MAX_SAVED_PAGE_STATE=256*1024;
 /** A pop-up is allowed only this soon after a click or key press in the opener page. */
 export const BROWSER_POPUP_GESTURE_MS=5000;
@@ -72,6 +74,8 @@ interface Entry {
   lastGesture:number; download?:PendingDownload; popup?:Popup;
   /** PER-04: true while the hidden page's lifecycle is frozen (no timers, rAF, network callbacks or JS). */
   frozen?:boolean;
+  /** Last time an agent tool drove this tab; it is exempt from freeze/discard while recent. */
+  agentUsedAt?:number;
 }
 const SECURE_PREFERENCES:WebPreferences={contextIsolation:true,sandbox:true,nodeIntegration:false,nodeIntegrationInWorker:false,nodeIntegrationInSubFrames:false,webSecurity:true,allowRunningInsecureContent:false,webviewTag:false,plugins:false,devTools:false,spellcheck:false,navigateOnDragDrop:false,disableDialogs:true,backgroundThrottling:true};
 const originOf=(url:string)=>{try{return new URL(url).origin;}catch{return '';}};
@@ -242,8 +246,9 @@ export class BrowserWorkspaceController {
   /** PER-04: Chromium's page lifecycle freeze through the page's own DevTools protocol client.
    * Best effort: a runtime without webContents.debugger (or one already attached elsewhere) keeps
    * the page throttled instead. Frozen pages never lose state; showing or using them thaws first. */
+  private agentBusy(entry:Entry):boolean {return entry.agentUsedAt!==undefined && this.now()-entry.agentUsedAt<BROWSER_AGENT_HOLD_MS;}
   private setFrozen(entry:Entry,frozen:boolean):void {
-    if(frozen && !this.freezeHidden) return;
+    if(frozen && (!this.freezeHidden || this.agentBusy(entry))) return;
     const contents=entry.view?.webContents;
     if(!contents || contents.isDestroyed() || !!entry.frozen===frozen) return;
     if(frozen && (entry.attached || entry.download?.info.state==='saving')) return;
@@ -265,7 +270,7 @@ export class BrowserWorkspaceController {
     this.profileIds.add(entry.profileId);
     const view=this.runtime.createView({webPreferences:{session,...SECURE_PREFERENCES}});
     entry.emulation=undefined;
-    view.setVisible(false);view.setBackgroundColor('#0e0e0e');view.webContents.setAudioMuted(true);
+    view.setVisible(false);view.setBackgroundColor('#ffffff');view.webContents.setAudioMuted(true);
     // A new view has 0×0 bounds until the pane positions it. An agent's tab can be driven long before that, and a 0×0
     // page captures as an empty image, so the live preview never got a frame and the pane sat on "Starting…" (#423).
     // The view is not in the window, so these bounds are never on screen; position() replaces them when it is shown.
@@ -438,7 +443,7 @@ export class BrowserWorkspaceController {
   /** Release the renderer process but keep URL, title and a bounded history copy. */
   private discard(entry:Entry):boolean {
     const view=entry.view;
-    if(!view || entry.attached) return false;
+    if(!view || entry.attached || this.agentBusy(entry)) return false;
     const contents=view.webContents;
     if(!contents.isDestroyed()){
       try {
@@ -678,20 +683,23 @@ export class BrowserWorkspaceController {
     const existing=this.entries.get(owner);
     if(!existing) return this.open({owner,surfaceId:'agent',profileId,url:target??'about:blank'});
     if(existing.profileId!==profileId) throw new Error('This browser tab belongs to a different profile.');
-    const entry=this.entry(owner);
+    const entry=this.entry(owner);entry.agentUsedAt=this.now();
     if(target) this.load(entry,target);
     return this.snapshot(entry);
   }
   hasTab(owner:string):boolean {return this.entries.has(owner);}
   /** The live page for agent input; a discarded tab is recreated first. */
   agentPage(owner:string):{contents:WebContents;attached:boolean;fill:boolean;state:()=>BrowserState} {
-    const entry=this.entry(owner);
+    const entry=this.entry(owner);entry.agentUsedAt=this.now();
     return {contents:entry.view.webContents,attached:entry.attached,fill:entry.viewport==='fill',state:()=>this.snapshot(entry)};
   }
   /** A small JPEG of the visible page for the live PiP; undefined while the page cannot be painted. */
   async frame(owner:string,width=640):Promise<{dataUrl:string;width:number;height:number;url:string;title:string}|undefined> {
-    const entry=this.entries.get(owner),contents=entry?.view?.webContents as Partial<WebContents>|undefined;
-    if(!entry || !contents?.capturePage || (contents as WebContents).isDestroyed()) return undefined;
+    // Through entry(): a frozen tab is thawed and a discarded one recreated, so a closed panel never blanks the agent's page.
+    let entry:LiveEntry;
+    try {entry=this.entry(owner);} catch {return undefined;}
+    const contents=entry.view.webContents as Partial<WebContents>;
+    if(!contents.capturePage || (contents as WebContents).isDestroyed()) return undefined;
     let image=await contents.capturePage(undefined,{stayHidden:true});
     if(image.isEmpty()) return undefined;
     if(image.getSize().width>width) image=image.resize({width,quality:'good'});

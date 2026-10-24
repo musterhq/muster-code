@@ -140,8 +140,8 @@ async function readReply(response: Response, label: string, input: AdapterRunInp
 }
 
 /** The shell and file tools this chat's access level allows, in the Messages tool format. */
-function messagesTools(access: AdapterRunInput['permissionMode'], browser: boolean) {
-  return toolSpecs(access, browser).map(tool => ({name: tool.function.name, description: tool.function.description, input_schema: tool.function.parameters}));
+function messagesTools(access: AdapterRunInput['permissionMode'], browser: boolean, ask: boolean) {
+  return toolSpecs(access, browser, ask).map(tool => ({name: tool.function.name, description: tool.function.description, input_schema: tool.function.parameters}));
 }
 
 export function claudeMessagesAdapter(options: Options): RunnableAdapter {
@@ -156,8 +156,8 @@ export function claudeMessagesAdapter(options: Options): RunnableAdapter {
     const text = seed ? `${seed}\n\nCurrent user request:\n${input.prompt}` : input.prompt;
     input.onThreadReady(threadId);
     const browser = browserOffered(input.browserTools);
-    const system = [input.instructions, toolInstructions(input.permissionMode, input.cwd, browser)].filter(Boolean).join('\n\n');
-    const tools = messagesTools(input.permissionMode, browser);
+    const system = [input.instructions, toolInstructions(input.permissionMode, input.cwd, browser, !!input.askUser)].filter(Boolean).join('\n\n');
+    const tools = messagesTools(input.permissionMode, browser, !!input.askUser);
     const budget = BUDGETS[input.reasoningEffort ?? 'medium'];
     const images = loadImages(input.images);
     const prompt: ClaudeMessage = {role: 'user', content: images.length ? [...images.map(image => ({type: 'image', source: {type: 'base64', media_type: image.mediaType, data: image.data}})), {type: 'text', text}] : text};
@@ -212,7 +212,7 @@ export function claudeMessagesAdapter(options: Options): RunnableAdapter {
         for (const [position, use] of uses.entries()) {
           if (position >= MAX_CALLS_PER_ROUND) { results.push({type: 'tool_result', tool_use_id: use.id, is_error: true, content: 'Too many tool calls in one reply; call it again.'}); continue; }
           calls++;
-          const result = await executeTool({id: String(use.id), name: String(use.name), arguments: JSON.stringify(use.input ?? {})}, {chatId: input.chat.id, ...(browser ? {browser: true} : {}), cwd: input.cwd, access: input.permissionMode, ...(input.vision ? {vision: true} : {}), signal: input.signal, emit: input.onEvent, threadId, turnId, ...(input.authorize ? {authorize: input.authorize} : {}), ...(input.env ? {env: input.env} : {}), deadline});
+          const result = await executeTool({id: String(use.id), name: String(use.name), arguments: JSON.stringify(use.input ?? {})}, {chatId: input.chat.id, ...(browser ? {browser: true} : {}), cwd: input.cwd, access: input.permissionMode, ...(input.vision ? {vision: true} : {}), signal: input.signal, emit: input.onEvent, threadId, turnId, ...(input.authorize ? {authorize: input.authorize} : {}), ...(input.askUser ? {askUser: input.askUser} : {}), ...(input.env ? {env: input.env} : {}), deadline});
           const content: Block[] = [{type: 'text', text: result.content}];
           if (result.image) content.push({type: 'image', source: {type: 'base64', media_type: result.image.mediaType, data: result.image.data}});
           results.push({type: 'tool_result', tool_use_id: use.id, content, ...(result.ok ? {} : {is_error: true})});

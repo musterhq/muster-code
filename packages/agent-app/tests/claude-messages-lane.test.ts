@@ -5,12 +5,15 @@ import assert from 'node:assert/strict';
 import {test, type TestContext} from 'node:test';
 import {mkdtemp, rm, writeFile, chmod} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
+import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {createAgentService} from '../src/runtime/service.ts';
 import {createProviderAdapter, type CoreClient, type ProviderAdapter, type ProviderInput} from '../src/runtime/provider.ts';
 import {createClaudeLane, PROBE_FAILURE_TTL_MS, PROBE_TTL_MS} from '../src/runtime/claude-lane.ts';
+import {registerChatTokenIssuer} from '../src/runtime/governance/chat-binding.ts';
+import {BACKGROUND_MCP} from '../src/runtime/background-agent-tools.ts';
 import {AgentStore} from '../src/runtime/store.ts';
 import {reconcileProviderTurn} from '../src/runtime/provider-reconciliation.ts';
 import type {DomainFactory} from '../src/runtime/domains/types.ts';
@@ -56,13 +59,15 @@ function router(backend: Record<string, string>, answer?: (sent: Sent, turn: num
 type RouterAnswer = (sent: Sent, turn: number) => Response | undefined;
 interface Harness {service: AgentService; router: Router; codex: Array<Record<string, unknown>>; overrides: Array<Record<string, unknown> | undefined>; clock: {now: number}; dataDir: string; chat(model: string, access?: 'read-only' | 'workspace' | 'full'): Promise<Chat>; send(chatId: string, text: string): Promise<void>; items(chatId: string): Promise<TimelineItem[]>; snapshot(chatId: string): Promise<Chat>}
 
-async function harness(t: TestContext, options: {backend?: Record<string, string>; answer?: RouterAnswer; headers?: (force?: boolean) => Promise<Record<string, string>>; userServer?: () => boolean} = {}): Promise<Harness> {
+async function harness(t: TestContext, options: {backend?: Record<string, string>; answer?: RouterAnswer; headers?: (force?: boolean) => Promise<Record<string, string>>; userServer?: () => boolean; askUser?: boolean} = {}): Promise<Harness> {
   const dataDir = await mkdtemp(join(tmpdir(), 'muster-lane-'));
   // The service adds the browser and background-command tool servers only when their launchers exist.
   const launcher = join(dataDir, 'launcher.sh');
   await writeFile(launcher, '#!/bin/sh\nexit 0\n'); await chmod(launcher, 0o700);
   const saved = {browser: process.env.MUSTER_BROWSER_MCP_LAUNCHER, background: process.env.MUSTER_BACKGROUND_MCP_LAUNCHER};
   process.env.MUSTER_BROWSER_MCP_LAUNCHER = launcher; process.env.MUSTER_BACKGROUND_MCP_LAUNCHER = launcher;
+  // The background-command server also needs its token issuer (a started host registers one).
+  const unissue = registerChatTokenIssuer(BACKGROUND_MCP, id => `token-for-${id}`);
   const fake = router(options.backend ?? {'intelligent-planner': 'claude-opus-5-5', executor: 'gpt-5.6-terra'}, options.answer);
   const clock = {now: 1_000_000};
   const codex: Array<Record<string, unknown>> = [];
@@ -81,8 +86,11 @@ async function harness(t: TestContext, options: {backend?: Record<string, string
   const overrides: Harness['overrides'] = [];
   const provider: ProviderAdapter = {...inner, run: (input: ProviderInput) => { overrides.push(input.configOverrides); return inner.run(input); }};
   const user: DomainFactory = ctx => { ctx.hooks.addRunOptionsContributor(async () => options.userServer?.() ? {configOverrides: {'mcp_servers.projectdb.command': '/bin/true'}} : null); return {handlers: {}}; };
-  const service = createAgentService({dataDir, provider, onEvent() {}, domains: [user]});
+  const service = createAgentService({dataDir, provider, onEvent() {}, domains: [user], ...(options.askUser ? {askUserTools: true} : {})});
+  // The ask_user tool host starts asynchronously; its launcher exists once the endpoint file is written.
+  if (options.askUser) { for (let i = 0; i < 500 && !existsSync(join(dataDir, 'agent-tools', 'ask', 'muster_ask-endpoint.json')); i++) await delay(10); await delay(20); }
   t.after(async () => {
+    unissue();
     await service.dispose(); inner.dispose();
     for (const [name, value] of [['MUSTER_BROWSER_MCP_LAUNCHER', saved.browser], ['MUSTER_BACKGROUND_MCP_LAUNCHER', saved.background]] as const) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
     await rm(dataDir, {recursive: true, force: true});
@@ -234,4 +242,33 @@ test('a run on the Messages lane that was open when Muster closed is interrupted
   const result = await reconcileProviderTurn({threadId: 'thread', turnId: 'turn', cwd: dataDir, providerId: 'gw', providerBindingId: 'gw-binding', providerThreadDriver: LANE}, query);
   assert.equal(result.resolved, true);
   assert.equal(asked, 0);
+});
+
+// Spec: MUS-SPEC-03-688P (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-688p)
+test('a Full access Claude turn still runs over the Messages API when the service adds the ask_user server, and ask_user returns the default', async t => {
+  // The router's first answer is one ask_user call.
+  const askCall = sse([
+    {type: 'message_start', message: {id: 'm', role: 'assistant', model: 'claude-opus-5-5', content: [], usage: {input_tokens: 10, output_tokens: 1}}},
+    {type: 'content_block_start', index: 0, content_block: {type: 'tool_use', id: 'toolu_ask', name: 'ask_user', input: {}}},
+    {type: 'content_block_delta', index: 0, delta: {type: 'input_json_delta', partial_json: JSON.stringify({question: 'Which database?', options: ['Postgres', 'SQLite'], default: 'SQLite'})}},
+    {type: 'content_block_stop', index: 0},
+    {type: 'message_delta', delta: {stop_reason: 'tool_use'}, usage: {output_tokens: 3}},
+    {type: 'message_stop'},
+  ]);
+  const h = await harness(t, {askUser: true, answer: (_sent, turn) => turn === 1 ? askCall : undefined});
+  const chat = await h.chat('cc/claude-opus-5-5');
+  await h.send(chat.id, 'Set up storage.');
+  assert.ok(Object.keys(h.overrides[0] ?? {}).some(key => key.startsWith('mcp_servers.muster_ask.')), 'the service added the ask_user server');
+  assert.equal(h.codex.length, 0, 'the Codex client never ran');
+  assert.equal(h.router.turns.length, 2, 'the question round and the continuation both went to the Messages API');
+  assert.ok(h.router.turns[0]!.body.tools!.some(tool => tool.name === 'ask_user'), 'the lane offers ask_user natively');
+  const toolResult = JSON.stringify(h.router.turns[1]!.body.messages.at(-1));
+  assert.match(toolResult, /toolu_ask/);
+  assert.match(toolResult, /continue now with \\"SQLite\\"/, 'the call returned the default at once');
+  const card = (await h.items(chat.id)).find(item => item.kind === 'question');
+  assert.equal(card?.data?.nonBlocking, true, 'the question card was posted');
+  assert.equal(card?.data?.defaultAnswer, 'SQLite');
+  const after = await h.snapshot(chat.id);
+  assert.equal(after.status, 'completed', after.error ?? 'turn did not complete');
+  assert.equal(after.providerThreadDriver, LANE);
 });
