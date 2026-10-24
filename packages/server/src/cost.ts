@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { entryHash, type Body } from '../../agent-app/src/runtime/turn-ledger.ts';
-import { estimateCostUsd } from '../../agent-app/src/shared/model-catalog.ts';
+import { estimateCostUsd, withCacheWriteDefault } from '../../agent-app/src/shared/model-catalog.ts';
 import type { ServerStore, TurnActorRecord, UserRecord } from './store/types.ts';
 
 export interface LedgerRow { id: string; chatId: string | null; projectId: string | null; provider: string | null; model: string | null; startedAt: string | null; endedAt: string;
@@ -30,7 +30,7 @@ function open(runtimeDir: string): DatabaseSync | null {
 }
 const hasTable = (db: DatabaseSync, name: string) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
 
-type Pricing = { inputPerMTok: number; outputPerMTok: number; cachedInputPerMTok?: number };
+type Pricing = { inputPerMTok: number; outputPerMTok: number; cachedInputPerMTok?: number; cacheWritePerMTok?: number };
 /** Prices set by an admin under Settings › Models, keyed provider::model. The Ledger itself only records catalog prices. */
 function settingsPrices(runtimeDir: string): Record<string, Pricing> {
   try { return (JSON.parse(readFileSync(join(runtimeDir, 'model-policy.json'), 'utf8')) as { policy?: { pricing?: Record<string, Pricing> } }).policy?.pricing ?? {}; } catch { return {}; }
@@ -48,7 +48,7 @@ export function readLedger(runtimeDir: string, since?: string): LedgerRow[] {
       let costUsd = b.costUsd ?? null, priceFromSettings = false;
       const price = b.provider && b.model ? prices[`${b.provider}::${b.model}`] : undefined;
       if (costUsd === null && price && b.tokens) {
-        costUsd = estimateCostUsd({ inputTokens: b.tokens.input, cachedInputTokens: b.tokens.cached, outputTokens: b.tokens.output, reasoningOutputTokens: b.tokens.reasoning, requests: 1 }, price);
+        costUsd = estimateCostUsd({ inputTokens: b.tokens.input, cachedInputTokens: b.tokens.cached, cacheWriteTokens: b.tokens.cacheWrite ?? 0, outputTokens: b.tokens.output, reasoningOutputTokens: b.tokens.reasoning, requests: 1 }, withCacheWriteDefault(price, b.provider ?? '', b.model ?? ''));
         priceFromSettings = costUsd !== null;
       }
       rows.push({ id: b.id, chatId: b.chatId ?? null, projectId: b.projectId ?? null, provider: b.provider ?? null, model: b.model ?? null, startedAt: b.startedAt ?? null,

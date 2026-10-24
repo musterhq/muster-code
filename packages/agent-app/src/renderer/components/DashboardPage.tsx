@@ -32,7 +32,7 @@ export function dashboardTiles(snapshot: WorkspaceSnapshot, data: DashboardData 
   const spend = data?.spend;
   const base = !spend ? { value: '…', detail: 'Reading the Ledger' }
     : spend.usd === null ? { value: spend.unpricedTurns ? 'Unpriced' : formatUsd(0), detail: spend.unpricedTurns ? `${spend.unpricedTurns} unpriced ${spend.unpricedTurns === 1 ? 'turn' : 'turns'} this month` : 'No agent turns this month' }
-    : { value: formatUsd(spend.usd), detail: `${spend.pricedTurns} priced ${spend.pricedTurns === 1 ? 'turn' : 'turns'}${spend.unpricedTurns ? ` + ${spend.unpricedTurns} unpriced` : ''} this month` };
+    : { value: formatUsd(spend.usd), detail: `${spend.pricedTurns} priced ${spend.pricedTurns === 1 ? 'turn' : 'turns'}${spend.unpricedTurns ? ` + ${spend.unpricedTurns} unpriced` : ''}${spend.estimatedTurns ? ` (${spend.estimatedTurns} estimated)` : ''} this month` };
   // The linked Paperclip's company budget: how much of it this month has used.
   const company = data?.budgets?.policies.find(p => p.scope === 'company');
   return {

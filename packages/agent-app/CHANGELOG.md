@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - Configured Responses routers no longer reconnect and fail when a completed response omits cache or reasoning usage counters. Existing counts, authentication, and chat history are preserved; truncated streams still report a failure.
+- Claude Code cache writes are now priced at the provider's cache-write rate (1.25× the input price for Claude models unless you set one) in Ledger receipts, Settings usage and the Dashboard. Settings › Models prices and catalog prices can set a cache-write rate; a receipt whose cost rests on a guess (a message whose final count never arrived, or cache writes billed at the input rate for a model with no cache-write price) says "estimate", and the Dashboard counts those turns.
 - The Linux app's terminal works again on Ubuntu 24.04. Linux builds are made on Ubuntu 24.04, so the terminal module runs there and on newer releases.
 - Settings › Muster Server buttons (invite, revoke, connector and agent actions) ignore a second click while the first is still running, so they no longer fire twice.
 - The Dashboard prices turns the provider reported no cost for from the model catalog or your Settings › Models prices; turns with no known price still count as unpriced.

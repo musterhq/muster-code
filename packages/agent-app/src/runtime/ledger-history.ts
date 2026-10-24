@@ -97,8 +97,8 @@ function chatEntries(db: DatabaseSync, chat: ChatRow, tables: { receipts: boolea
   // Usage is stored per chat, not per turn: it is shown only where it belongs to exactly one imported turn.
   let usage: UsageTotals | null = null;
   if (tables.usage && kept.length === 1 && turns.length === 1 && !live.size) {
-    const row = db.prepare(`SELECT SUM(input_tokens) AS i, SUM(cached_input_tokens) AS c, SUM(output_tokens) AS o, SUM(reasoning_output_tokens) AS r, SUM(requests) AS n FROM model_usage WHERE chat_id = ?`).get(chat.id) as { i: number | null; c: number | null; o: number | null; r: number | null; n: number | null } | undefined;
-    if (row?.n) usage = { inputTokens: Number(row.i ?? 0), cachedInputTokens: Number(row.c ?? 0), outputTokens: Number(row.o ?? 0), reasoningOutputTokens: Number(row.r ?? 0), requests: Number(row.n) };
+    const row = db.prepare(`SELECT SUM(input_tokens) AS i, SUM(cached_input_tokens) AS c, SUM(cache_write_tokens) AS w, SUM(output_tokens) AS o, SUM(reasoning_output_tokens) AS r, SUM(requests) AS n FROM model_usage WHERE chat_id = ?`).get(chat.id) as { i: number | null; c: number | null; w: number | null; o: number | null; r: number | null; n: number | null } | undefined;
+    if (row?.n) usage = { inputTokens: Number(row.i ?? 0), cachedInputTokens: Number(row.c ?? 0), outputTokens: Number(row.o ?? 0), reasoningOutputTokens: Number(row.r ?? 0), cacheWriteTokens: Number(row.w ?? 0), requests: Number(row.n) };
   }
   const provider = chat.provider_id || null, model = chat.model || null;
   const pricing = usage && provider && model ? options.pricing?.(provider, model) ?? null : null;
@@ -107,7 +107,7 @@ function chatEntries(db: DatabaseSync, chat: ChatRow, tables: { receipts: boolea
     return {
       id: `history:${chat.id}:${turn.userId}`, chatId: chat.id, runId: runId ?? `history:${turn.userId}`, taskId: null, projectId: chat.project_id ?? null,
       trigger: chat.project_id ? 'project chat' : 'chat', agent: chat.title || 'Agent', provider, model,
-      tokens: usage ? { input: usage.inputTokens, cached: usage.cachedInputTokens, output: usage.outputTokens, reasoning: usage.reasoningOutputTokens } : null,
+      tokens: usage ? { input: usage.inputTokens, cached: usage.cachedInputTokens, output: usage.outputTokens, reasoning: usage.reasoningOutputTokens, ...(usage.cacheWriteTokens ? { cacheWrite: usage.cacheWriteTokens } : {}) } : null,
       costUsd: usage ? estimateCostUsd(usage, pricing) : null,
       tools: [...turn.tools].map(([name, count]) => ({ name, count })), approvals: turn.approvals, tests: turn.tests, files: null,
       startedAt: turn.startedAt, endedAt: turn.endedAt, durationMs: start !== null && end !== null ? Math.max(0, end - start) : null,
@@ -140,6 +140,8 @@ export async function importLedgerHistory(db: DatabaseSync, ledger: TurnLedger, 
   if (hasTable(db, 'chats') && hasTable(db, 'timeline')) {
     db.exec('CREATE TABLE IF NOT EXISTS turn_ledger_backfill (chat_id TEXT PRIMARY KEY, turns INTEGER NOT NULL, done_at TEXT NOT NULL)');
     const tables = { receipts: hasTable(db, 'receipts'), usage: hasTable(db, 'model_usage') };
+    // A usage table from before cache writes were counted has no such column; its rows count none.
+    if (tables.usage && !(db.prepare("SELECT name FROM pragma_table_info('model_usage')").all() as { name: string }[]).some(column => column.name === 'cache_write_tokens')) db.exec('ALTER TABLE model_usage ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0');
     const next = db.prepare(`SELECT c.id, c.project_id, c.title, c.status, c.provider_id, c.model FROM chats c
       WHERE c.id > ? AND c.status NOT IN (${BUSY.map(() => '?').join(',')}) AND NOT EXISTS (SELECT 1 FROM turn_ledger_backfill b WHERE b.chat_id = c.id) ORDER BY c.id LIMIT ?`);
     const done = db.prepare('INSERT OR IGNORE INTO turn_ledger_backfill (chat_id, turns, done_at) VALUES (?, ?, ?)');
