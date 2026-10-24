@@ -4,14 +4,16 @@
  * prompt contributor). Promote turns it into a normal chat in the sidebar; Discard deletes it.
  */
 import React, {useEffect, useRef, useState} from 'react';
-import {ArrowUp, ExternalLink, MessagesSquare, Square, Trash2, Maximize2} from 'lucide-react';
-import {openDiff, openFile, openPullRequestTab, sendMessage, stopChat, type WorkspaceTab} from '../store';
+import {ArrowLeft, ArrowUp, ExternalLink, MessagesSquare, Square, Trash2, Maximize2} from 'lucide-react';
+import {getState, openDiff, openFile, openPullRequestTab, selectChat, sendMessage, stopChat, type WorkspaceTab} from '../store';
 import {useStoreSelector} from '../useStore';
 import {discardSideChat, openCanvasTab, promoteSideChat, useSideChat} from '../artifacts';
 import type {SideChatBinding} from '../../shared/domains/artifacts-protocol';
 import type {TimelineItem} from '../../shared/protocol';
 import {MessageBody} from './MessageBody';
 import {ResourceState} from './ResourceState';
+import {closeNewChat} from '../newChatDraft';
+import {focusComposer} from '../focus';
 import './side-chat.css';
 import {Tip} from './Tooltip';
 
@@ -26,11 +28,13 @@ export function sideChatRows(items: readonly TimelineItem[]): TimelineItem[] {
   return items.filter(item => (item.kind === 'user' || item.kind === 'assistant') && item.text.trim());
 }
 
-export function SideChatTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
+export function SideChatTab({tab, onToggleResourceMaximize, resourceMaximized = false}: {tab: WorkspaceTab; onToggleResourceMaximize?: () => void; resourceMaximized?: boolean}): React.ReactElement {
   const chatId = tab.chatId!;
   const side = useSideChat(chatId);
   const timeline = useStoreSelector(state => state.timelines[chatId]);
   const chat = useStoreSelector(state => state.snapshot?.chats.find(item => item.id === chatId));
+  const parentId = side?.parentChatId;
+  const parentExists = useStoreSelector(state => !!parentId && !!state.snapshot?.chats.some(item => item.id === parentId));
   const sending = useStoreSelector(state => !!state.sending[chatId]);
   const sendError = useStoreSelector(state => state.sendErrors[chatId]);
   const [text, setText] = useState('');
@@ -41,6 +45,13 @@ export function SideChatTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
   if (!chat) return <ResourceState kind="empty" message="This side chat no longer exists."/>;
   const send = async () => { const value = text.trim(); if (!value || sending) return; if (await sendMessage(chatId, value)) setText(''); };
   const binding = side?.binding;
+  /** Back to the conversation this side chat was opened from: show it (restoring a maximized pane) and focus its composer. */
+  const backToChat = (id: string) => {
+    closeNewChat();
+    if (resourceMaximized) onToggleResourceMaximize?.();
+    if (getState().activeChatId === id) focusComposer();
+    else void selectChat(id).then(() => focusComposer());
+  };
   return <div className="side-chat">
     <header className="side-chat-head">
       <MessagesSquare size={14} aria-hidden="true"/>
@@ -48,6 +59,7 @@ export function SideChatTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
         <strong>{side?.label ?? tab.title}</strong>
         {binding?.excerpt && <details><summary>Selection · {binding.excerpt.split('\n').length} line{binding.excerpt.split('\n').length === 1 ? '' : 's'}</summary><pre>{binding.excerpt}</pre></details>}
       </div>
+      {parentId && parentExists && <Tip label="Back to chat"><button type="button" className="icon-button" aria-label="Back to chat" onClick={() => backToChat(parentId)}><ArrowLeft size={13}/></button></Tip>}
       {binding && <Tip label="Open the resource"><button type="button" className="icon-button" aria-label="Open the resource" onClick={() => openBinding(binding)}><ExternalLink size={13}/></button></Tip>}
       <Tip label="Promote to a full chat"><button type="button" className="icon-button" aria-label="Promote to a full chat" disabled={side?.promotedAt !== undefined} onClick={() => void promoteSideChat(chatId)}><Maximize2 size={13}/></button></Tip>
       <Tip label="Discard side chat"><button type="button" className="icon-button" aria-label="Discard side chat" onClick={() => { if (!rows.length || window.confirm('Discard this side chat and its messages?')) void discardSideChat(chatId); }}><Trash2 size={13}/></button></Tip>
