@@ -81,6 +81,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Terminal panes retry failed loads twice and offer a Retry action if loading still fails.
 - A chat started in a new worktree from an existing chat now keeps that chat's model, reasoning effort and access mode instead of the app defaults
 - The window loads less code before it first paints: the new-task form and the project task page now load when first opened, cutting the startup JavaScript by about 87 KB (1.90 MB to 1.81 MB).
+- Large text files use a bounded source view, keeping full-file search and selection responsive when loading the full file.
+
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 - Files downloaded in the in-app browser no longer keep invisible text-direction characters in their names, so a name can't disguise its real extension.
 - On Windows, a link to a network share in a reply is no longer inspected or opened, which could contact an untrusted server.

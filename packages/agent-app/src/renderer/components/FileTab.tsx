@@ -25,6 +25,7 @@ import {FileAnnotations} from './FileAnnotations';
 import {HighlightedSourceTable} from './HighlightedCode';
 import {codeLanguageFromPath} from './codeLanguage';
 import {InlineFileSource, type InlineFileReview} from './InlineFileSource';
+import {VirtualFileSource, LARGE_FILE_THRESHOLD, virtualFileSelection} from './VirtualFileSource';
 import {friendlyFileError, parseDelimited, delimitedCellType} from './filePresentation';
 import {ResourceState} from './ResourceState';
 import {FileExitActions, FileFallback, HtmlPreview, MediaFile, QuickLookFile} from './FilePreviews';
@@ -141,9 +142,12 @@ function useTurnReview({folderId, path, text, enabled}: {folderId?: string; path
 }
 
 /** Selected source lines → an "Add to chat" chip (DIF-10). */
-function selectedLines(container: HTMLElement | null): {start: number; end: number; text: string; rect: DOMRect} | undefined {
+function selectedLines(container: HTMLElement | null, source: string): {start: number; end: number; text: string; rect: DOMRect} | undefined {
   const selection = window.getSelection();
   if (!container || !selection || selection.isCollapsed || !selection.rangeCount) return undefined;
+  const virtual = container.querySelector<HTMLElement>('.virtual-file-source');
+  const original = virtual && virtualFileSelection(virtual, source);
+  if (original?.text.trim()) return {...original, text: original.text.slice(0, 8000), rect: selection.getRangeAt(0).getBoundingClientRect()};
   const text = selection.toString();
   if (!text.trim()) return undefined;
   const lineOf = (node: Node | null) => { const element = node instanceof Element ? node : node?.parentElement; const row = element?.closest?.('tr[data-line]'); return row && container.contains(row) ? Number(row.getAttribute('data-line')) : undefined; };
@@ -445,7 +449,7 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
           <span>{staleReason}</span>
           <button type="button" onClick={reload}>Refresh</button>
         </div>}
-        {blaming && tab.folderId && tab.path ? <BlameView folderId={tab.folderId} path={tab.path} source={text} targetLine={tab.line}/> : turnReview && turnReview.model.state !== 'clean' ? <InlineFileSource source={text} path={tab.path??''} review={turnReview}/> : latestEdit && !turnReview ? <InlineFileSource source={text} path={tab.path??''} patch={latestEdit.patch} status={latestEdit.status} unavailableReason={latestEdit.unavailableReason}/> : <HighlightedSourceTable source={text} language={codeLanguageFromPath(tab.path ?? '')} targetLine={tab.line}/ >}
+        {blaming && tab.folderId && tab.path ? <BlameView folderId={tab.folderId} path={tab.path} source={text} targetLine={tab.line}/> : turnReview && turnReview.model.state !== 'clean' ? <InlineFileSource source={text} path={tab.path??''} review={turnReview}/> : latestEdit && !turnReview ? <InlineFileSource source={text} path={tab.path??''} patch={latestEdit.patch} status={latestEdit.status} unavailableReason={latestEdit.unavailableReason}/> : text.length >= LARGE_FILE_THRESHOLD ? <VirtualFileSource source={text} targetLine={tab.line}/> : <HighlightedSourceTable source={text} language={codeLanguageFromPath(tab.path ?? '')} targetLine={tab.line}/ >}
         {!text && <p className="file-empty">This file is empty.</p>}
       </div>}
       {richText && kind !== 'html' && !previewAllowed && !truncated && <div className="pane-truncated">Showing source: Document preview is limited to 65,536 characters.</div>}
@@ -481,8 +485,9 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
     </div>
     {find.open && !editing && <FindBar find={find} matchCount={fileFindMatches.length}/>}
     <div className="file-content-layout">
-    <div className="file-document" onScrollCapture={event=>{onScrollCapture(event);if(picked)setPicked(undefined);}} onMouseDown={event=>{if(!(event.target as Element).closest?.('.file-selection-context'))setPicked(undefined);}} onMouseUp={()=>{const selection=window.getSelection();if(selection && code.current?.contains(selection.anchorNode))setQuote(selection.toString().slice(0,2000));if(!preview)setPicked(selectedLines(code.current?.querySelector('.code-scroll') ?? null));}}>
+    <div className="file-document" onScrollCapture={event=>{onScrollCapture(event);if(picked)setPicked(undefined);}} onMouseDown={event=>{if(!(event.target as Element).closest?.('.file-selection-context'))setPicked(undefined);}} onMouseUp={()=>{const selection=window.getSelection();if(selection && code.current?.contains(selection.anchorNode)){const virtual=code.current.querySelector<HTMLElement>('.virtual-file-source');setQuote(((virtual&&virtualFileSelection(virtual,text))?.text??selection.toString()).slice(0,2000));}if(!preview)setPicked(selectedLines(code.current?.querySelector('.code-scroll') ?? null, text));}}>
       {editing && tab.folderId && tab.path ? <FileEditor folderId={tab.folderId} path={tab.path} tabId={tab.id} onSaved={() => {}}/>
+        : find.open && text.length >= LARGE_FILE_THRESHOLD ? <div className="code-scroll" role="region" aria-label={`Source of ${tab.path}`} tabIndex={0}><VirtualFileSource source={text} query={find.query} matches={fileFindMatches} current={find.index}/></div>
         : find.open ? <FindHighlightedText text={text} query={find.query} matches={fileFindMatches} current={find.index}/>
         : content}
       {picked && <button type="button" className="file-selection-context" style={{position:'fixed',top:Math.min(picked.rect.bottom+6,window.innerHeight-32),left:Math.max(8,Math.min(picked.rect.left,window.innerWidth-140))}} onClick={()=>{const range=picked.start===picked.end?`L${picked.start}`:`L${picked.start}-${picked.end}`;void addReviewContext({label:`${tab.path}:${range}`,text:picked.text,source:{kind:'file',folderId:tab.folderId,path:tab.path,startLine:picked.start,endLine:picked.end}}).then(result=>setSelectionStatus(result==='added'?'Added to chat':result==='copied'?'Copied selection — paste it into the chat':'Could not add the selection'));setPicked(undefined);window.getSelection()?.removeAllRanges();}}><MessageSquarePlus size={12} aria-hidden="true"/>Add to chat</button>}
