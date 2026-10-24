@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- The Ledger's chain check now also catches deleted or rewritten recent receipts, not only edits in the middle. It names the first receipt affected, and adding new receipts afterwards does not hide it.
 - The Linux app's terminal works again on Ubuntu 24.04. Linux builds are made on Ubuntu 24.04, so the terminal module runs there and on newer releases.
 - Settings › Muster Server buttons (invite, revoke, connector and agent actions) ignore a second click while the first is still running, so they no longer fire twice.
 - The Dashboard prices turns the provider reported no cost for from the model catalog or your Settings › Models prices; turns with no known price still count as unpriced.
