@@ -59,7 +59,9 @@ export const ARCHIVE_RUNNING_WARNING = 'Archiving stops nothing; the agent keeps
 export interface ChatExport { text: string; omitted: string[]; fileName: string }
 export interface PendingQuestionOption { label: string; description?: string; value?: string }
 export interface PendingQuestion { id: string; header: string; question: string; options: PendingQuestionOption[]; allowCustomAnswer: boolean; multiSelect: boolean; isSecret?: boolean; isOther?: boolean }
-export interface PendingQuestionData { method: 'item/tool/requestUserInput'; questions: PendingQuestion[]; expiresAt?: string; expiredReason?: 'restart' | 'timeout' | 'stale'; reaskedAt?: string }
+export interface PendingQuestionData { method: 'item/tool/requestUserInput'; questions: PendingQuestion[]; expiresAt?: string; expiredReason?: 'restart' | 'timeout' | 'stale'; reaskedAt?: string;
+  /** ask_user: the run did not wait; it continued with `defaultAnswer`, and a later answer is delivered as a steer or the next turn. */
+  nonBlocking?: true; defaultAnswer?: string; delivered?: 'steered' | 'queued' }
 export interface TimelineItem { id: string; chatId: string; kind: 'user' | 'assistant' | 'reasoning' | 'tool' | 'approval' | 'question' | 'notice'; text: string; status?: string; createdAt: string; data?: Record<string, unknown> }
 /** `data` of an approval item. `kind` picks the card body; every field is optional because providers omit them. */
 export interface ApprovalData { method: string; kind: 'command' | 'fileChange' | 'mcp'; command?: string; cwd?: string; reason?: string; diff?: Array<{path: string; diff?: string; kind?: string}>; server?: string; tool?: string; args?: string; expiredReason?: 'restart' | 'timeout' | 'stale'; /** ISO deadline stored with the request; whether it has expired is decided at read time. */ expiresAt?: string; /** Set once the user asked the agent again after it expired. */ reaskedAt?: string; /** R5: the command would stop a process the user started; never approvable for the whole session. */ protectsUserProcess?: boolean }

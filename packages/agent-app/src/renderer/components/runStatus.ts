@@ -7,7 +7,8 @@ export function displayStatus(chat:Pick<Chat,'status'|'queue'|'autoResume'>,item
   const live=chat.status==='running'||chat.status==='stopping';
   // #448: a run stopped on a usage limit reads Limited until it continues (or the retries gave up).
   if(!live&&chat.autoResume&&!chat.autoResume.gaveUp)return 'limited';
-  if(live&&items.some(item=>(item.kind==='approval'||item.kind==='question')&&item.status==='pending'))return 'waiting';
+  // An ask_user question (nonBlocking) does not hold the run: the agent keeps working on its default.
+  if(live&&items.some(item=>(item.kind==='approval'||item.kind==='question')&&item.status==='pending'&&item.data?.nonBlocking!==true))return 'waiting';
   if(live&&stalled)return 'reconnecting';
   if(!live&&chat.queue?.length&&chat.status!=='failed'&&chat.status!=='interrupted')return 'queued';
   return chat.status;

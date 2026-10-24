@@ -73,6 +73,8 @@ import { isGitWorkTree } from './review-baseline.ts';
 import type { ReviewBaselineInfo } from '../shared/domains/review-protocol.ts';
 import type { EditRestorePreview } from '../shared/protocol.ts';
 import { randomUUID } from 'node:crypto';
+import { ToolHost, toolText } from './governance/tool-host.ts';
+import { ASK_MCP, ASK_USER_METHOD, ASK_USER_SPEC, ASK_QUESTION_ID, askUserAnswerMessage, askUserCard, askUserReply, askUserRunOverrides, isNonBlockingQuestion, parseAskUser } from './ask-user.ts';
 import { plural } from '../shared/wording.ts';
 import { device } from '../shared/device-noun.ts';
 
@@ -136,7 +138,8 @@ export function userProcessNote(groups: readonly UserProcessGroup[], cwd: string
     ...relevant.map(group => `- process group ${group.pgid}: ${group.label.replace(/[\x00-\x1f]/g, ' ').slice(0, 80)}${group.cwd ? ` (cwd ${group.cwd.slice(0, 200)})` : ''}`)].join('\n');
 }
 const PROVIDER_LISTING_WAIT_MS = 15_000;
-export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; userProcesses?: () => readonly UserProcessGroup[]; userProcessTargets?: () => Promise<readonly UserProcessTarget[]>; provider?: ProviderAdapter; reconcileProvider?: (input: ReconciliationInput) => Promise<ReconciliationResult>; domains?: readonly DomainFactory[] }) {
+export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; userProcesses?: () => readonly UserProcessGroup[]; userProcessTargets?: () => Promise<readonly UserProcessTarget[]>; provider?: ProviderAdapter; reconcileProvider?: (input: ReconciliationInput) => Promise<ReconciliationResult>; domains?: readonly DomainFactory[];
+  /** Serve the ask_user MCP server to CLI routes (default: on outside tests). */ askUserTools?: boolean }) {
   applyPendingRestore(options.dataDir);
   setProviderListingStore(join(options.dataDir, 'provider-listings'));
   const store = new AgentStore(options.dataDir);
@@ -231,7 +234,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     for (const item of store.timeline(chat.id)) {
       // The provider request ended with the previous process; the card stays readable but cannot be reopened.
       // No handler survives a restart. The same read-time rule decides: past its stored deadline it expired, otherwise it was lost.
-      if ((item.kind === 'question' || item.kind === 'approval') && item.status === 'pending') { const settled = pendingStatusAtRead(item, Date.now(), false); store.updateItem(item.id, item.text, settled.status, {...item.data, expiredReason:settled.reason}); }
+      // An ask_user question never had a waiting handler: it stays answerable, and its answer becomes the next turn.
+      if ((item.kind === 'question' || item.kind === 'approval') && item.status === 'pending' && !isNonBlockingQuestion(item.data)) { const settled = pendingStatusAtRead(item, Date.now(), false); store.updateItem(item.id, item.text, settled.status, {...item.data, expiredReason:settled.reason}); }
       // A manual compaction request in flight when the app closed: no new process will ever settle this row.
       if (item.kind === 'notice' && item.data?.kind === 'compaction' && item.status === 'running') store.updateItem(item.id, 'Compaction status unknown: Muster restarted while it was in progress. History is unchanged. Retry, or continue in a fresh thread with a summary.', 'failed', {...item.data, status: 'failed', actions: ['retry', 'fresh']});
     }
@@ -427,6 +431,57 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (status === 'expired') store.appendItem(pending.chatId, 'notice', 'A question timed out before you answered, so the agent was told it was cancelled. Use Ask again to have it re-ask.', 'completed', {kind:'attention-expired', itemId});
     timeline(pending.chatId); state();
     pending.resolve(answers); pending.waiters.splice(0).forEach(resolve => resolve(answers));
+  }
+  // ── ask_user: non-blocking questions ─────────────────────────────────────
+  /** Posts the question card and answers the tool at once with the default. Never waits, in any access mode. */
+  function askUser(chatId: string, args: Record<string, unknown>): {content: Array<{type: 'text'; text: string}>; isError?: true; text: string} {
+    const reply = (text: string, isError = false) => ({...toolText(text, isError), text} as {content: Array<{type: 'text'; text: string}>; isError?: true; text: string});
+    const chat = store.chat(chatId);
+    if (disposed || closing || !chat) return reply('This chat is not available.', true);
+    const input = parseAskUser(args);
+    if (typeof input === 'string') return reply(input, true);
+    store.appendItem(chatId, 'question', input.question, 'pending', {...askUserCard(input)});
+    timeline(chatId); state();
+    return reply(askUserReply(input));
+  }
+  let askHost: ToolHost | undefined, askLauncher: string | undefined;
+  if (options.askUserTools ?? !process.env.NODE_TEST_CONTEXT) {
+    askHost = new ToolHost({dir: join(options.dataDir, 'agent-tools', 'ask'), name: ASK_MCP, title: 'Muster questions', specs: [ASK_USER_SPEC], execPath: process.execPath, timeoutMs: 30_000,
+      run: (chatId, _tool, args) => { const {text: _text, ...result} = askUser(chatId, args); return result; }});
+    void askHost.start().then(launcher => { askLauncher = launcher; }, error => console.warn(`Agent question tool unavailable: ${error instanceof Error ? error.message : String(error)}`));
+  }
+  /** Adds the muster_ask MCP server to a run (CLI routes load it; HTTP routes offer ask_user natively instead). */
+  function withAskUser<T extends {configOverrides?: Record<string, unknown>}>(chatId: string, runOptions: T): T {
+    const extra = askHost && askLauncher ? askUserRunOverrides(chatId, askLauncher, askHost.chatToken(chatId)) : {};
+    return Object.keys(extra).length ? {...runOptions, configOverrides: {...runOptions.configOverrides, ...extra}} : runOptions;
+  }
+  /** A later answer: recorded on the card at once (so a second answer is a no-op), then delivered as a steer while the
+   *  run is going and the route takes one, or as the next turn through the chat queue. */
+  async function answerAsked(itemId: string, raw: unknown): Promise<void> {
+    const item = store.item(itemId);
+    if (!item || item.kind !== 'question') throw new Error('This question no longer exists.');
+    if (item.status === 'answered') return;
+    if (item.status !== 'pending') throw new Error('This question was already closed.');
+    const chat = chatFor(item.chatId);
+    if (chat.archived) throw new Error('Restore this chat before answering.');
+    const values = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>)[ASK_QUESTION_ID] : undefined;
+    const list = values && typeof values === 'object' && !Array.isArray(values) ? (values as Record<string, unknown>).answers : undefined;
+    if (!Array.isArray(list) || list.length !== 1 || typeof list[0] !== 'string' || !list[0].trim() || list[0].length > 4096) throw new Error('Invalid question answers.');
+    const answer = list[0].trim();
+    const question = Array.isArray(item.data?.questions) ? String((item.data.questions[0] as {question?: unknown} | undefined)?.question ?? item.text) : item.text;
+    store.updateItem(itemId, item.text, 'answered', {...item.data, answers: {[ASK_QUESTION_ID]: {answers: [answer]}}});
+    timeline(chat.id); state();
+    const message = askUserAnswerMessage(question, answer), requestId = `ask-${itemId}`;
+    let delivered: 'steered' | 'queued' = 'queued';
+    if (runs.has(chat.id) && (await steerRun(chat, message, requestId, {})).steered) delivered = 'steered';
+    else await dispatch('chat.queue.add', {id: chat.id, text: message, requestId});
+    const latest = store.item(itemId);
+    if (latest) { store.updateItem(itemId, latest.text, latest.status, {...latest.data, delivered}); timeline(chat.id); }
+  }
+  function dismissAsked(itemId: string): void {
+    const item = store.item(itemId);
+    if (!item || item.status !== 'pending') return;
+    store.updateItem(itemId, item.text, 'dismissed', item.data); timeline(item.chatId); state();
   }
   function settleApprovals(chatId: string) {
     for (const [itemId, pending] of approvals) if (pending.chatId === chatId) finishApproval(itemId, pending, 'decline', 'interrupted');
@@ -699,7 +754,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // No registered hooks: dispatch in the same tick, exactly as before the seam existed.
         const hooked = domainHooks.hasRunHooks();
         const contributed = hooked ? await domainHooks.contributePrompt({chat, ...(folder ? {folder} : {}), ...(project ? {project} : {}), prompt}) : {text:'', sources:[] as string[], blocks:[] as ContextBlock[]};
-        const runOptions = hooked ? await domainHooks.resolveRunOptions(chat) : {};
+        const runOptions = withAskUser(chat.id, hooked ? await domainHooks.resolveRunOptions(chat) : {});
         if (hooked) await domainHooks.runStarted({chat, runId: accepted.runId, cwd});
         if (disposed) return;
         let ownership = '';
@@ -856,6 +911,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             const background = current ? current !== run && !current.stopped : provider.hasActiveWork?.(chatId) === true;
             if (disposed || closing || run.stopped || (current !== run && !background) || !store.chat(chatId)) return undefined;
             seal();
+            // ask_user from an HTTP route: the card is posted and the run continues with the default, in every access mode.
+            if (method === ASK_USER_METHOD) return askUser(chatId, params);
+            // Muster's own ask_user MCP server never needs a card: calling it only posts a question.
+            if ((/^item\/mcpToolCall\/requestApproval$/.test(method) || isElicitationRequest(method)) && (params.server === ASK_MCP || params.serverName === ASK_MCP || elicitationServer(params) === ASK_MCP)) return isElicitationRequest(method) ? elicitationResult(true) : {decision: 'accept'};
             if (method === 'item/tool/requestUserInput') {
               const rawQuestions = Array.isArray(params.questions) ? params.questions : [];
               if (rawQuestions.length === 0 || rawQuestions.length > 32) throw new Error('Invalid provider questions.');
@@ -1982,10 +2041,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         store.appendItem(chatId, 'notice', 'Continued without confirming the earlier attempt. It may still have been working at the provider; nothing was resent.', 'completed', {kind: 'continue-anyway', providerThreadId: chat.providerThreadId, providerTurnId: chat.providerTurnId});
         timeline(chatId); state(); return updated;
       }
-      case 'question.dismiss': { const questionId = id(p.id); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.'); finishQuestion(questionId, pending, null, 'dismissed'); return; }
+      case 'question.dismiss': { const questionId = id(p.id); if (!questions.has(questionId) && isNonBlockingQuestion(store.item(questionId)?.data)) return dismissAsked(questionId); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.'); finishQuestion(questionId, pending, null, 'dismissed'); return; }
       case 'chat.compact': await compactChat(id(p.id), {fresh: p.fresh === true}); return;
       case 'question.respond': {
-        const questionId = id(p.id); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.');
+        const questionId = id(p.id);
+        if (!questions.has(questionId) && isNonBlockingQuestion(store.item(questionId)?.data)) return answerAsked(questionId, p.answers);
+        const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.');
         if (Date.now() >= pending.expiresAt) { finishQuestion(questionId, pending, null, 'expired'); throw new Error('This question timed out before it was answered. Use Ask again.'); }
         { const stale = staleAttention(pending.chatId, questionId); if (stale) { finishQuestion(questionId, pending, null, 'interrupted', undefined, 'stale'); throw new Error(stale); } }
         if (!p.answers || typeof p.answers !== 'object' || Array.isArray(p.answers)) throw new Error('Invalid question answers.');
@@ -2257,7 +2318,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         }
         run.stopped = true; run.retry.abort(); settleApprovals(chatId); settleQuestions(chatId);
       }
-      offIdleEvents?.(); offQueueEvents(); offInstalls?.(); nativeTurns.dispose();
+      offIdleEvents?.(); offQueueEvents(); offInstalls?.(); nativeTurns.dispose(); askHost?.dispose();
       provider.dispose();
       // Main owns the user-visible deadline. Keep the database open until all
       // tracked callbacks settle, even if main times out and keeps the app open.
