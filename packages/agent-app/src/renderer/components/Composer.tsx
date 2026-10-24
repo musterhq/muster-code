@@ -165,6 +165,17 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const modEnter = state.settings['general.sendKey'] === 'mod-enter';
   const draft = state.composerDrafts[chat.id];
   const text = draft?.text ?? chat.draft;
+  // A run stopped before its message was sent hands the text back (runtime sets chat.draft); the local empty draft would otherwise hide it.
+  // Only when the run just ended (status changed in the same update): a late save of the user's own typing also changes
+  // chat.draft, and adopting that would bring back text the user had already deleted.
+  const lastRuntimeDraft = useRef({ id: chat.id, draft: chat.draft, status: chat.status });
+  useEffect(() => {
+    const previous = lastRuntimeDraft.current;
+    lastRuntimeDraft.current = { id: chat.id, draft: chat.draft, status: chat.status };
+    if (previous.id !== chat.id) return;
+    const runEnded = previous.status !== chat.status && (chat.status === 'interrupted' || chat.status === 'failed');
+    if (runEnded && chat.draft && chat.draft !== previous.draft && !(draft?.text ?? '').trim()) setComposerDraft(chat.id, chat.draft);
+  }, [chat.id, chat.draft, chat.status]);
   const input = useRef<HTMLTextAreaElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
@@ -197,8 +208,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const [panel, setPanel] = useState<{ kind: 'goal'; initial: string; mode: 'set' | 'edit' } | { kind: 'skill'; draft: SkillDraft } | { kind: 'sketch'; editing?: string } | { kind: 'info'; view: InfoView } | null>(null);
   /** Strokes behind each attached sketch (by attachment localId), so clicking its tile reopens it for editing. */
   const sketches = useRef(new Map<string, SketchStroke[]>());
-  /** "Send message?" while the queue is paused, and Codex's "Resume paused goal?" after a send. */
-  const [confirmSend, setConfirmSend] = useState(false);
+  /** Codex's "Resume paused goal?" after a send. */
   const [askResume, setAskResume] = useState(false);
   const [plusQuery, setPlusQuery] = useState('');
   const [plusActive, setPlusActive] = useState(0);
@@ -491,8 +501,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     setText: value => { setComposerDraft(chat.id, value); setCaret(value.length); }, setChips, setContext, setAttachments, chooseEffort, flash, notifyError });
   const clearIfUnchanged = (value: string) => { if (currentDraft.current.chatId === chat.id && currentDraft.current.text === value) { setComposerDraft(chat.id, ''); setCaret(0); } };
 
-  /** Idle send. While the queue is paused Codex first asks "Send message?" (clear the queue or keep it). */
-  const submit = (confirmed = false) => {
+  /** Idle send. A paused queue keeps its held messages: they run, in order, after this one. */
+  const submit = () => {
     // While the agent waits on a question, the composer text is its custom answer (the arrow is Next/Submit too).
     if (questionFlow && !questionFlow.collapsed) { void answerQuestion(); return; }
     if (noProvider && !running) { setConnectAsk(true); return; }
@@ -501,7 +511,6 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     // /compact is Muster's own command: it runs here (or waits), and is never sent to the model.
     if (isCompactCommand(text)) { clearIfUnchanged(text); if (running) flash('Compacts as soon as the current turn finishes'); runCommand('compact'); return; }
     if (running) { void followUp(false); return; }
-    if (!confirmed && chat.queuePaused && queue.length) { setConfirmSend(true); return; }
     if (isCheckoutQueued(chat.id)) { flash('Already queued · starts when the other chat in this folder finishes'); return; }
     recall.current = null;
     const ids = readyIds, payload = chipPayload(text, chips, vocabulary), goal = chat.goal, body = outgoing(text), extras = { ...payload, ...(storedEffort ? { effort } : {}) };
@@ -512,11 +521,6 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
       // A paused goal: offer to resume it now that the user is back (Codex "Resume paused goal?").
       if (goal?.status === 'paused' && !resumeDeclined.has(`${chat.id}:${goal.createdAt}`)) setAskResume(true);
     });
-  };
-  const clearQueueAndSend = async () => {
-    setConfirmSend(false);
-    try { await invoke('chat.queue.clear', { id: chat.id }); } catch (cause) { setQueueError(runtimeMessage(cause)); return; }
-    submit(true);
   };
   const answerResume = async (answer: 'resume' | 'keep' | 'later') => {
     setAskResume(false);
@@ -1229,8 +1233,6 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     <RecordSkill open={panel?.kind === 'skill'} draft={panel?.kind === 'skill' ? panel.draft : { name: '', description: '', body: '' }} onClose={() => setPanel(null)} onSaved={skillSaved} />
     <SketchPad open={panel?.kind === 'sketch'} initial={panel?.kind === 'sketch' && panel.editing ? sketches.current.get(panel.editing) : undefined} onClose={() => { setPanel(null); requestAnimationFrame(() => input.current?.focus()); }}
       onAttach={(file, strokes) => attachSketch(file, strokes, panel?.kind === 'sketch' ? panel.editing : undefined)} />
-    <ConfirmSheet open={confirmSend} testId="queue-send-confirm" title="Send message?" description={`You are about to send a message. Do you want to clear the ${plural(queue.length, 'message')} previously queued?`}
-      onCancel={() => setConfirmSend(false)} actions={[{ label: 'Clear queue', run: () => void clearQueueAndSend() }, { label: 'Send message', primary: true, run: () => { setConfirmSend(false); submit(true); } }]} />
     {/* Composer stays mounted (just visually hidden) behind Memory/Settings/Projects/Automations, since only
         `.work-surface`'s `hidden` attribute changes when the screen does. Without the screen check this portal
         (ConfirmSheet renders via createPortal to document.body) would pop up over whichever unrelated screen
