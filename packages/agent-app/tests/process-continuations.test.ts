@@ -22,6 +22,7 @@ function harness(live: Record<string, string[]> = {}) {
 }
 const exit = (o: Partial<ProcessExit> = {}): ProcessExit => ({chatId: 'chat', processId: 'process:1', label: 'npm run build', status: 'failed', exitCode: 2, owner: 'agent', output: Array.from({length: 60}, (_, i) => `line ${i + 1}`).join('\n') + '\n', ...o});
 
+// Spec: MUS-SPEC-10-473B (docs/spec/clauses/10-terminal-and-processes.md#mus-spec-10-473b)
 test('a process that exits after the turn ended queues exactly one continuation with its code and last 40 lines', () => {
   const h = harness({chat: ['process:1']});
   h.chats({id: 'chat', status: 'running'});
@@ -41,6 +42,7 @@ test('a process that exits after the turn ended queues exactly one continuation 
   assert.equal(h.queued.length, 1);
 });
 
+// Spec: MUS-SPEC-10-473C (docs/spec/clauses/10-terminal-and-processes.md#mus-spec-10-473c)
 test('no continuation when the chat is still mid-turn at exit (the agent sees it itself), and not later either', () => {
   const h = harness({chat: ['process:1']});
   h.chats({id: 'chat', status: 'running'});
@@ -54,6 +56,7 @@ test('no continuation when the chat is still mid-turn at exit (the agent sees it
   assert.equal(h.queued.length + g.queued.length, 0);
 });
 
+// Spec: MUS-SPEC-10-473D (docs/spec/clauses/10-terminal-and-processes.md#mus-spec-10-473d)
 test('never for a user-started process, a user-stopped process, a user-stopped turn, a deleted or archived chat', () => {
   const h = harness({chat: ['process:u', 'process:s'], stopped: ['process:t'], gone: ['process:g'], old: ['process:a']});
   for (const id of ['chat', 'stopped', 'gone', 'old']) h.chats({id, status: 'running'});
@@ -98,6 +101,7 @@ test('ProcessSessions: an agent-owned process reports its exit once with output;
   } finally { await registry.dispose(); await fs.rm(directory, {recursive: true, force: true}); }
 });
 
+// Spec: MUS-SPEC-02-473J (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-473j)
 test('liveness: a turn that ends promising to report back is not completed', () => {
   const f = (assistantText: string, toolCalls = 1) => classifyRun({status: 'completed', assistantText, toolCalls, fileChanges: 0});
   for (const t of ['Started the build in the background. I\'ll report back when it finishes.', 'Kicked off the test suite.\n\nOnce the tests complete, I will summarize the failures.', 'Deploy is running; I’ll check back on it shortly.']) {
@@ -111,6 +115,7 @@ test('liveness: a turn that ends promising to report back is not completed', () 
   }
 });
 
+// Spec: MUS-SPEC-02-473H (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-473h)
 test('agent-mode instructions forbid ending a turn on a promise', () => {
   assert.match(NO_PROMISE_RULE, /Never end a turn promising future work/);
   assert.match(NO_PROMISE_RULE, /tool call/);
@@ -129,6 +134,7 @@ import type {Snapshot} from '../src/shared/protocol.ts';
 
 const resultText = (r: {content: {text: string}[]}) => r.content.map(c => c.text).join('\n');
 
+// Spec: MUS-SPEC-10-473A (docs/spec/clauses/10-terminal-and-processes.md#mus-spec-10-473a)
 test('run_background starts an agent-owned process mid-turn; its exit after the turn queues one follow-up', async () => {
   const directory = await fs.mkdtemp(join(tmpdir(), 'muster-bg-'));
   let chatStatus: ChatLike['status'] = 'running', full = true;
@@ -163,6 +169,7 @@ test('run_background starts an agent-owned process mid-turn; its exit after the 
   } finally { await registry.dispose(); await fs.rm(directory, {recursive: true, force: true}); }
 });
 
+// Spec: MUS-SPEC-10-473E (docs/spec/clauses/10-terminal-and-processes.md#mus-spec-10-473e)
 test('stop_background stops only the agent’s own process, and a stopped process sends no follow-up', async () => {
   const directory = await fs.mkdtemp(join(tmpdir(), 'muster-bg-stop-'));
   const queued: string[] = [];
@@ -187,6 +194,7 @@ test('stop_background stops only the agent’s own process, and a stopped proces
   } finally { await registry.dispose(); await fs.rm(directory, {recursive: true, force: true}); }
 });
 
+// Spec: MUS-SPEC-05-473F (docs/spec/clauses/05-access-modes-and-approvals.md#mus-spec-05-473f)
 test('commandAuthority: the agent may start mid-turn, but only in Agent mode with Full access', async () => {
   const dir = await fs.mkdtemp(join(tmpdir(), 'muster-bg-auth-'));
   const snap = (chat: Record<string, unknown>) => ({chats: [{id: 'chat', archived: false, status: 'running', mode: 'agent', permissionMode: 'full', ...chat}], folders: []}) as unknown as Snapshot;
@@ -198,6 +206,7 @@ test('commandAuthority: the agent may start mid-turn, but only in Agent mode wit
   } finally { await fs.rm(dir, {recursive: true, force: true}); }
 });
 
+// Spec: MUS-SPEC-05-473G (docs/spec/clauses/05-access-modes-and-approvals.md#mus-spec-05-473g)
 test('the muster_background server is offered only in Agent mode with Full access, with its instruction', async () => {
   const dir = await fs.mkdtemp(join(tmpdir(), 'muster-bg-opts-')), launcher = join(dir, 'muster-background-mcp');
   await fs.writeFile(launcher, '#!/bin/sh\n', {mode: 0o700});
