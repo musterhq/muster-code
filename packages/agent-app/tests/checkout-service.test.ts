@@ -78,7 +78,7 @@ function setup(opts: { tests?: number; lazy?: boolean } = {}) {
   const worktrees: string[] = [], pushed: string[] = [], emitted: (string | null)[] = [];
   let pushOk = true, noRemote = false, commitOk = true, hasTests = true, repo = true, chatSeq = 0, pushedHead = false, clean = true, head = 'abc123', origin = 'https://aiteam.example';
   const prOk = new Set<string>(), gitCalls: string[] = [], commits: string[] = [], statCalls: string[][] = [];
-  let salt = 0, statFails = false, stat = { count: 7, added: 120, removed: 30 }, queuedMore = false, wait: { fn: () => void; ms: number; live: boolean }[] = [];
+  let salt = 0, statFails = false, stat = { count: 7, added: 120, removed: 30 }, queuedMore = false, wait: { fn: () => void | Promise<void>; ms: number; live: boolean }[] = [];
   const homeDir = mkdtempSync(join(tmpdir(), 'muster-home-'));
   // The local chat as the timeline shows it: the person's message, a file change, a test run (tool output), and the agent's last message.
   const tl = { user: 'Implement it.', change: true, test: 'ℹ pass 12\nℹ fail 1' as string | null, testStatus: 'completed', exit: 0 as number, testCommand: 'npm test', after: null as { command: string } | null, final: 'Worked on it.', trailingTool: null as string | null, outcome: 'completed', question: false };
