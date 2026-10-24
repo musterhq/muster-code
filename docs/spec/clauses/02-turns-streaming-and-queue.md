@@ -60,6 +60,7 @@ Boundaries:
 | [MUS-SPEC-02-476H](02-turns-streaming-and-queue.md#mus-spec-02-476h) | Command-line routes are given the question tool. | [`CLI routes get the muster_ask MCP server when the tool host runs`](../../../packages/agent-app/tests/ask-user-nonblocking.test.ts) |
 | [MUS-SPEC-02-476I](02-turns-streaming-and-queue.md#mus-spec-02-476i) | Model-router routes get ask_user as a built-in tool at every access level. | [`HTTP routes: ask_user is a native tool at every access level and returns at once`](../../../packages/agent-app/tests/ask-user-nonblocking.test.ts) |
 | [MUS-SPEC-02-476J](02-turns-streaming-and-queue.md#mus-spec-02-476j) | Agent mode tells the model to use ask_user instead of ending the turn. | [`agent instructions prefer ask_user over ending the turn to ask (agent mode only)`](../../../packages/agent-app/tests/ask-user-nonblocking.test.ts) |
+| [MUS-SPEC-02-569A](02-turns-streaming-and-queue.md#mus-spec-02-569a) | 2000 streamed pieces in one burst end up as the full text with a timeline revision below 50. | [`2000 deltas in one burst are stored with a handful of writes, and the final text is complete`](../../../packages/agent-app/tests/stream-write-cost.test.ts) |
 
 ### After Stop
 
@@ -563,4 +564,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/ask-user-nonblocking.test.ts::agent instructions prefer ask_user over ending the turn to ask (agent mode only)`
 - Environment: Node test runner; no provider or network.
 - Known gaps: Shows the instruction is present, not that a model follows it.
+- Evidence: UNVERIFIED
+
+### Streaming cost
+
+<a id="mus-spec-02-569a"></a>
+#### MUS-SPEC-02-569A: A streamed reply is saved in a few writes, not one per token
+
+- Precondition: A chat whose provider streams 2000 small pieces of text in one burst.
+- Action: Send a message and wait for the turn to complete.
+- Expected result: The saved reply is the whole text, completed, and the timeline revision stays under 50 (one write per piece would pass 2000).
+- Test: `packages/agent-app/tests/stream-write-cost.test.ts::2000 deltas in one burst are stored with a handful of writes, and the final text is complete`
+- Environment: Node test runner; no network, no provider. Real agent service with a fake provider and a temp data folder.
+- Known gaps: Counts writes by the timeline revision, not time. The "about a third of the time" figure for 20 chats of 600 KB is from the author's run and is not tested.
 - Evidence: UNVERIFIED
