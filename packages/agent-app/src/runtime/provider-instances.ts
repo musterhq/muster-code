@@ -523,6 +523,16 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       // Fallback: the model the user set in Codex's config.toml stays selectable (first, so it is the default) when a stale
       // or hand-written list does not carry it. A model the list marks hidden is respected, not resurrected.
       if(route.kind==='chatgpt'&&route.configuredModel&&!models.some(model=>model.id===route.configuredModel)&&!excluded.some(item=>item.id===route.configuredModel))models.unshift({id:route.configuredModel,name:gptNameFromId(route.configuredModel)});
+      // #588: a ChatGPT profile catalog is a snapshot that goes stale. Codex's own account cache also lists the models the
+      // account gained since; they follow the catalog's models, once each. Hidden entries (in either list) and non-OpenAI ids stay out.
+      if(route.kind==='chatgpt'&&catalogPath){
+        const cache=readCodexCatalog(track(join(codexHome,'models_cache.json')),fs);
+        if(cache.ok){
+          const known=new Set([...models.map(model=>model.id),...excluded.map(item=>item.id)]);
+          const newer=catalogModels('openai-direct',cache.models).models.filter(model=>!known.has(model.id));
+          if(newer.length){models.push(...newer);catalogSource+=` and ${newer.length} newer model${newer.length===1?'':'s'} from Codex’s model cache`;}
+        }
+      }
       // A gateway with a hand-written catalog also offers the router's own agents and combos (owned_by "combo":
       // planner, advisor, executor, auto routes), read live so new ones appear without editing the catalog.
       // While the listing loads, or if it fails, the catalog alone is offered.
