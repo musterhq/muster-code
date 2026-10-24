@@ -42,6 +42,3 @@ Boundaries:
 - Environment: Node test runner; temp data folder; local tool host on a loopback port; no provider or network.
 - Known gaps: Checks the wording the run carries. There was no code path that drafts and asks, so no behaviour beyond the instructions is shown.
 - Evidence: UNVERIFIED
-A PR that changes this area adds its cases here first: one row in this table, then the case block below it (see [acceptance-cases.md](../acceptance-cases.md)).
-
-|---|---|---|
