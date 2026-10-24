@@ -20,6 +20,8 @@ Boundaries:
 | [MUS-SPEC-03-1B](03-providers-models-and-accounts.md#mus-spec-03-1b) | The first turn completes and the truncated one fails, on the same thread. | [`router usage compatibility: a genuinely truncated stream still fails`](../../../packages/agent-app/tests/router-usage-workflow.test.ts) |
 | [MUS-SPEC-03-1C](03-providers-models-and-accounts.md#mus-spec-03-1c) | 404 without the private path; nothing forwarded; the real request is forwarded unchanged. | [`router bridge: a request without the private path prefix is refused and never forwarded`](../../../packages/agent-app/tests/responses-compat.test.ts) |
 | [MUS-SPEC-03-1D](03-providers-models-and-accounts.md#mus-spec-03-1d) | 502 naming ECONNREFUSED, with no credentials or address in it. | [`router bridge: when the router cannot be reached the 502 says why, without the address or credentials`](../../../packages/agent-app/tests/responses-compat.test.ts) |
+| [MUS-SPEC-03-588A](03-providers-models-and-accounts.md#mus-spec-03-588a) | A ChatGPT route with an older profile catalog also offers the newer models in Codex's own account cache, after the catalog's models, each once. | not written yet (#588) |
+| [MUS-SPEC-03-588B](03-providers-models-and-accounts.md#mus-spec-03-588b) | Models the cache or the profile catalog marks hidden, and ids that are not OpenAI's, are not added; a gateway profile catalog is not extended. | not written yet (#588) |
 
 ### Configured routers
 <a id="mus-spec-03-1a"></a>
@@ -66,3 +68,25 @@ Boundaries:
 - Known gaps: Only the system error code is shown, not the router's own error text.
 - Evidence: UNVERIFIED
 
+### Model lists that go stale
+<a id="mus-spec-03-588a"></a>
+#### MUS-SPEC-03-588A: A stale profile catalog does not hide newer account models
+
+- Precondition: The ChatGPT sign-in has a profile whose `model_catalog_json` lists GPT-5.5 and GPT-5.6 Luna. Codex's own account cache (`models_cache.json`) lists those and also GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna.
+- Action: Open the model list for OpenAI (ChatGPT sign-in).
+- Expected result: All five models are offered, once each. The profile's models keep their order and come first; the newer ones follow in the cache's order. The route's detail line says how many came from the account cache.
+- Test: not written yet (#588)
+- Environment: Node test runner; a temp Codex home with a profile, a catalog, a cache and a fake sign-in.
+- Known gaps: Does not run Codex. Muster does not fetch the account list itself; it reads what Codex last saved. There is no refresh button or last-updated time.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-588b"></a>
+#### MUS-SPEC-03-588B: Hidden models and other providers' catalogs stay as they are
+
+- Precondition: The same ChatGPT profile catalog marks one model hidden. The cache lists that model as visible, another model as hidden, and one non-OpenAI id. A second profile for a gateway lists its own models, and the cache lists others.
+- Action: Open the model lists for both routes.
+- Expected result: The ChatGPT route does not offer the model its catalog hides, the model the cache hides, or the non-OpenAI id. The gateway route offers exactly its own catalog.
+- Test: not written yet (#588)
+- Environment: Node test runner; a temp Codex home.
+- Known gaps: A model removed from the cache stays offered while the profile catalog still lists it.
+- Evidence: UNVERIFIED
