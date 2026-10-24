@@ -24,7 +24,7 @@ Boundaries:
 | [MUS-SPEC-03-688B](03-providers-models-and-accounts.md#mus-spec-03-688b) | The request for the second turn holds the first turn's user message, every assistant block (thinking with signature, tool call, final text) and the tool result, unchanged, before the new message. | [`the next turn resends every earlier block unchanged`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
 | [MUS-SPEC-03-688C](03-providers-models-and-accounts.md#mus-spec-03-688c) | The next request carries the redacted_thinking block with its data unchanged. | [`redacted thinking is sent back unchanged`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
 | [MUS-SPEC-03-688D](03-providers-models-and-accounts.md#mus-spec-03-688d) | The thinking text reaches the chat's reasoning stream, and the answer text reaches the reply, in order. | [`thinking and text stream to the chat as they arrive`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
-| [MUS-SPEC-03-688E](03-providers-models-and-accounts.md#mus-spec-03-688e) | Each request offers the tools that access level allows, in the Messages tool format; read-only gets no command or edit tools. | [`the tools offered follow the chat's access level`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
+| [MUS-SPEC-03-688E](03-providers-models-and-accounts.md#mus-spec-03-688e) | Each request offers the tools that access level allows, in the Messages tool format: Read only can only read and list, Workspace can also edit files, Full access can also run commands. | [`the tools offered follow the chat's access level`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
 | [MUS-SPEC-03-688F](03-providers-models-and-accounts.md#mus-spec-03-688f) | The turn fails with the router's error message, and nothing is resent. | [`a router error fails the turn with its message`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
 | [MUS-SPEC-03-688G](03-providers-models-and-accounts.md#mus-spec-03-688g) | The request carries the saved earlier blocks, signatures included, unchanged. | [`a restart continues with the saved blocks unchanged`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
 
@@ -122,9 +122,9 @@ Boundaries:
 <a id="mus-spec-03-688e"></a>
 #### MUS-SPEC-03-688E: Tools follow the chat's access level
 
-- Precondition: Two chats on the same Claude route: one read-only, one with Workspace access.
+- Precondition: Three chats on the same Claude route: Read only, Workspace and Full access.
 - Action: Send a message in each.
-- Expected result: Each request offers the tools that access level allows, in the Messages tool format; read-only gets no command or edit tools.
+- Expected result: Each request offers the tools that access level allows, in the Messages tool format: Read only can only read and list, Workspace can also edit files, Full access can also run commands.
 - Test: `packages/agent-app/tests/claude-messages-driver.test.ts::the tools offered follow the chat's access level`
 - Environment: Node test runner; the adapter talks to a fake router over fetch; no network.
 - Known gaps: None known.

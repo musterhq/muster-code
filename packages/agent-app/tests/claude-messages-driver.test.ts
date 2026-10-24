@@ -5,8 +5,7 @@ import {test, type TestContext} from 'node:test';
 import {mkdtemp, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {ConversationMemory} from '../src/runtime/adapters/shared.ts';
-import {claudeMessagesAdapter} from '../src/runtime/adapters/claude-messages.ts';
+import {claudeMessagesAdapter, ClaudeConversationMemory} from '../src/runtime/adapters/claude-messages.ts';
 import type {AdapterRunInput} from '../src/runtime/adapters/types.ts';
 import {removeTmp} from './fixtures/tmp-dir.ts';
 
@@ -75,7 +74,7 @@ const SIGNED = {type: 'thinking', thinking: 'I should read the file first.', sig
 const READ = {type: 'tool_use', id: 'toolu_01', name: 'read_file', input: {path: 'notes.txt'}};
 const DONE = {type: 'text', text: 'The first line is "line one".'};
 
-function adapter(fetch: typeof globalThis.fetch, memory = new ConversationMemory()) {
+function adapter(fetch: typeof globalThis.fetch, memory = new ClaudeConversationMemory()) {
   return claudeMessagesAdapter({endpoint: 'https://router.test/v1', headers: async () => ({authorization: 'Bearer test-token'}), label: 'Router', fetch, memory});
 }
 
@@ -85,7 +84,7 @@ test('a tool round sends the signed thinking and tool call back exactly as recei
   const r = router([[SIGNED, READ], [DONE]]);
   const run = input(cwd);
   const result = await adapter(r.fetch).run(run.value);
-  assert.equal(result.status, 'completed', result.errorMessage);
+  assert.equal(result.status, 'completed', result.errorMessage ?? 'turn did not complete');
   assert.equal(result.finalMessage, 'The first line is "line one".');
   assert.equal(r.sent.length, 2);
   assert.equal(r.sent[0]!.url, 'https://router.test/v1/messages');
@@ -103,13 +102,13 @@ test('a tool round sends the signed thinking and tool call back exactly as recei
 // Spec: MUS-SPEC-03-688B (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-688b)
 test('the next turn resends every earlier block unchanged', async t => {
   const cwd = await workspace(t);
-  const memory = new ConversationMemory();
+  const memory = new ClaudeConversationMemory();
   const r = router([[SIGNED, READ], [DONE], [{type: 'text', text: 'Second answer.'}]]);
   const first = input(cwd);
   await adapter(r.fetch, memory).run(first.value);
   const second = input(cwd, {prompt: 'And the second line?', resumeThreadId: first.thread()});
   const result = await adapter(r.fetch, memory).run(second.value);
-  assert.equal(result.status, 'completed', result.errorMessage);
+  assert.equal(result.status, 'completed', result.errorMessage ?? 'turn did not complete');
   const messages = r.sent[2]!.body.messages;
   assert.deepEqual(messages.map(m => m.role), ['user', 'assistant', 'user', 'assistant', 'user']);
   assert.equal(messages[0]!.content, 'Read notes.txt and tell me the first line.');
@@ -134,7 +133,7 @@ test('thinking and text stream to the chat as they arrive', async t => {
   const r = router([[{type: 'thinking', thinking: 'Plan the answer.', signature: 'sig-2'}, {type: 'text', text: 'Hello there.'}]]);
   const run = input(cwd);
   const result = await adapter(r.fetch).run(run.value);
-  assert.equal(result.status, 'completed', result.errorMessage);
+  assert.equal(result.status, 'completed', result.errorMessage ?? 'turn did not complete');
   assert.equal(run.reasoning.join(''), 'Plan the answer.');
   assert.ok(run.reasoning.length > 1, 'thinking arrives in pieces, not at the end');
   assert.equal(run.deltas.join(''), 'Hello there.');
@@ -144,14 +143,16 @@ test('thinking and text stream to the chat as they arrive', async t => {
 // Spec: MUS-SPEC-03-688E (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-688e)
 test("the tools offered follow the chat's access level", async t => {
   const cwd = await workspace(t);
-  const r = router([[DONE], [DONE]]);
+  const r = router([[DONE], [DONE], [DONE]]);
   await adapter(r.fetch).run(input(cwd, {permissionMode: 'read-only'}).value);
   await adapter(r.fetch).run(input(cwd, {permissionMode: 'workspace'}).value);
-  const readOnly = r.sent[0]!.body.tools!.map(tool => tool.name), workspaceTools = r.sent[1]!.body.tools!.map(tool => tool.name);
-  assert.ok(readOnly.includes('read_file'));
-  assert.ok(!readOnly.includes('run_command') && !readOnly.includes('write_file'), 'read-only cannot run commands or write');
-  assert.ok(workspaceTools.includes('run_command') && workspaceTools.includes('write_file'));
-  for (const tool of r.sent[1]!.body.tools!) assert.ok('input_schema' in tool, 'Messages tool format');
+  await adapter(r.fetch).run(input(cwd, {permissionMode: 'full'}).value);
+  const [readOnly, workspaceTools, full] = r.sent.map(sent => sent.body.tools!.map(tool => tool.name));
+  assert.ok(readOnly!.includes('read_file'));
+  assert.ok(!readOnly!.includes('write_file') && !readOnly!.includes('run_command'), 'read-only can only look');
+  assert.ok(workspaceTools!.includes('write_file') && !workspaceTools!.includes('run_command'), 'workspace edits files but runs no commands');
+  assert.ok(full!.includes('run_command'), 'full access runs commands');
+  for (const tool of r.sent[2]!.body.tools!) assert.ok('input_schema' in tool, 'Messages tool format');
 });
 
 // Spec: MUS-SPEC-03-688F (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-688f)
@@ -172,10 +173,10 @@ test('a restart continues with the saved blocks unchanged', async t => {
   t.after(() => removeTmp(saved));
   const r = router([[SIGNED, READ], [DONE], [{type: 'text', text: 'Continued.'}]]);
   const first = input(cwd);
-  await adapter(r.fetch, new ConversationMemory(64, 400_000, () => saved)).run(first.value);
+  await adapter(r.fetch, new ClaudeConversationMemory(64, 2_000_000, () => saved)).run(first.value);
   // A fresh memory on the same folder: what a restarted Muster sees.
   const after = input(cwd, {prompt: 'Continue.', resumeThreadId: first.thread()});
-  const result = await adapter(r.fetch, new ConversationMemory(64, 400_000, () => saved)).run(after.value);
-  assert.equal(result.status, 'completed', result.errorMessage);
+  const result = await adapter(r.fetch, new ClaudeConversationMemory(64, 2_000_000, () => saved)).run(after.value);
+  assert.equal(result.status, 'completed', result.errorMessage ?? 'turn did not complete');
   assert.deepEqual(r.sent[2]!.body.messages[1]!.content, [SIGNED, READ], 'the signature survived the restart');
 });
