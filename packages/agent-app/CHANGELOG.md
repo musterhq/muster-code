@@ -83,6 +83,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Files downloaded in the in-app browser no longer keep invisible text-direction characters in their names, so a name can't disguise its real extension.
 - On Windows, a link to a network share in a reply is no longer inspected or opened, which could contact an untrusted server.
 - Pending approvals and questions badge the Dock (or taskbar) again when you switch away from Muster, instead of staying unbadged until the count changes.
+- Arabic, Hebrew and other right-to-left messages, replies, lists and chat titles now read and align right-to-left instead of left-to-right
+- Typing in Arabic or Hebrew in the message box now flows right-to-left, and sidebar chat titles follow their own direction
 - The Dashboard follows the org you switched to. Before, a read of the previous org that was still running when you switched could answer for the new one, so the Dashboard showed the old org's spend, budget and tasks by day.
 - The Dashboard's Recent activity and the Activity list name the agent or person who acted instead of a short id such as "agent a8782383".
 - The Dashboard opens faster on a large org: it reuses the org's last read instead of reading every task page again.

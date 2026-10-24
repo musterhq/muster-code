@@ -1134,7 +1134,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     <ContextStrip chips={shownContext} onRemove={id => { setContext(current => current.filter(chip => chip.id !== id)); requestAnimationFrame(() => input.current?.focus()); }} onOpenSource={openContextSource} />
     <div className={`composer-field${tokenRanges.length ? ' has-chips' : ''}`} onMouseMove={onFieldMouseMove} onMouseLeave={() => setChipHover(null)}>
       {tokenRanges.length > 0 && <ChipMirror text={text} ranges={tokenRanges} selected={selection} plugins={state.plugins.value ?? []} mirror={mirror} hint={promptHint || undefined} />}
-      <textarea ref={input} data-testid="composer-input" className={`composer-input${answering && questionFlow!.question.isSecret ? ' is-secret' : ''}`} aria-label={answering ? 'Answer' : 'Message'} readOnly={chat.archived}
+      <textarea ref={input} dir="auto" data-testid="composer-input" className={`composer-input${answering && questionFlow!.question.isSecret ? ' is-secret' : ''}`} aria-label={answering ? 'Answer' : 'Message'} readOnly={chat.archived}
         aria-describedby={descriptionIds}
         aria-controls={slash || mention ? caretPopoverId : undefined} aria-expanded={slash || mention ? true : undefined}
         aria-activedescendant={caretRows.length && caretActive >= 0 ? `${caretPopoverId}-${caretActive}` : undefined}

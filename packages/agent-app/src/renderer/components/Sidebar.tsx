@@ -199,7 +199,7 @@ function ChatRowImpl({ chat, now, tabbable, onFocusRow, selected, selectionMode,
           onDoubleClick={event=>{event.preventDefault();beginRename();}}
         >
           <StatusDot status={rowStatus} unread={chat.unread} />
-          <span className="chat-title" title={chat.title}>
+          <span className="chat-title" dir="auto" title={chat.title}>
             {chat.title}
           </span>
           {(activeProcesses > 0 || pendingAttention > 0) && <span className="chat-row-status" aria-label={[activeProcesses ? `${plural(activeProcesses, 'local command')} running` : '', pendingAttention ? `${plural(pendingAttention, 'request')} need input` : ''].filter(Boolean).join(', ')} title={[activeProcesses ? `${activeProcesses} running` : '', pendingAttention ? `${pendingAttention} need input` : ''].filter(Boolean).join(' · ')}>

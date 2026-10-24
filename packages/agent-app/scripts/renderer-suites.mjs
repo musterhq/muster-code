@@ -71,6 +71,8 @@ export const suites = [
   'file-viewer-parity',
   'limit-resume-dom',
   'chat-render-bounds-dom',
+  'chat-rtl-dom',
+  'composer-rtl-dom',
 ];
 
 /** Suites that open Base UI menus/portals get a split build: their `await import()` of UI code stays a separate
