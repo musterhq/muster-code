@@ -21,6 +21,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Launch and connection failures that never reached the provider are now retried five times with growing waits (1 to 16 seconds) instead of twice.
 - Queued messages can no longer be lost or sent twice around a quit: a message leaves the queue only in the same step that records it as sent, a message already sent is dropped at launch, and messages the Codex app-server held come back to Muster's own queue.
 - Tool rows no longer keep spinning after a Stop, a crash or a quit; they show as interrupted.
+- Browser pages without their own background now render on white instead of the app's dark background.
 - Security: the agent's background-process and terminal tools now prove which chat is calling with the same per-chat token as Muster's other agent tools, so one chat can no longer start, read or stop processes, or read a terminal, as another chat. A call whose chat and token don't match is refused with a plain message.
 - Installing a plugin or MCP connector while a chat is working now makes it usable right away: the chat restarts on a fresh session (keeping its conversation) and re-sends your last message, with a short notice saying so. Idle chats whose last message asked for that plugin get the same treatment; unrelated chats are left alone.
 - Memory: facts and preferences you told Muster once now carry into project and folder chats, and recall looks at your task and recent messages (not just "continue"), with a longer wait for the memory service.

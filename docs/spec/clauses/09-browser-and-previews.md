@@ -15,11 +15,25 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-09-611A](09-browser-and-previews.md#mus-spec-09-611a) | A newly opened browser tab's view is given a white background colour. | [`web pages use a white background independent of the app theme`](../../../packages/agent-app/tests/browser-workspace.test.ts) |
 | [MUS-SPEC-09-465A](09-browser-and-previews.md#mus-spec-09-465a) | Taking a picture of a frozen tab wakes it first; a tab whose page was dropped to save memory is recreated; an unknown tab gives nothing. | [`frame() on a frozen tab thaws it and on a discarded tab recreates it`](../../../packages/agent-app/tests/browser-workspace-memory.test.ts) |
 | [MUS-SPEC-09-465B](09-browser-and-previews.md#mus-spec-09-465b) | A tab an agent tool is using is not frozen when the panel closes and is not discarded to make room; once the agent is done it can be frozen and discarded again. | [`a tab an agent tool is using is neither frozen nor discarded by the memory paths`](../../../packages/agent-app/tests/browser-workspace-memory.test.ts) |
 | [MUS-SPEC-09-465C](09-browser-and-previews.md#mus-spec-09-465c) | A lost connection retries read-only browser tools with backoff, never repeats a click, retries a refused connection for any tool, and gives up after three retries. | [`MCP server: connection resets retry read-only tools with backoff but never repeat a click`](../../../packages/agent-app/tests/browser-route-matrix.test.ts) |
 | [MUS-SPEC-09-465D](09-browser-and-previews.md#mus-spec-09-465d) | The idle sweep leaves a tab an agent tool just used awake for three minutes, then freezes it. | [`agent use thaws a hidden page; the sweeper refreezes it once idle`](../../../packages/agent-app/tests/browser-freeze.test.ts) |
 | [MUS-SPEC-09-564A](09-browser-and-previews.md#mus-spec-09-564a) | A download name with a right-to-left override keeps its real .exe extension and holds no direction control characters. | [`a downloaded file name cannot use text-direction controls to disguise its extension`](../../../packages/agent-app/tests/browser-download-name.test.ts) |
+
+### Page background
+
+<a id="mus-spec-09-611a"></a>
+#### MUS-SPEC-09-611A: Web pages sit on white, not on the app's dark colour
+
+- Precondition: The browser workspace is set up with a fake window and fake page views. Nothing has been opened yet.
+- Action: Open a browser tab on a web page.
+- Expected result: The page view is given the background colour white (`#ffffff`), whatever the app theme is. A page that sets no background of its own therefore shows white, not the app's dark colour.
+- Test: `packages/agent-app/tests/browser-workspace.test.ts::web pages use a white background independent of the app theme`
+- Environment: Node test runner; fake window, view and session objects; no Electron and no network.
+- Known gaps: The page view is a fake that records the colour it was given. The test does not render a real page, so it shows the colour is set, not that a real page looks white.
+- Evidence: UNVERIFIED
 
 ### The agent's tab survives a closed panel
 
