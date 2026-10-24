@@ -38,6 +38,8 @@ Boundaries:
 | [MUS-SPEC-12-558C](12-projects-orgs-and-tasks.md#mus-spec-12-558c) | After the runtime rejects a quiet-hours value of 9999, the field shows the saved value 8. | [`a quiet-hours value the runtime rejects is replaced by the saved value`](../../../packages/agent-app/tests/checkout-settings-reject-dom.tsx) |
 | [MUS-SPEC-12-560C](12-projects-orgs-and-tasks.md#mus-spec-12-560c) | On a Russian layout the physical C, G then I keys run New task and Go to Inbox; on a Dvorak-style Latin layout the typed letter still wins. | [`single-key shortcuts follow the physical letter on non-Latin layouts`](../../../packages/agent-app/tests/wave3-nav.test.ts) |
 | [MUS-SPEC-12-572A](12-projects-orgs-and-tasks.md#mus-spec-12-572a) | A priority named like an object key is dropped, not sent. | [`creating a task ignores a priority that is an Object.prototype key`](../../../packages/agent-app/tests/protocol-bughunt.test.ts) |
+| [MUS-SPEC-12-673A](12-projects-orgs-and-tasks.md#mus-spec-12-673a) | The branch is named release, not heads/release, when a tag shares the name. | [`checkout and memory name the branch when a tag shares its name`](../../../packages/agent-app/tests/branch-tag-same-name.test.ts) |
+| [MUS-SPEC-12-673B](12-projects-orgs-and-tasks.md#mus-spec-12-673b) | With a detached HEAD, check-out gives the short commit id and memory records no branch. | [`a detached HEAD: checkout falls back to the short sha, memory records no branch`](../../../packages/agent-app/tests/branch-tag-same-name.test.ts) |
 
 <a id="mus-spec-12-573a"></a>
 #### MUS-SPEC-12-573A: Two wakes in one moment join into one waiting wake
@@ -291,4 +293,26 @@ Boundaries:
 - Test: `packages/agent-app/tests/protocol-bughunt.test.ts::creating a task ignores a priority that is an Object.prototype key`
 - Environment: Node test runner; no network.
 - Known gaps: The command channel is fake. It does not use the New task form.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-12-673a"></a>
+#### MUS-SPEC-12-673A: Check-out names the branch when a tag has the same name
+
+- Precondition: A repository on branch release with a tag also named release.
+- Action: Ask check-out for the current branch name.
+- Expected result: The answer is release, not heads/release.
+- Test: `packages/agent-app/tests/branch-tag-same-name.test.ts::checkout and memory name the branch when a tag shares its name`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: Tests the git helper. It does not run a full check-out. The same test covers memory (MUS-SPEC-11-673A).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-12-673b"></a>
+#### MUS-SPEC-12-673B: A detached HEAD gives a short commit id, and memory records no branch
+
+- Precondition: A repository whose HEAD is detached.
+- Action: Ask check-out for the branch name and read the memory evidence.
+- Expected result: Check-out answers with the short commit id. Memory has a head commit and no branch.
+- Test: `packages/agent-app/tests/branch-tag-same-name.test.ts::a detached HEAD: checkout falls back to the short sha, memory records no branch`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: On main this file fails to load because readRepoEvidence is not exported, so the red result comes from that; the check-out half answered HEAD on main.
 - Evidence: UNVERIFIED

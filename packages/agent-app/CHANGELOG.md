@@ -47,6 +47,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Cloning a repository from the setup guide no longer leaves a background timer running that could reopen the guide minutes later when you add a folder another way
 - Chat exports and memory notes now redact secrets whose key name is longer than about 64 characters (long dotted or prefixed names such as `spring.datasource.hikari...password`), and the scan stays linear on large input.
 - Switching chats with the terminal dock open no longer starts a shell for each chat. A shell starts when you explicitly open Terminal or choose New terminal.
+- The check-out lease and memory scoping now record the right branch name when a tag shares the branch's name, instead of `heads/<name>`.
 - Settings › Muster Server buttons (invite, revoke, connector and agent actions) ignore a second click while the first is still running, so they no longer fire twice.
 - Help › Third-Party Notices now lists the license of every bundled package. The `buffers` package, which declared none, is recorded as MIT.
 - The Dashboard prices turns the provider reported no cost for from the model catalog or your Settings › Models prices; turns with no known price still count as unpriced.

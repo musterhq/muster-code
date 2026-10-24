@@ -21,6 +21,7 @@ Boundaries:
 | [MUS-SPEC-11-467B](11-memory.md#mus-spec-11-467b) | A bare "continue" searches memory with the first request and recent user messages, ends with "continue", stays within 1,600 characters, and recalls the matching note. | [`recall query uses the task and recent user messages, so a bare "continue" still recalls`](../../../packages/agent-app/tests/memory-run.test.ts) |
 | [MUS-SPEC-11-467C](11-memory.md#mus-spec-11-467c) | The default recall wait is 4,000 ms instead of 1,800 ms. | [`the default recall timeout is raised to about four seconds`](../../../packages/agent-app/tests/memory-run.test.ts) |
 | [MUS-SPEC-11-558A](11-memory.md#mus-spec-11-558a) | After the first save fails slowly and a later toggle saves, the later choice (After runs) is still selected. | [`a failed memory save does not undo a later toggle that went through`](../../../packages/agent-app/tests/memory-settings-rollback-dom.tsx) |
+| [MUS-SPEC-11-673A](11-memory.md#mus-spec-11-673a) | Repository evidence records the branch as release when a tag shares the name. | [`checkout and memory name the branch when a tag shares its name`](../../../packages/agent-app/tests/branch-tag-same-name.test.ts) |
 
 ### Memory suggestions (#471)
 
@@ -92,4 +93,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/memory-settings-rollback-dom.tsx::a failed memory save does not undo a later toggle that went through`
 - Environment: Node and linkedom: a DOM suite with the real PreferencesScreen and a fake bridge; no server.
 - Known gaps: Does not check the error notice text.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-11-673a"></a>
+#### MUS-SPEC-11-673A: Memory records the branch when a tag has the same name
+
+- Precondition: A repository on branch release with a tag also named release.
+- Action: Read the repository evidence that memory saves.
+- Expected result: The branch recorded is release.
+- Test: `packages/agent-app/tests/branch-tag-same-name.test.ts::checkout and memory name the branch when a tag shares its name`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: Reads the evidence function only. It does not save a memory. The same test covers check-out (MUS-SPEC-12-673A).
 - Evidence: UNVERIFIED
