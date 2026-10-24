@@ -77,9 +77,9 @@ export function consoleEntry(args:unknown[],at:number):BrowserConsoleEntry|undef
   return {level:named,message:rawMessage.slice(0,2000),source:typeof rawSource==='string'?rawSource.slice(0,512):'',line:finite(rawLine)?Math.max(0,Math.floor(rawLine)):0,at};
 }
 
-/** Downloaded names never carry a path, control characters or a hidden prefix. */
+/** Downloaded names never carry a path, control characters (including text-direction overrides that can disguise an extension) or a hidden prefix. */
 export function downloadFilename(value:unknown):string {
-  const base=(typeof value==='string'?value:'').split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f<>:"|?*]/g,'_').replace(/^[.\s]+/,'').trim().slice(0,180);
+  const base=(typeof value==='string'?value:'').split(/[\\/]/).pop()!.replace(/[\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]/g,'').replace(/[\u0000-\u001f\u007f<>:"|?*]/g,'_').replace(/^[.\s]+/,'').trim().slice(0,180);
   return base || 'download';
 }
 /** "name.ext", then "name (1).ext" ... against names already taken. */

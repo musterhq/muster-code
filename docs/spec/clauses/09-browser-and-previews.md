@@ -19,6 +19,7 @@ Boundaries:
 | [MUS-SPEC-09-465B](09-browser-and-previews.md#mus-spec-09-465b) | A tab an agent tool is using is not frozen when the panel closes and is not discarded to make room; once the agent is done it can be frozen and discarded again. | [`a tab an agent tool is using is neither frozen nor discarded by the memory paths`](../../../packages/agent-app/tests/browser-workspace-memory.test.ts) |
 | [MUS-SPEC-09-465C](09-browser-and-previews.md#mus-spec-09-465c) | A lost connection retries read-only browser tools with backoff, never repeats a click, retries a refused connection for any tool, and gives up after three retries. | [`MCP server: connection resets retry read-only tools with backoff but never repeat a click`](../../../packages/agent-app/tests/browser-route-matrix.test.ts) |
 | [MUS-SPEC-09-465D](09-browser-and-previews.md#mus-spec-09-465d) | The idle sweep leaves a tab an agent tool just used awake for three minutes, then freezes it. | [`agent use thaws a hidden page; the sweeper refreezes it once idle`](../../../packages/agent-app/tests/browser-freeze.test.ts) |
+| [MUS-SPEC-09-564A](09-browser-and-previews.md#mus-spec-09-564a) | A download name with a right-to-left override keeps its real .exe extension and holds no direction control characters. | [`a downloaded file name cannot use text-direction controls to disguise its extension`](../../../packages/agent-app/tests/browser-download-name.test.ts) |
 
 ### The agent's tab survives a closed panel
 
@@ -64,4 +65,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/browser-freeze.test.ts::agent use thaws a hidden page; the sweeper refreezes it once idle`
 - Environment: Node test runner; a fake browser view and clock; no Electron.
 - Known gaps: Uses fake web contents and a fake clock.
+- Evidence: UNVERIFIED
+
+### Downloads
+
+<a id="mus-spec-09-564a"></a>
+#### MUS-SPEC-09-564A: A downloaded file name has no hidden text-direction characters
+
+- Precondition: A page offers a download whose name has a right-to-left override character in the middle, so `invoice` + override + `fdp.exe` would read as `invoiceexe.pdf`.
+- Action: Work out the file name the in-app browser saves the download under.
+- Expected result: The saved name holds no invisible text-direction characters and still ends in `.exe`. A name that starts with an override character and then reads `report.pdf` is saved as `report.pdf`.
+- Test: `packages/agent-app/tests/browser-download-name.test.ts::a downloaded file name cannot use text-direction controls to disguise its extension`
+- Environment: Node test runner; no network, no provider.
+- Known gaps: Calls the name function used by the download handler, not a real download in the browser tab.
 - Evidence: UNVERIFIED

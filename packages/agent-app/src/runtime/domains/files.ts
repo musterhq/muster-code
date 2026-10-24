@@ -38,10 +38,12 @@ async function writeRunActions(dataDir: string, folderId: string, actions: FileR
 }
 
 /** TRN-12: an absolute (or ~/) path from a transcript reference, normalized. Relative paths have no anchor outside a folder. */
-export function externalPath(value: unknown, home = homedir()): string {
+export function externalPath(value: unknown, home = homedir(), windows = process.platform === 'win32'): string {
   if (typeof value !== 'string' || !value || value.length > 4096 || /[\u0000-\u001f\u007f]/.test(value)) throw new Error('Choose a file.');
   let raw = value;
-  if (raw.startsWith('file://')) { try { raw = fileURLToPath(raw); } catch { throw new Error('Choose a file.'); } }
+  if (raw.startsWith('file://')) { try { raw = fileURLToPath(raw, {windows}); } catch { throw new Error('Choose a file.'); } }
+  // A network share (UNC path) would make Windows contact that server just to inspect the file.
+  if (windows && /^[\\/]{2}/.test(raw)) throw new Error('Choose a file on this computer.');
   if (raw === '~' || raw.startsWith('~/')) raw = join(home, raw.slice(2));
   if (!isAbsolute(raw)) throw new Error('Only absolute paths can be opened outside the chat\'s folders.');
   return resolvePath(raw);
