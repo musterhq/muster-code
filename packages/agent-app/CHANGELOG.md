@@ -5,6 +5,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Memory: facts and preferences you told Muster once now carry into project and folder chats, and recall looks at your task and recent messages (not just "continue"), with a longer wait for the memory service.
+- Memory context is sent again on the next turn after a compaction or a model/provider change.
 - The browser tab an agent is working in now stays usable when you close the browser panel mid-run: it is no longer frozen or discarded while in use, live previews revive it, and browser tool calls retry safely after a dropped connection (never repeating a click or keystroke).
 - Project task runs now keep working while a build, test or deploy is running instead of stopping to wait, and only stop for decisions the user must make.
 - Agents post the task handoff comment themselves instead of drafting it and asking whether to post it.
