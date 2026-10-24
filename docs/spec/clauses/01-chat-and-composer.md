@@ -17,3 +17,28 @@ A PR that changes this area adds its cases here first: one row in this table, th
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-01-95A](01-chat-and-composer.md#mus-spec-01-95a) | An imported Codex chat and an imported Claude Code chat each record the model and provider their own session ran, in the import note. | not written yet (#95) |
+| [MUS-SPEC-01-95B](01-chat-and-composer.md#mus-spec-01-95b) | The imported-chat note shows the session model and provider as plain text, with no control to change them. | not written yet (#95) |
+
+### Imported chats keep their own model
+<a id="mus-spec-01-95a"></a>
+#### MUS-SPEC-01-95A: An imported chat records the model and provider its session ran
+
+- Precondition: A Codex rollout whose session ran `gpt-6-codex` on provider `openai`, and a Claude Code transcript whose assistant turns ran `claude-fable-5-1`. The app's default model is a different one.
+- Action: Import both sessions.
+- Expected result: Each chat's import note holds the session's own model and provider (`gpt-6-codex` on `openai`, `claude-fable-5-1` on `anthropic`), not the app default.
+- Test: not written yet (#95)
+- Environment: Node test runner; the agent service with a fake provider; fixture sessions in a temp folder.
+- Known gaps: ChatGPT export sessions are not covered (the export names no model). The chat's own model field stays a model Muster can run, so the next message runs on that, not on the imported model.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-95b"></a>
+#### MUS-SPEC-01-95B: The imported-chat note shows the session model read-only
+
+- Precondition: An imported chat whose import note holds the model `gpt-6-codex` and the provider `openai`.
+- Action: Open the chat, and look at the note at the top.
+- Expected result: The note names the model and the provider as plain text. It has no button, input or menu for either. A note with no model records shows no model text.
+- Test: not written yet (#95)
+- Environment: DOM suite in linkedom; the real ImportOrigin component.
+- Known gaps: Does not render the whole chat screen.
+- Evidence: UNVERIFIED
