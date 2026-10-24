@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Large files stay quick to open when the last turn edited them or when you turn on Blame: only the lines near the view are drawn, and the change markers, Keep/Undo, Next/Previous change, copy and find keep working.
 - Installing a plugin or MCP connector while a chat is working now makes it usable right away: the chat restarts on a fresh session (keeping its conversation) and re-sends your last message, with a short notice saying so. Idle chats whose last message asked for that plugin get the same treatment; unrelated chats are left alone.
 - Memory: facts and preferences you told Muster once now carry into project and folder chats, and recall looks at your task and recent messages (not just "continue"), with a longer wait for the memory service.
 - Memory context is sent again on the next turn after a compaction or a model/provider change.

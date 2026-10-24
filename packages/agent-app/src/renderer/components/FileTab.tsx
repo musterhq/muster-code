@@ -26,6 +26,7 @@ import {HighlightedSourceTable} from './HighlightedCode';
 import {codeLanguageFromPath} from './codeLanguage';
 import {InlineFileSource, type InlineFileReview} from './InlineFileSource';
 import {VirtualFileSource, LARGE_FILE_THRESHOLD, virtualFileSelection} from './VirtualFileSource';
+import {virtualRowSelection} from './VirtualRowTable';
 import {friendlyFileError, parseDelimited, delimitedCellType} from './filePresentation';
 import {ResourceState} from './ResourceState';
 import {FileExitActions, FileFallback, HtmlPreview, MediaFile, QuickLookFile} from './FilePreviews';
@@ -146,6 +147,8 @@ function selectedLines(container: HTMLElement | null, source: string): {start: n
   const selection = window.getSelection();
   if (!container || !selection || selection.isCollapsed || !selection.rangeCount) return undefined;
   const virtual = container.querySelector<HTMLElement>('.virtual-file-source');
+  const rows = virtualRowSelection(container.querySelector('.virtual-row-source'));
+  if (rows?.text.trim() && rows.start !== undefined && rows.end !== undefined) return {start: rows.start, end: rows.end, text: rows.text.slice(0, 8000), rect: selection.getRangeAt(0).getBoundingClientRect()};
   const original = virtual && virtualFileSelection(virtual, source);
   if (original?.text.trim()) return {...original, text: original.text.slice(0, 8000), rect: selection.getRangeAt(0).getBoundingClientRect()};
   const text = selection.toString();
@@ -441,7 +444,7 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
           <span>{staleReason}</span>
           <button type="button" onClick={reload}>Refresh</button>
         </div>}
-        {blaming && tab.folderId && tab.path ? <BlameView folderId={tab.folderId} path={tab.path} source={text} targetLine={tab.line}/> : turnReview && turnReview.model.state !== 'clean' ? <InlineFileSource source={text} path={tab.path??''} review={turnReview}/> : latestEdit && !turnReview ? <InlineFileSource source={text} path={tab.path??''} patch={latestEdit.patch} status={latestEdit.status} unavailableReason={latestEdit.unavailableReason}/> : text.length >= LARGE_FILE_THRESHOLD ? <VirtualFileSource source={text} targetLine={tab.line}/> : <HighlightedSourceTable source={text} language={codeLanguageFromPath(tab.path ?? '')} targetLine={tab.line}/ >}
+        {blaming && tab.folderId && tab.path ? <BlameView folderId={tab.folderId} path={tab.path} source={text} targetLine={tab.line}/> : turnReview && turnReview.model.state !== 'clean' ? <InlineFileSource source={text} path={tab.path??''} review={turnReview} targetLine={tab.line}/> : latestEdit && !turnReview ? <InlineFileSource source={text} path={tab.path??''} patch={latestEdit.patch} status={latestEdit.status} unavailableReason={latestEdit.unavailableReason} targetLine={tab.line}/> : text.length >= LARGE_FILE_THRESHOLD ? <VirtualFileSource source={text} targetLine={tab.line}/> : <HighlightedSourceTable source={text} language={codeLanguageFromPath(tab.path ?? '')} targetLine={tab.line}/ >}
         {!text && <p className="file-empty">This file is empty.</p>}
       </div>}
       {richText && kind !== 'html' && !previewAllowed && !truncated && <div className="pane-truncated">Showing source: Document preview is limited to 65,536 characters.</div>}
@@ -477,7 +480,7 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
     </div>
     {find.open && !editing && <FindBar find={find} matchCount={fileFindMatches.length}/>}
     <div className="file-content-layout">
-    <div className="file-document" onScrollCapture={event=>{onScrollCapture(event);if(picked)setPicked(undefined);}} onMouseDown={event=>{if(!(event.target as Element).closest?.('.file-selection-context'))setPicked(undefined);}} onMouseUp={()=>{const selection=window.getSelection();if(selection && code.current?.contains(selection.anchorNode)){const virtual=code.current.querySelector<HTMLElement>('.virtual-file-source');setQuote(((virtual&&virtualFileSelection(virtual,text))?.text??selection.toString()).slice(0,2000));}if(!preview)setPicked(selectedLines(code.current?.querySelector('.code-scroll') ?? null, text));}}>
+    <div className="file-document" onScrollCapture={event=>{onScrollCapture(event);if(picked)setPicked(undefined);}} onMouseDown={event=>{if(!(event.target as Element).closest?.('.file-selection-context'))setPicked(undefined);}} onMouseUp={()=>{const selection=window.getSelection();if(selection && code.current?.contains(selection.anchorNode)){const virtual=code.current.querySelector<HTMLElement>('.virtual-file-source');setQuote(((virtual&&virtualFileSelection(virtual,text))?.text??virtualRowSelection(code.current.querySelector('.virtual-row-source'))?.text??selection.toString()).slice(0,2000));}if(!preview)setPicked(selectedLines(code.current?.querySelector('.code-scroll') ?? null, text));}}>
       {editing && tab.folderId && tab.path ? <FileEditor folderId={tab.folderId} path={tab.path} tabId={tab.id} onSaved={() => {}}/>
         : find.open && text.length >= LARGE_FILE_THRESHOLD ? <div className="code-scroll" role="region" aria-label={`Source of ${tab.path}`} tabIndex={0}><VirtualFileSource source={text} query={find.query} matches={fileFindMatches} current={find.index}/></div>
         : find.open ? <FindHighlightedText text={text} query={find.query} matches={fileFindMatches} current={find.index}/>
