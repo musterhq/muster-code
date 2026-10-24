@@ -30,6 +30,8 @@ Boundaries:
 | [MUS-SPEC-22-3B](22-engineering-standards.md#mus-spec-22-3b) | A not-written-yet case passes only with UNVERIFIED evidence. | [`a not-written-yet case passes only with UNVERIFIED evidence and an issue number`](../../../packages/agent-app/tests/check-spec.test.ts) |
 | [MUS-SPEC-22-3C](22-engineering-standards.md#mus-spec-22-3c) | The traceability index must list exactly the clauses that have cases. | [`a clause with cases must be listed in the traceability index, and one without must not`](../../../packages/agent-app/tests/check-spec.test.ts) |
 | [MUS-SPEC-22-4A](22-engineering-standards.md#mus-spec-22-4a) | The real Muster spec in this repository passes the checker. | [`the real Muster spec passes the checker`](../../../packages/agent-app/tests/check-spec.test.ts) |
+| [MUS-SPEC-22-5A](22-engineering-standards.md#mus-spec-22-5a) | Every `tests/*.tsx` file in the repository is either a suite run by `npm run test:renderer` or excluded with a stated reason, and every listed name has a file. | [`every tests/*.tsx file is a renderer suite or is excluded with a reason`](../../../packages/agent-app/tests/renderer-suites.test.ts) |
+| [MUS-SPEC-22-5B](22-engineering-standards.md#mus-spec-22-5b) | The guard names a stray DOM suite, a stale list entry, a name in both lists and a duplicate. | [`the guard names a stray suite, a stale entry, a name in both lists and a duplicate`](../../../packages/agent-app/tests/renderer-suites.test.ts) |
 
 ### Case format
 
@@ -203,3 +205,28 @@ Boundaries:
 - Environment: Node test runner; the checker runs as a child process on the repository.
 - Known gaps: CI also runs the checker directly; this test keeps the unit suite honest when CI is skipped locally.
 - Evidence: UNVERIFIED
+
+### Renderer suites run in CI
+
+<a id="mus-spec-22-5a"></a>
+#### MUS-SPEC-22-5A: Every DOM suite runs in CI or says why not
+
+- Precondition: The `tests/*.tsx` files of the app, the `suites` list in `scripts/renderer-suites.mjs` that `npm run test:renderer` runs, and its `excluded` map.
+- Action: Compare the files with the two lists.
+- Expected result: Every `tests/*.tsx` file is in `suites` or in `excluded` with a reason, and every name in either list has a file. A DOM suite that nobody lists fails the unit suite, which CI runs on every PR.
+- Test: `packages/agent-app/tests/renderer-suites.test.ts::every tests/*.tsx file is a renderer suite or is excluded with a reason`
+- Environment: Node test runner; reads the real `tests` folder.
+- Known gaps: Proves the suite is listed, not that it passes; the renderer step of CI runs it. A suite in `excluded` is not run by anything.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-22-5b"></a>
+#### MUS-SPEC-22-5B: The guard names what is wrong
+
+- Precondition: A file list with a stray DOM suite, a list with a name that has no file, a name in both lists, and a name listed twice.
+- Action: Ask the guard for the problems.
+- Expected result: Each of the four is reported by name; a file list that matches the lists reports none.
+- Test: `packages/agent-app/tests/renderer-suites.test.ts::the guard names a stray suite, a stale entry, a name in both lists and a duplicate`
+- Environment: Node test runner; pure function over made-up lists.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
