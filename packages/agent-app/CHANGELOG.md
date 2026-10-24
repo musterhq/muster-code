@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- A side chat now has a Back to chat button in its header that returns to the conversation it was opened from, restores a maximized resource pane and focuses the message box. The button is hidden when the side chat has no parent conversation.
 - Configured Responses routers no longer reconnect and fail when a completed response omits cache or reasoning usage counters. Existing counts, authentication, and chat history are preserved; truncated streams still report a failure.
 - The Linux app's terminal works again on Ubuntu 24.04. Linux builds are made on Ubuntu 24.04, so the terminal module runs there and on newer releases.
 - Settings › Muster Server buttons (invite, revoke, connector and agent actions) ignore a second click while the first is still running, so they no longer fire twice.
