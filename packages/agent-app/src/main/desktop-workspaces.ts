@@ -13,7 +13,8 @@ export async function commandAuthority(snapshot:Snapshot,appData:string,input:Pa
   if(input.operation==='terminal')return terminalCwd(snapshot,appData,chat,input.folderId);
   if(input.operation!=='start')return {};
   if(chat.archived)throw new Error('Restore this conversation before starting a command.');
-  if(chat.status==='running'||chat.status==='stopping')throw new Error('Wait for the current agent attempt before starting a host command.');
+  // The chat's own agent starts its background process mid-turn; the user waits for the attempt to end.
+  if(!input.agent&&(chat.status==='running'||chat.status==='stopping'))throw new Error('Wait for the current agent attempt before starting a host command.');
   if(chat.mode!=='agent'||chat.permissionMode!=='full')throw new Error('Host commands require explicitly acknowledged Full access in Agent mode.');
   if(chat.recovery?.kind==='recovery-needed')throw new Error('Resolve the uncertain provider attempt before starting more work.');
   const folder=chat.folderId?snapshot.folders.find(item=>item.id===chat.folderId):undefined;

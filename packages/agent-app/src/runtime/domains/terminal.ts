@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { TerminalAccess } from '../../shared/domains/terminal-protocol.ts';
 import { TERMINAL_MCP, TERMINAL_MCP_LAUNCHER_ENV } from '../terminal-agent-tools.ts';
+import { BACKGROUND_MCP, BACKGROUND_MCP_LAUNCHER_ENV, BACKGROUND_TOOL_NOTE } from '../background-agent-tools.ts';
+import type { Chat } from '../../shared/protocol.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
 const chatId = (input: Record<string, unknown>): string => {
@@ -16,6 +18,13 @@ export function terminalRunOptions(chat: { id: string }, allowed: boolean, launc
   return { configOverrides: { [`mcp_servers.${TERMINAL_MCP}.command`]: launcher, [`mcp_servers.${TERMINAL_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${TERMINAL_MCP}.tool_timeout_sec`]: 30 } };
 }
 
+/** The muster_background server (agent-owned long-running commands that wake the chat when they exit): Agent mode with
+ *  Full access only, the same gate ProcessSessions applies to every start. */
+export function backgroundRunOptions(chat: Pick<Chat, 'id' | 'mode' | 'permissionMode'>, launcher = process.env[BACKGROUND_MCP_LAUNCHER_ENV]) {
+  if (chat.mode !== 'agent' || chat.permissionMode !== 'full' || !launcher || !path.isAbsolute(launcher) || !fs.existsSync(launcher)) return null;
+  return { configOverrides: { [`mcp_servers.${BACKGROUND_MCP}.command`]: launcher, [`mcp_servers.${BACKGROUND_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${BACKGROUND_MCP}.tool_timeout_sec`]: 60 }, developerInstructions: BACKGROUND_TOOL_NOTE };
+}
+
 /** Terminal domain: explicit, per-chat, revocable consent for the agent's read-only terminal tool (off by default). */
 export function createTerminalDomain(ctx: DomainContext): DomainModule {
   const db = ctx.db();
@@ -25,6 +34,7 @@ export function createTerminalDomain(ctx: DomainContext): DomainModule {
     return row ? { chatId: id, allowed: true, allowedAt: row.allowed_at } : { chatId: id, allowed: false };
   };
   const off = ctx.hooks.addRunOptionsContributor(async chat => terminalRunOptions(chat, read(chat.id).allowed));
+  const offBackground = ctx.hooks.addRunOptionsContributor(async chat => backgroundRunOptions(chat));
   return {
     handlers: {
       'terminalAccess.get': input => read(chatId(input)),
@@ -40,6 +50,6 @@ export function createTerminalDomain(ctx: DomainContext): DomainModule {
         return access;
       },
     },
-    dispose() { off(); },
+    dispose() { off(); offBackground(); },
   };
 }
