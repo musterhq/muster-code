@@ -1,6 +1,6 @@
 import { ArrowUp, AtSign, BookmarkPlus, Boxes, Brain, Check, ChevronDown, CircleAlert, CircleDot, Cpu, FilePlus, FileText, Folder, FolderKanban, Gauge, GitBranch, GitCompare, Globe, Goal, Lightbulb, LoaderCircle, MessageSquarePlus, Monitor, MessagesSquare, Mic, Paperclip, PenLine, Pencil, Plus, Search, Server, Shrink, Sparkles, Square, SquarePen, SquareTerminal, X, type LucideIcon } from 'lucide-react';
 import { MemoryRecallChip } from './MemoryRecallChip';
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MAX_ATTACHED_SKILL_BYTES, REASONING_EFFORTS, type Chat, type FileEntry, type PluginEntry, type Project, type QueuedMessage, type ReasoningEffort, type SkillEntry } from '../../shared/protocol';
 import { goalResumable } from '../../shared/domains/goals-protocol';
 import { invoke } from '../bridge';
@@ -13,11 +13,11 @@ import { createChat, flushComposerDraft, getState, loadPlugins, loadProviders, l
 import { ADD_CONTEXT_EVENT, loadComposerMemory, normalizeContextChip, saveComposerMemory, serializeContext, type ContextChip } from '../composerContext';
 import { setTerminalDock, setTerminalPaneView, terminalDock } from '../processSummary';
 import { ChipMirror, ContextStrip, TokenCard } from './ComposerTokens';
-import { useStoreSlice } from '../useStore';
+import { useStoreSelector, useStoreSlice } from '../useStore';
 import { AttachmentStrip, type ComposerAttachment } from './AttachmentStrip';
 import { CaptureSourcePicker, type CaptureResult } from './CaptureSourcePicker';
 import { accessibilityAttachment, utf8Base64 } from '../captureRegion';
-import { ProviderUsageHover } from './ProviderUsage';
+import { ProviderUsageHover, ProviderUsageWarning } from './ProviderUsage';
 import type { ComputerCaptureSource } from '../../shared/domains/computer-protocol';
 import { baseFileName, buildAddRows, buildMentionRows, buildSlashRows, ComposerMenuList, connectorEntries, firstRow, nextRow, pluginLabel, pluginRow, skillRow, skillUsable, type MenuRow } from './ComposerMenu';
 import { ComposerQuestionPanel, useQuestionFlow } from './ComposerQuestionPanel';
@@ -44,6 +44,8 @@ import {Tip} from './Tooltip';
 import { Menu, MenuPopup } from './AppMenu';
 import {ConnectModelPrompt,useNoProvider} from './SetupGuide';
 import { device } from '../../shared/device-noun.ts';
+import { sandboxRouteSupported } from '../../shared/sandbox-routes.ts';
+import { sandboxRouteWarning, useChatEnvironment } from './EnvironmentFooter';
 
 const ACCESS = ACCESS_OPTIONS;
 const COMMAND_ICONS: Record<ComposerCommandId, LucideIcon> = {plan:Lightbulb,goal:Goal,project:FolderKanban,sketch:PenLine,terminal:SquareTerminal,model:Cpu,reasoning:Brain,access:CircleAlert,new:SquarePen,browser:Globe,stop:Square,compact:Shrink,fork:GitBranch,rename:Pencil,status:Gauge,mcp:Server,init:FilePlus,review:GitCompare};
@@ -161,10 +163,22 @@ export function useMentionEntries(folderId: string | undefined, query: string, e
 }
 
 export function Composer({ chat }: { chat: Chat }): React.ReactElement {
-  const state = useStoreSlice('composerDrafts','followUpMode','plugins','providers','screen','sendErrors','sending','settings','skills','snapshot','timelines');
+  const state = useStoreSlice('composerDrafts','followUpMode','plugins','providers','screen','sendErrors','sending','settings','skills','snapshot');
+  // The transcript streams several patches a second: read only the narrow facts the composer renders (see tests/chat-render-bounds-dom.tsx).
   const modEnter = state.settings['general.sendKey'] === 'mod-enter';
   const draft = state.composerDrafts[chat.id];
   const text = draft?.text ?? chat.draft;
+  // A run stopped before its message was sent hands the text back (runtime sets chat.draft); the local empty draft would otherwise hide it.
+  // Only when the run just ended (status changed in the same update): a late save of the user's own typing also changes
+  // chat.draft, and adopting that would bring back text the user had already deleted.
+  const lastRuntimeDraft = useRef({ id: chat.id, draft: chat.draft, status: chat.status });
+  useEffect(() => {
+    const previous = lastRuntimeDraft.current;
+    lastRuntimeDraft.current = { id: chat.id, draft: chat.draft, status: chat.status };
+    if (previous.id !== chat.id) return;
+    const runEnded = previous.status !== chat.status && (chat.status === 'interrupted' || chat.status === 'failed');
+    if (runEnded && chat.draft && chat.draft !== previous.draft && !(draft?.text ?? '').trim()) setComposerDraft(chat.id, chat.draft);
+  }, [chat.id, chat.draft, chat.status]);
   const input = useRef<HTMLTextAreaElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
@@ -197,8 +211,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const [panel, setPanel] = useState<{ kind: 'goal'; initial: string; mode: 'set' | 'edit' } | { kind: 'skill'; draft: SkillDraft } | { kind: 'sketch'; editing?: string } | { kind: 'info'; view: InfoView } | null>(null);
   /** Strokes behind each attached sketch (by attachment localId), so clicking its tile reopens it for editing. */
   const sketches = useRef(new Map<string, SketchStroke[]>());
-  /** "Send message?" while the queue is paused, and Codex's "Resume paused goal?" after a send. */
-  const [confirmSend, setConfirmSend] = useState(false);
+  /** Codex's "Resume paused goal?" after a send. */
   const [askResume, setAskResume] = useState(false);
   const [plusQuery, setPlusQuery] = useState('');
   const [plusActive, setPlusActive] = useState(0);
@@ -206,7 +219,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   /** User and detected MCP servers for the + menu's Connectors & MCP section (read when the menu opens). */
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   /** CS-B11: the oldest pending provider question, answered in the panel above the card with the textarea as its custom answer. */
-  const questionFlow = useQuestionFlow(chat.id, pendingQuestionItem(state.timelines[chat.id]?.value));
+  const questionItem = useStoreSelector(current => pendingQuestionItem(current.timelines[chat.id]?.value)?.item);
+  const questionFlow = useQuestionFlow(chat.id, useMemo(() => questionItem ? pendingQuestionItem([questionItem]) : null, [questionItem]));
   /** CS-A1-3: running shells and background commands of this chat, for the Terminals pill. */
   const runningTerminals = useRunningTerminals(chat.id);
   const [popoverActive, setPopoverActive] = useState(0);
@@ -224,6 +238,12 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const backgroundAttempt = useRef<{ key: string; chatId: string; requestId: string } | null>(null);
   const [chipHover, setChipHover] = useState<{ index: number; left: number; top: number; start: number } | null>(null);
   const [fullConfirm, setFullConfirm] = useState(false);
+  /** #653: the access level a sandbox chat asked to raise to, waiting on "Leave the sandbox?". */
+  const [leaveSandbox, setLeaveSandbox] = useState<Exclude<ComposerAccess, 'read-only'> | null>(null);
+  /** Set once "Leave the sandbox?" is confirmed, so the Full access confirmation that may follow keeps leaving. */
+  const leavingSandbox = useRef(false);
+  const { environment } = useChatEnvironment(chat.id);
+  const inSandbox = environment?.env === 'sandbox';
   const [settingsError, setSettingsError] = useState('');
   const [settingsChanging, setSettingsChanging] = useState(false);
   const settingsPending = useRef(false);
@@ -265,6 +285,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const imageBlind = imageBlindModel(providers, chat.providerId, chat.model);
   const toolBlind = chat.mode === 'plan' ? null : toolBlindModel(providers, chat.providerId, chat.model);
   const toolAlternative = toolBlind ? toolCapableAlternative(providers, chat.providerId, chat.model) : null;
+  const sandboxBlind = inSandbox && !sandboxRouteSupported(state.providers.value, chat.providerId);
   const selectedModel = modelOptions.find(model => model.id === chat.model && model.providerId === chat.providerId);
   const modelEfforts = selectedModel?.efforts ?? REASONING_EFFORTS;
   const storedEffort = efforts[chat.id];
@@ -285,7 +306,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   /** CS-B3-6: a plugin chip's defaultPrompt[0], shown after the chips while nothing else is typed. */
   const promptHint = pluginPromptHint(text, tokenRanges, state.plugins.value ?? []);
   const chipAtCaret = chipRanges.find(range => caret > range.start && caret <= range.end);
-  const popoverBlocked = composing.current || menu !== null || modelOpen || fullConfirm || dismissed === text;
+  const popoverBlocked = composing.current || menu !== null || modelOpen || fullConfirm || leaveSandbox !== null || dismissed === text;
   const slash = popoverBlocked ? null : readSlashQuery(text, caret);
   const mention = popoverBlocked || slash || chipAtCaret ? null : readMentionQuery(text, caret);
   const mentionQuery = mention?.query ?? '';
@@ -491,8 +512,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     setText: value => { setComposerDraft(chat.id, value); setCaret(value.length); }, setChips, setContext, setAttachments, chooseEffort, flash, notifyError });
   const clearIfUnchanged = (value: string) => { if (currentDraft.current.chatId === chat.id && currentDraft.current.text === value) { setComposerDraft(chat.id, ''); setCaret(0); } };
 
-  /** Idle send. While the queue is paused Codex first asks "Send message?" (clear the queue or keep it). */
-  const submit = (confirmed = false) => {
+  /** Idle send. A paused queue keeps its held messages: they run, in order, after this one. */
+  const submit = () => {
     // While the agent waits on a question, the composer text is its custom answer (the arrow is Next/Submit too).
     if (questionFlow && !questionFlow.collapsed) { void answerQuestion(); return; }
     if (noProvider && !running) { setConnectAsk(true); return; }
@@ -501,22 +522,17 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     // /compact is Muster's own command: it runs here (or waits), and is never sent to the model.
     if (isCompactCommand(text)) { clearIfUnchanged(text); if (running) flash('Compacts as soon as the current turn finishes'); runCommand('compact'); return; }
     if (running) { void followUp(false); return; }
-    if (!confirmed && chat.queuePaused && queue.length) { setConfirmSend(true); return; }
     if (isCheckoutQueued(chat.id)) { flash('Already queued · starts when the other chat in this folder finishes'); return; }
     recall.current = null;
-    const ids = readyIds, payload = chipPayload(text, chips, vocabulary), goal = chat.goal, body = outgoing(text), extras = { ...payload, ...(storedEffort ? { effort } : {}) };
+    const ids = readyIds, sentContext = new Set(contextChips.map(chip => chip.id)), sentChips = new Set(chips.map(chip => chip.token)), payload = chipPayload(text, chips, vocabulary), goal = chat.goal, body = outgoing(text), extras = { ...payload, ...(storedEffort ? { effort } : {}) };
     // CHAT-06: another chat running in this checkout → worktree / queue / run anyway / cancel, before anything starts.
     void sendWithCheckoutGuard(chat.id, { hasAttachments: ids.length > 0 }, target => sendMessage(target, body, extras, target === chat.id ? ids : [])).then(sent => {
       if (!sent || currentDraft.current.chatId !== chat.id) return;
-      setChips(() => []); setContext(() => []); dropSent(ids);
+      // Only what was sent goes: a chip added while the send was in flight stays for the next message.
+      setChips(current => current.filter(chip => !sentChips.has(chip.token))); setContext(current => current.filter(chip => !sentContext.has(chip.id))); dropSent(ids);
       // A paused goal: offer to resume it now that the user is back (Codex "Resume paused goal?").
       if (goal?.status === 'paused' && !resumeDeclined.has(`${chat.id}:${goal.createdAt}`)) setAskResume(true);
     });
-  };
-  const clearQueueAndSend = async () => {
-    setConfirmSend(false);
-    try { await invoke('chat.queue.clear', { id: chat.id }); } catch (cause) { setQueueError(runtimeMessage(cause)); return; }
-    submit(true);
   };
   const answerResume = async (answer: 'resume' | 'keep' | 'later') => {
     setAskResume(false);
@@ -661,8 +677,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     if (source.path) { const folder = typeof source.folderId === 'string' ? source.folderId : chat.folderId; if (folder) void openFile(folder, source.path, source.line); }
   };
   /** A quote whose message is gone from the loaded timeline (edited or forked away) is marked stale. */
-  const loadedItems = state.timelines[chat.id]?.value;
-  const shownContext = contextChips.map(chip => chip.type === 'quote' && chip.source.itemId && (chip.source.chatId ?? chat.id) === chat.id && loadedItems && !loadedItems.some(item => item.id === chip.source.itemId) ? { ...chip, stale: true } : chip);
+  const staleQuotes = useStoreSelector(current => { const loaded = current.timelines[chat.id]?.value; return loaded ? contextChips.filter(chip => chip.type === 'quote' && chip.source.itemId && (chip.source.chatId ?? chat.id) === chat.id && !loaded.some(item => item.id === chip.source.itemId)).map(chip => chip.id).join('\0') : ''; });
+  const shownContext = contextChips.map(chip => staleQuotes && staleQuotes.split('\0').includes(chip.id) ? { ...chip, stale: true } : chip);
 
   const updateAttachment = (localId: string, patch: Partial<ComposerAttachment>) => setAttachments(current => current.map(item => item.localId === localId ? { ...item, ...patch } : item));
   const stage = async (item: ComposerAttachment) => {
@@ -815,13 +831,18 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   };
   const chooseAccess = async (permissionMode: ComposerAccess, acknowledgeFullAccess = false, rememberFolder = false) => {
     if (settingsBlocked || settingsPending.current || modelPending.current) return;
-    if (permissionMode === selectedAccess && !acknowledgeFullAccess) { setMenu(null); accessTrigger.current?.focus(); return; }
+    if (permissionMode === selectedAccess && !acknowledgeFullAccess && !(inSandbox && permissionMode !== 'read-only')) { setMenu(null); accessTrigger.current?.focus(); return; }
+    // #653: raising access in a sandbox chat leaves the sandbox, and never silently.
+    const leaving = inSandbox && permissionMode !== 'read-only', confirmedLeave = leavingSandbox.current;
+    leavingSandbox.current = false;
+    if (leaving && !confirmedLeave) { setMenu(null); setLeaveSandbox(permissionMode); return; }
     // CS-B7-3: a folder where the user chose "Don't ask again" switches straight to Full access (Settings › Chat undoes it).
-    if (permissionMode === 'full' && !acknowledgeFullAccess) { if (skipsFullAccessConfirm(chat.folderId)) acknowledgeFullAccess = true; else { setMenu(null); setFullConfirm(true); return; } }
+    if (permissionMode === 'full' && !acknowledgeFullAccess) { if (skipsFullAccessConfirm(chat.folderId)) acknowledgeFullAccess = true; else { setMenu(null); leavingSandbox.current = confirmedLeave; setFullConfirm(true); return; } }
     const request = ++settingsRequest.current;
     settingsPending.current = true; setSettingsChanging(true); setSettingsError('');
     try {
-      await invoke('chat.setPermissionMode', { id: chat.id, permissionMode, ...(acknowledgeFullAccess ? { acknowledgeFullAccess: true } : {}) });
+      if (leaving) await invoke('sandbox.chatEnvironment.set', { chatId: chat.id, env: 'host', permissionMode, ...(acknowledgeFullAccess ? { acknowledgeFullAccess: true } : {}) });
+      else await invoke('chat.setPermissionMode', { id: chat.id, permissionMode, ...(acknowledgeFullAccess ? { acknowledgeFullAccess: true } : {}) });
       if (request !== settingsRequest.current || currentDraft.current.chatId !== chat.id) return;
       // Remembered so a second chat in the same folder starts with the access level this one settled on (CHAT-24).
       if (chat.folderId) saveFolderAccess(chat.folderId, permissionMode);
@@ -829,6 +850,12 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
       setFullConfirm(false); setMenu(null); if (running) flash('Access applies to the next turn'); requestAnimationFrame(() => accessTrigger.current?.focus());
     } catch (cause) { if (request === settingsRequest.current && currentDraft.current.chatId === chat.id) setSettingsError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (request === settingsRequest.current) { settingsPending.current = false; setSettingsChanging(false); } }
+  };
+  const confirmLeaveSandbox = () => {
+    const level = leaveSandbox; setLeaveSandbox(null);
+    if (!level) return;
+    leavingSandbox.current = true;
+    void chooseAccess(level);
   };
   /** The goal editor opens prefilled with the draft (minus a `/goal` token); with an empty draft it edits the unfinished goal. */
   const openGoal = (range?: { start: number; end: number }) => {
@@ -844,9 +871,9 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     requestAnimationFrame(() => input.current?.focus());
   };
   const projects = state.snapshot?.projects ?? [];
-  const timelineItems = state.timelines[chat.id]?.value;
   /** Only a chat without messages moves; otherwise a new chat opens in the chosen project. */
-  const movesToProject = !running && Boolean(timelineItems) && !timelineItems!.some(item => item.kind === 'user');
+  const hasUserMessage = useStoreSelector(current => Boolean(current.timelines[chat.id]?.value?.some(item => item.kind === 'user')));
+  const movesToProject = useStoreSelector(current => { const loaded = current.timelines[chat.id]?.value; return !running && Boolean(loaded) && !loaded!.some(item => item.kind === 'user'); });
   const chooseProject = async (next: Project | null) => {
     setMenu(null);
     if ((next?.id ?? undefined) === chat.projectId) { restoreCaret(); return; }
@@ -859,14 +886,14 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     setMenu(null);
     if (await createChat(chat.folderId, chat.projectId, { draft: SKILL_RECORDER_PROMPT })) flash('Recording a skill · send to start the interview');
   };
-  const openSaveSkill = () => { setMenu(null); setPanel({ kind: 'skill', draft: skillDraft(timelineItems ?? []) }); };
+  const openSaveSkill = () => { setMenu(null); setPanel({ kind: 'skill', draft: skillDraft(getState().timelines[chat.id]?.value ?? []) }); };
   const skillSaved = (slug: string) => {
     setPanel(null);
     void loadSkills(true, activeFolderPath ? [activeFolderPath] : []);
     flash(`Saved skill $${slug} · find it under / and +`);
     requestAnimationFrame(() => input.current?.focus());
   };
-  const commandDisabled = (id: ComposerCommandId) => id === 'stop' ? !running : id === 'plan' ? choicesDisabled : id === 'model' || id === 'access' ? settingsBlocked : id === 'goal' || id === 'project' || id === 'sketch' || id === 'terminal' ? chat.archived : id === 'compact' ? (!chat.providerThreadId && !timelineItems?.some(item => item.kind === 'user')) : id === 'init' || id === 'review' ? chat.archived || !chat.folderId : false;
+  const commandDisabled = (id: ComposerCommandId) => id === 'stop' ? !running : id === 'plan' ? choicesDisabled : id === 'model' || id === 'access' ? settingsBlocked : id === 'goal' || id === 'project' || id === 'sketch' || id === 'terminal' ? chat.archived : id === 'compact' ? (!chat.providerThreadId && !hasUserMessage) : id === 'init' || id === 'review' ? chat.archived || !chat.folderId : false;
   const runCommand = (id: ComposerCommandId, range?: { start: number; end: number }) => {
     if (commandDisabled(id)) return;
     if (range) replaceRange(range.start, range.end, '');
@@ -1062,7 +1089,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     if (text && !(oneLine || (up ? field.selectionStart === 0 : field.selectionEnd === text.length))) return;
     if (!recall.current) {
       if (!up || text !== '') return;
-      const values = (state.timelines[chat.id]?.value ?? []).filter(item => item.kind === 'user').map(item => item.text).reverse();
+      const values = (getState().timelines[chat.id]?.value ?? []).filter(item => item.kind === 'user').map(item => item.text).reverse();
       if (!values.length) return;
       recall.current = { values, index: -1 };
     }
@@ -1117,6 +1144,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     <div className="composer-attachments"><AttachmentStrip chatId={chat.id} items={attachments} onRemove={removeAttachment} onRetry={retryAttachment}
       onOpen={item => { if (!sketches.current.has(item.localId)) return false; openSketch(item.localId); return true; }} /></div>
     {toolBlind && <p className="composer-tools-warning" role="status" data-testid="tools-blind-warning">{TOOLS_BLIND_NOTICE}.{toolAlternative && <> <button type="button" data-testid="tools-blind-switch" disabled={settingsBlocked || running} onClick={() => void chooseModel(toolAlternative.model, toolAlternative.providerId)}>Switch to {toolAlternative.name}</button></>}</p>}
+    <ProviderUsageWarning providerId={chat.providerId || undefined} />
+    {sandboxBlind && <p className="composer-tools-warning" role="status" data-testid="sandbox-route-warning">{sandboxRouteWarning()}</p>}
     {imageBlind && attachments.some(item => item.kind === 'image') && <p className="composer-image-warning" role="status" data-testid="image-blind-warning">{imageBlindWarning(imageBlind)}</p>}
     {largePaste && <div className="composer-paste-offer" role="group" aria-label="Large paste">
       <FileText size={14} aria-hidden="true" /><span>Large paste · {formatBytes(largePaste.bytes)}</span>
@@ -1127,7 +1156,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     <ContextStrip chips={shownContext} onRemove={id => { setContext(current => current.filter(chip => chip.id !== id)); requestAnimationFrame(() => input.current?.focus()); }} onOpenSource={openContextSource} />
     <div className={`composer-field${tokenRanges.length ? ' has-chips' : ''}`} onMouseMove={onFieldMouseMove} onMouseLeave={() => setChipHover(null)}>
       {tokenRanges.length > 0 && <ChipMirror text={text} ranges={tokenRanges} selected={selection} plugins={state.plugins.value ?? []} mirror={mirror} hint={promptHint || undefined} />}
-      <textarea ref={input} data-testid="composer-input" className={`composer-input${answering && questionFlow!.question.isSecret ? ' is-secret' : ''}`} aria-label={answering ? 'Answer' : 'Message'} readOnly={chat.archived}
+      <textarea ref={input} dir="auto" data-testid="composer-input" className={`composer-input${answering && questionFlow!.question.isSecret ? ' is-secret' : ''}`} aria-label={answering ? 'Answer' : 'Message'} readOnly={chat.archived}
         aria-describedby={descriptionIds}
         aria-controls={slash || mention ? caretPopoverId : undefined} aria-expanded={slash || mention ? true : undefined}
         aria-activedescendant={caretRows.length && caretActive >= 0 ? `${caretPopoverId}-${caretActive}` : undefined}
@@ -1217,7 +1246,10 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     {settingsError && !fullConfirm && <div className="composer-error" role="alert">{settingsError}</div>}
     <FullAccessConfirm open={fullConfirm} folderName={state.snapshot?.folders.find(folder => folder.id === chat.folderId)?.name} canRemember={Boolean(chat.folderId)}
       pending={settingsChanging} blocked={settingsBlocked} error={settingsError || undefined} cancelRef={cancelFull} finalFocus={accessTrigger}
-      onOpenChange={open => { if (!settingsPending.current) setFullConfirm(open); }} onConfirm={remember => void chooseAccess('full', true, remember)} />
+      onOpenChange={open => { if (!settingsPending.current) { setFullConfirm(open); if (!open) leavingSandbox.current = false; } }} onConfirm={remember => void chooseAccess('full', true, remember)} />
+    <ConfirmSheet open={leaveSandbox !== null} testId="leave-sandbox-confirm" title="Leave the sandbox?" description={`Commands will run on ${device().lower} with ${leaveSandbox === 'full' ? 'full' : 'workspace'} access.`}
+      onCancel={() => { setLeaveSandbox(null); requestAnimationFrame(() => accessTrigger.current?.focus()); }}
+      actions={[{ label: 'Cancel', run: () => { setLeaveSandbox(null); requestAnimationFrame(() => accessTrigger.current?.focus()); } }, { label: 'Leave sandbox', primary: true, run: confirmLeaveSandbox }]} />
     {sending ? <span className="composer-status" role="status" aria-live="polite">Sending…</span>
       : note ? <span className="composer-status" role="status" aria-live="polite">{note}</span>
       : dictation && text ? <span className="composer-status is-dictation" role="status" aria-live="polite">{dictation.interim ? `Listening… ${dictation.interim}` : 'Listening…'}</span> : null}
@@ -1229,8 +1261,6 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     <RecordSkill open={panel?.kind === 'skill'} draft={panel?.kind === 'skill' ? panel.draft : { name: '', description: '', body: '' }} onClose={() => setPanel(null)} onSaved={skillSaved} />
     <SketchPad open={panel?.kind === 'sketch'} initial={panel?.kind === 'sketch' && panel.editing ? sketches.current.get(panel.editing) : undefined} onClose={() => { setPanel(null); requestAnimationFrame(() => input.current?.focus()); }}
       onAttach={(file, strokes) => attachSketch(file, strokes, panel?.kind === 'sketch' ? panel.editing : undefined)} />
-    <ConfirmSheet open={confirmSend} testId="queue-send-confirm" title="Send message?" description={`You are about to send a message. Do you want to clear the ${plural(queue.length, 'message')} previously queued?`}
-      onCancel={() => setConfirmSend(false)} actions={[{ label: 'Clear queue', run: () => void clearQueueAndSend() }, { label: 'Send message', primary: true, run: () => { setConfirmSend(false); submit(true); } }]} />
     {/* Composer stays mounted (just visually hidden) behind Memory/Settings/Projects/Automations, since only
         `.work-surface`'s `hidden` attribute changes when the screen does. Without the screen check this portal
         (ConfirmSheet renders via createPortal to document.body) would pop up over whichever unrelated screen

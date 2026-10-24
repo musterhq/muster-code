@@ -163,7 +163,7 @@ function selectedLines(container: HTMLElement | null, source: string): {start: n
 // Editing (WRK-08): a textarea editor with line numbers, Cmd+S to save, and a
 // conflict prompt when the file changed on disk since it was loaded.
 
-function FileEditor({folderId, path, tabId, onSaved}: {folderId: string; path: string; tabId: string; onSaved: () => void}): React.ReactElement {
+export function FileEditor({folderId, path, tabId, onSaved}: {folderId: string; path: string; tabId: string; onSaved: () => void}): React.ReactElement {
   const [state, setState] = useState<{phase: 'loading'} | {phase: 'ready'; original: string; draft: string; revision: string} | {phase: 'error'; message: string}>({phase: 'loading'});
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
@@ -174,7 +174,13 @@ function FileEditor({folderId, path, tabId, onSaved}: {folderId: string; path: s
     let live = true;
     setState({phase: 'loading'});
     void invoke('files.readFull', {folderId, path}).then(
-      value => { if (live) setState({phase: 'ready', original: value.text, draft: value.text, revision: value.revision}); },
+      value => {
+        if (!live) return;
+        // Saving writes the whole buffer back, so a file that was not read faithfully must never be editable.
+        if (value.truncated) setState({phase: 'error', message: 'This file is too large to edit here, so it was not opened for editing. Open it in an editor instead.'});
+        else if (value.encodingWarning) setState({phase: 'error', message: 'This file has bytes that are not valid UTF-8, so editing it here would replace them. Open it in an editor instead.'});
+        else setState({phase: 'ready', original: value.text, draft: value.text, revision: value.revision});
+      },
       cause => { if (live) setState({phase: 'error', message: friendlyFileError(cause)}); },
     );
     return () => { live = false; };
@@ -186,16 +192,18 @@ function FileEditor({folderId, path, tabId, onSaved}: {folderId: string; path: s
     if (state.phase !== 'ready' || saving) return;
     setSaving(true); setSaveError('');
     try {
-      const result = await invoke('files.write', {folderId, path, text: state.draft, ...(force ? {} : {expectedRevision: state.revision})});
+      const saved = state.draft;
+      const result = await invoke('files.write', {folderId, path, text: saved, ...(force ? {} : {expectedRevision: state.revision})});
       if (result.conflict) { setConflict(true); return; }
-      setState({phase: 'ready', original: state.draft, draft: state.draft, revision: result.revision});
+      // Keep whatever was typed while the write was in flight; only the saved baseline moves.
+      setState(prior => prior.phase === 'ready' ? {phase: 'ready', original: saved, draft: prior.draft, revision: result.revision} : prior);
       setConflict(false);
       void refreshFileBody(folderId, path);
       onSaved();
     } catch (cause) { setSaveError(friendlyFileError(cause)); }
     finally { setSaving(false); }
   }, [state, saving, folderId, path, onSaved]);
-  const discardAndReload = () => { setConflict(false); void invoke('files.readFull', {folderId, path}).then(value => setState({phase: 'ready', original: value.text, draft: value.text, revision: value.revision})); };
+  const discardAndReload = () => { setSaveError(''); void invoke('files.readFull', {folderId, path}).then(value => { setConflict(false); setState({phase: 'ready', original: value.text, draft: value.text, revision: value.revision}); }, cause => setSaveError(friendlyFileError(cause))); };
   if (state.phase === 'loading') return <ResourceState kind="loading" label={`Loading ${path}`} rows={6}/>;
   if (state.phase === 'error') return <ResourceState kind="error" message={state.message}/>;
   const lineCount = state.draft.split('\n').length;
@@ -436,7 +444,7 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
     content = <>
       {ready!.native ? <NativeDocument key={tab.id} folderId={tab.folderId!} path={tab.path!} revision={ready!} onToggleResourceMaximize={onToggleResourceMaximize} resourceMaximized={resourceMaximized}/> : document ? <PdfFile document={document} onLocation={setLocation}/> : workbook || (delimited.workbook && preview) ? <WorkbookFile key={`workbook:${tab.id}`} delimited={isDelimited} workbook={workbook ?? delimited.workbook!} onLocation={locateCell} onToggleFullPage={onToggleResourceMaximize} fullPage={resourceMaximized}/> : asset ? <ImageFile asset={asset} name={tab.title}/> : preview && delimited.error ? <div className="pane-error" role="alert"><p>Cannot preview this table: {delimited.error}</p><button onClick={() => setMode('source')}>View source</button></div> : preview && kind === 'html' ? <HtmlPreview html={text} name={tab.title}/> : preview ? <div className="file-markdown" data-kind={kind} role="region" aria-label={`Preview of ${tab.path}`} tabIndex={0}>
         {kind === 'markdown' && text && <DocumentCopyButton text={text}/>}
-        {kind === 'markdown' ? <MessageBody text={text} resourceContext={{folderId: tab.folderId!, path: tab.path!}}/> : <StructuredFile text={text} kind={kind as 'json'|'csv'|'tsv'}/>}
+        {kind === 'markdown' ? <MessageBody text={text} resourceContext={{folderId: tab.folderId!, path: tab.path!}} asDocument/> : <StructuredFile text={text} kind={kind as 'json'|'csv'|'tsv'}/>}
         {!text && <p className="file-empty">This document is empty.</p>}
       </div> : <div className="code-scroll" role="region" aria-label={`Source of ${tab.path}`} tabIndex={0}>
         {staleReason && <div className="inline-file-diff-stale" role="status">

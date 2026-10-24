@@ -119,8 +119,8 @@ assert.equal(store.get('muster.summaryHidden'),'false');
 // #324 colour themes: a swatch picker per appearance, wired to settings.set; stock Muster Light/Dark are the defaults.
 const picker=(label:string)=>document.querySelector(`.theme-picker[aria-label="${label}"]`) as HTMLElement;
 const names=(label:string)=>Array.from(picker(label).querySelectorAll('.theme-option-name')).map(el=>el.textContent);
-assert.deepEqual(names('Light theme'),['Muster Light','High Contrast Light','Solarized Light','Warm Sepia']);
-assert.deepEqual(names('Dark theme'),['Muster Dark','High Contrast Dark','Solarized Dark','GitHub Dark']);
+assert.deepEqual(names('Light theme'),['Muster Light','High Contrast Light','Solarized Light','Warm Sepia','Chalk','Daylight','Indigo Day','Linen','Stone','Ember Light','Pure White']);
+assert.deepEqual(names('Dark theme'),['Muster Dark','High Contrast Dark','Solarized Dark','GitHub Dark','Charcoal','Midnight','Indigo Night','Deep Navy','Phosphor','Ink','Slate','Ember Dark','Aubergine','Moss','Pure Black','Studio']);
 assert.equal((picker('Dark theme').querySelector('[aria-checked="true"] .theme-option-name') as HTMLElement).textContent,'Muster Dark','the stock theme is the default selection');
 (Array.from(picker('Dark theme').querySelectorAll('button')).find(el=>el.textContent?.endsWith('GitHub Dark')) as HTMLButtonElement).click();await delay(10);
 assert.ok(calls.some(call=>call.command==='settings.set'&&call.input.key==='appearance.darkTheme'&&call.input.value==='github-dark'),'choosing a theme goes through settings.set');

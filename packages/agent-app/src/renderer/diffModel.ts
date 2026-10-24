@@ -58,11 +58,37 @@ export function wordSpans(oldLine: string, newLine: string): { del: CharSpan[]; 
 
 export interface DiffBuild { rows: DiffRow[]; /** True when the word-pair budget ran out. */ wordLimited: boolean }
 
+const splitWithEnds = (text: string): string[] => text === '' ? [] : text.split(/(?<=\n)/);
+
+/**
+ * Line changes with the shared head and tail peeled off first. The general line diff gives up past an edit-length
+ * budget, which would hide the preview of a created or deleted file (and of a long block inserted into an
+ * otherwise untouched file) although there is nothing to align: a one-sided middle is just added or removed lines.
+ */
+function lineChanges(before: string, after: string, ignoreWhitespace: boolean): {value: string; added?: boolean; removed?: boolean}[] | undefined {
+  const a = splitWithEnds(before), b = splitWithEnds(after);
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+  const midA = a.slice(head, a.length - tail).join(''), midB = b.slice(head, b.length - tail).join('');
+  let middle: {value: string; added?: boolean; removed?: boolean}[];
+  if (!midA && !midB) middle = [];
+  else if (!midA) middle = [{value: midB, added: true}];
+  else if (!midB) middle = [{value: midA, removed: true}];
+  else { const found = diffLines(midA, midB, {timeout:1000,maxEditLength:2000,ignoreWhitespace}); if (!found) return undefined; middle = found; }
+  const out: {value: string; added?: boolean; removed?: boolean}[] = [];
+  if (head) out.push({value: a.slice(0, head).join('')});
+  out.push(...middle);
+  if (tail) out.push({value: a.slice(a.length - tail).join('')});
+  return out;
+}
+
 export function buildDiff(before: string, after: string, ignoreWhitespace = false): DiffBuild {
   const rows: DiffRow[] = [];
   let oldNo = 1;
   let newNo = 1;
-  const changes = diffLines(before, after, {timeout:1000,maxEditLength:2000,ignoreWhitespace});
+  const changes = lineChanges(before, after, ignoreWhitespace);
   if (!changes) throw new Error('This change is too complex for the inline preview. Open the file or use Git to review it.');
   let wordBudget = WORD_PAIR_BUDGET, wordLimited = false;
   for (let i = 0; i < changes.length; i++) {

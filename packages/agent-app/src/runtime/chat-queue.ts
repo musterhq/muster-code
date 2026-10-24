@@ -17,8 +17,11 @@ export function queueActionAfter(status: ChatStatus): 'dispatch' | 'hold' {
 }
 /** Codex copy for the paused-queue banner. */
 export function queuePausedLabel(reason: QueuePause): string {
-  return reason === 'interrupted' ? 'Queue paused because you interrupted' : 'Queue paused because the last run did not finish';
+  return reason === 'interrupted' ? 'Queue paused because you interrupted' : reason === 'limited' ? 'Queue waits for the usage limit to reset' : 'Queue paused because the last run did not finish';
 }
+
+/** The queued row was removed or edited while its dispatch was being prepared; nothing was sent. */
+export class QueueChangedError extends Error { constructor() { super('The queued message changed before it was sent.'); this.name = 'QueueChangedError'; } }
 
 export interface QueueChips { skillIds?: string[]; pluginIds?: string[]; effort?: ReasoningEffort }
 interface ChipRow { id: string; skill_ids: string; plugin_ids: string; effort: string | null }
@@ -124,30 +127,45 @@ export class ChatQueue {
     this.reorder(chatId, [queueId, ...ids.filter(id => id !== queueId)]);
   }
 
-  /** Remove the head (with its chips) for dispatch. Put it back with `restore` when the send is refused. */
-  take(chatId: string): QueuedMessage | undefined {
+  /** The next message to dispatch, with its chips. It stays queued until `consume` runs inside the send's receipt transaction. */
+  head(chatId: string): QueuedMessage | undefined {
     const head = this.store.queue(chatId)[0];
-    if (!head) return undefined;
-    const extra = this.chips([head.id]).get(head.id);
-    const removed = this.store.removeQueued(chatId, head.id);
-    if (removed) this.dropChips(head.id);
-    const { error: _error, ...chips } = extra ?? {};
-    return removed ? { ...removed, ...chips } : undefined;
+    return head ? this.withChips([head])[0] : undefined;
   }
 
-  /** Puts a refused item back at the head, marked failed so the row offers Retry. */
-  restore(chatId: string, item: QueuedMessage, error?: string): void {
-    const { skillIds, pluginIds, effort, error: _previous, ...plain } = item;
-    this.store.enqueue(chatId, plain, Number.MAX_SAFE_INTEGER, 'head');
-    this.saveChips(item.id, { skillIds, pluginIds, effort });
-    if (error) this.db.prepare('INSERT OR REPLACE INTO chat_queue_errors (id, error) VALUES (?, ?)').run(item.id, error.slice(0, 2000));
+  /**
+   * #450: removes a dispatched row inside chat.send's receipt transaction (raw statements: the store's
+   * transaction is already open), so a quit between dispatch and send neither loses the message nor
+   * sends it twice. Throws QueueChangedError when the row was removed or edited after dispatch began.
+   */
+  consume(chatId: string, item: QueuedMessage): void {
+    const row = this.db.prepare('SELECT text, attachment_ids FROM chat_queue WHERE chat_id = ? AND id = ?').get(chatId, item.id) as { text: string; attachment_ids: string } | undefined;
+    if (!row || row.text !== item.text || row.attachment_ids !== JSON.stringify(item.attachmentIds)) throw new QueueChangedError();
+    this.db.prepare('DELETE FROM chat_queue WHERE chat_id = ? AND id = ?').run(chatId, item.id);
+    this.dropChips(item.id);
+  }
+
+  /** Marks a refused row so it offers Retry instead of being skipped. */
+  fail(queueId: string, error: string): void { this.db.prepare('INSERT OR REPLACE INTO chat_queue_errors (id, error) VALUES (?, ?)').run(queueId, error.slice(0, 2000)); }
+
+  /**
+   * #450, at boot: a row whose request id already has a send receipt was sent (never send it again);
+   * rows the Codex app-server held natively come back under Muster's dispatch, because that process
+   * and its in-memory queue ended with the app. Returns the chats whose queue changed.
+   */
+  recoverAtBoot(): string[] {
+    const sent = this.db.prepare('SELECT q.chat_id AS chat_id, q.id AS id FROM chat_queue q JOIN receipts r ON r.request_id = q.request_id').all() as unknown as { chat_id: string; id: string }[];
+    for (const row of sent) { this.db.prepare('DELETE FROM chat_queue WHERE chat_id = ? AND id = ?').run(row.chat_id, row.id); this.dropChips(row.id); }
+    const native = this.db.prepare('SELECT DISTINCT chat_id FROM chat_queue_native').all() as unknown as { chat_id: string }[];
+    this.db.exec('DELETE FROM chat_queue_native');
+    return [...new Set([...sent.map(row => row.chat_id), ...native.map(row => row.chat_id)])];
   }
   clearError(queueId: string): void { this.db.prepare('DELETE FROM chat_queue_errors WHERE id = ?').run(queueId); }
 
   /** Why the queue is not dispatching, or undefined when it runs. */
   paused(chatId: string): QueuePause | undefined {
     const row = this.db.prepare('SELECT paused FROM chat_queue_state WHERE chat_id = ?').get(chatId) as { paused: string } | undefined;
-    return row?.paused === 'interrupted' || row?.paused === 'failed' ? row.paused : undefined;
+    return row?.paused === 'interrupted' || row?.paused === 'failed' || row?.paused === 'limited' ? row.paused : undefined;
   }
   pause(chatId: string, reason: QueuePause): void { this.db.prepare('INSERT OR REPLACE INTO chat_queue_state (chat_id, paused) VALUES (?, ?)').run(chatId, reason); }
   resume(chatId: string): void { this.db.prepare('DELETE FROM chat_queue_state WHERE chat_id = ?').run(chatId); }

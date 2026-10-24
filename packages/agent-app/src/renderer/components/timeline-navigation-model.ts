@@ -60,6 +60,8 @@ export function createTimelineProjection(){
       sameTurns&&=next===old;turns.push(next);
     };
     for(const item of items){
+      // Memory suggestions live in the Memory inbox, never inline in the transcript.
+      if(item.kind==='notice'&&item.data?.kind==='memory-offer')continue;
       const last=rows.at(-1);
       if(item.kind==='tool'&&last?.kind==='activity'){last.items.push(item);subagents.see(last,item);continue;}
       const rowIndex=rows.length;

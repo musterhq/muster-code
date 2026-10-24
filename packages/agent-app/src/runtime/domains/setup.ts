@@ -93,6 +93,7 @@ export function createSetupDomain(context: DomainContext, options: SetupDomainOp
       list, paths: tuning.paths ?? (() => watchedProviderPaths({ dataDir: context.dataDir })),
       ...(tuning.stat ? { stat: tuning.stat } : {}), ...(tuning.intervalMs ? { intervalMs: tuning.intervalMs } : {}), ...(tuning.debounceMs ? { debounceMs: tuning.debounceMs } : {}),
       ...(context.modelCatalogReady ? { ready: context.modelCatalogReady } : {}),
+      ...(context.providersSettled ? { settled: context.providersSettled } : {}),
       emit: change => context.emit({ type: 'providersChanged', ...change }),
       onReady: async providers => {
         const memory = readMemory();

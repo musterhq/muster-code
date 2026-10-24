@@ -866,7 +866,7 @@
         "runtime": 3030
       },
       "version": "0.1.1",
-      "license": "UNKNOWN",
+      "license": "MIT",
       "licenseFile": null,
       "direct": false
     },

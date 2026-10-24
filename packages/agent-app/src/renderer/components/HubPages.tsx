@@ -23,6 +23,7 @@ import { notifyError, notifySuccess } from '../store';
 import { useStore } from '../useStore';
 import { AGENT_STATE_LABEL, ApprovalActions, INBOX_KIND_LABEL, Monogram, Receipt, RUN_STATE_LABEL, StateChip, TaskStatusIcon, agentTone, duration, explainRunError, runTone, type Tone } from './HubParts';
 import { AuditRuns } from './AuditRuns';
+import { IdleCheckoutActions } from './CheckoutPanel';
 import { CostsPanel } from './CostsPanel';
 import { ReflectActions, ReflectionSection } from './ReflectionCoach';
 import { InboxOptions } from './InboxOptions';
@@ -49,7 +50,7 @@ const KIND_LABEL: Record<string, string> = { ...INBOX_KIND_LABEL, completed: 'Do
 export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | null; nav: HubNav }): React.ReactElement {
   const { snapshot: app } = useStore();
   const [filter, setFilter] = useState<'all' | InboxBucket>('all');
-  const [group, setGroup] = useState('all');
+  const [chosenGroup, setGroup] = useState('all');
   const [view, setView] = useState<InboxView>('all');
   const [clock, setClock] = useState(0);
   const { meta, reload: reloadMeta } = useInboxMeta();
@@ -68,6 +69,8 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
   const inView = useMemo(() => applyView(items, view, meta, owner, now), [items, view, meta, snapshot?.tasks, clock]);
   const viewCounts = useMemo<Record<InboxView, number>>(() => ({ all: applyView(items, 'all', meta, owner, now).length, mine: applyView(items, 'mine', meta, owner, now).length, unread: applyView(items, 'unread', meta, owner, now).length, snoozed: applyView(items, 'snoozed', meta, owner, now).length }), [items, meta, snapshot?.tasks, clock]);
   const groups = useMemo(() => [...new Set(inView.map(i => i.group))], [inView]);
+  // A group whose items are gone falls back to Everything: the Group menu is hidden with one group left, so a stale choice could not be undone.
+  const group = chosenGroup !== 'all' && groups.includes(chosenGroup) ? chosenGroup : 'all';
   const counts = useMemo(() => { const c = new Map<string, number>(); for (const i of inView) c.set(i.bucket, (c.get(i.bucket) ?? 0) + 1); return c; }, [inView]);
   const visible = decisionOrder(inView.filter(i => (filter === 'all' || i.bucket === filter) && (group === 'all' || i.group === group)), meta);
   // The tidy policy runs when the Inbox is on screen and its items change; it never touches a question, approval, review or problem.
@@ -114,13 +117,14 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
             <button type="button" className="ws-row-text ws-row-link" disabled={item.action.kind === 'none'} onClick={() => act(item)}><span className="ws-row-title">{item.title}</span><span className="ws-row-meta">{item.kind === 'failed_run' || item.kind === 'agent_error' ? explainRunError(item.why) : item.why}</span></button>
             {item.org ? <span className="ws-source ws-org-chip" title={`${item.org.name} · ${NAMES.server}`}>{item.org.name}</span> : item.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}
             <span className="ws-row-age" title={exactTime(item.at)}>{agoLabel(item.at)}</span>
-            {item.action.kind !== 'none' && <button type="button" className="settings-button secondary ws-row-action" onClick={() => act(item)}>{label(item)}</button>}
+            {item.action.kind !== 'none' && !item.checkout && <button type="button" className="settings-button secondary ws-row-action" onClick={() => act(item)}>{label(item)}</button>}
             <GateActions item={item} onChanged={reloadMeta}/>
             <ReflectActions item={item} onChanged={() => void refreshWorkspace(true)}/>
             {item.source !== 'paperclip' && !item.id.startsWith('chat-') && <SnoozeMenu item={item} snoozed={snoozedNow(item, meta)} onChanged={reloadMeta}/>}
             <Tip label="Dismiss"><button type="button" className="icon-button ws-row-dismiss" aria-label={`Dismiss ${item.title}`} onClick={() => void dismissInboxItem({ id: item.id, at: item.at, title: item.title }).catch(notifyError)}><X size={13} aria-hidden="true"/></button></Tip>
           </div>
           {item.approval && <ApprovalActions approvalId={item.approval.id} verbs={item.approval.verbs}/>}
+          {item.checkout && item.taskId && <IdleCheckoutActions taskId={item.taskId} onChanged={() => void refreshWorkspace(true)}/>}
           {item.bucket === 'needs' && item.taskId && !item.id.startsWith('ws:gate:') && <DecisionExtras item={item} meta={meta.get(item.id)} agentName={item.agentId ? snapshot?.agents.find(a => a.id === item.agentId)?.name ?? null : null} onChanged={reloadMeta}/>}
         </li>)}</ul>
       </section>)}
