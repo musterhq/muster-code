@@ -74,3 +74,10 @@ test('the files domain confines paths to the chosen folder', async t => {
   await assert.rejects(async () => handlers['files.openWith']({folderId: 'g', path: 'docs/a.md', app: 'vscode'}), /does not exist/);
   assert.equal(opened.length, 1);
 });
+
+// Spec: MUS-SPEC-19-564A (docs/spec/clauses/19-security-and-redaction.md#mus-spec-19-564a)
+test('Windows network (UNC) paths are not opened from transcript references', async () => {
+  const {externalPath} = await import('../src/runtime/domains/files.ts');
+  for (const value of ['file://attacker.example/share/x.txt', '\\\\attacker.example\\share\\x.txt', '//attacker.example/share/x.txt'])
+    assert.throws(() => externalPath(value, 'C:\\Users\\me', true), /Choose a file/, value);
+});

@@ -29,6 +29,11 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
+const gitText = (cwd: string, args: string[]) => new Promise<string | null>(resolve => execFile('git', ['-c', 'core.fsmonitor=false', ...args], { cwd, timeout: 1_500, windowsHide: true }, (error, out) => resolve(error ? null : String(out).trim() || null)));
+/** HEAD and branch of a folder. `symbolic-ref` names the branch even when a tag shares its name (`rev-parse --abbrev-ref` answers `heads/<name>`, and so does `--short`, so the full ref is trimmed); a detached HEAD has no branch. */
+export const readRepoEvidence = (path: string): Promise<RunContextRepo | null> => Promise.all([gitText(path, ['rev-parse', 'HEAD']), gitText(path, ['symbolic-ref', '-q', 'HEAD'])])
+  .then(([head, branch]) => head && /^[0-9a-f]{40,64}$/.test(head) ? { head, ...(branch ? { branch: branch.replace(/^refs\/heads\//, '') } : {}) } : null);
+
 export const RECALL_TIMEOUT_MS = 4_000;
 /** Recall query bounds: the task (first request) plus the last few user messages, so "continue" still recalls what matters. */
 export const RECALL_QUERY_MAX_CHARS = 1_600, RECALL_RECENT_MESSAGES = 3;
@@ -100,6 +105,19 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
   db.exec('CREATE TABLE IF NOT EXISTS memory_deleted_documents (document_id TEXT NOT NULL, scope TEXT NOT NULL, bank_id TEXT, engine TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, next_at TEXT, job_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (scope, document_id))');
   db.exec('CREATE TABLE IF NOT EXISTS memory_offer_history (chat_id TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL)');
   db.exec('CREATE INDEX IF NOT EXISTS memory_offer_history_chat ON memory_offer_history (chat_id)');
+  // One surfaced offer per chat per local day; kept durably so a restart does not reset the throttle.
+  db.exec('CREATE TABLE IF NOT EXISTS memory_offer_days (chat_id TEXT PRIMARY KEY, day TEXT NOT NULL)');
+  const dayKey = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const offerDays = {
+    /** True (and records today) when this chat has not had an offer yet today. */
+    take(chatId: string): boolean {
+      const today = dayKey();
+      const row = db.prepare('SELECT day FROM memory_offer_days WHERE chat_id = ?').get(chatId) as { day: string } | undefined;
+      if (row?.day === today) return false;
+      db.prepare('INSERT INTO memory_offer_days (chat_id, day) VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET day = excluded.day').run(chatId, today);
+      return true;
+    },
+  };
   /** Recent run-summary offers per chat, so an active session iterating on the same task doesn't
    *  re-suggest remembering it after every turn. Kept in a small table so a restart doesn't re-offer what
    *  was just offered; rows past the dedupe window, beyond the per-chat cap, or for deleted chats are pruned. */
@@ -116,6 +134,8 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
       db.prepare('DELETE FROM memory_offer_history WHERE at < ?').run(now - OFFER_DEDUPE_WINDOW_MS);
       const chats = db.prepare('SELECT DISTINCT chat_id FROM memory_offer_history').all() as { chat_id: string }[];
       for (const { chat_id } of chats) if (!context.store.chat(chat_id)) db.prepare('DELETE FROM memory_offer_history WHERE chat_id = ?').run(chat_id);
+      // A throttle row only matters on its own day.
+      db.prepare('DELETE FROM memory_offer_days WHERE day <> ?').run(dayKey(new Date(now)));
     },
   };
   const archiveDir = join(context.dataDir, 'memory-archives');
@@ -494,13 +514,11 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
   const RECALL_MAX_RECORDS = 6, RECALL_MAX_CHARS = 3200;
   // Repository evidence (MEM-07): HEAD and branch from git, cached briefly so a burst of turns never waits on git twice.
   const repoCache = new Map<string, { at: number; value: Promise<RunContextRepo | null> }>();
-  const git = (cwd: string, args: string[]) => new Promise<string | null>(resolve => execFile('git', args, { cwd, timeout: 1_500, windowsHide: true }, (error, out) => resolve(error ? null : String(out).trim() || null)));
   const repoEvidence = (path: string | undefined): Promise<RunContextRepo | null> => {
     if (!path) return Promise.resolve(null);
     const hit = repoCache.get(path);
     if (hit && Date.now() - hit.at < 5_000) return hit.value;
-    const value = Promise.all([git(path, ['rev-parse', 'HEAD']), git(path, ['rev-parse', '--abbrev-ref', 'HEAD'])])
-      .then(([head, branch]) => head && /^[0-9a-f]{40,64}$/.test(head) ? { head, ...(branch && branch !== 'HEAD' ? { branch } : {}) } : null);
+    const value = readRepoEvidence(path);
     repoCache.set(path, { at: Date.now(), value });
     return value;
   };
@@ -614,8 +632,11 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
     offerHistory.set(chat.id, recordOffer(history, summary));
     const folderId = chat.folderId && context.store.folder(chat.folderId) ? chat.folderId : undefined;
     if (autoRetain === 'ask') {
+      // The Memory inbox reads these rows; the transcript hides them. Only the first candidate of the day is
+      // listed as an offer, later ones are kept as held rows (status 'held') so nothing is lost.
+      const listed = offerDays.take(chat.id);
       const before = revision(chat.id);
-      context.store.appendItem(chat.id, 'notice', 'Suggested a note about this run for memory. Review it in Memory to remember or dismiss it.', 'offer', { kind: 'memory-offer', chatId: chat.id, runId, summary });
+      context.store.appendItem(chat.id, 'notice', listed ? 'Suggested a note about this run for memory. Review it in Memory to remember or dismiss it.' : 'Held a note about this run for memory.', listed ? 'offer' : 'held', { kind: 'memory-offer', chatId: chat.id, runId, summary, ...(listed ? {} : { held: true }) });
       publish(chat.id, before);
       return;
     }
