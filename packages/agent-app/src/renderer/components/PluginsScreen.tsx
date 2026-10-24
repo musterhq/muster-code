@@ -253,7 +253,7 @@ function SkillDetail({ skill, shadowedBy, onEdit, onForked }: { skill: SkillEntr
     </div>
     {shadowedBy && <p className="plugin-detail-notice-inline">Shadowed by {shadowedBy}: a folder skill beats a user skill, which beats an installed one with the same name.</p>}
     <div className="plugin-detail-path">{skill.path}</div>
-    {skill.readError ? <div className="plugin-detail-read-error"><p>Could not read SKILL.md</p><code>{skill.readError}</code></div> : skill.readme ? <MessageBody text={skill.readme} /> : <p className="plugin-detail-empty">No SKILL.md found in this skill directory.</p>}
+    {skill.readError ? <div className="plugin-detail-read-error"><p>Could not read SKILL.md</p><code>{skill.readError}</code></div> : skill.readme ? <MessageBody text={skill.readme} asDocument /> : <p className="plugin-detail-empty">No SKILL.md found in this skill directory.</p>}
     {(skill.provenance === LOCAL_SKILLS || skill.provenance === '~/.codex/skills') && !skill.readError && <SkillStudio name={skill.name} canFork={skill.provenance === LOCAL_SKILLS} onForked={onForked} />}
   </div>;
 }

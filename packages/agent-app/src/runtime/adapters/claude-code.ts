@@ -1,11 +1,12 @@
 import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {cliSpawn, jsonLines, loadImages, text} from './shared.ts';
+import {killTree} from './cli-common.ts';
 import {launcherSpec} from '../launcher-script.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
 import {CLAUDE_CODE_ALIASES, CLAUDE_CODE_DEFAULT} from './claude-models.ts';
 
-export type Spawn = (command: string, args: string[], options: {cwd: string; env: NodeJS.ProcessEnv; stdio: ['pipe', 'pipe', 'pipe']; windowsHide?: boolean}) => ChildProcess;
+export type Spawn = (command: string, args: string[], options: {cwd: string; env: NodeJS.ProcessEnv; stdio: ['pipe', 'pipe', 'pipe']; windowsHide?: boolean; detached?: boolean}) => ChildProcess;
 /** Claude Code's default and family aliases only; the versioned list comes from claude-models.ts. */
 export const CLAUDE_CODE_MODELS = [CLAUDE_CODE_DEFAULT, ...CLAUDE_CODE_ALIASES];
 
@@ -21,6 +22,10 @@ function toolArgs(servers: AdapterRunInput['mcpServers']): string[] {
     '--allowedTools', ...CLAUDE_SUBAGENT_TOOLS, ...names.map(name => `mcp__${name}`)];
 }
 
+/** #653: Claude Code's host tools that run commands or change files, denied outright while the chat is sandboxed. Reads
+ *  (Read, Grep, Glob, LS) stay; commands and edits go through the muster_sandbox tools. */
+export const CLAUDE_SANDBOX_DENIED_TOOLS = ['Bash', 'BashOutput', 'KillShell', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit'];
+
 export function claudeArgs(input: AdapterRunInput, sessionId: string): string[] {
   const alias = input.model.replace(/^claude-code\//, '');
   return ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
@@ -30,7 +35,9 @@ export function claudeArgs(input: AdapterRunInput, sessionId: string): string[] 
     // Muster's own tool servers (in-app browser, terminal, mailbox…): loaded alongside the user's, and allowed, since
     // they are first-party and each enforces its own lease and scope. Both flags are variadic, so a flag follows them.
     ...toolArgs(input.mcpServers),
-    '--permission-mode', claudePermissionMode(input.permissionMode),
+    // Variadic too, so a flag follows it. A deny rule wins over every permission mode and allow rule.
+    ...(input.sandboxed ? ['--disallowedTools', ...CLAUDE_SANDBOX_DENIED_TOOLS] : []),
+    '--permission-mode', claudePermissionMode(input.sandboxed ? 'read-only' : input.permissionMode),
     ...(alias && alias !== 'default' ? ['--model', alias] : []),
     ...(input.reasoningEffort ? ['--effort', input.reasoningEffort] : []),
     ...(input.resumeThreadId ? ['--resume', input.resumeThreadId] : ['--session-id', sessionId]),
@@ -107,6 +114,10 @@ const handBack = (content: string): string => { const at = content.indexOf('The 
 /** The turn's stdin: the plain prompt, or with images one stream-json user message whose
  *  image content blocks carry the attachment bytes (the model sees them directly). */
 export const claudeUserMessage = (text: string): string => JSON.stringify({type: 'user', message: {role: 'user', content: [{type: 'text', text}]}}) + '\n';
+/** A steer is written as another user message. Said bare, the model often answers just it and ends the turn with the
+ *  original task half done: frame it as a correction to fold in, then keep working. */
+export const claudeSteerText = (text: string): string =>
+  `[The user sent this while you were working. Take it into account and continue the current task; do not stop after acknowledging it. If it changes the task, adjust and keep going until the task is done.]\n\n${text}`;
 export function claudeStdin(input: Pick<AdapterRunInput, 'prompt' | 'images'>): string {
   if (!input.images?.length) return claudeUserMessage(input.prompt);
   const images = loadImages(input.images);
@@ -128,7 +139,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       const env = {...(options.env ?? process.env), ...(input.env ?? {})}; delete env.ANTHROPIC_API_KEY;
       let child: ChildProcess;
       const launch = cliSpawn(options.binary, claudeArgs(input, sessionId), env);
-      try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true}); }
+      try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32'}); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `Claude Code could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let accepted = false, settled = false, final: {ok: boolean; text: string} | undefined, stderr = '', streamedText = false;
       // `pending` counts results still owed. The CLI folds a message that arrives mid-turn into that turn, so several
@@ -215,7 +226,10 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       const threadFor = (parent: unknown) => typeof parent === 'string' && parent ? `${sessionId}:${parent}` : sessionId;
       const finish = (result: AdapterRunResult) => { if (settled) return; settled = true; input.signal.removeEventListener('abort', abort); clearTimeout(killer); clearTimeout(watchdog); clearTimeout(grace); resolve(result); };
       let killer: ReturnType<typeof setTimeout> | undefined;
-      const abort = () => { child.kill('SIGINT'); killer = setTimeout(() => child.kill('SIGKILL'), options.killGraceMs ?? 3000); };
+      // SIGINT lets the CLI stop its own work; then the whole process group goes, so a tool command it started (which still
+      // holds stdout) cannot keep the run open after Stop.
+      const abort = () => { child.kill('SIGINT'); killer = setTimeout(() => killTree(child, 'SIGKILL'), options.killGraceMs ?? 3000); };
+      child.on('exit', () => { if (input.signal.aborted) killTree(child, 'SIGKILL'); });
       if (input.signal.aborted) abort(); else input.signal.addEventListener('abort', abort, {once: true});
       child.stderr?.setEncoding('utf8');
       child.stderr?.on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-4096); });
@@ -342,7 +356,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       input.onSteerable?.(message => {
         if (settled || inputClosed || !child.stdin || input.signal.aborted) return false;
         pending++; unanswered++;
-        try { child.stdin.write(claudeUserMessage(message)); if (grace) { clearTimeout(grace); grace = undefined; } return true; } catch { pending--; unanswered--; return false; }
+        try { child.stdin.write(claudeUserMessage(claudeSteerText(message))); if (grace) { clearTimeout(grace); grace = undefined; } return true; } catch { pending--; unanswered--; return false; }
       });
     });
   }};

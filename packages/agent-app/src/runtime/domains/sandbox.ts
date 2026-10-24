@@ -7,7 +7,8 @@
  * So a 'sandbox' chat gets the fallback the brief names: the `muster_sandbox` MCP tool set (sandbox_exec, sandbox_read,
  * sandbox_write, sandbox_list, see runtime/sandbox-agent-tools.ts) routed through the W4-C style agent-tools host,
  * the chat's host access set to read-only (the provider's own read-only sandbox mode, since `sandbox*` config overrides
- * are filtered by provider.ts), and the run's cwd switched to the host side of the container's /workspace bind mount so
+ * are filtered by provider.ts; #653: provider.ts also keeps every sandboxed run read-only and denies each route's host
+ * shell and edit tools), and the run's cwd switched to the host side of the container's /workspace bind mount so
  * host-side reads see exactly what the container sees. Mode 'copy' seeds that workspace from the chat's folder;
  * 'mount' is refused with its reason until the core can bind a caller-supplied folder.
  */
@@ -19,31 +20,18 @@ import type { ChatBrowserPlacement, ChatEnvironmentKind, ChatEnvironmentMode, Ch
 import type { ScopedComputerRef } from '../../shared/scoped-computer-protocol.ts';
 import { currentAgentSandboxHost, type AgentSandboxHost } from '../sandbox-registry.ts';
 import { SANDBOX_MCP } from '../sandbox-agent-tools.ts';
-import { providerAccessPolicy } from '../provider-run-lifecycle.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 import { device } from '../../shared/device-noun.ts';
 
-export const SANDBOX_ENV_LABEL = 'Sandbox · Linux container';
+import { SANDBOX_BROWSER_ENDPOINT, SANDBOX_ENV_LABEL, sandboxNote } from '../sandbox-note.ts';
+import { SANDBOX_ROUTE_UNSUPPORTED, sandboxToolsReach } from '../../shared/sandbox-routes.ts';
+
+export { NO_SANDBOX_TOOLS_NOTE, SANDBOX_BROWSER_ENDPOINT, SANDBOX_ENV_LABEL, routeSandboxNote, sandboxNote } from '../sandbox-note.ts';
 export const HOST_ENV_LABEL = device().title;
 export const SANDBOX_NOT_READY = `${SANDBOX_ENV_LABEL} is not running for this chat. Start it in the Sandbox tab (or switch the chat back to ${HOST_ENV_LABEL}), then send again.`;
 export const MOUNT_UNSUPPORTED = 'Mounting the folder itself into the container is not available yet: the container core binds only its own workspace. Choose the isolated copy.';
-/** SBX-11: the note's browser sentence when the chat's browser runs inside the container instead. */
-export const SANDBOX_BROWSER_ENDPOINT = 'http://127.0.0.1:9222';
-const HOST_BROWSER_SENTENCE = 'The agent browser, when available, runs on the user\'s Mac, not in the container.';
-const CONTAINER_BROWSER_SENTENCE = `This chat's browser runs inside the container, not on the user's Mac: headless Chromium with its DevTools endpoint at ${SANDBOX_BROWSER_ENDPOINT} (reachable only inside the container). Drive it from sandbox_exec (for example a CDP or Playwright script); do not use host browser tools for this chat's pages.`;
-/** What the provider's own shell can still do on the host. It is not disabled: the provider process stays on
- * the Mac under the chat's access setting (read-only on entering the sandbox). Codex enforces that with its own
- * sandbox; Claude Code only with a permission mode (policy, not a sandbox) — so the note never claims enforcement. */
-function hostShellSentence(access: ChatPermissionMode): string {
-  const level = access === 'read-only' ? 'read-only' : access === 'full' ? 'full access' : 'write access to this folder';
-  return `Your own shell and file tools still run on the user's Mac, outside the container, and this chat's access there is ${level}. Do not use them to run commands or change files in this chat.`;
-}
-/** Turn note for a sandbox chat; the tools describe themselves, this fixes where work happens and says truthfully what still runs on the host. */
-export function sandboxNote(access: ChatPermissionMode = 'read-only', browser: 'host' | 'sandbox' = 'host'): string {
-  return `This chat runs in ${SANDBOX_ENV_LABEL}. The working folder you see is the host side of the container's /workspace (an isolated copy of the project). Run every command with the sandbox_exec tool and make every file change with sandbox_write. ${hostShellSentence(access)} Paths passed to sandbox tools are relative to /workspace. The user applies your changes to their Mac later through a diff review. ${browser === 'sandbox' ? CONTAINER_BROWSER_SENTENCE : HOST_BROWSER_SENTENCE}`;
-}
-export const SANDBOX_NOTE = sandboxNote('read-only', 'host');
-export const SANDBOX_BROWSER_NOTE = sandboxNote('read-only', 'sandbox');
+export const SANDBOX_NOTE = sandboxNote('host');
+export const SANDBOX_BROWSER_NOTE = sandboxNote('sandbox');
 const SKIP = new Set(['node_modules', '.DS_Store']);
 const COMPARE_SKIP = new Set(['node_modules', '.DS_Store', '.git']);
 const MAX_SEED_BYTES = 2 * 1024 ** 3, MAX_WALK = 100_000, MAX_CHANGES = 2000, MAX_DIFF = 1024 * 1024, MAX_COMPARE = 32 * 1024 * 1024;
@@ -156,7 +144,7 @@ export function createSandboxDomain(ctx: DomainContext): DomainModule {
   const unsubscribe = ctx.hooks.addRunOptionsContributor(async chat => {
     if (!inSandbox(chat.id)) return null;
     const launcher = await host().agentToolsLauncher(async chatId => scopeForChat(chatFor(chatId)));
-    return { developerInstructions: sandboxNote(providerAccessPolicy(chat).permissionMode, browserOf(row(chat.id)) === 'sandbox' ? 'sandbox' : 'host'), configOverrides: { [`mcp_servers.${SANDBOX_MCP}.command`]: launcher, [`mcp_servers.${SANDBOX_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${SANDBOX_MCP}.tool_timeout_sec`]: 1830 } };
+    return { developerInstructions: sandboxNote(browserOf(row(chat.id)) === 'sandbox' ? 'sandbox' : 'host'), configOverrides: { [`mcp_servers.${SANDBOX_MCP}.command`]: launcher, [`mcp_servers.${SANDBOX_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${SANDBOX_MCP}.tool_timeout_sec`]: 1830 } };
   });
 
   /** A project's sandbox is shared: it is only stopped once no other live (unarchived) chat in the project remains. */
@@ -189,8 +177,14 @@ export function createSandboxDomain(ctx: DomainContext): DomainModule {
         if (mode !== 'copy' && mode !== 'mount') throw new Error('Invalid sandbox mode.');
         if (running(chat)) throw new Error('Stop the chat before changing where it runs.');
         if (env === 'sandbox' && mode === 'mount') throw new Error(MOUNT_UNSUPPORTED);
+        // #653: leaving to raise access names the level to switch to (the user confirmed that commands then run on the host).
+        const raise = input.permissionMode;
+        if (raise !== undefined && (env !== 'host' || (raise !== 'workspace' && raise !== 'full'))) throw new Error('Invalid access policy.');
+        if (raise === 'full' && input.acknowledgeFullAccess !== true) throw new Error('Confirm unrestricted filesystem, command execution and network access before selecting Full access.');
         const current = row(chat.id);
         if (env === 'sandbox') {
+          // #652: only routes that receive the sandbox tools (and deny their host shell and edits) can be sandboxed.
+          if (current?.env !== 'sandbox' && chat.providerId && !sandboxToolsReach(ctx.modelCatalog?.().providers.find(provider => provider.id === chat.providerId)?.driver ?? 'codex-app-server')) throw new Error(`${SANDBOX_ROUTE_UNSUPPORTED}. Pick a model that supports the sandbox first.`);
           host();
           if (current?.env !== 'sandbox') {
             const previous = chat.permissionMode ?? 'workspace';
@@ -200,7 +194,8 @@ export function createSandboxDomain(ctx: DomainContext): DomainModule {
           } else save({ ...current, mode });
         } else {
           // Restore whatever access policy the chat had before sandboxing (not just 'workspace'); 'full' needs its own re-acknowledgement gate.
-          if (current?.env === 'sandbox' && current.previous_permission && current.previous_permission !== 'read-only' && chat.permissionMode === 'read-only') {
+          if (raise) await ctx.invoke('chat.setPermissionMode', { id: chat.id, permissionMode: raise, ...(raise === 'full' ? { acknowledgeFullAccess: true } : {}) });
+          else if (current?.env === 'sandbox' && current.previous_permission && current.previous_permission !== 'read-only' && chat.permissionMode === 'read-only') {
             const restore = current.previous_permission as ChatPermissionMode;
             await ctx.invoke('chat.setPermissionMode', { id: chat.id, permissionMode: restore, ...(restore === 'full' ? { acknowledgeFullAccess: true } : {}) });
           }

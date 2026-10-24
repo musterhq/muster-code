@@ -24,3 +24,13 @@ test('renderer crash policy reloads once and asks on a repeat within a minute',(
   assert.equal(isRendererCrash('killed'),true);
   assert.equal(isRendererCrash('clean-exit'),false,'reloads and navigations are not crashes');
 });
+
+// Spec: MUS-SPEC-16-564A (docs/spec/clauses/16-notifications-and-attention.md#mus-spec-16-564a)
+test('the dock badge comes back when the window loses focus with the same pending count', async () => {
+  const {createBadgeTracker} = await import('../src/main/app-shell.ts');
+  const track = createBadgeTracker();
+  assert.deepEqual(track(3, false), {badge: '3', bounce: true});
+  assert.deepEqual(track(3, true), {badge: '', bounce: false});
+  assert.deepEqual(track(3, false), {badge: '3', bounce: false});
+  assert.equal(track(3, false), null);
+});

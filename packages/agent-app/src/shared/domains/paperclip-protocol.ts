@@ -133,10 +133,10 @@ export interface WorkspaceRun {
   /** Muster runs open their chat. */
   chatId?: string;
 }
-export type InboxKind = 'review' | 'blocked' | 'approval' | 'question' | 'failed_run' | 'agent_error' | 'mention' | 'mail' | 'budget' | 'other';
+export type InboxKind = 'review' | 'blocked' | 'approval' | 'question' | 'failed_run' | 'agent_error' | 'mention' | 'mail' | 'budget' | 'checkout' | 'other';
 /** `group` is the project it belongs to (the Inbox groups by it); `source` says whether it came from Paperclip or Muster. */
 /** `chatIds`: a Muster task's run chats. The Inbox lists and counts the task, not those chats again. */
-export interface WorkspaceInboxItem { id: string; kind: InboxKind; /** The org (company) a server item belongs to, so one Inbox over several orgs can tag each row. */ org?: { id: string; name: string }; /** A Paperclip approval this row stands for: decided from the row. */ approvalId?: string; approvalVerbs?: ApprovalDecision[]; title: string; why: string; severity: 'critical' | 'high' | 'medium' | 'low'; at: string; taskId: string | null; agentId: string | null; runId: string | null; group?: string; source?: WorkspaceSource; projectId?: string | null; chatIds?: string[]; /** Listed by the server's own attention feed, which already limits it to what the signed-in board user may act on. */ scoped?: boolean }
+export interface WorkspaceInboxItem { id: string; kind: InboxKind; /** The org (company) a server item belongs to, so one Inbox over several orgs can tag each row. */ org?: { id: string; name: string }; /** A Paperclip approval this row stands for: decided from the row. */ approvalId?: string; approvalVerbs?: ApprovalDecision[]; /** A check-out of this Mac that has sat idle for days: the row offers Hand back, Release and Keep (`taskId` is the task). */ checkout?: { days: number }; title: string; why: string; severity: 'critical' | 'high' | 'medium' | 'low'; at: string; taskId: string | null; agentId: string | null; runId: string | null; group?: string; source?: WorkspaceSource; projectId?: string | null; chatIds?: string[]; /** Listed by the server's own attention feed, which already limits it to what the signed-in board user may act on. */ scoped?: boolean }
 export interface WorkspaceGoal { id: string; title: string; status: string; level: string | null; parentId?: string | null; ownerAgentId?: string | null }
 /** A Paperclip approval waiting on the board (a hire, a CEO strategy, a budget override, a board request). Decided only by you. */
 export interface WorkspaceApproval {

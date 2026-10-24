@@ -15,9 +15,37 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-11-471A](11-memory.md#mus-spec-11-471a) | A memory suggestion row is left out of the transcript rows while other notices stay. | [`memory offers stay out of the transcript (they live in the Memory inbox)`](../../../packages/agent-app/tests/activity.test.ts) |
+| [MUS-SPEC-11-471B](11-memory.md#mus-spec-11-471b) | Five finished runs in one chat leave one listed suggestion in the Memory inbox, all five are recorded, and a restart does not reset the limit. | [`many turns in one chat list at most one offer per day, the rest are held, and the throttle survives a restart`](../../../packages/agent-app/tests/memory-run.test.ts) |
 | [MUS-SPEC-11-467A](11-memory.md#mus-spec-11-467a) | A Personal rule and a Personal note about the user both reach a chat in a folder. | [`folder chats still get Personal directives and Personal facts the user already gave`](../../../packages/agent-app/tests/memory-run.test.ts) |
 | [MUS-SPEC-11-467B](11-memory.md#mus-spec-11-467b) | A bare "continue" searches memory with the first request and recent user messages, ends with "continue", stays within 1,600 characters, and recalls the matching note. | [`recall query uses the task and recent user messages, so a bare "continue" still recalls`](../../../packages/agent-app/tests/memory-run.test.ts) |
 | [MUS-SPEC-11-467C](11-memory.md#mus-spec-11-467c) | The default recall wait is 4,000 ms instead of 1,800 ms. | [`the default recall timeout is raised to about four seconds`](../../../packages/agent-app/tests/memory-run.test.ts) |
+| [MUS-SPEC-11-558A](11-memory.md#mus-spec-11-558a) | After the first save fails slowly and a later toggle saves, the later choice (After runs) is still selected. | [`a failed memory save does not undo a later toggle that went through`](../../../packages/agent-app/tests/memory-settings-rollback-dom.tsx) |
+| [MUS-SPEC-11-673A](11-memory.md#mus-spec-11-673a) | Repository evidence records the branch as release when a tag shares the name. | [`checkout and memory name the branch when a tag shares its name`](../../../packages/agent-app/tests/branch-tag-same-name.test.ts) |
+
+### Memory suggestions (#471)
+
+<a id="mus-spec-11-471a"></a>
+#### MUS-SPEC-11-471A: Memory suggestions stay out of the chat transcript
+
+- Precondition: A chat timeline with a memory suggestion row and a compaction notice.
+- Action: Build the transcript rows from the timeline.
+- Expected result: Only the compaction notice is a row. The memory suggestion is not shown in the transcript.
+- Test: `packages/agent-app/tests/activity.test.ts::memory offers stay out of the transcript (they live in the Memory inbox)`
+- Environment: Node test runner; the renderer's timeline projection, no DOM.
+- Known gaps: Checks the projection that builds the rows, not the rendered transcript. The Memory inbox list is covered by MUS-SPEC-11-471B.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-11-471b"></a>
+#### MUS-SPEC-11-471B: Each chat lists at most one memory suggestion per day
+
+- Precondition: A chat in a folder with memory set to ask before saving. Five different runs finish in it, each with a file edit and a real answer.
+- Action: Let each run settle, then read the Memory inbox. Restart the memory domain and let a sixth run settle.
+- Expected result: One suggestion is listed in the inbox and the other four are recorded as held rows that are not listed. After the restart the sixth run is also held, so the chat still has one listed suggestion that day.
+- Test: `packages/agent-app/tests/memory-run.test.ts::many turns in one chat list at most one offer per day, the rest are held, and the throttle survives a restart`
+- Environment: Node test runner; the memory domain on a temp database with a fake memory service; no network.
+- Known gaps: Uses the local clock for "today" and does not cross midnight. It reads the stored rows and the inbox list, not the rendered Memory screen.
+- Evidence: UNVERIFIED
 
 ### Recall in every chat (#467)
 
@@ -52,4 +80,28 @@ Boundaries:
 - Test: `packages/agent-app/tests/memory-run.test.ts::the default recall timeout is raised to about four seconds`
 - Environment: Node test runner; no provider or network.
 - Known gaps: Checks the value only, not a slow service being waited for. The abort of a request that runs out of time is covered by an existing test that sets its own short wait. It does not cover the memory context being sent again after a provider change: the only test for that passes on main, so it is not linked.
+- Evidence: UNVERIFIED
+
+### Memory settings
+
+<a id="mus-spec-11-558a"></a>
+#### MUS-SPEC-11-558A: A failed memory save does not undo a later toggle that went through
+
+- Precondition: Settings > Memory is open. The first save is slow and then fails; the next save works.
+- Action: Switch "Use memory in agent runs", then right away pick "After runs" for "After a run completes".
+- Expected result: When the first save fails, its error is shown, but "After runs" stays selected because the later save went through.
+- Test: `packages/agent-app/tests/memory-settings-rollback-dom.tsx::a failed memory save does not undo a later toggle that went through`
+- Environment: Node and linkedom: a DOM suite with the real PreferencesScreen and a fake bridge; no server.
+- Known gaps: Does not check the error notice text.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-11-673a"></a>
+#### MUS-SPEC-11-673A: Memory records the branch when a tag has the same name
+
+- Precondition: A repository on branch release with a tag also named release.
+- Action: Read the repository evidence that memory saves.
+- Expected result: The branch recorded is release.
+- Test: `packages/agent-app/tests/branch-tag-same-name.test.ts::checkout and memory name the branch when a tag shares its name`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: Reads the evidence function only. It does not save a memory. The same test covers check-out (MUS-SPEC-12-673A).
 - Evidence: UNVERIFIED
