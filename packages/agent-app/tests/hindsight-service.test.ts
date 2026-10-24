@@ -2,10 +2,14 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createServer} from 'node:http';
 import {createRequire} from 'node:module';
+import {existsSync} from 'node:fs';
 import {HindsightInputError, HindsightService, HindsightUnavailableError, type HindsightClientLike} from '../src/runtime/hindsight-service.ts';
 
 const require = createRequire(import.meta.url);
-const realCore = require('../dist/runtime/core-hindsight.cjs') as typeof core;
+const bundle = new URL('../dist/runtime/core-hindsight.cjs', import.meta.url);
+/** The bundled core exists only after `npm run build`; without it the tests that drive it are skipped, not the whole file. */
+const needsBundle = {skip: existsSync(bundle) ? false : 'dist/runtime/core-hindsight.cjs is missing; run npm run build first'};
+const realCore = (needsBundle.skip ? undefined : require('../dist/runtime/core-hindsight.cjs')) as typeof core;
 
 const core = {
   HindsightClient: class {
@@ -42,6 +46,7 @@ function blockingClient(released: {signal?: AbortSignal}): HindsightClientLike {
   } as HindsightClientLike;
 }
 
+// Spec: MUS-SPEC-22-482A (docs/spec/clauses/22-engineering-standards.md#mus-spec-22-482a)
 test('unconfigured status is truthful and never includes a key', () => {
   const service = new HindsightService({core, env:{HINDSIGHT_API_KEY:'secret'}, resolveFolderScope:()=>({kind:'workspace',id:'w'})});
   const status = service.status('folder');
@@ -93,7 +98,7 @@ test('dispose aborts in-flight operations and budgets are runtime validated', as
   await assert.rejects(other.recall({folderId:'trusted', query:'x', types:1 as unknown as ('world'|'experience'|'observation')[]}), HindsightInputError);
 });
 
-test('real bundled core sends derived bank, provenance, recall, and reflect wire requests', async t => {
+test('real bundled core sends derived bank, provenance, recall, and reflect wire requests', needsBundle, async t => {
   const requests: {path: string; body: Record<string, unknown>; auth?: string}[] = [];
   const server = createServer((request, response) => {
     let raw = '';
@@ -126,7 +131,7 @@ test('real bundled core sends derived bank, provenance, recall, and reflect wire
   assert.deepEqual((requests[0]!.body.items as {metadata: Record<string,string>}[])[0]!.metadata, {source:'test',muster_scope:'workspace:wire-workspace',muster_provenance:'chat:test'});
 });
 
-test('invalid trusted scope causes no HTTP request and real core unavailable errors stay explicit', async t => {
+test('invalid trusted scope causes no HTTP request and real core unavailable errors stay explicit', needsBundle, async t => {
   let requests = 0;
   const server = createServer((_request, response) => { requests++; response.end('{}'); });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
@@ -229,7 +234,7 @@ test('refresh discovers new configuration and clears old evidence without exposi
   assert.equal(service.status('one').configured,false,'refresh cannot resurrect a disposed service');
 });
 
-test('local HTTP failure and recovery are recorded only after real bank requests', async t => {
+test('local HTTP failure and recovery are recorded only after real bank requests', needsBundle, async t => {
   let requests = 0;
   let unauthorized = true;
   const server = createServer((request,response) => {

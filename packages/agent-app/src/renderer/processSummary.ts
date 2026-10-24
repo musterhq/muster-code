@@ -59,6 +59,15 @@ export const terminalPaneView=(chatId:string):TerminalPaneView=>views.get(chatId
 export function setTerminalPaneView(chatId:string,view:TerminalPaneView):void {views.set(chatId,view);for(const listener of viewListeners)listener();}
 export function subscribeTerminalPaneView(listener:()=>void):()=>void {viewListeners.add(listener);return()=>{viewListeners.delete(listener);};}
 
+/** Explicit opens are chat-scoped; a visible dock alone must never start a shell. */
+const terminalRequests=new Set<string>(),terminalRequestListeners=new Set<()=>void>();
+export const terminalRequested=(chatId:string):boolean=>terminalRequests.has(chatId);
+export function requestTerminal(chatId:string):void {
+  if(terminalRequests.has(chatId))return;
+  terminalRequests.add(chatId);for(const listener of terminalRequestListeners)listener();
+}
+export function subscribeTerminalRequests(listener:()=>void):()=>void {terminalRequestListeners.add(listener);return()=>{terminalRequestListeners.delete(listener);};}
+
 /** Where interactive terminals live: the right-pane Terminal tab, or a resizable bottom
  * panel under the conversation (Codex/Cursor style). Remembered per window (sessionStorage),
  * seeded for new windows from the last choice (localStorage). */

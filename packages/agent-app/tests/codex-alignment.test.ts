@@ -189,3 +189,31 @@ test('composer helpers: Codex goal labels, follow-up invert, queue summaries, re
   const items=[{id:'1',chatId:'c',kind:'user' as const,text:'record it',createdAt:''},{id:'2',chatId:'c',kind:'assistant' as const,text:skill,createdAt:''}];
   assert.equal(skillDraft(items).name,'weekly-report','the recorder’s SKILL.md wins over a draft');
 });
+
+test('Stop then send keeps the held queue: it runs, in order, after the new message',async t=>{
+  const dataDir=await directory(t),fake=scripted(()=>ok('done'),true);
+  const service=createAgentService({dataDir,provider:fake.provider,onEvent(){}});t.after(()=>service.dispose());
+  const chat=await service.invoke('chat.create',{});
+  const chatOf=async()=>(await service.invoke('app.snapshot',undefined)).chats.find(item=>item.id===chat.id)!;
+  await service.invoke('chat.send',{id:chat.id,text:'start',requestId:'start'});await until(()=>fake.open);
+  await service.invoke('chat.queue.add',{id:chat.id,text:'held one',requestId:'h1'});
+  await service.invoke('chat.queue.add',{id:chat.id,text:'held two',requestId:'h2'});
+  await service.invoke('chat.stop',{id:chat.id});
+  await until(async()=>(await chatOf()).queuePaused==='interrupted','paused');
+  await service.invoke('chat.send',{id:chat.id,text:'new message',requestId:'new'});
+  await until(()=>fake.inputs.length===2&&fake.open,'the new message runs first');
+  assert.equal(fake.inputs[1]!.prompt,'new message');
+  assert.deepEqual((await chatOf()).queue?.map(item=>item.text),['held one','held two'],'nothing was dropped');
+  fake.release();await until(()=>fake.inputs.length===3&&fake.open,'first held item');assert.equal(fake.inputs[2]!.prompt,'held one');
+  fake.release();await until(()=>fake.inputs.length===4&&fake.open,'second held item');assert.equal(fake.inputs[3]!.prompt,'held two');
+  fake.release();
+});
+
+test('a run stopped before its message was dispatched hands the text back as the draft',async t=>{
+  const dataDir=await directory(t);
+  const provider:ProviderAdapter={info,run:async()=>({status:'failed',finalMessage:'',dispatchState:'not-dispatched',recovery:{kind:'cancelled',retryable:false,reason:'Stopped before the request was sent.'}}),stop:async()=>true,dispose(){}};
+  const service=createAgentService({dataDir,provider,onEvent(){}});t.after(()=>service.dispose());
+  const chat=await service.invoke('chat.create',{});
+  await service.invoke('chat.send',{id:chat.id,text:'do not lose me',requestId:'r1'});
+  await until(async()=>(await service.invoke('app.snapshot',undefined)).chats.find(item=>item.id===chat.id)?.draft==='do not lose me','draft restored');
+});

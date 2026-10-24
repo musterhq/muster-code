@@ -8,6 +8,7 @@ import { EFFORT_LABELS } from './composerMenus';
 import { ProviderLogo } from './ProviderLogo';
 import { Tip } from './Tooltip';
 import './model-picker.css';
+import {exhaustedUsage, reportsUsage, useSharedProviderUsage} from './ProviderUsage';
 
 export const MODEL_FAVORITES_KEY = 'muster.composer.model-favorites.v1';
 function readFavorites(): string[] {
@@ -57,6 +58,8 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
   const { providers, selected, onSelect, phase = 'ready', error, label = 'Available models', listId, emptyOption, optionDisabled, optionTitle,
     onManageHidden, efforts = [], effort, onEffort, effortLabel = 'Reasoning effort', notes, initialFocus = 'search', onTabOut } = props;
   const policy = useModelPolicy();
+  const usage = useSharedProviderUsage(providers.some(reportsUsage));
+  const exhausted = new Set([...usage.values()].filter(row => exhaustedUsage(row)).map(row => row.providerId));
   const all = useMemo(() => pickerModels(providers), [providers]);
   const { shown, hidden } = useMemo(() => applyVisibility(all, policy, selected ? selected : undefined), [all, policy, selected?.providerId, selected?.model]);
   const railProviders = useMemo(() => providers.filter(provider => shown.some(model => model.providerId === provider.id)), [providers, shown]);
@@ -137,7 +140,7 @@ export function ModelPicker(props: ModelPickerProps): React.ReactElement {
                 : sections.map(section => {
                   const open = openRoutes.includes(section.providerId);
                   return <div key={section.providerId} className="model-picker-group" role="group" aria-label={section.title}>
-                    <div className="model-picker-section" role="presentation">{section.title}</div>
+                    <div className="model-picker-section" role="presentation">{section.title}{exhausted.has(section.providerId) && <span className="model-picker-limit"> · Limit reached</span>}</div>
                     {section.models.map(row)}
                     {section.routes.length > 0 && <>
                       <button type="button" className="model-picker-routes" tabIndex={-1} aria-expanded={open} onClick={() => toggleRoutes(section.providerId)}>

@@ -4,7 +4,9 @@
  * Only credential *shapes* are matched, so ordinary hex hashes and commit SHAs are left alone.
  *
  * Every quantifier that can repeat from many start positions is bounded, so a long adversarial run
- * (a minified bundle, `sk-sk-sk-…`, thousands of unterminated PEM headers) stays linear.
+ * (a minified bundle, `sk-sk-sk-…`, thousands of unterminated PEM headers) stays linear. The key/value rules
+ * do not skip a variable-length name prefix: a secret word only has to start a name (a lookbehind checks the
+ * boundary in constant time), so the name can be any length and each position is still tried once.
  */
 import { redactGitText } from './git-local.ts';
 
@@ -28,9 +30,9 @@ export const SECRET_PATTERNS: readonly RegExp[] = [
   /\b(?<label>Bearer\s+)[A-Za-z0-9._~+/=-]{16,}/gi,
   /\b(?<label>Authorization\s*:\s*(?:Basic|Token|Digest)\s+)[A-Za-z0-9._~+/=-]{8,}/gi,
   // key: value / key=value, including prefixed names (aws_secret_access_key, db-password) and quoted values.
-  /\b(?<label>(?:[a-z0-9]{1,32}[_-]){0,4}(?:api[_-]?key|secret|token|password|passwd|access[_-]?key|client[_-]?secret|private[_-]?key|auth[_-]?token)(?:[_-](?:key|base|value)){0,2}["']?\s*[:=]\s*)(?:(?<q>["'])(?<qvalue>[^"'\r\n]{4,512})\k<q>|(?<value>[^\s"',;]{6,}))/gi,
+  /(?<label>(?:(?<![A-Za-z0-9_])|(?<=[A-Za-z0-9]_))(?:api[_-]?key|secret|token|password|passwd|access[_-]?key|client[_-]?secret|private[_-]?key|auth[_-]?token)(?:[_-](?:key|base|value)){0,2}["']?\s*[:=]\s*)(?:(?<q>["'])(?<qvalue>[^"'\r\n]{4,512})\k<q>|(?<value>[^\s"',;]{6,}))/gi,
   // .env style: GITHUB_TOKEN=…, export DB_PASSWORD="…", AWS_SECRET_ACCESS_KEY=…, OPENAI_APIKEY=…
-  /\b(?<label>(?:[A-Z0-9]{1,32}_){0,6}(?:API|ACCESS|SECRET|PRIVATE|AUTH|CLIENT|MASTER)?(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)(?:_(?:KEY|TOKEN|SECRET|ID|B64|BASE64|VALUE|RAW|PROD|DEV|TEST|LIVE)){0,3}\s*=\s*)(?:(?<q>["'])(?<qvalue>[^"'\r\n]{1,512})\k<q>|(?<value>[^\s"'`]{4,}))/g,
+  /(?<label>(?:(?<![A-Za-z0-9_])|(?<=[A-Z0-9]_))(?:API|ACCESS|SECRET|PRIVATE|AUTH|CLIENT|MASTER)?(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)(?:_(?:KEY|TOKEN|SECRET|ID|B64|BASE64|VALUE|RAW|PROD|DEV|TEST|LIVE)){0,3}\s*=\s*)(?:(?<q>["'])(?<qvalue>[^"'\r\n]{1,512})\k<q>|(?<value>[^\s"'`]{4,}))/g,
 ];
 export const SECRET_MASK = '[redacted]';
 

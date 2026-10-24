@@ -1,10 +1,10 @@
 import { openHub, useHubRoute, useInboxBadge, useInboxDismissals, useWorkspace, type HubPage } from '../hubStore';
+import {imeComposing} from '../ime';
 import { OrgSidebar } from './OrgSidebar';
 import { badgeCount, buildActivity } from '../inboxModel';
 import { NAMES } from '../../shared/workspace-names';
 import { taskWorktreeFolderIds } from '../taskWorktrees';
 import type { WorkspaceProject, WorkspaceTask } from '../../shared/domains/paperclip-protocol';
-import { NewTaskSheet } from './HubSetup';
 import {
   AlarmClock,
   AlarmClockOff,
@@ -128,7 +128,7 @@ function ChatRowImpl({ chat, now, tabbable, onFocusRow, selected, selectionMode,
   const hasDraft = useStoreSelector(state => { const local = state.composerDrafts[chat.id]; return local ? local.text.length > 0 : Boolean(chat.draft); });
   // Timeline items are only kept live for the active chat (and a couple of open-tab edge cases);
   // everywhere else this stays undefined and the row just shows the chat's plain status.
-  const rowStatus = useStoreSelector(state => { const items = state.timelines[chat.id]?.value; return items ? displayStatus(chat, items) : chat.status; });
+  const rowStatus = useStoreSelector(state => { const items = state.timelines[chat.id]?.value; return items ? displayStatus(chat, items) : chat.autoResume ? displayStatus(chat, []) : chat.status; });
   const age=compactAge(chat.updatedAt,now),exact=exactTime(chat.updatedAt),updated=relativeLabel(chat.updatedAt,now);
   const togglePin=()=>void updateChat(chat.id,{pinned:!chat.pinned});
   const snoozed=isSnoozed(chat),wakes=snoozed?snoozeLabel(chat,new Date(now)):'';
@@ -174,7 +174,7 @@ function ChatRowImpl({ chat, now, tabbable, onFocusRow, selected, selectionMode,
           onBlur={()=>void commitRename()}
           onKeyDown={(e) => {
             e.stopPropagation();
-            if (e.key === 'Enter') {e.preventDefault();void commitRename();}
+            if (e.key === 'Enter') {if (imeComposing(e)) return;e.preventDefault();void commitRename();}
             else if (e.key === 'Escape') {
               e.preventDefault();setTitle(chat.title);finishRename();
             }
@@ -200,7 +200,7 @@ function ChatRowImpl({ chat, now, tabbable, onFocusRow, selected, selectionMode,
           onDoubleClick={event=>{event.preventDefault();beginRename();}}
         >
           <StatusDot status={rowStatus} unread={chat.unread} />
-          <span className="chat-title" title={chat.title}>
+          <span className="chat-title" dir="auto" title={chat.title}>
             {chat.title}
           </span>
           {(activeProcesses > 0 || pendingAttention > 0) && <span className="chat-row-status" aria-label={[activeProcesses ? `${plural(activeProcesses, 'local command')} running` : '', pendingAttention ? `${plural(pendingAttention, 'request')} need input` : ''].filter(Boolean).join(', ')} title={[activeProcesses ? `${activeProcesses} running` : '', pendingAttention ? `${pendingAttention} need input` : ''].filter(Boolean).join(' · ')}>
@@ -277,7 +277,7 @@ function FolderRename({folder,done}:{folder:Folder;done:()=>void}):React.ReactEl
   };
   return <header className="nav-section-head is-nested"><input type="text" className="chat-rename" autoFocus value={name} maxLength={256} aria-label={`Folder name for ${folder.path}`} onFocus={event=>event.currentTarget.select()} onChange={event=>setName(event.target.value)} onBlur={()=>void commit()} onKeyDown={event=>{
     event.stopPropagation();
-    if(event.key==='Enter'){event.preventDefault();void commit();}
+    if(event.key==='Enter'){if(imeComposing(event))return;event.preventDefault();void commit();}
     else if(event.key==='Escape'){event.preventDefault();finished.current=true;done();}
   }}/></header>;
 }
