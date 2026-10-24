@@ -75,6 +75,9 @@ export const suites = [
   'composer-rtl-dom',
   'composer-inflight-chips-dom',
   'queue-stale-edit-dom',
+  'hub-store-race',
+  'org-open-failure',
+  'my-work-retry-dom',
 ];
 
 /** Suites that open Base UI menus/portals get a split build: their `await import()` of UI code stays a separate
