@@ -15,14 +15,14 @@ Boundaries:
 
 ## Acceptance cases
 
-A PR that changes this area adds its cases here first: one row in this table, then the case block below it (see [acceptance-cases.md](../acceptance-cases.md)).
-
 | Case | What the assertions check | Test |
 |---|---|---|
 | [MUS-SPEC-05-347A](05-access-modes-and-approvals.md#mus-spec-05-347a) | A folder swapped for a link after the path check and before the write makes the write fail and creates no folder outside the chat's folder. | [`a folder swapped for a link while a write waits for approval creates nothing outside`](../../../packages/agent-app/tests/write-confined-347.test.ts) |
 | [MUS-SPEC-05-347B](05-access-modes-and-approvals.md#mus-spec-05-347b) | While another process keeps swapping a folder and a file name for links, repeated writes leave no file and no folder outside the chat's folder. | [`a racer swapping a folder and a link under repeated writes leaves nothing outside`](../../../packages/agent-app/tests/write-confined-347.test.ts) |
 | [MUS-SPEC-05-347C](05-access-modes-and-approvals.md#mus-spec-05-347c) | A policyOnly flag inside the parameters of an approval request does not skip the approval card. | [`a policyOnly flag inside request parameters does not skip the approval card`](../../../packages/agent-app/tests/write-confined-347.test.ts) |
 | [MUS-SPEC-05-347D](05-access-modes-and-approvals.md#mus-spec-05-347d) | An HTTP route's file change asks for approval with policyOnly as a separate argument, not inside the parameters. | [`the HTTP tools pass policyOnly as a separate authorize argument`](../../../packages/agent-app/tests/write-confined-347.test.ts) |
+| [MUS-SPEC-05-473F](05-access-modes-and-approvals.md#mus-spec-05-473f) | A mid-turn start by the agent is allowed only in Agent mode with Full access; a user start still waits for the turn. | [`commandAuthority: the agent may start mid-turn, but only in Agent mode with Full access`](../../../packages/agent-app/tests/process-continuations.test.ts) |
+| [MUS-SPEC-05-473G](05-access-modes-and-approvals.md#mus-spec-05-473g) | The muster_background server and its instruction are added only for Agent mode with Full access. | [`the muster_background server is offered only in Agent mode with Full access, with its instruction`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 
 ### Confined writes and policy-only requests
 
@@ -68,4 +68,28 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/write-confined-347.test.ts::the HTTP tools pass policyOnly as a separate authorize argument`
 - Environment: Node test runner, temp folder.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### Background processes and access mode
+
+<a id="mus-spec-05-473f"></a>
+#### MUS-SPEC-05-473F: Only Agent mode with Full access may start a background process mid-turn
+
+- Precondition: A running chat in Agent mode with Full access, then the same chat in Read only, Workspace and Ask mode.
+- Action: Ask for permission to start a command as the user, then as the agent.
+- Expected result: A user start mid-turn is refused with "Wait for the current agent attempt". The agent's start is allowed in Agent mode with Full access, and refused with a message naming Full access in Read only, Workspace and Ask.
+- Test: `packages/agent-app/tests/process-continuations.test.ts::commandAuthority: the agent may start mid-turn, but only in Agent mode with Full access`
+- Environment: Node test runner; temp folder; no provider or network.
+- Known gaps: Calls the main-process authority check directly, not through a running chat.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-05-473g"></a>
+#### MUS-SPEC-05-473G: The background tool is offered only in Agent mode with Full access
+
+- Precondition: Chats in Agent mode with Full access, Workspace and Read only, and Ask and Plan chats in Full access.
+- Action: Build the run options for each.
+- Expected result: Only the Agent mode and Full access chat gets the muster_background server (with its chat ID) and its one-line instruction. All others, and a missing launcher, get nothing.
+- Test: `packages/agent-app/tests/process-continuations.test.ts::the muster_background server is offered only in Agent mode with Full access, with its instruction`
+- Environment: Node test runner; temp folder; no provider or network.
+- Known gaps: Checks the run options, not a model using the tool.
 - Evidence: UNVERIFIED
