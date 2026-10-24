@@ -53,3 +53,6 @@ Boundaries:
 - Environment: Node test runner; no provider or network.
 - Known gaps: Checks the value only, not a slow service being waited for. The abort of a request that runs out of time is covered by an existing test that sets its own short wait. It does not cover the memory context being sent again after a provider change: the only test for that passes on main, so it is not linked.
 - Evidence: UNVERIFIED
+A PR that changes this area adds its cases here first: one row in this table, then the case block below it (see [acceptance-cases.md](../acceptance-cases.md)).
+
+|---|---|---|
