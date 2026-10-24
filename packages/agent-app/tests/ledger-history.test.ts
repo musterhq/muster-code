@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test,type TestContext} from 'node:test';
 import {AgentStore} from '../src/runtime/store.ts';
-import {TurnLedger} from '../src/runtime/turn-ledger.ts';
+import {TurnLedger,attachTurnLedger,APPROVAL_SHOWN_EVENT} from '../src/runtime/turn-ledger.ts';
 import {importLedgerHistory,matchReceipts,splitTurns} from '../src/runtime/ledger-history.ts';
 import {MODEL_USAGE_SCHEMA} from '../src/runtime/domains/models.ts';
 import {SqliteImportStore} from '../src/runtime/paperclip-import.ts';
@@ -118,4 +118,24 @@ test('turn splitting and receipt matching hold for same-millisecond sends and re
   const turns=splitTurns([{id:'u1',kind:'user',created_at:at,type:null,server:null,tool:null,command:null},{id:'x',kind:'assistant',created_at:at,type:null,server:null,tool:null,command:null},{id:'u2',kind:'user',created_at:at,type:null,server:null,tool:null,command:null}]);
   assert.equal(turns.length,2);
   assert.deepEqual(matchReceipts(turns,[{run_id:'r1',created_at:at},{run_id:'r2',created_at:at},{run_id:'retry',created_at:later}]),[['r1'],['r2','retry']]);
+});
+
+// Spec: MUS-SPEC-17-458A (docs/spec/clauses/17-usage-cost-and-ledger.md#mus-spec-17-458a)
+test('ledger approvals count only cards shown to the user, never Full-access auto-accepts',async t=>{
+  const {DatabaseSync}=await import('node:sqlite');
+  const db=new DatabaseSync(':memory:');t.after(()=>db.close());
+  const ledger=new TurnLedger(db),appended:any[]=[],hooks:any={};
+  const context={db:()=>db,hooks:{onRunStarted:(fn:any)=>{hooks.start=fn;return()=>{};},onRunSettled:(fn:any)=>{hooks.settle=fn;return()=>{};},onProviderEvent:(fn:any)=>{hooks.event=fn;return()=>{};}}} as any;
+  t.after(attachTurnLedger(context,()=>ledger,e=>appended.push(e)));
+  const chat={id:'c1',title:'Run'};
+  await hooks.start({chat,runId:'r1',cwd:'/nonexistent'});
+  // Full access: the provider asks, Muster accepts at once, no card, no event from the service.
+  hooks.event({chat,method:'item/commandExecution/requestApproval',params:{}});
+  hooks.event({chat,method:'item/fileChange/requestApproval',params:{}});
+  await hooks.settle({chat,runId:'r1',status:'completed'});
+  await hooks.start({chat,runId:'r2',cwd:'/nonexistent'});
+  hooks.event({chat,method:'item/commandExecution/requestApproval',params:{}});
+  hooks.event({chat,method:APPROVAL_SHOWN_EVENT,params:{}});
+  await hooks.settle({chat,runId:'r2',status:'completed'});
+  assert.deepEqual(appended.map(e=>e.approvals),[0,1]);
 });
