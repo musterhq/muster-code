@@ -1,4 +1,4 @@
-/** Run with node tests/run-sidebar-navigation.mjs; dynamic chunks initialize UI after the DOM. */
+/** Run with npm run test:renderer (suite sidebar-navigation); dynamic chunks initialize UI after the DOM. */
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {setTimeout as delay} from 'node:timers/promises';

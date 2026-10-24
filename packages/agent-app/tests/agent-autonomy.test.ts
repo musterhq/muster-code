@@ -3,7 +3,8 @@ import {mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
-import {AGENT_AUTONOMY_RULE, runInstructions} from '../src/runtime/provider.ts';
+import {AGENT_AUTONOMY_RULE, FULL_ACCESS_NO_ASKING_RULE, createProviderAdapter, runInstructions} from '../src/runtime/provider.ts';
+import {toolInstructions} from '../src/runtime/adapters/http-tools.ts';
 import {ENVELOPE_RULES, TASK_TEXT_MAX, untrusted} from '../src/runtime/checkout/sanitize.ts';
 import {asksOpenQuestion, endsWithQuestion, ProjectTaskStore} from '../src/runtime/project-tasks.ts';
 
@@ -16,6 +17,31 @@ test('#385: the keep-going directive is in agent mode only, and short', () => {
   assert.ok(runInstructions('agent', 'extra note', false)!.includes(AGENT_AUTONOMY_RULE));
   assert.ok(!(runInstructions('ask') ?? '').includes(AGENT_AUTONOMY_RULE));
   assert.ok(!(runInstructions('plan') ?? '').includes(AGENT_AUTONOMY_RULE));
+});
+
+// Spec: MUS-SPEC-05-459A (docs/spec/clauses/05-access-modes-and-approvals.md#mus-spec-05-459a)
+test('Full access adds the no-asking rule to agent instructions only', () => {
+  assert.match(FULL_ACCESS_NO_ASKING_RULE, /Never ask the user for permission or confirmation to proceed/);
+  assert.ok(runInstructions('agent', undefined, true, 'full')!.includes(FULL_ACCESS_NO_ASKING_RULE));
+  for (const mode of ['workspace', 'read-only', undefined] as const) assert.ok(!runInstructions('agent', undefined, true, mode)!.includes(FULL_ACCESS_NO_ASKING_RULE));
+  for (const mode of ['ask', 'plan'] as const) assert.ok(!(runInstructions(mode, undefined, true, 'full') ?? '').includes(FULL_ACCESS_NO_ASKING_RULE));
+});
+
+// Spec: MUS-SPEC-05-459B (docs/spec/clauses/05-access-modes-and-approvals.md#mus-spec-05-459b)
+test('an API-key route in Full access gets the no-asking rule and a tool note that asks only before deleting user data', async () => {
+  const seen: {instructions?: string}[] = [];
+  const adapter = {kind: 'http' as const, run: async (input: {instructions?: string}) => { seen.push(input); return {status: 'completed' as const, finalMessage: 'done', dispatchState: 'dispatched' as const}; }};
+  const provider = createProviderAdapter({instances: () => [{info: {id: 'local-x', name: 'X', available: true, identityMasked: 'x', models: [{id: 'm', name: 'M'}]}, command: '', env: {}, sessionsRoot: '', adapter}] as never});
+  const noop = () => {};
+  for (const permissionMode of ['full', 'workspace'] as const) {
+    await provider.run({chat: {id: 'c', mode: 'agent', providerId: 'local-x', model: 'm', permissionMode}, cwd: tmpdir(), prompt: 'p', onDelta: noop, onReasoning: noop, onEvent: noop, onRequest: async () => ({decision: 'accept'})} as never);
+  }
+  assert.ok(seen[0]!.instructions!.includes(FULL_ACCESS_NO_ASKING_RULE), 'Full access: the route is told never to ask permission');
+  assert.ok(!seen[1]!.instructions!.includes(FULL_ACCESS_NO_ASKING_RULE), 'Workspace: no such rule');
+  const note = toolInstructions('full', '/w');
+  assert.match(note, /Do not ask for permission to proceed \(commit, push, install, restart/);
+  assert.match(note, /ask in chat only before irreversibly deleting user data/);
+  assert.doesNotMatch(note, /force-pushing|changing system settings/);
 });
 
 test('#385: the envelope keeps embedded commands untrusted but the task goal is what the person wants, and local commits are expected', () => {

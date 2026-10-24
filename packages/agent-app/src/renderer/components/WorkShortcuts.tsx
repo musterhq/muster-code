@@ -2,9 +2,10 @@
  * Keyboard shortcuts for the work surfaces (C3): the listener, the cheatsheet (`?`) and the "new task" sheet (`c`). The rules
  * are in `shortcuts.ts`. Nothing runs until a key is pressed on the Inbox, task, Roster, Outputs, Ledger or Projects screens.
  */
-import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ModalSheet } from './ModalSheet';
-import { NewTaskSheet } from './HubSetup';
+import { lazyNamed } from '../lazyScreens';
+import { AreaBoundary } from './AreaBoundary';
 import { openSpotlightSearch } from './SpotlightSearch';
 import { currentProject } from '../projectFocus';
 import { hubRoute, openHub, undoInbox, useWorkspace } from '../hubStore';
@@ -72,7 +73,7 @@ export function WorkShortcutsHost(): React.ReactElement | null {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target instanceof Element ? e.target : null;
       const result = resolveShortcut(state.current, {
-        key: e.key, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, isComposing: e.isComposing, repeat: e.repeat, defaultPrevented: e.defaultPrevented,
+        key: e.key, code: e.code, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, isComposing: e.isComposing, repeat: e.repeat, defaultPrevented: e.defaultPrevented,
         // The focused element counts too: a key pressed while a field has focus is typing, whatever the event's target says.
         typing: Boolean(target?.closest(TYPING) || document.activeElement?.closest?.(TYPING)), blocked: Boolean(document.querySelector(BLOCKERS)),
       }, Date.now());
@@ -95,6 +96,9 @@ export function WorkShortcutsHost(): React.ReactElement | null {
   </>;
 }
 
+// The sheet's module (the hub's setup forms) loads on the first `c`, not at startup.
+const NewTaskSheet = lazyNamed(() => import('./HubSetup'), 'NewTaskSheet');
+
 /** The project a new task should start in: the open project, the open task's project, else the sheet's own default. */
 function NewTaskHost({ onClose }: { onClose: () => void }): React.ReactElement {
   const ws = useWorkspace();
@@ -102,7 +106,8 @@ function NewTaskHost({ onClose }: { onClose: () => void }): React.ReactElement {
   const snapshot = ws.snapshot;
   const fromTask = route.page === 'task' && route.arg ? snapshot?.tasks.find(t => t.id === route.arg || t.key === route.arg)?.projectId ?? null : null;
   const project = getState().screen === 'projects' ? currentProject() : route.page === 'project' ? route.arg : fromTask;
-  return <NewTaskSheet open snapshot={snapshot} projectId={project} onClose={onClose} onCreated={id => openHub('task', id)}/>;
+  // A chunk that fails to load stays inside this boundary (with its Reload area) instead of reaching the window boundary.
+  return <AreaBoundary area="the new task form" scope="item"><Suspense fallback={null}><NewTaskSheet open snapshot={snapshot} projectId={project} onClose={onClose} onCreated={(id: string) => openHub('task', id)}/></Suspense></AreaBoundary>;
 }
 
 function Cheatsheet({ onClose }: { onClose: () => void }): React.ReactElement {

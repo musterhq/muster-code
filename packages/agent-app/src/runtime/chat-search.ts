@@ -38,9 +38,12 @@ export const SEARCH_PAGE_MAX = 50;
 const SNIPPET_CONTEXT = 48;
 const MAX_TERMS = 8;
 
+/** Lower case that keeps every index: U+0130 (İ) lower-cases to two code units ("i̇"), which shifted snippets and highlights. */
+export const foldCase = (text: string): string => text.replace(/\u0130/g, 'i').toLowerCase();
+
 export function searchTerms(query: string): string[] {
   const seen = new Set<string>();
-  for (const term of query.toLowerCase().split(/\s+/)) if (term) seen.add(term);
+  for (const term of foldCase(query).split(/\s+/)) if (term) seen.add(term);
   // Longer terms first: they are rarer, so a miss is found sooner.
   return [...seen].sort((a, b) => b.length - a.length).slice(0, MAX_TERMS);
 }
@@ -48,7 +51,7 @@ export function searchTerms(query: string): string[] {
 /** The window around the first term hit, flattened to one line, with every term occurrence highlighted. */
 export function buildSnippet(text: string, terms: readonly string[], context = SNIPPET_CONTEXT): { snippet: string; ranges: Array<[number, number]> } {
   const flat = text.replace(/\s/g, ' '); // same length, so indexes line up with `text`
-  const lower = flat.toLowerCase();
+  const lower = foldCase(flat);
   let first = -1, firstLength = 0;
   for (const term of terms) {
     const at = lower.indexOf(term);
@@ -61,7 +64,7 @@ export function buildSnippet(text: string, terms: readonly string[], context = S
   if (end < flat.length) { const space = flat.indexOf(' ', end); if (space >= 0 && space - end < 16) end = space; }
   const body = flat.slice(start, end).replace(/ {2,}/g, ' ').trim();
   const snippet = `${start > 0 ? '…' : ''}${body}${end < flat.length ? '…' : ''}`;
-  const hay = snippet.toLowerCase();
+  const hay = foldCase(snippet);
   const spans: Array<[number, number]> = [];
   for (const term of terms) for (let at = hay.indexOf(term); at >= 0; at = hay.indexOf(term, at + term.length)) spans.push([at, at + term.length]);
   spans.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
@@ -84,7 +87,7 @@ export class ChatSearchIndex {
     const docs: Doc[] = [];
     for (const item of this.source.items(chatId)) {
       if ((item.kind !== 'user' && item.kind !== 'assistant') || !item.text) continue;
-      docs.push({ itemId: item.id, text: item.text, lower: item.text.toLowerCase() });
+      docs.push({ itemId: item.id, text: item.text, lower: foldCase(item.text) });
     }
     this.entries.set(chatId, { revision, docs });
     return docs;
@@ -96,7 +99,7 @@ export class ChatSearchIndex {
   search(query: string, options: { offset?: number; limit?: number } = {}): ChatSearchHit[] {
     const terms = searchTerms(query);
     if (!terms.length) return [];
-    const phrase = query.trim().toLowerCase().replace(/\s+/g, ' ');
+    const phrase = foldCase(query.trim()).replace(/\s+/g, ' ');
     const offset = Math.max(0, Math.floor(options.offset ?? 0));
     const limit = Math.min(SEARCH_PAGE_MAX, Math.max(1, Math.floor(options.limit ?? SEARCH_PAGE_DEFAULT)));
     const chats = this.source.chats().filter(chat => !chat.archived);

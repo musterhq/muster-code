@@ -550,7 +550,7 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
     }
     else if(route.baseUrl){
       const listed=listing(route,env,fetcher);listingKey=listed.key;
-      if(listed.status==='pending')return {info:{...base,status:'configured',listing:'loading',detail:`Loading models from ${name}… Scan again in a moment. ${mcpDetail(mcp)}`},command,env:childEnv,sessionsRoot,listingKey};
+      if(listed.status==='pending')return {info:{...base,status:'configured',checking:true,listing:'loading',detail:`Loading models from ${name}… Scan again in a moment. ${mcpDetail(mcp)}`},command,env:childEnv,sessionsRoot,listingKey};
       if(listed.status==='error'){
         const reason=`${name} didn’t answer: ${(listed.reason??'no reason given').replace(/[.\s]+$/,'')}. Retry.`;
         return {info:{...base,status:'error',listing:'failed',listingError:reason,error:reason,detail:`${reason} Add model_catalog_json to the profile to list models without asking the endpoint. ${mcpDetail(mcp)}`},command,env:childEnv,sessionsRoot,listingKey};

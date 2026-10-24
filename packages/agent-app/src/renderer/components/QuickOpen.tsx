@@ -1,4 +1,5 @@
 import React, {useEffect, useId, useMemo, useRef, useState} from 'react';
+import {imeComposing} from '../ime';
 import {Dialog} from '@base-ui/react/dialog';
 import {Search} from 'lucide-react';
 import {invoke} from '../bridge';
@@ -53,7 +54,7 @@ export function QuickOpen({folderId, folderName, open, onClose}: {folderId: stri
             onKeyDown={event => {
               if (event.key === 'ArrowDown') { event.preventDefault(); setActive(value => Math.min(rows.length - 1, value + 1)); }
               else if (event.key === 'ArrowUp') { event.preventDefault(); setActive(value => Math.max(0, value - 1)); }
-              else if (event.key === 'Enter') { event.preventDefault(); const row = rows[active]; if (row) choose(row.path); }
+              else if (event.key === 'Enter' && !imeComposing(event)) { event.preventDefault(); const row = rows[active]; if (row) choose(row.path); }
               else if (event.key === 'Escape') { event.preventDefault(); onClose(); }
             }}
           />
