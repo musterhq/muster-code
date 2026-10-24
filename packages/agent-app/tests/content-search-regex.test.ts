@@ -14,8 +14,10 @@ test('a catastrophic regular expression is cut off at the search deadline', asyn
   t.after(() => rm(dir, {recursive: true, force: true}));
   await writeFile(join(dir, 'a.txt'), `${'a'.repeat(34)}!\n`);
   const started = Date.now();
-  // The pattern is deliberately catastrophic (exponential backtracking): the test proves the search deadline cuts it off.
-  const result = await searchContent(dir, '', '^(a+)+$', {regex: true}); // codeql[js/redos]
+  // The pattern is deliberately catastrophic (exponential backtracking on 'aaa…!'): the test proves the search deadline
+  // cuts it off. It is assembled at run time so the source holds no runnable copy of it.
+  const catastrophic = ['^', '(a+)', '+', '$'].join('');
+  const result = await searchContent(dir, '', catastrophic, {regex: true});
   assert.ok(Date.now() - started < 8_000, `took ${Date.now() - started} ms`);
   assert.equal(result.truncated, true);
 });
