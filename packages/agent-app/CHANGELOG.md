@@ -124,6 +124,9 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - The file editor no longer lets you save over a file it could not read faithfully (not valid UTF-8, or larger than the full-read limit), and text typed while a save is finishing is no longer thrown away
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 - In the file editor, "Discard your edit and reload" now keeps the conflict notice and shows the error if the file cannot be re-read
+- Pressing Enter to confirm a Japanese, Chinese or Korean composition in search, quick open, renaming and the branch and owner pickers no longer also runs the highlighted row or saves a half-typed name
+- Searching with an emoji in the command palette and chat search highlights the whole emoji instead of showing a broken character
+- The single-key shortcuts (c, g then i, j, k and the rest) now work on Russian, Greek and other non-Latin keyboard layouts
 
 ## 0.3.13
 

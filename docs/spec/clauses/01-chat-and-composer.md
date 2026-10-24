@@ -20,6 +20,8 @@ Boundaries:
 | [MUS-SPEC-01-554C](01-chat-and-composer.md#mus-spec-01-554c) | Each of your messages in the transcript has `dir="auto"`, for an Arabic message and an English one. | [`each user message takes its text direction from its own first strong character`](../../../packages/agent-app/tests/chat-rtl-dom.tsx) |
 | [MUS-SPEC-01-554D](01-chat-and-composer.md#mus-spec-01-554d) | In an Arabic reply, the paragraph, the list and each list item have `dir="auto"`. | [`paragraphs and list items in a reply take their own text direction`](../../../packages/agent-app/tests/chat-rtl-dom.tsx) |
 | [MUS-SPEC-01-555A](01-chat-and-composer.md#mus-spec-01-555a) | After a send finishes, the chip that was sent is gone from the composer, and a chip added while the send was in flight is still there. | [`a context chip added while a send is in flight is kept, and only the sent chip is cleared`](../../../packages/agent-app/tests/composer-inflight-chips-dom.tsx) |
+| [MUS-SPEC-01-560A](01-chat-and-composer.md#mus-spec-01-560a) | Enter pressed to confirm an IME composition (or the key that follows it) leaves the search palette open and screen unchanged; a plain Enter opens the row. | [`Enter that confirms an IME composition does not open the highlighted search row`](../../../packages/agent-app/tests/ime-enter-dom.tsx) |
+| [MUS-SPEC-01-560B](01-chat-and-composer.md#mus-spec-01-560b) | Search highlight ranges cover a whole emoji, merge adjacent emoji, and never split a surrogate pair. | [`fuzzyMatch ranges never cut an emoji in half`](../../../packages/agent-app/tests/spotlight-model.test.ts) |
 
 ### Text direction
 
@@ -78,4 +80,28 @@ Boundaries:
 - Test: `packages/agent-app/tests/composer-inflight-chips-dom.tsx::a context chip added while a send is in flight is kept, and only the sent chip is cleared`
 - Environment: Real Composer in a DOM suite (linkedom); fake app bridge with a send that waits until released; no network.
 - Known gaps: Uses the app bridge fake, not a running agent. It covers a selection chip only; the in-text mention chips use the same fix but are not tested.
+- Evidence: UNVERIFIED
+
+### Typing with an IME and emoji
+
+<a id="mus-spec-01-560a"></a>
+#### MUS-SPEC-01-560A: Enter that confirms an IME composition does not run the search row
+
+- Precondition: The search palette is open with the query "OSS-12", so one row is highlighted.
+- Action: Press Enter flagged as part of a composition; then Enter with key code 229 (the key event some browsers send right after the composition ends); then a plain Enter.
+- Expected result: The first two keys do nothing: the screen stays the same and the palette stays open. The plain Enter opens the row.
+- Test: `packages/agent-app/tests/ime-enter-dom.tsx::Enter that confirms an IME composition does not open the highlighted search row`
+- Environment: Real SpotlightSearchHost in a DOM suite (linkedom); fake app bridge; no network.
+- Known gaps: Only the search palette is driven. The same helper is applied to quick open, chat and folder rename, the branch picker, the owner picker and the add-resource menu, and those have no test here. Real IME input is not tested; the events are made by hand.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-560b"></a>
+#### MUS-SPEC-01-560B: Search highlights keep an emoji whole
+
+- Precondition: The search text is an emoji, or two emoji in a row, and the result text has them inside other letters.
+- Action: Match the text and split the result into highlighted and plain parts.
+- Expected result: The highlight covers the whole emoji (both halves of its surrogate pair). Adjacent emoji form one span. Every part is well-formed text.
+- Test: `packages/agent-app/tests/spotlight-model.test.ts::fuzzyMatch ranges never cut an emoji in half`
+- Environment: Node test runner; no UI and no network.
+- Known gaps: Unit test of the matcher and the splitter, not the rendered highlight in the palette.
 - Evidence: UNVERIFIED

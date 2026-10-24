@@ -1,4 +1,5 @@
 import { openHub, useHubRoute, useInboxBadge, useInboxDismissals, useWorkspace, type HubPage } from '../hubStore';
+import {imeComposing} from '../ime';
 import { OrgSidebar } from './OrgSidebar';
 import { badgeCount, buildActivity } from '../inboxModel';
 import { NAMES } from '../../shared/workspace-names';
@@ -173,7 +174,7 @@ function ChatRowImpl({ chat, now, tabbable, onFocusRow, selected, selectionMode,
           onBlur={()=>void commitRename()}
           onKeyDown={(e) => {
             e.stopPropagation();
-            if (e.key === 'Enter') {e.preventDefault();void commitRename();}
+            if (e.key === 'Enter') {if (imeComposing(e)) return;e.preventDefault();void commitRename();}
             else if (e.key === 'Escape') {
               e.preventDefault();setTitle(chat.title);finishRename();
             }
@@ -276,7 +277,7 @@ function FolderRename({folder,done}:{folder:Folder;done:()=>void}):React.ReactEl
   };
   return <header className="nav-section-head is-nested"><input type="text" className="chat-rename" autoFocus value={name} maxLength={256} aria-label={`Folder name for ${folder.path}`} onFocus={event=>event.currentTarget.select()} onChange={event=>setName(event.target.value)} onBlur={()=>void commit()} onKeyDown={event=>{
     event.stopPropagation();
-    if(event.key==='Enter'){event.preventDefault();void commit();}
+    if(event.key==='Enter'){if(imeComposing(event))return;event.preventDefault();void commit();}
     else if(event.key==='Escape'){event.preventDefault();finished.current=true;done();}
   }}/></header>;
 }

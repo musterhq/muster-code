@@ -73,7 +73,7 @@ export function WorkShortcutsHost(): React.ReactElement | null {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target instanceof Element ? e.target : null;
       const result = resolveShortcut(state.current, {
-        key: e.key, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, isComposing: e.isComposing, repeat: e.repeat, defaultPrevented: e.defaultPrevented,
+        key: e.key, code: e.code, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, isComposing: e.isComposing, repeat: e.repeat, defaultPrevented: e.defaultPrevented,
         // The focused element counts too: a key pressed while a field has focus is typing, whatever the event's target says.
         typing: Boolean(target?.closest(TYPING) || document.activeElement?.closest?.(TYPING)), blocked: Boolean(document.querySelector(BLOCKERS)),
       }, Date.now());

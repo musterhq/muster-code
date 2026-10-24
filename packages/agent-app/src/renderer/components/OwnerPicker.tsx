@@ -3,6 +3,7 @@
  * grouped No owner → Me → People → Agents, names shown once. Choosing a person assigns them (the agent is cleared); an agent assigns it (the person is cleared).
  */
 import { ChevronDown } from 'lucide-react';
+import {imeComposing} from '../ime';
 import { createPortal } from 'react-dom';
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { filterOwners, OWNER_GROUP_LABEL, type OwnerGroup, type OwnerOption } from '../ownerOptions';
@@ -43,7 +44,7 @@ export function OwnerPicker({ options, value, label, disabled, bare, onChange }:
         onKeyDown={e => {
           if (e.key === 'ArrowDown') { e.preventDefault(); setActive(i => Math.min(shown.length - 1, i + 1)); }
           else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(i => Math.max(0, i - 1)); }
-          else if (e.key === 'Enter') { e.preventDefault(); choose(shown[active]); }
+          else if (e.key === 'Enter' && !imeComposing(e)) { e.preventDefault(); choose(shown[active]); }
           else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false); }
         }}/>
       <ul id={listId} role="listbox" aria-label={label} className="owner-list">

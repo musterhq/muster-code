@@ -18,7 +18,7 @@ export const CHORD_MS = 1200;
 export const GO_KEYS: Record<string, ShortcutAction> = { i: 'go-inbox', d: 'go-dashboard', t: 'go-tasks', r: 'go-roster', o: 'go-outputs', l: 'go-ledger', p: 'go-projects', c: 'focus-comment' };
 
 export interface ShortcutKey {
-  key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean;
+  key: string; /** The physical key (`KeyG`): used for letters when the layout produces a non-Latin character. */ code?: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean;
   isComposing?: boolean; repeat?: boolean; defaultPrevented?: boolean;
   /** The target is a text field, a select or an editable region. */
   typing: boolean;
@@ -33,7 +33,14 @@ export interface Resolved { action: ShortcutAction | null; next: ChordState; con
 export const shortcutScreens = ['hub', 'projects'] as const;
 export const shortcutsApplyOn = (screen: string): boolean => (shortcutScreens as readonly string[]).includes(screen);
 
-export function resolveShortcut(state: ChordState, e: ShortcutKey, now: number): Resolved {
+/** The letter a key means: its own character, or the physical Latin letter when a non-Latin layout (Cyrillic, Greek…) types something else. */
+function shortcutKey(e: ShortcutKey): string {
+  const letter = e.code ? /^Key([A-Z])$/.exec(e.code) : null;
+  return letter && !/^[\x00-\x7f]$/.test(e.key) ? letter[1].toLowerCase() : e.key;
+}
+
+export function resolveShortcut(state: ChordState, input: ShortcutKey, now: number): Resolved {
+  const e = input.key === shortcutKey(input) ? input : { ...input, key: shortcutKey(input) };
   const none: Resolved = { action: null, next: IDLE, consume: false };
   if (e.defaultPrevented || e.isComposing || e.typing || e.blocked) return none;
   const bare = !e.metaKey && !e.ctrlKey && !e.altKey;

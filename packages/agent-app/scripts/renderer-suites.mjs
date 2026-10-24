@@ -85,6 +85,7 @@ export const suites = [
   'inbox-group-stale-dom',
   'checkout-settings-reject-dom',
   'file-editor-safety-dom',
+  'ime-enter-dom',
 ];
 
 /** Suites that open Base UI menus/portals get a split build: their `await import()` of UI code stays a separate
@@ -116,6 +117,7 @@ export const split = new Set([
   'sidebar-navigation',
   'spotlight-palette-dom',
   'limit-resume-dom',
+  'ime-enter-dom',
 ]);
 
 /** tests/*.tsx files that are deliberately not suites, with the reason. */

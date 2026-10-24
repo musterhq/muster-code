@@ -36,6 +36,7 @@ Boundaries:
 | [MUS-SPEC-12-558A](12-projects-orgs-and-tasks.md#mus-spec-12-558a) | After the chosen Group has no items left, the Inbox lists the remaining items instead of an empty list. | [`the Inbox shows the remaining items when the chosen group has none left`](../../../packages/agent-app/tests/inbox-group-stale-dom.tsx) |
 | [MUS-SPEC-12-558B](12-projects-orgs-and-tasks.md#mus-spec-12-558b) | A failed impact check shows its error and a Try again button, and clicking it shows the impact list. | [`archive confirmation offers Try again after a failed impact check`](../../../packages/agent-app/tests/project-confirm-retry-dom.tsx) |
 | [MUS-SPEC-12-558C](12-projects-orgs-and-tasks.md#mus-spec-12-558c) | After the runtime rejects a quiet-hours value of 9999, the field shows the saved value 8. | [`a quiet-hours value the runtime rejects is replaced by the saved value`](../../../packages/agent-app/tests/checkout-settings-reject-dom.tsx) |
+| [MUS-SPEC-12-560C](12-projects-orgs-and-tasks.md#mus-spec-12-560c) | On a Russian layout the physical C, G then I keys run New task and Go to Inbox; on a Dvorak-style Latin layout the typed letter still wins. | [`single-key shortcuts follow the physical letter on non-Latin layouts`](../../../packages/agent-app/tests/wave3-nav.test.ts) |
 
 <a id="mus-spec-12-573a"></a>
 #### MUS-SPEC-12-573A: Two wakes in one moment join into one waiting wake
@@ -265,4 +266,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/checkout-settings-reject-dom.tsx::a quiet-hours value the runtime rejects is replaced by the saved value`
 - Environment: Node and linkedom: a DOM suite with the real LocalCheckoutsCard and a fake bridge; no server.
 - Known gaps: Only the quiet-hours field is run; the device-name field uses the same recovery code.
+- Evidence: UNVERIFIED
+
+### Work shortcuts
+
+<a id="mus-spec-12-560c"></a>
+#### MUS-SPEC-12-560C: Single-key work shortcuts work on non-Latin keyboard layouts
+
+- Precondition: The work screens are open and no text field has focus. The keyboard layout is Russian, where the physical C key types "с", G types "п" and I types "ш".
+- Action: Press the physical C key; then the physical G key followed by the physical I key. Then press a key that types "j" while on the physical C position (a Latin layout such as Dvorak).
+- Expected result: C starts a new task. G then I goes to the Inbox. On the Latin layout, the typed letter wins, so the "j" key moves to the next row and does not start a new task.
+- Test: `packages/agent-app/tests/wave3-nav.test.ts::single-key shortcuts follow the physical letter on non-Latin layouts`
+- Environment: Node test runner; no UI and no network.
+- Known gaps: Unit test of the shortcut resolver with key event objects, not real key presses in a window. The resolver's use in the screens is not driven.
 - Evidence: UNVERIFIED
