@@ -57,7 +57,7 @@ const POLL_FAST_MS = 2_500, POLL_IDLE_MS = 15_000, POLL_QUIET_AFTER_MS = 60_000,
 /** Frames that fire many times a second while an agent works and change nothing the UI shows. */
 const NOISY = new Set(['heartbeat.run.log', 'heartbeat.run.event', 'heartbeat.run.progress', 'plugin.ui.updated']);
 /** Needs you + Problems: the only kinds that badge. */
-const URGENT = new Set(['question', 'approval', 'blocked', 'failed_run', 'agent_error', 'budget', 'mention']);
+const URGENT = new Set(['question', 'approval', 'blocked', 'failed_run', 'agent_error', 'budget', 'mention', 'checkout']);
 
 /** Kept for callers that read it from here (tests, older code): the entry migrated Paperclip tokens stay in. */
 export const PAPERCLIP_SECRET_ID = LEGACY_PAPERCLIP_SECRET;
@@ -285,7 +285,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const gates: WorkspaceInboxItem[] = (over?.inbox ?? []).map(g => ({ ...g, taskId: null, agentId: null, runId: null, source: 'local' as const }));
     // The server's Inbox lists only what asks the signed-in person (never another person's task), from every ticked org, each tagged with its org.
     const serverInbox = await scopedServerInbox(p, theirs.link?.company ?? null);
-    const inbox = [...mine.inbox.map(carried), ...gates, ...await budgetInbox(mine.projects), ...serverInbox.filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
+    let idleCheckouts: WorkspaceInboxItem[] = []; try { idleCheckouts = hub.checkoutInbox?.() ?? []; } catch { /* the checkout store is unavailable: its rows wait */ }
+    const inbox = [...mine.inbox.map(carried), ...gates, ...idleCheckouts, ...await budgetInbox(mine.projects), ...serverInbox.filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
     return {
       paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects: projects2, goals: p?.goals ?? [], runs, inbox, ...(p ? { approvals: p.approvals, labels: p.labels, people: await peopleOf(p) } : {}), agentCounts: p ?  { active: p.agents.filter(a => a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending').length, paused: p.agents.filter(a => a.status === 'paused').length, resumable: resumable(p) } : { active: 0, paused: 0, resumable: resumable(null) },
       counts: { liveRuns: runs.filter(r => r.status === 'running').length, inbox: inbox.filter(i => i.kind !== 'mail').length, failedRuns: runs.filter(r => r.status === 'failed').length, openTasks: tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length },

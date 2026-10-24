@@ -19,6 +19,7 @@ import {accessibilityAttachment} from '../captureRegion';
 import {ACCESS_OPTIONS,FullAccessConfirm} from './FullAccessConfirm';
 import {attachmentKey,attachmentName,imageBlindModel,imageBlindWarning,chipPayload,chipToken,COMPOSER_COMMANDS,EFFORT_LABELS,findTokenRanges,formatBytes,insertToken,MAX_ATTACHMENT_BYTES,MAX_ATTACHMENTS,readFolderAccess,readMentionQuery,readSlashQuery,saveFolderAccess,scoreItem,setFullAccessSkip,skipsFullAccessConfirm,SKILL_RECORDER_PROMPT,type ComposerAccess,type ComposerChip,type ComposerCommandId} from './composerMenus';
 import {ModelPicker} from './ModelPicker';
+import {ProviderUsageWarning} from './ProviderUsage';
 import {ProjectPicker} from './ProjectPicker';
 import {openImportConversations} from './ImportConversations';
 import {SKETCH_FILE_NAME,SketchPad,type SketchStroke} from './SketchPad';
@@ -459,6 +460,7 @@ export function NewChatScreen():React.ReactElement {
     <div ref={composerRoot} className="composer new-chat-composer" aria-busy={busy}>
       {attachments.length>0&&<div className="composer-attachments"><AttachmentStrip chatId={undefined} items={attachments} onRemove={removeAttachment} onRetry={()=>{}}
         onOpen={item=>{if(!sketches.current.has(item.localId))return false;openSketch(item.localId);return true;}}/></div>}
+      <ProviderUsageWarning providerId={createdModel.providerId || undefined}/>
       {attachments.some(item=>item.kind==='image')&&imageBlindModel(providers,createdModel.providerId,createdModel.id)&&<p className="composer-image-warning" role="status" data-testid="image-blind-warning">{imageBlindWarning(imageBlindModel(providers,createdModel.providerId,createdModel.id)!)}</p>}
       <div className={`composer-field${tokenRanges.length?' has-chips':''}`}>
         {tokenRanges.length>0&&<ChipMirror text={text} ranges={tokenRanges} selected={selection} plugins={plugins} mirror={mirror}/>}

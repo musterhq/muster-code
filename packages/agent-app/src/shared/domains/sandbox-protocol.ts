@@ -30,8 +30,9 @@ export interface SandboxFileDiff {path: string; status: SandboxChangeStatus; pat
 
 export interface SandboxCommands {
   'sandbox.chatEnvironment.get': {input: {chatId: string}; output: ChatEnvironmentStatus};
-  /** Refused while the chat is running. Selecting 'sandbox' sets the chat's host access to read-only. */
-  'sandbox.chatEnvironment.set': {input: {chatId: string; env: ChatEnvironmentKind; mode?: ChatEnvironmentMode}; output: ChatEnvironmentStatus};
+  /** Refused while the chat is running. Selecting 'sandbox' sets the chat's host access to read-only (refused on a model
+   *  whose tools can't run in the sandbox). Leaving with `permissionMode` sets that access instead of restoring the old one. */
+  'sandbox.chatEnvironment.set': {input: {chatId: string; env: ChatEnvironmentKind; mode?: ChatEnvironmentMode; permissionMode?: 'workspace' | 'full'; acknowledgeFullAccess?: boolean}; output: ChatEnvironmentStatus};
   /** Re-copies the folder into the isolated copy, discarding the copy's own changes. Refused while running. */
   'sandbox.syncFromHost': {input: {chatId: string}; output: ChatEnvironmentStatus};
   /** Files that differ between the isolated copy and the folder on this Mac. */
