@@ -38,8 +38,8 @@ A PR that changes this area adds its cases here first: one row in this table, th
 #### MUS-SPEC-17-387B: A rebase during a turn is not counted as the turn's edits
 
 - Precondition: A Git folder on a feature branch. `main` gained commits that add three files. A turn starts with its review baseline taken.
-- Action: During the turn the agent edits `a.txt` and runs `git rebase main`. The turn settles.
-- Expected result: The Receipt lists `a.txt` only. The three files rebased in from `main` are not listed.
+- Action: During the turn the agent edits `a.txt`, commits it and runs `git rebase main`. The turn settles.
+- Expected result: The Receipt lists `a.txt` only. The three files rebased in from `main` are not listed, and neither is a file nobody edited.
 - Test: not written yet (#387)
 - Environment: Node test runner; real `git` and a temp folder; the real turn ledger hooks.
 - Known gaps: Same as MUS-SPEC-17-387A. Merge and pull go through the same reflog path but have no test of their own.

@@ -49,10 +49,10 @@ A PR that changes this area adds its cases here first: one row in this table, th
 <a id="mus-spec-02-387c"></a>
 #### MUS-SPEC-02-387C: A tool row left running by a closed app is stopped on restart
 
-- Precondition: The app closed while a turn was running a command; the chat and the command row are saved as running.
+- Precondition: The app closed while a turn was running a command; the chat and the command row are saved as running, next to a finished command.
 - Action: Start the agent service on the same data folder.
-- Expected result: The chat is interrupted and the command row is interrupted and reads Stopped.
+- Expected result: The chat is interrupted. The running command row is interrupted and reads Stopped; the finished one stays completed.
 - Test: not written yet (#387)
 - Environment: Node test runner; the agent service and the store on a temp data folder.
-- Known gaps: Rows in chats that were not running when the app closed are not touched.
+- Known gaps: Does not check a provider that is still working in the background after the app restarts; nothing survives a restart.
 - Evidence: UNVERIFIED
