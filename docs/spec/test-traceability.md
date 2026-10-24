@@ -27,6 +27,7 @@ One row per clause file that has at least one case. The checker reports a clause
 | `MUS-SPEC-09` | [Browser and previews](clauses/09-browser-and-previews.md) |
 | `MUS-SPEC-09` | [Browser and previews](clauses/09-browser-and-previews.md) |
 | `MUS-SPEC-09` | [Browser and previews](clauses/09-browser-and-previews.md) |
+| `MUS-SPEC-09` | [Browser and previews](clauses/09-browser-and-previews.md) |
 | `MUS-SPEC-10` | [Terminal and background processes](clauses/10-terminal-and-processes.md) |
 | `MUS-SPEC-11` | [Memory](clauses/11-memory.md) |
 | `MUS-SPEC-11` | [Memory](clauses/11-memory.md) |

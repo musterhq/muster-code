@@ -17,6 +17,8 @@ Boundaries:
 |---|---|---|
 | [MUS-SPEC-10-455A](10-terminal-and-processes.md#mus-spec-10-455a) | The user-process note lists the chat's folder first, forbids touching only the listed local process groups, allows remote hosts and services, and is empty when nothing is running. | [`the agent is told which live processes belong to the user`](../../../packages/agent-app/tests/dogfood-runtime-fixes.test.ts) |
 | [MUS-SPEC-10-455B](10-terminal-and-processes.md#mus-spec-10-455b) | The rule text says local machine only, names the user's terminals, Commands-tab commands and dev servers, and lists the allowed exceptions. | [`the process-ownership rule is scoped to local processes and names the allowed exceptions`](../../../packages/agent-app/tests/dogfood-runtime-fixes.test.ts) |
+| [MUS-SPEC-10-634A](10-terminal-and-processes.md#mus-spec-10-634a) | A terminal whose start finishes after its pane was closed is sent a kill request. | [`a terminal that finishes starting after its pane closed is shut down`](../../../packages/agent-app/tests/processes-components.tsx) |
+| [MUS-SPEC-10-634B](10-terminal-and-processes.md#mus-spec-10-634b) | When opening a terminal fails with the internal call wrapper in the message, the pane shows only the plain sentence. | [`a terminal error shows as plain text without the internal call wrapper`](../../../packages/agent-app/tests/processes-components.tsx) |
 | [MUS-SPEC-10-473A](10-terminal-and-processes.md#mus-spec-10-473a) | run_background starts an agent-owned process; after the turn ends and it exits, one follow-up with the name, exit code and output is queued; a Workspace chat gets a Full access error. | [`run_background starts an agent-owned process mid-turn; its exit after the turn queues one follow-up`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 | [MUS-SPEC-10-473B](10-terminal-and-processes.md#mus-spec-10-473b) | One follow-up per process with its exit code and the last 40 output lines; a repeat exit queues nothing. | [`a process that exits after the turn ended queues exactly one continuation with its code and last 40 lines`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 | [MUS-SPEC-10-473C](10-terminal-and-processes.md#mus-spec-10-473c) | An exit during a running turn, including a later turn, queues no follow-up. | [`no continuation when the chat is still mid-turn at exit (the agent sees it itself), and not later either`](../../../packages/agent-app/tests/process-continuations.test.ts) |
@@ -45,6 +47,30 @@ Boundaries:
 - Test: `packages/agent-app/tests/dogfood-runtime-fixes.test.ts::the process-ownership rule is scoped to local processes and names the allowed exceptions`
 - Environment: Node test runner; no provider or network.
 - Known gaps: A unit test of the rule's wording. It does not show how a model follows the rule.
+- Evidence: UNVERIFIED
+
+### Terminal panes
+
+<a id="mus-spec-10-634a"></a>
+#### MUS-SPEC-10-634A: A shell that starts after its pane closed does not keep running
+
+- Precondition: A terminal pane asks for a new shell, and the shell's start is still pending.
+- Action: Close the pane, then let the start finish.
+- Expected result: The shell that was created is closed by the app (a kill request for that terminal id is sent), so nothing keeps running with no pane to show it.
+- Test: `packages/agent-app/tests/processes-components.tsx::a terminal that finishes starting after its pane closed is shut down`
+- Environment: DOM suite (`linkedom`); the app's calls are faked, so no real shell starts.
+- Known gaps: Shows that a kill request is sent, not that a real shell process ends. The session-level tests in `tests/terminal-pty.test.ts` (20 open and close rounds leave no sessions; closing an ended terminal; the cap of 12) need a built `node-pty` and are not linked here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-10-634b"></a>
+#### MUS-SPEC-10-634B: Terminal errors read as plain text
+
+- Precondition: Opening a terminal fails with the message "Error invoking remote method 'muster:invoke': Error: Close a terminal before opening another (maximum 12)."
+- Action: Show the terminal pane for a chat.
+- Expected result: The pane shows "Close a terminal before opening another (maximum 12)." and nothing of the internal wrapper text.
+- Test: `packages/agent-app/tests/processes-components.tsx::a terminal error shows as plain text without the internal call wrapper`
+- Environment: DOM suite (`linkedom`); the app's calls are faked.
+- Known gaps: Uses one error message, the terminal cap. Other error texts are not checked.
 - Evidence: UNVERIFIED
 
 ### Background processes the agent starts
