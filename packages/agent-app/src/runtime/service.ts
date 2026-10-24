@@ -970,15 +970,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       } finally {
         // Background sub-agents can still be waiting on a card after the parent turn ended: keep it answerable.
         if (run.stopped || disposed || !provider.hasActiveWork?.(chatId)) { settleApprovals(chatId); settleQuestions(chatId); }
-        // Stop can close the provider before it sends item/completed. Persist the terminal
-        // state once, keeping completed tools and partial output intact.
-        if (run.stopped) for (const [providerId, localId] of toolIds) {
-          const item = store.item(localId);
-          if (item?.status === 'running') {
-            const startedAt = toolStarted.get(providerId);
-            store.updateItem(localId, item.text, 'interrupted', {...item.data, awaitingApproval:undefined,
-              ...(startedAt !== undefined ? {durationMs:Date.now() - startedAt} : {})});
-          }
+        // Stop can close the provider before it sends item/completed, and a completed or failed turn can end with a tool the
+        // provider never closed (#387). Persist the terminal state once, keeping completed tools and partial output intact.
+        // Background sub-agents still working after the turn keep their rows live until they report back.
+        if (run.stopped || disposed || !provider.hasActiveWork?.(chatId)) {
+          const startedById = new Map([...toolIds].map(([providerId, localId]) => [localId, toolStarted.get(providerId)]));
+          store.settleToolItems(chatId, item => startedById.get(item.id));
         }
         runs.delete(chatId);
         // #426: a compaction asked for during the turn runs now (before any queued message is dispatched).

@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Receipts no longer count files a checkout, merge or rebase brought in as the turn's own edits: when the branch moves during a turn, only files the agent changed or committed are listed. A tool the provider never closed is shown as Stopped once its turn ends, and after Muster restarts, instead of running forever.
 - The browser tab an agent is working in now stays usable when you close the browser panel mid-run: it is no longer frozen or discarded while in use, live previews revive it, and browser tool calls retry safely after a dropped connection (never repeating a click or keystroke).
 - Project task runs now keep working while a build, test or deploy is running instead of stopping to wait, and only stop for decisions the user must make.
 - Agents post the task handoff comment themselves instead of drafting it and asking whether to post it.
