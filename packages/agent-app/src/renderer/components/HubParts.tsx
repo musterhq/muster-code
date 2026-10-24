@@ -25,7 +25,7 @@ export function Monogram({ name, kind = 'agent' }: { name: string; kind?: 'agent
 
 export const AGENT_STATE_LABEL: Record<AgentState, string> = { active: 'Active', idle: 'Idle', running: 'Working', paused: 'Paused', error: 'Error', pending: 'Pending approval', terminated: 'Terminated' };
 export const RUN_STATE_LABEL: Record<RunState, string> = { queued: 'Queued', running: 'Running', succeeded: 'Succeeded', failed: 'Failed', cancelled: 'Cancelled', timed_out: 'Timed out', interrupted: 'Interrupted' };
-export const INBOX_KIND_LABEL: Record<InboxKind, string> = { review: 'Review', blocked: 'Blocked', approval: 'Approval', question: 'Question', failed_run: 'Failed run', agent_error: 'Agent error', mention: 'Mention', mail: 'Mail', budget: 'Budget', other: 'Attention' };
+export const INBOX_KIND_LABEL: Record<InboxKind, string> = { review: 'Review', blocked: 'Blocked', approval: 'Approval', question: 'Question', failed_run: 'Failed run', agent_error: 'Agent error', mention: 'Mention', mail: 'Mail', budget: 'Budget', checkout: 'Idle check-out', other: 'Attention' };
 
 export type Tone = 'ok' | 'warn' | 'danger' | 'accent' | 'faint' | 'violet';
 export function StateChip({ tone, children }: { tone: Tone; children: React.ReactNode }): React.ReactElement {

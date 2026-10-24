@@ -20,6 +20,7 @@ Boundaries:
 | [MUS-SPEC-17-557B](17-usage-cost-and-ledger.md#mus-spec-17-557b) | 2,500,000,000 shows as 2.5B, and counts that round up to a billion or down to 999M show the right unit. | [`very large token counts get a billions unit`](../../../packages/agent-app/tests/token-format-edges.test.ts) |
 | [MUS-SPEC-17-557C](17-usage-cost-and-ledger.md#mus-spec-17-557c) | formatUsd of -5 returns a dash. | [`a negative cost is not shown as under a cent`](../../../packages/agent-app/tests/token-format-edges.test.ts) |
 | [MUS-SPEC-17-557D](17-usage-cost-and-ledger.md#mus-spec-17-557d) | A receipt with 999,990 input tokens reads 1.0M, 2.5 billion reads 2.5B, and 999,960 never contains 1000. | [`a receipt never shows 1000k tokens and shows billions with a B`](../../../packages/agent-app/tests/receipt-token-format.tsx) |
+| [MUS-SPEC-17-458A](17-usage-cost-and-ledger.md#mus-spec-17-458a) | With two approval requests accepted automatically a turn records 0 approvals; a turn that also shows a card records 1. | [`ledger approvals count only cards shown to the user, never Full-access auto-accepts`](../../../packages/agent-app/tests/ledger-history.test.ts) |
 
 ### Showing token counts and cost
 
@@ -67,3 +68,15 @@ Boundaries:
 - Known gaps: Renders to static markup, so layout is not checked.
 - Evidence: UNVERIFIED
 
+### Approvals in the ledger
+
+<a id="mus-spec-17-458a"></a>
+#### MUS-SPEC-17-458A: Approvals in a turn receipt count only cards shown to the user
+
+- Precondition: A chat in Full access, where the provider asks for approval and Muster accepts at once with no card. A second turn where an approval card is shown.
+- Action: Run both turns through the ledger's run hooks and settle each one.
+- Expected result: The first turn's receipt records 0 approvals. The second turn's receipt records 1.
+- Test: `packages/agent-app/tests/ledger-history.test.ts::ledger approvals count only cards shown to the user, never Full-access auto-accepts`
+- Environment: Node test runner; in-memory SQLite database; no provider or network.
+- Known gaps: Drives the ledger's run hooks with hand-made events, not the agent service. It does not show the service sending the shown-card event when it creates a card.
+- Evidence: UNVERIFIED

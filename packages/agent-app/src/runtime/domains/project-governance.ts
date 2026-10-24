@@ -1091,7 +1091,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     if (g.capabilities.canAssign) critical.push(`You may create subtasks${g.capabilities.assignScope === 'project' ? ' anywhere in the project' : ' under this task'} and hand them to teammates: end your reply with \`\`\`muster-subtasks [{"title":"…","acceptance":"…","assignee":"Name"}]\`\`\`.`);
     if (g.capabilities.canHire) critical.push('You may propose a new teammate: ```muster-hire {"name":"…","title":"…","instructions":"…"}``` or the agent_propose_hire tool.');
     critical.push(`Tools (muster_tasks): task_get, task_list, agent_list, task_comment, task_update, task_create, task_assign, task_checkout, task_document_upsert, task_ask_questions, task_request_confirmation, agent_propose_hire.`, 'Muster task protocol:', TASK_PROTOCOL);
-    if (settings(projectId).runComment !== 'off') critical.push('End every run with a short comment on the task: what you did, what changed, what is left.');
+    if (settings(projectId).runComment !== 'off') critical.push('End every run with a short comment on the task: what you did, what changed, what is left. Post it yourself with task_comment; do not draft it and ask whether to post.');
     return { critical, bundle };
   }
   const taskLines = (task: ProjectTask, chatId: string): string[] => { const { critical, bundle } = taskSections(task, chatId); return [...critical, ...bundle]; };
