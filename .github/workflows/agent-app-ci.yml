@@ -40,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: packages/agent-app/.nvmrc
           cache: npm
@@ -92,3 +92,8 @@ jobs:
 
       - name: Renderer tests
         run: npm run test:renderer
+
+      - name: Router workflows with the real coding client
+        env:
+          MUSTER_REQUIRE_CODEX_E2E: "1"
+        run: npm exec --yes --package=@openai/codex@0.163.0 -- node --experimental-transform-types --import ./tests/pin-device-platform.mjs --test tests/router-usage-workflow.test.ts
