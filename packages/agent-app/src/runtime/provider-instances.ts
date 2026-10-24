@@ -12,6 +12,7 @@ import {entryAcceptsImages,fetchModelList,type ListedModel} from './adapters/htt
 import {readCodexCatalog} from './codex-catalog.ts';
 import bundledCodex from './catalogs/codex-models.json' with {type: 'json'};
 import {codexAuthHeaders,inlineStringTable,type CodexProviderAuth} from './codex-provider-auth.ts';
+import {createClaudeLane,type ClaudeLane} from './claude-lane.ts';
 
 export interface ProviderInstance {
   info: ProviderInfo;
@@ -20,6 +21,9 @@ export interface ProviderInstance {
   sessionsRoot: string;
   /** Set for non-Codex routes (Claude Code, OpenCode, HTTP APIs); run() delegates to it instead of the app-server. */
   adapter?: RunnableAdapter;
+  /** #688: a Codex gateway route that also serves Claude models over the router's Messages API. A turn picks it per turn
+   *  (provider.ts); every other turn keeps the Codex client. */
+  claudeLane?: ClaudeLane;
   /** Key of the live model listing behind this route (a gateway without a catalog), for waiting on it at send. */
   listingKey?: string;
 }
@@ -327,6 +331,8 @@ export const LISTING_WAIT_MS=15_000;
 export type ListingState=Validation<ListedModel[]> & {stale?:boolean};
 interface ListingEntry {validator:Validator<ListedModel[]>;key:string;failures:number;watching:boolean;timer?:unknown;persisted?:ListedModel[]|null}
 const listings=new Map<string,ListingEntry>();
+/** One Messages lane per gateway account, kept across instance-list rebuilds so its probe answers and saved conversations persist. */
+const claudeLanes=new Map<string,ClaudeLane>();
 const settleListeners=new Set<()=>void>();
 let listingDir:string|undefined;
 let scheduler:{set:(fn:()=>void,ms:number)=>unknown;clear:(handle:unknown)=>void}={set:(fn,ms)=>{const timer=setTimeout(fn,ms);timer.unref?.();return timer;},clear:handle=>clearTimeout(handle as NodeJS.Timeout)};
@@ -335,7 +341,7 @@ export function setProviderListingStore(dir:string|undefined):void {listingDir=d
 /** Tests drive the retry timers by hand. */
 export function setListingScheduler(next?:typeof scheduler):void {scheduler=next??{set:(fn,ms)=>{const timer=setTimeout(fn,ms);timer.unref?.();return timer;},clear:handle=>clearTimeout(handle as NodeJS.Timeout)};}
 /** Forgets every in-memory listing (tests). */
-export function resetProviderListings():void {for(const entry of listings.values())if(entry.timer!==undefined)scheduler.clear(entry.timer);listings.clear();}
+export function resetProviderListings():void {for(const entry of listings.values())if(entry.timer!==undefined)scheduler.clear(entry.timer);listings.clear();claudeLanes.clear();}
 /** Called when a model listing settles, so a cached instance list is rebuilt with its result. */
 export function onProviderListingSettled(listener:()=>void):()=>void {settleListeners.add(listener);return ()=>settleListeners.delete(listener);}
 /** Resolves once no model listing is in flight. */
@@ -395,6 +401,19 @@ export async function awaitProviderListing(listingKey:string|undefined,timeoutMs
   try {await Promise.race([entry.validator.settled().then(()=>undefined),timeout]);} finally {clearTimeout(timer as NodeJS.Timeout);}
   // The settle handler runs on the same promise; give it its turn so provider info is rebuilt before validating.
   await new Promise<void>(resolve=>setImmediate(resolve));
+}
+/** The Messages lane of a gateway route, shared by every rebuild of the instance list. Its credentials are the listing's own. */
+function claudeLaneFor(route:CodexRouteSpec,env:NodeJS.ProcessEnv,fetcher:typeof fetch|undefined,key:string):ClaudeLane {
+  const base=route.baseUrl!.replace(/\/+$/,''),auth=route.auth??{};
+  const headers=(force?:boolean)=>codexAuthHeaders(auth,env,{force:force===true});
+  let lane=claudeLanes.get(key);
+  if(lane)lane.configure({headers,...(fetcher?{fetch:fetcher}:{})});
+  else {
+    if(claudeLanes.size>=32)claudeLanes.delete(claudeLanes.keys().next().value!);
+    lane=createClaudeLane({endpoint:base,headers,label:route.name??route.modelProvider,...(fetcher?{fetch:fetcher}:{}),dir:providerDataDir});
+    claudeLanes.set(key,lane);
+  }
+  return lane;
 }
 function listing(route:CodexRouteSpec,env:NodeJS.ProcessEnv,fetcher:typeof fetch|undefined):ListingState&{key:string} {
   const base=route.baseUrl!.replace(/\/+$/,''),auth=route.auth??{};
@@ -561,7 +580,8 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       accountId=typeof tokenAccount==='string'&&tokenAccount?tokenAccount:apiKey??'codex-sign-in';
     }
     const bindingId=createHash('sha256').update(JSON.stringify([route.modelProvider,route.profile??'',codexHome,cli,route.fingerprint,accountId])).digest('hex');
-    return {info:{...base,models,...(excluded.length?{excludedModels:excluded}:{}),...(incremental?{incrementalInput:true}:{}),...listingInfo,available:true,status:'ready',bindingId,detail:`Runs through the Codex CLI with ${catalogSource}. ${mcpDetail(mcp)} Upstream access is checked only when you run.`},command,env:childEnv,sessionsRoot,...(listingKey?{listingKey}:{})};
+    const claudeLane=route.kind==='gateway'&&route.baseUrl?claudeLaneFor(route,env,fetcher,bindingId):undefined;
+    return {info:{...base,models,...(excluded.length?{excludedModels:excluded}:{}),...(incremental?{incrementalInput:true}:{}),...listingInfo,available:true,status:'ready',bindingId,detail:`Runs through the Codex CLI with ${catalogSource}. ${mcpDetail(mcp)} Upstream access is checked only when you run.`},command,env:childEnv,sessionsRoot,...(listingKey?{listingKey}:{}),...(claudeLane?{claudeLane}:{})};
   });
 }
 

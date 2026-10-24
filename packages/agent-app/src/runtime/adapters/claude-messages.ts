@@ -29,7 +29,7 @@ export class ClaudeConversationMemory {
   private threads = new Map<string, ClaudeMessage[]>();
   constructor(private maxThreads = 64, private maxChars = 2_000_000, private dir: () => string | undefined = () => undefined) {}
   private file(threadId: string): string | undefined { const dir = this.dir(); return dir && /^[a-f0-9-]{36}$/.test(threadId) ? join(dir, `${threadId}.json`) : undefined; }
-  open(threadId?: string): {threadId: string; history: ClaudeMessage[]} {
+  open(threadId?: string): {threadId: string; history: ClaudeMessage[]; found: boolean} {
     let known = threadId ? this.threads.get(threadId) : undefined;
     const file = threadId && !known ? this.file(threadId) : undefined;
     if (file) try {
@@ -38,15 +38,22 @@ export class ClaudeConversationMemory {
         if (Array.isArray(parsed)) known = parsed.filter((m): m is ClaudeMessage => !!m && typeof m === 'object' && (m.role === 'user' || m.role === 'assistant') && (typeof m.content === 'string' || Array.isArray(m.content)));
       }
     } catch { known = undefined; }
-    return known ? {threadId: threadId!, history: [...known]} : {threadId: randomUUID(), history: []};
+    return known ? {threadId: threadId!, history: [...known], found: true} : {threadId: randomUUID(), history: [], found: false};
   }
   commit(threadId: string, messages: ClaudeMessage[]): {retainedUserTurns: number; trimmed: boolean} {
     const size = (m: ClaudeMessage) => typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content).length;
-    let kept = messages.slice(-80), total = kept.reduce((n, m) => n + size(m), 0);
-    // Drop from the front until the thread fits, then make sure it starts on a plain user prompt (not a tool result,
-    // whose tool call would be gone).
-    while (kept.length > 2 && total > this.maxChars) { total -= size(kept[0]!); kept = kept.slice(1); }
-    while (kept.length > 1 && !(kept[0]!.role === 'user' && typeof kept[0]!.content === 'string')) kept = kept.slice(1);
+    const isPrompt = (m: ClaudeMessage) => m.role === 'user' && typeof m.content === 'string';
+    let kept = messages.slice(-80).map(withoutImages);
+    const sizes = kept.map(size);
+    let from = 0, total = sizes.reduce((sum, n) => sum + n, 0);
+    // The saved thread must start on a real user prompt (a tool result without its call, or an assistant message first, is a
+    // 400 at Anthropic) and fit the limits: drop from the front one whole prompt at a time, then re-align to the next prompt.
+    for (;;) {
+      while (from < kept.length && !isPrompt(kept[from]!)) { total -= sizes[from]!; from++; }
+      if (from >= kept.length || total <= this.maxChars) break;
+      total -= sizes[from]!; from++;
+    }
+    kept = kept.slice(from);
     this.threads.delete(threadId); this.threads.set(threadId, kept);
     while (this.threads.size > this.maxThreads) this.threads.delete(this.threads.keys().next().value!);
     const file = this.file(threadId);
@@ -60,7 +67,7 @@ interface Options {
   /** Router base URL, e.g. https://router.example/v1 ( /messages is appended). */
   endpoint: string;
   /** Request headers carrying the route's own credentials (bearer token, its auth helper's token, extra headers). */
-  headers: () => Promise<Record<string, string>>;
+  headers: (force?: boolean) => Promise<Record<string, string>>;
   label: string;
   fetch?: typeof fetch;
   memory?: ClaudeConversationMemory;
@@ -141,20 +148,30 @@ export function claudeMessagesAdapter(options: Options): RunnableAdapter {
   return {kind: 'http', async run(input): Promise<AdapterRunResult> {
     const lane = {steers: [] as string[], open: true};
     input.onSteerable?.(text => { if (!lane.open || input.signal.aborted) return false; lane.steers.push(text); return true; });
-    const {threadId, history} = memory.open(input.resumeThreadId);
+    const {threadId, history, found} = memory.open(input.resumeThreadId);
+    // A saved conversation that is gone (data folder cleared, a first turn that never saved) must not drop the earlier messages silently.
+    const seed = input.resumeThreadId && !found ? input.onThreadReset?.(input.resumeThreadId)?.trim() : undefined;
+    const text = seed ? `${seed}\n\nCurrent user request:\n${input.prompt}` : input.prompt;
     input.onThreadReady(threadId);
     const browser = browserOffered(input.browserTools);
     const system = [input.instructions, toolInstructions(input.permissionMode, input.cwd, browser)].filter(Boolean).join('\n\n');
     const tools = messagesTools(input.permissionMode, browser);
     const budget = BUDGETS[input.reasoningEffort ?? 'medium'];
     const images = loadImages(input.images);
-    const prompt: ClaudeMessage = {role: 'user', content: images.length ? [...images.map(image => ({type: 'image', source: {type: 'base64', media_type: image.mediaType, data: image.data}})), {type: 'text', text: input.prompt}] : input.prompt};
+    const prompt: ClaudeMessage = {role: 'user', content: images.length ? [...images.map(image => ({type: 'image', source: {type: 'base64', media_type: image.mediaType, data: image.data}})), {type: 'text', text}] : text};
     // Images are sent once; the saved conversation keeps the prompt text only.
-    const saved: ClaudeMessage[] = [...history, {role: 'user', content: input.prompt}];
+    const saved: ClaudeMessage[] = [...history, {role: 'user', content: text}];
     const live: ClaudeMessage[] = [...history, prompt];
-    const send = async () => request(`${options.endpoint.replace(/\/+$/, '')}/messages`, {method: 'POST', redirect: 'error', signal: input.signal,
-      headers: {...await options.headers(), 'content-type': 'application/json', accept: 'text/event-stream', 'anthropic-version': '2023-06-01'},
+    const post = async (force: boolean) => request(`${options.endpoint.replace(/\/+$/, '')}/messages`, {method: 'POST', redirect: 'error', signal: input.signal,
+      headers: {...await options.headers(force), 'content-type': 'application/json', accept: 'text/event-stream', 'anthropic-version': '2023-06-01'},
       body: JSON.stringify({model: input.model, max_tokens: budget + 8_000, stream: true, thinking: {type: 'enabled', budget_tokens: budget}, system, tools, messages: live})});
+    // An expired helper token answers 401 before any output: fetch a fresh one and send the same request once more.
+    const send = async () => {
+      const response = await post(false);
+      if (response.status !== 401) return response;
+      await response.body?.cancel().catch(() => {});
+      return post(true);
+    };
     const fail = (message: string, extra: Partial<AdapterRunResult> = {}): AdapterRunResult => ({status: 'failed', finalMessage: '', threadId, dispatchState: 'not-dispatched', errorMessage: message, ...extra});
     let response: Response;
     try { response = await send(); }
@@ -203,6 +220,13 @@ export function claudeMessagesAdapter(options: Options): RunnableAdapter {
     input.onEvent(HISTORY_WINDOW_EVENT, {threadId, turnId, retainedUserTurns: retained.retainedUserTurns, trimmed: retained.trimmed});
     return {status: input.signal.aborted ? 'failed' : 'completed', finalMessage: answer, threadId, turnId, dispatchState: 'dispatched', ...(input.signal.aborted ? {errorMessage: 'Stopped.'} : {})};
   }};
+}
+
+/** Saved history keeps no pictures: a screenshot a tool returned would be re-sent on every later turn. */
+function withoutImages(message: ClaudeMessage): ClaudeMessage {
+  if (typeof message.content === 'string') return message;
+  const content = message.content.filter(block => block.type !== 'image').map(block => Array.isArray(block.content) ? {...block, content: (block.content as Block[]).filter(inner => inner.type !== 'image')} : block);
+  return {role: message.role, content};
 }
 
 /** A conversation saved mid-turn (Stop, a failed round) must not end on tool calls without results: Anthropic refuses
