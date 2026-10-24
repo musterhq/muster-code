@@ -686,7 +686,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) || pluginReloads.wantsConnectors(chatId) ? {connectorsRequested: true} : {}),
           ...(runOptions.configOverrides ? {configOverrides: runOptions.configOverrides as Record<string, string | number | boolean | string[]>} : {}), ...(runOptions.developerInstructions ? {developerInstructions: runOptions.developerInstructions} : {}),
           onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
-          onThreadReady: threadId => persistIdentity(threadId),
+          onThreadReady: threadId => { persistIdentity(threadId); void nativeQueue.flushStranded(chatId); },
           // The saved provider thread is gone (pruned or deleted): the fresh one gets the earlier conversation and the
           // context blocks the old thread already held, and the user is told.
           onThreadReset() {

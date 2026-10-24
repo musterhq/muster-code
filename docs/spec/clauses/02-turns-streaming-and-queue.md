@@ -18,6 +18,7 @@ Boundaries:
 |---|---|---|
 | [MUS-SPEC-02-473H](02-turns-streaming-and-queue.md#mus-spec-02-473h) | The no-promise rule is in Agent mode instructions and not in Ask or Plan. | [`agent-mode instructions forbid ending a turn on a promise`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 | [MUS-SPEC-02-473J](02-turns-streaming-and-queue.md#mus-spec-02-473j) | A closing promise makes the run advanced or plan-only, never completed; ordinary endings stay completed. | [`liveness: a turn that ends promising to report back is not completed`](../../../packages/agent-app/tests/process-continuations.test.ts) |
+| [MUS-SPEC-02-579A](02-turns-streaming-and-queue.md#mus-spec-02-579a) | After a crash, Continue anyway and then Steer on a queued message send it once; the app-server's saved copy is deleted, so it does not send it again when the thread goes idle. | [`a message queued before a crash is sent once after Continue anyway and Steer`](../../../packages/agent-app/tests/queue-after-crash-579.test.ts) |
 
 ### Turns that end on a promise
 
@@ -41,4 +42,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/process-continuations.test.ts::liveness: a turn that ends promising to report back is not completed`
 - Environment: Node test runner; no provider or network.
 - Known gaps: A unit test of a text classifier, so wording it does not recognise is not caught.
+- Evidence: UNVERIFIED
+
+### A queued message after a crash
+
+<a id="mus-spec-02-579a"></a>
+#### MUS-SPEC-02-579A: A message queued during a turn that crashed is sent once after Continue anyway and Steer
+
+- Precondition: A Codex chat has a running turn and one follow-up queued while it ran; the follow-up is held by the app-server's own queue. Muster is killed without closing and relaunched over the same data folder, so the chat shows "May still be running at the provider" with the follow-up still queued.
+- Action: Click Continue anyway, then Steer on the queued message. Then the thread goes idle and the app-server starts whatever it still holds for it.
+- Expected result: The provider receives the queued text exactly once, the transcript has one copy of it, and the queue is empty. The app-server's saved copy was deleted as soon as the session came back, so it is not sent a second time.
+- Test: `packages/agent-app/tests/queue-after-crash-579.test.ts::a message queued before a crash is sent once after Continue anyway and Steer`
+- Environment: Node test runner; the agent service with a fake Codex-style provider that keeps its saved queue across a relaunch and sends it when the thread goes idle; no network.
+- Known gaps: The fake app-server models the real one's queue persistence and idle send from its documented methods, not from a live Codex. A provider that keeps no queue of its own never double-sends, and Continue anyway then Steer on it already sent once.
 - Evidence: UNVERIFIED
