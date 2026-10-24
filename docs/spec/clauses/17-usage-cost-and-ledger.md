@@ -14,14 +14,13 @@ Boundaries:
 
 ## Acceptance cases
 
-A PR that changes this area adds its cases here first: one row in this table, then the case block below it (see [acceptance-cases.md](../acceptance-cases.md)).
-
 | Case | What the assertions check | Test |
 |---|---|---|
 | [MUS-SPEC-17-179A](17-usage-cost-and-ledger.md#mus-spec-17-179a) | After the newest receipt rows are deleted, the chain check fails and points at the first removed entry. | [`deleting the newest receipts is reported by verify`](../../../packages/agent-app/tests/turn-ledger-anchor-179.test.ts) |
 | [MUS-SPEC-17-179B](17-usage-cost-and-ledger.md#mus-spec-17-179b) | After the whole chain is rewritten with valid hashes, the chain check fails because the head no longer matches the saved head. | [`a fully rewritten chain is reported by verify`](../../../packages/agent-app/tests/turn-ledger-anchor-179.test.ts) |
 | [MUS-SPEC-17-179C](17-usage-cost-and-ledger.md#mus-spec-17-179c) | A ledger written before the saved head existed adopts its current head, then reports a later truncation; a new receipt does not hide an earlier truncation. | [`an older ledger adopts its head and a later receipt cannot hide a truncation`](../../../packages/agent-app/tests/turn-ledger-anchor-179.test.ts) |
 | [MUS-SPEC-17-179D](17-usage-cost-and-ledger.md#mus-spec-17-179d) | A receipt whose save fails partway leaves nothing half-written: the check still passes and the next receipt chains on. | [`a receipt that fails to save leaves the ledger passing`](../../../packages/agent-app/tests/turn-ledger-anchor-179.test.ts) |
+| [MUS-SPEC-17-458A](17-usage-cost-and-ledger.md#mus-spec-17-458a) | With two approval requests accepted automatically a turn records 0 approvals; a turn that also shows a card records 1. | [`ledger approvals count only cards shown to the user, never Full-access auto-accepts`](../../../packages/agent-app/tests/ledger-history.test.ts) |
 
 ### Ledger head anchor
 
@@ -67,4 +66,17 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/turn-ledger-anchor-179.test.ts::a receipt that fails to save leaves the ledger passing`
 - Environment: Node with `node:sqlite`, in-memory database.
 - Known gaps: a real power loss is simulated by a database trigger that fails the update, not by killing the process.
+- Evidence: UNVERIFIED
+
+### Approvals in the ledger
+
+<a id="mus-spec-17-458a"></a>
+#### MUS-SPEC-17-458A: Approvals in a turn receipt count only cards shown to the user
+
+- Precondition: A chat in Full access, where the provider asks for approval and Muster accepts at once with no card. A second turn where an approval card is shown.
+- Action: Run both turns through the ledger's run hooks and settle each one.
+- Expected result: The first turn's receipt records 0 approvals. The second turn's receipt records 1.
+- Test: `packages/agent-app/tests/ledger-history.test.ts::ledger approvals count only cards shown to the user, never Full-access auto-accepts`
+- Environment: Node test runner; in-memory SQLite database; no provider or network.
+- Known gaps: Drives the ledger's run hooks with hand-made events, not the agent service. It does not show the service sending the shown-card event when it creates a card.
 - Evidence: UNVERIFIED

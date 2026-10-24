@@ -6,6 +6,16 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - The Ledger's chain check now also catches deleted or rewritten recent receipts, not only edits in the middle. It names the first receipt affected, and adding new receipts afterwards does not hide it.
+- Installing a plugin or MCP connector while a chat is working now makes it usable right away: the chat restarts on a fresh session (keeping its conversation) and re-sends your last message, with a short notice saying so. Idle chats whose last message asked for that plugin get the same treatment; unrelated chats are left alone.
+- Memory: facts and preferences you told Muster once now carry into project and folder chats, and recall looks at your task and recent messages (not just "continue"), with a longer wait for the memory service.
+- Memory context is sent again on the next turn after a compaction or a model/provider change.
+- The browser tab an agent is working in now stays usable when you close the browser panel mid-run: it is no longer frozen or discarded while in use, live previews revive it, and browser tool calls retry safely after a dropped connection (never repeating a click or keystroke).
+- Project task runs now keep working while a build, test or deploy is running instead of stopping to wait, and only stop for decisions the user must make.
+- Agents post the task handoff comment themselves instead of drafting it and asking whether to post it.
+- Usage stats and Receipts now count only approvals that actually showed you a card; requests accepted automatically in Full access are no longer counted as prompts.
+- Agent mode no longer ends a turn with a promise like "I'll report back when the build finishes": the agent is told to wait for the work inside the turn, and a run that ends on such a promise is no longer counted as completed.
+- In Agent mode with Full access, the agent can start a long build, test run or deploy as a background process of the chat (shown in Commands as the agent's). If it is still running when the turn ends, its exit sends the chat one follow-up (exit code and the last 40 lines of output) through the message queue, so the agent picks up where it left off.
+- Configured Responses routers no longer reconnect and fail when a completed response omits cache or reasoning usage counters. Existing counts, authentication, and chat history are preserved; truncated streams still report a failure.
 - The Linux app's terminal works again on Ubuntu 24.04. Linux builds are made on Ubuntu 24.04, so the terminal module runs there and on newer releases.
 - Settings › Muster Server buttons (invite, revoke, connector and agent actions) ignore a second click while the first is still running, so they no longer fire twice.
 - The Dashboard prices turns the provider reported no cost for from the model catalog or your Settings › Models prices; turns with no known price still count as unpriced.
