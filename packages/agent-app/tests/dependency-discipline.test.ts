@@ -44,7 +44,8 @@ test('no bundled dependency has an unknown license',()=>{
   const licenses=read('licenses/THIRD-PARTY-LICENSES.txt');
   const start=licenses.indexOf('buffers@0.1.1 (MIT)');
   assert.ok(start>=0,'license bundle lists buffers@0.1.1 as MIT');
-  const entry=licenses.slice(start,licenses.indexOf('\n====',start));
+  const body=licenses.indexOf('\n',licenses.indexOf('\n',start)+1)+1; // past the header and its ==== underline
+  const entry=licenses.slice(body,licenses.indexOf('\n====',body));
   assert.match(entry,/Permission is hereby granted, free of charge/);
   assert.match(entry,/James Halliday/);
   assert.match(entry,/package\.json/i,'says where the license was confirmed');
