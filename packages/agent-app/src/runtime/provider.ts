@@ -50,7 +50,8 @@ export interface ProviderInput {
   onDelta(text: string): void;
   onReasoning(text: string): void;
   onEvent(method: string, params: Record<string, unknown>): void;
-  onRequest(method: string, params: Record<string, unknown>): Promise<Record<string, unknown> | undefined>;
+  /** `options` come from the adapter, never from the provider's parameters: policyOnly asks only for the rules, the guard and a card for a threat or an ask (an adapter that runs its own tools). */
+  onRequest(method: string, params: Record<string, unknown>, options?: {policyOnly?: boolean}): Promise<Record<string, unknown> | undefined>;
   /** The saved provider thread could not be resumed and a fresh one starts. Returns text (a digest of the earlier
    *  conversation) to send ahead of this turn's prompt. */
   onThreadReset?(previousThreadId: string): string | undefined;
@@ -222,9 +223,9 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         ...adapterBrowser(route.info.driver, input.chat.mode, input.developerInstructions, input.configOverrides, subagentSupport(route.info.driver) !== 'none'),
         ...(Object.keys(envFromOverrides(input.configOverrides)).length ? {env: envFromOverrides(input.configOverrides)} : {}),
         // The adapter runs its own tools (HTTP routes): they meet the same Project tool rules, user-process guard and approval cards as Codex's.
-        authorize: async (method, params) => {
+        authorize: async (method, params, options) => {
           if (!live()) return false;
-          const answer = await requestWhileOwned(owned.controller.signal, () => input.onRequest(method, params));
+          const answer = await requestWhileOwned(owned.controller.signal, () => input.onRequest(method, params, options));
           if (owned.controller.signal.aborted) return false;
           const decision = answer?.decision;
           return answer === undefined || decision === 'accept' || decision === 'acceptForSession';

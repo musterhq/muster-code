@@ -25,7 +25,7 @@ export interface ToolCall { id: string; name: string; arguments: string }
 export interface ToolImage { mediaType: string; data: string; name: string }
 export interface ToolResult { content: string; ok: boolean; image?: ToolImage }
 /** Resolves true to proceed. The service answers with the Project tool policy, the user-process guard and approval cards. */
-export type Authorize = (method: string, params: Record<string, unknown>) => Promise<boolean>;
+export type Authorize = (method: string, params: Record<string, unknown>, options?: {policyOnly?: boolean}) => Promise<boolean>;
 export interface ToolContext { /** The chat whose browser tab the browser tools drive (#424). */ chatId?: string; /** Offer Muster's in-app browser tools. */ browser?: boolean; cwd: string; access: ToolAccess; signal: AbortSignal; emit: AdapterRunInput['onEvent']; threadId: string; turnId: string; authorize?: Authorize; env?: Record<string, string>; deadline?: number; /** True when the model reports image input. read_file of an image returns the picture only then. */ vision?: boolean; /** Shared across one turn so the "this model cannot see images" explanation is given once. */ visionNote?: {told: boolean} }
 
 export const MAX_TOOL_OUTPUT = 64 * 1024, MAX_FILE_READ = 256 * 1024, MAX_EDIT_FILE = 5 * 1024 * 1024, MAX_TIMELINE_OUTPUT = 8 * 1024;
@@ -121,38 +121,63 @@ async function resolvePath(raw: unknown, ctx: ToolContext): Promise<Resolved> {
   }
   return {path: join(base, ...parts), base, confined: true};
 }
-/** After the parent exists: its real path must still be inside the folder (the folder may have changed since the check). */
-async function parentStillInside(path: string, base: string): Promise<void> {
-  const real = await fs.realpath(dirname(path));
-  if (!isInsidePath(base, real)) throw new Error('That location leads outside the working folder.');
-}
-
-/** Writes through a handle opened without following links, then checks where the file really is; removes it if it landed outside. */
+/**
+ * Writes through a handle opened without following links. The parent folders are made one at a time, each lstat-ed (a link or a
+ * folder that is not really inside the working folder is refused, and a folder this call just made that landed outside is removed
+ * again); after opening, the handle must be the very file (device and inode) that lstat sees under the real parent, and the file
+ * must still really lie inside the folder. A file this call created elsewhere is removed.
+ */
 async function writeConfined(resolved: Resolved, content: string): Promise<void> {
   const {path, base, confined} = resolved;
-  await fs.mkdir(dirname(path), {recursive: true});
-  if (!confined) { await fs.writeFile(path, content, 'utf8'); return; }
-  await parentStillInside(path, base);
-  const existed = await fs.lstat(path).then(() => true, () => false);
+  if (!confined) { await fs.mkdir(dirname(path), {recursive: true}); await fs.writeFile(path, content, 'utf8'); return; }
+  const parts = relative(base, path).split(sep).filter(Boolean);
+  const name = parts.pop();
+  if (!name) throw new Error('A file path is required.');
+  let realParent = base;
+  for (const part of parts) {
+    const next = join(realParent, part);
+    let info = await fs.lstat(next).catch(error => { if (missing(error)) return undefined; throw error; });
+    if (!info) {
+      await fs.mkdir(next).catch(error => { if ((error as NodeJS.ErrnoException)?.code !== 'EEXIST') throw error; });
+      info = await fs.lstat(next);
+    }
+    if (info.isSymbolicLink() || !info.isDirectory()) throw new Error(`${relative(base, next)} is not a plain folder; links are not followed outside Full access.`);
+    const real = await fs.realpath(next);
+    if (!isInsidePath(base, real)) {
+      // Only an empty folder this call made can be here; a swap of the parent let it land outside.
+      await fs.rmdir(real).catch(() => {});
+      throw new Error('That location leads outside the working folder.');
+    }
+    realParent = real;
+  }
+  const file = join(realParent, name);
+  const before = await fs.lstat(file).catch(error => { if (missing(error)) return undefined; throw error; });
+  const existed = before !== undefined;
   const noFollow = typeof fsc.O_NOFOLLOW === 'number' ? fsc.O_NOFOLLOW : 0;
-  const handle = await fs.open(path, fsc.O_WRONLY | fsc.O_CREAT | noFollow, 0o644);
+  const handle = await fs.open(file, fsc.O_WRONLY | fsc.O_CREAT | noFollow, 0o644);
   let real: string | undefined;
   try {
     const info = await handle.stat();
     if (!info.isFile()) throw new Error('That is not a regular file.');
     if (existed && info.nlink > 1) throw new Error('That file has other hard links, so it is not changed outside Full access.');
-    real = await fs.realpath(path);
+    // On Windows O_NOFOLLOW is 0: this is what covers the last component there.
+    const named = await fs.lstat(file).catch(() => undefined);
+    if (!named || named.isSymbolicLink() || named.dev !== info.dev || named.ino !== info.ino) throw new Error('That file changed while it was being opened, so it was not written.');
+    real = await fs.realpath(file);
     if (!isInsidePath(base, real)) throw new Error('That file leads outside the working folder.');
     await handle.truncate(0);
     await handle.writeFile(content, 'utf8');
   } catch (error) {
     await handle.close().catch(() => {});
     // The file was created by this call and turned out to be elsewhere: take it away again.
-    if (!existed && real && !isInsidePath(base, real)) await fs.unlink(real).catch(() => {});
+    if (!existed) {
+      const stray = await fs.realpath(file).catch(() => undefined);
+      if (stray && !isInsidePath(base, stray)) await fs.unlink(stray).catch(() => {});
+    }
     throw error;
   }
   await handle.close();
-  const after = await fs.realpath(path).catch(() => undefined);
+  const after = await fs.realpath(file).catch(() => undefined);
   if (after && !isInsidePath(base, after)) { if (!existed) await fs.unlink(after).catch(() => {}); throw new Error('That file ended up outside the working folder and was removed.'); }
 }
 
@@ -273,7 +298,7 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
     return finish({type: 'commandExecution', command: `${call.name} (blocked)`, cwd}, {content: why, ok: false});
   }
   /** Project rules and the user-process guard; false when declined. */
-  const approved = async (method: string, params: Record<string, unknown>) => { if (!ctx.authorize) return true; try { return await ctx.authorize(method, {...params, itemId: id, policyOnly: true}); } catch { return false; } };
+  const approved = async (method: string, params: Record<string, unknown>) => { if (!ctx.authorize) return true; try { return await ctx.authorize(method, {...params, itemId: id}, {policyOnly: true}); } catch { return false; } };
   const declined: ToolResult = {content: 'This was declined (a Project tool rule, the protection for your own processes, or your answer).', ok: false};
   let item: Record<string, unknown> = {type: kindOf};
   try {
