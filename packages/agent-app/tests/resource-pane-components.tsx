@@ -1,4 +1,4 @@
-/** Run with node tests/run-resource-pane-components.mjs: file tree keyboard + retained expansion, '+' menu, and the one
+/** Run with npm run test:renderer (suite resource-pane-components): file tree keyboard + retained expansion, '+' menu, and the one
  *  Git tab (Changes · History · Pull request): staged/unstaged sections, colour classes per status, segment navigation,
  *  CI and conflict banner routing. */
 import assert from 'node:assert/strict';

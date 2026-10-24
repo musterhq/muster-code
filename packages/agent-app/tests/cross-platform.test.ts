@@ -71,7 +71,7 @@ test('the terminal tool launcher really starts and answers MCP on this platform'
   const launcher=await host.start();
   assert.equal(launcher.endsWith('.cmd'),process.platform==='win32');
   const [file,argv]=process.platform==='win32'?[process.env.ComSpec||'cmd.exe',['/d','/c',launcher]]:[launcher,[]];
-  const child=spawn(file,argv,{env:{...process.env,MUSTER_CHAT_ID:'chat1'},stdio:['pipe','pipe','ignore'],windowsHide:true});
+  const child=spawn(file,argv,{env:{...process.env,MUSTER_CHAT_ID:'chat1',MUSTER_CHAT_TOKEN:host.chatToken('chat1')},stdio:['pipe','pipe','ignore'],windowsHide:true});
   t.after(()=>child.kill());
   const lines:string[]=[];let wake:()=>void=()=>{};
   let buffer='';child.stdout.on('data',d=>{buffer+=d;let i;while((i=buffer.indexOf('\n'))>=0){lines.push(buffer.slice(0,i));buffer=buffer.slice(i+1);wake();}});
