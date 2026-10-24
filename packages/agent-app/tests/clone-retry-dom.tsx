@@ -1,4 +1,4 @@
-/** Run with node tests/run-clone-retry-dom.mjs: GIT-10 clone Retry and draft-while-cloning. */
+/** Run with npm run test:renderer (suite clone-retry-dom): GIT-10 clone Retry and draft-while-cloning. */
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {setTimeout as delay} from 'node:timers/promises';
