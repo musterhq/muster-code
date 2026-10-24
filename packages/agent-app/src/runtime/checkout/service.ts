@@ -19,7 +19,7 @@ import { asksOpenQuestion } from '../project-tasks.ts';
 import { homedir } from 'node:os';
 import { costEventFor, payerOf, type ProviderPayInfo } from './costs.ts';
 import { credentialId, GIVE_UP_MS, whyNotSend, type Expect } from './outbox-policy.ts';
-import { canCheckout, checkoutComment, checkoutText, deriveLease, LeaseError, markerFor, newLease, transition, toView } from './lease.ts';
+import { canCheckout, checkoutComment, checkoutText, deriveLease, idleDaysOf, LeaseError, markerFor, newLease, quietSince, transition, toView } from './lease.ts';
 /** How long an automatic hand-back can be taken back. */
 export const UNDO_MS = 2 * 60_000;
 /** One context summary at most this often. */
@@ -47,7 +47,7 @@ import { TEST_COMMAND } from '../turn-ledger.ts';
 import { ENVELOPE_RULES, neutralizeServerText, sanitizeOut, untrusted } from './sanitize.ts';
 import { join as joinPath } from 'node:path';
 import { collectServerHistory, compactBrief, taskDir, taskFolderProblem, UNSAFE_FOLDER_NOTE, writeTaskFolder, type TaskHistory } from './task-history.ts';
-import type { WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol.ts';
+import type { WorkspaceInboxItem, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol.ts';
 import { device } from '../../shared/device-noun.ts';
 
 /** The org copy as kept on this Mac: the task's history rides with it (#434), so a turn without the server still has the last one. */
@@ -1058,6 +1058,46 @@ export class CheckoutService {
       this.scheduleFlush(lease.taskId);
     }
     return posted;
+  }
+  /**
+   * A check-out that has sat quiet for more than three days gets ONE note on the server saying how long (once per quiet stretch: activity or "Keep it" starts a new one),
+   * and shows in the Inbox as Needs you (`inboxItems`). Nothing is handed back or released because of it.
+   */
+  async checkStale(): Promise<number> {
+    let posted = 0;
+    for (const lease of this.ownOpen()) {
+      if (lease.offline === 'manual' || idleDaysOf(lease, this.d.now()) === null) continue;
+      // Work in any chat of this worktree is activity too: a check-out being worked on in another chat is not idle.
+      const active = await this.folderActivity(lease);
+      if (active > Date.parse(lease.lastActivityAt)) this.d.store.putLease({ ...this.d.store.lease(lease.taskId)!, lastActivityAt: iso(active) });
+      const current = this.d.store.lease(lease.taskId)!, days = idleDaysOf(current, this.d.now());
+      if (days === null) continue;
+      const since = quietSince(current);
+      const added = this.enq({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key: `idle:${lease.taskId}:${since}`, kind: 'note', at: iso(this.d.now()),
+        body: `**Idle for ${days} days.** No activity since ${since.slice(0, 10)}. It is still checked out on ${lease.device}; nothing was handed back. Its owner needs to hand it back, release it or keep it.` });
+      if (!added) continue;
+      posted++; this.scheduleFlush(lease.taskId); this.d.emit(lease.taskId);
+    }
+    return posted;
+  }
+  /**
+   * The Needs-you rows for this Mac's idle check-outs: one per check-out, read from the lease itself, so it cannot repeat and goes away the moment the person
+   * hands back, releases or keeps it (Keep starts a new quiet stretch). `at` is the start of the quiet stretch: dismissing a row hides that stretch only.
+   */
+  inboxItems(): WorkspaceInboxItem[] {
+    const items: WorkspaceInboxItem[] = [];
+    for (const lease of this.ownOpen()) {
+      const days = idleDaysOf(lease, this.d.now());
+      if (days === null) continue;
+      const copy = this.d.store.orgCopy(lease.taskId);
+      items.push({
+        id: `checkout:${lease.taskId}`, kind: 'checkout', checkout: { days }, title: `${lease.key} · ${lease.title}: still checked out on ${lease.device}`,
+        why: `No activity for ${days} days. It is still assigned to you and the team sees it as in progress. Hand it back, release it, or keep it.`,
+        severity: 'high', at: quietSince(lease), taskId: lease.taskId, agentId: null, runId: null, source: 'local', group: copy?.project?.name ?? copy?.orgName ?? lease.key,
+        ...(copy ? { org: { id: lease.orgId, name: copy.orgName } } : {}),
+      });
+    }
+    return items;
   }
   /**
    * Takes a hand-back back, for about two minutes, only while nobody else has acted on it (security review M3): a fresh read must succeed, the task must still be
