@@ -73,6 +73,7 @@ test('service retries a not-dispatched 503 with one in-place notice, then comple
   mock.timers.tick(100);await service.dispose();
 });
 
+// Spec: MUS-SPEC-02-479N (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-479n)
 test('chat.stop cancels a pending retry; exhausted retries keep the admission recovery',async t=>{
   const dataDir=await directory(t);
   mock.timers.enable({apis:['setTimeout','Date'],now:0});t.after(()=>mock.timers.reset());
@@ -94,7 +95,9 @@ test('chat.stop cancels a pending retry; exhausted retries keep the admission re
   await flush();
   assert.equal(calls,ADMISSION_RETRY_MAX+1);
   chat=(await service.invoke('app.snapshot',undefined)).chats.find(item=>item.id===exhausted.id)!;
-  assert.equal(chat.status,'failed');assert.equal(chat.recovery?.kind,'admission-rejected');assert.match(chat.recovery!.reason,/after 5 automatic retries/);assert.equal(chat.draft,'keep trying');
+  assert.equal(chat.status,'failed');assert.equal(chat.recovery?.kind,'admission-rejected');assert.match(chat.recovery!.reason,/after 5 automatic retries/);
+  // #448: still unavailable after the in-run retries, the chat waits as rate-limited and re-runs this prompt itself, so it is not also handed back as a draft.
+  assert.equal(chat.draft,'');assert.equal(chat.autoResume?.reason,'rate');assert.equal(chat.autoResume?.resume,true);
   assert.equal((await service.invoke('chat.timeline',{id:exhausted.id})).items.find(item=>item.data?.kind==='admission-retry')?.status,'failed');
   mock.timers.tick(100);await service.dispose();
 });

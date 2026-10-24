@@ -25,7 +25,7 @@ export function Monogram({ name, kind = 'agent' }: { name: string; kind?: 'agent
 
 export const AGENT_STATE_LABEL: Record<AgentState, string> = { active: 'Active', idle: 'Idle', running: 'Working', paused: 'Paused', error: 'Error', pending: 'Pending approval', terminated: 'Terminated' };
 export const RUN_STATE_LABEL: Record<RunState, string> = { queued: 'Queued', running: 'Running', succeeded: 'Succeeded', failed: 'Failed', cancelled: 'Cancelled', timed_out: 'Timed out', interrupted: 'Interrupted' };
-export const INBOX_KIND_LABEL: Record<InboxKind, string> = { review: 'Review', blocked: 'Blocked', approval: 'Approval', question: 'Question', failed_run: 'Failed run', agent_error: 'Agent error', mention: 'Mention', mail: 'Mail', budget: 'Budget', other: 'Attention' };
+export const INBOX_KIND_LABEL: Record<InboxKind, string> = { review: 'Review', blocked: 'Blocked', approval: 'Approval', question: 'Question', failed_run: 'Failed run', agent_error: 'Agent error', mention: 'Mention', mail: 'Mail', budget: 'Budget', checkout: 'Idle check-out', other: 'Attention' };
 
 export type Tone = 'ok' | 'warn' | 'danger' | 'accent' | 'faint' | 'violet';
 export function StateChip({ tone, children }: { tone: Tone; children: React.ReactNode }): React.ReactElement {
@@ -70,7 +70,7 @@ export function LiveCount({ count }: { count: number }): React.ReactElement | nu
   return <span className="ws-live" aria-label={`${count} live`}><span className="ws-live-dot" aria-hidden="true"/>{count} live</span>;
 }
 
-const k = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+const k = (n: number) => n >= 999_950_000 ? `${(n / 1_000_000_000).toFixed(1)}B` : n >= 999_950 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 const short = (hash: string | null) => hash ? hash.slice(0, 7) : '—';
 /** Cost is never shown as $0: an unknown price says so, and a priced turn that rounds to nothing is a lower bound. */
 export function costText(entry: Pick<LedgerEntry, 'costUsd' | 'tokens' | 'estimated'>): string | null {

@@ -122,7 +122,8 @@ export function applyVisibility<T extends { id: string; providerId: string; hidd
 export function formatTokenCount(tokens: number): string {
   if (!Number.isFinite(tokens) || tokens < 0) return '—';
   if (tokens < 1000) return String(Math.round(tokens));
-  const [value, unit] = tokens >= 1_000_000 ? [tokens / 1_000_000, 'M'] : [tokens / 1000, 'K'];
+  // 999,999 reads as 1M, not 1000K.
+  const [value, unit] = tokens >= 999_500_000 ? [tokens / 1_000_000_000, 'B'] : tokens >= 999_500 ? [tokens / 1_000_000, 'M'] : [tokens / 1000, 'K'];
   return `${value >= 100 || Number.isInteger(value) ? Math.round(value) : value.toFixed(1).replace(/\.0$/, '')}${unit}`;
 }
 
@@ -163,7 +164,7 @@ export function estimateCostUsd(totals: UsageTotals, pricing: ModelPricing | Pri
 export const assumesCacheWriteRate = (totals: Pick<UsageTotals, 'cacheWriteTokens'>, pricing: ModelPricing | PricingInput | null | undefined): boolean =>
   !!pricing && totals.cacheWriteTokens > 0 && pricing.cacheWritePerMTok === undefined;
 export function formatUsd(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  if (value === null || value === undefined || !Number.isFinite(value) || value < 0) return '—';
   if (value === 0) return '$0.00';
   if (value < 0.01) return '<$0.01';
   return `$${value < 1000 ? value.toFixed(2) : Math.round(value).toLocaleString('en-US')}`;

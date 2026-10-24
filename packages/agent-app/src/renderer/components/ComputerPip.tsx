@@ -13,6 +13,7 @@ import {PIP_STACK_MAX,agentBrowserBinding,bindAgentBrowser,liveViewTabId,STACK_P
 import {clampPipPosition,exceedsDragThreshold,loadPipCorner,pipCornerOrigin,savePipCorner,settlePipDrop,springSettled,springStep,type PipCorner,type PipPoint,type PipRect,type PipSize,type SpringState} from '../pipLayout';
 import {AppGlyph} from './AppGlyph';
 import './pip.css';
+import {pipReserveFor} from '../pipReserve';
 import {Tip} from './Tooltip';
 
 const loadImage=(id:string)=>invoke('computer.image',{id});
@@ -267,6 +268,16 @@ export function openScreenshotTab(source:PipSource):void {
 /** The sidebar tab that is on screen right now, or null when the sidebar is closed or showing something else. */
 const selectVisibleTab=(state:ReturnType<typeof getState>)=>!state.resourcesHidden&&state.rightPaneMode==='resources'&&state.screen==='work'?state.activeTabId:null;
 
+/** Space to keep beside the transcript so the preview card never covers its text, or undefined when it does not
+ *  overlap the (centred, max-width) column at all, or when reserving would leave the transcript too narrow to read. */
+function pipReserve(center:HTMLElement,anchor:{right:number;width:number},side:'left'|'right'):{side:'left'|'right';px:number}|undefined {
+  // The column centres inside the timeline's content box: the pane minus the summary card's own reserve (its padding).
+  const timeline=center.querySelector<HTMLElement>('.chat > .timeline-shell > .timeline');
+  const pad=timeline?getComputedStyle(timeline):undefined,box=center.getBoundingClientRect();
+  const left=box.left+(parseFloat(pad?.paddingLeft??'')||0),right=box.right-(parseFloat(pad?.paddingRight??'')||0);
+  return pipReserveFor({left,right,width:right-left},parseFloat(getComputedStyle(center).getPropertyValue('--timeline-max'))||804,window.innerWidth,anchor,side);
+}
+
 /** Codex-style picture-in-picture: a frameless cluster of live window thumbnails at the conversation's right,
  *  under the summary card; one card per app or page the agent used lately. The user can raise any card, drag the
  *  cluster to a corner, and open a session as a sidebar tab, at which point its card steps aside. */
@@ -291,6 +302,19 @@ export function ComputerPip({paneVisible=true}:{paneVisible?:boolean}={}) {
   const [corner,setCorner]=useState<PipCorner|undefined>(loadPipCorner);
   const frozen=useRef(false),stack=useRef<HTMLDivElement>(null);
   const [anchor,setAnchor]=useStackAnchor(shown,ui.minimized?1:Math.max(1,open.length),corner,frozen);
+  useEffect(()=>{
+    const center=document.querySelector<HTMLElement>('main.center')??document.querySelector<HTMLElement>('.center');
+    if(!center)return;
+    const reserve=shown&&open.length&&!ui.minimized?pipReserve(center,anchor,corner?.endsWith('left')?'left':'right'):undefined;
+    if(reserve){
+      center.dataset.pipSide=reserve.side;
+      center.style.setProperty('--pip-reserve',`${reserve.px}px`);
+    }else{
+      delete center.dataset.pipSide;
+      center.style.removeProperty('--pip-reserve');
+    }
+    return()=>{delete center.dataset.pipSide;center.style.removeProperty('--pip-reserve');};
+  },[shown,open.length,ui.minimized,corner,anchor]);
   const drag=usePipDrag(stack,frozen,(next,target,width)=>{
     savePipCorner(next);setCorner(next);setAnchor({right:Math.max(0,window.innerWidth-target.x-width),top:target.y,width});
   });

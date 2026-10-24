@@ -10,6 +10,7 @@ import { isEnabled, type ExtensionEnablement, type InstalledExtension } from '..
 import { MCP_HOOK_EVENTS, MCP_HOOK_LIMITS, type McpHook, type McpHookRun, type McpLogLine, type McpScope, type McpServer, type McpSource, type McpTestResult, type McpTool } from '../../shared/domains/mcp-protocol.ts';
 import { BROWSER_MCP } from '../../shared/computer-use.ts';
 import { TERMINAL_MCP } from '../terminal-agent-tools.ts';
+import { ASK_MCP } from '../ask-user.ts';
 import { BACKGROUND_MCP } from '../background-agent-tools.ts';
 import type { Chat } from '../../shared/protocol.ts';
 import { assignConfigKeys, maskDetectedServer, parseTomlSections, redact, testHttp, testStdio } from '../mcp-client.ts';
@@ -97,7 +98,7 @@ export function createMcpDomain(ctx: DomainContext): DomainModule {
   const installedRows = (): InstalledExtension[] => { try { return (db.prepare('SELECT data FROM extensions_installed').all() as Array<{ data: string }>).map(entry => JSON.parse(entry.data) as InstalledExtension); } catch { return []; } };
   const rules = (): ExtensionEnablement[] => { try { return (db.prepare('SELECT * FROM extension_enablement').all() as Array<{ extension_id: string; scope: string; scope_id: string; enabled: number }>).map(entry => ({ extensionId: entry.extension_id, scope: entry.scope as McpScope, scopeId: entry.scope_id, enabled: entry.enabled === 1 })); } catch { return []; } };
   /** Keys taken by plugin servers and the built-in browser server; user servers yield to them. */
-  const keys = (list = rows()) => assignConfigKeys(list, [BROWSER_MCP, TERMINAL_MCP, BACKGROUND_MCP, ...installedRows().flatMap(entry => entry.manifest?.capabilities.mcpServers.map(server => pluginKey(entry.name, server.name)) ?? [])]);
+  const keys = (list = rows()) => assignConfigKeys(list, [BROWSER_MCP, TERMINAL_MCP, ASK_MCP, BACKGROUND_MCP, ...installedRows().flatMap(entry => entry.manifest?.capabilities.mcpServers.map(server => pluginKey(entry.name, server.name)) ?? [])]);
   const healthy = (entry: Stored) => entry.health.ok !== false;
   const chatOf = (chatId: string) => ctx.store.snapshot().chats.find(chat => chat.id === chatId);
   const loadedBy = (id: string) => [...loaded].filter(([chatId, ids]) => ids.has(id) && ['running', 'stopping'].includes(chatOf(chatId)?.status ?? '')).map(([chatId]) => ({ chatId, title: chatOf(chatId)?.title ?? 'Chat' }));

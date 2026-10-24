@@ -27,6 +27,8 @@ import {accessibilityText,captureSource,captureSources,computerPermissions} from
 import {NativePreviewController} from './native-preview.ts';
 import { buildMenuTemplate } from './menu.ts';
 import {AppUpdater,bundlePathOf,detectInstallMethod,plistString} from './app-updater.ts';
+import {createUpdateGate,type UpdateGate} from './update-gate.ts';
+import type {UpdateStatus} from '../shared/update-protocol.ts';
 import {unpackedPath} from '../runtime/unpacked-path.ts';
 import {resolveUpdateChannel} from './update-channel.ts';
 import { createQuitCoordinator, quitChoice, quitPrompt, withinDeadline } from './quit-coordinator.ts';
@@ -34,7 +36,7 @@ import { loadAgentService, type AgentService } from './service-loader.ts';
 import { clampGeometry, DEFAULT_GEOMETRY, MIN_HEIGHT, MIN_WIDTH, planDisplayChange, WindowStateStore, type WindowGeometry } from './window-state.ts';
 import {chatIdFromArgs,chatIdFromLink} from './chat-links.ts';
 import {parseTaskLink,taskLinkFromArgs,type TaskLink} from '../shared/task-link.ts';
-import {attentionBadge,createCrashTracker,isRendererCrash} from './app-shell.ts';
+import {createBadgeTracker,createCrashTracker,isRendererCrash} from './app-shell.ts';
 import {MENU_CHANNEL,MENU_CLOSE_CHANNEL,type MenuAction} from '../shared/menu-protocol.ts';
 import {installProcessGuard} from './process-guard.ts';
 import {passwordStoreSwitch} from './linux-launch.ts';
@@ -77,6 +79,7 @@ async function main(): Promise<void> {
   });
   let service: AgentService | null = null;
   let runningChats = 0;
+  let updateGate: UpdateGate<UpdateStatus> | undefined;
   /** A background process the agent left running at the end of its turn wakes the chat when it exits. */
   let processContinuations: ProcessContinuations | undefined;
   let repaintPolicy: (() => void) | undefined;
@@ -129,8 +132,7 @@ async function main(): Promise<void> {
   // --- Agent service -------------------------------------------------------
   const dataDir = path.join(app.getPath('userData'), 'agent-data');
   // Pending approvals/questions badge the dock while the window is not in front.
-  let attentionCount = 0;
-  let shownBadge = '';
+  const badgeTracker = createBadgeTracker();
   // AUT-05: monitoring notifications follow the user's settings (mute, failures only, attention alerts off).
   let notifyPrefs: NotificationPrefs = notificationPrefs(undefined);
   let pendingAttention = 0;
@@ -138,10 +140,8 @@ async function main(): Promise<void> {
     pendingAttention = requested;
     const next = attentionAllowed(notifyPrefs, Date.now()) ? requested : 0;
     const focused = window !== null && !window.isDestroyed() && window.isVisible() && window.isFocused();
-    const update = attentionBadge(attentionCount, next, focused);
-    attentionCount = next;
-    if (!update || (update.badge === shownBadge && !update.bounce)) return;
-    shownBadge = update.badge;
+    const update = badgeTracker(next, focused);
+    if (!update) return;
     if (process.platform === 'darwin') {
       app.dock?.setBadge(update.badge);
       if (update.bounce) app.dock?.bounce('informational');
@@ -214,6 +214,8 @@ async function main(): Promise<void> {
       const before = runningChats;
       runningChats = event.snapshot.chats.filter((c) => c.status === 'running' || c.status === 'stopping').length;
       if ((before === 0) !== (runningChats === 0)) repaintPolicy?.();
+      // #449: an update Install that waited for running work starts once nothing runs.
+      if (runningChats === 0) updateGate?.idle();
       applyBadge(event.snapshot.attention?.totalRequests ?? 0);
       notifySettled(event.snapshot);
       processContinuations?.observe(event.snapshot.chats);
@@ -383,7 +385,9 @@ async function main(): Promise<void> {
   };
   syncTransparency();
   nativeTheme.on('updated', syncTransparency);
-  window.on('focus', () => { applyBadge(attentionCount); if (!isMac) window?.flashFrame(false); });
+  // Re-apply the unfiltered count: passing the muted (0) count would forget the requests still pending.
+  window.on('blur', () => applyBadge(pendingAttention));
+  window.on('focus', () => { applyBadge(pendingAttention); if (!isMac) window?.flashFrame(false); });
 
   // --- Renderer crash recovery ---------------------------------------------
   const crashes = createCrashTracker();
@@ -501,6 +505,7 @@ async function main(): Promise<void> {
     quit:()=>app.quit(),
     openExternal:url=>{void shell.openExternal(url);},
   });
+  updateGate=createUpdateGate({running:()=>runningChats,install:()=>updater.install(),notify:message=>{if(window&&!window.isDestroyed())window.webContents.send('muster:event',{type:'notice',message} satisfies AgentEvent);}});
   void updater.start();
   app.on('browser-window-focus', () => updater.checkIfStale());
 
@@ -526,7 +531,8 @@ async function main(): Promise<void> {
         if(!request||typeof request.enabled!=='boolean')throw new Error('Invalid update setting.');
         return updater.setAutoCheck(request.enabled);
       }
-      case 'updates.install': return updater.install();
+      // #449: never install (and quit) over running turns; it waits for them and says so.
+      case 'updates.install': return (await updateGate!.install()) ?? updater.snapshot();
       case 'chat.contextMenu': {
         const request=input as Commands['chat.contextMenu']['input'];
         if(!request||typeof request.id!=='string'||request.id.length>256||!Number.isFinite(request.x)||!Number.isFinite(request.y)||(request.surface!==undefined&&request.surface!=='sidebar'&&request.surface!=='header'))throw new Error('Invalid chat menu request.');
