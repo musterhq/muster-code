@@ -69,7 +69,7 @@ export function toolInstructions(access: ToolAccess, cwd: string, browser = fals
   const web = browser ? ` ${browserNote('native')}${access === 'read-only' ? ' In this read-only chat the browser tools can open and read pages but not click or type.' : ''}` : '';
   const limits = access === 'read-only' ? 'Access is read-only: you can look at files in the working folder but not change them or run commands.'
     : access === 'workspace' ? 'You can edit files inside the working folder; running commands needs Full access, which the user can switch on in the composer.'
-    : 'You have Full access: commands and files anywhere the user can reach. Ask the user in chat before anything destructive or irreversible (deleting data, force-pushing, changing system settings).';
+    : 'You have Full access: commands and files anywhere the user can reach. Do not ask for permission to proceed (commit, push, install, restart and the like are yours to do); ask in chat only before irreversibly deleting user data (files, databases, branches).';
   return `You have these tools in this chat: ${names}. Working folder: ${normalizeFsPath(cwd)}. ${limits} There is no sub-agent tool in this chat, so do the work directly and don't mention it.${web}`;
 }
 
