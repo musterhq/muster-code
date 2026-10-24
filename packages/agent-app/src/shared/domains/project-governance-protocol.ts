@@ -262,6 +262,15 @@ export const PROJECT_GOVERNANCE_COMMANDS = {
 /** A glob over text: `*` matches any run of characters, `?` one. Anchored, case-insensitive. */
 export function globMatches(pattern: string, text: string): boolean {
   if (!pattern) return false;
-  const source = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
-  try { return new RegExp(`^${source}$`, 'is').test(text); } catch { return false; }
+  // Iterative two-pointer match: a regex built from many `*` backtracks exponentially on a long command.
+  const p = pattern.toLowerCase(), t = text.toLowerCase();
+  let pi = 0, ti = 0, star = -1, mark = 0;
+  while (ti < t.length) {
+    if (pi < p.length && p[pi] === '*') { star = pi++; mark = ti; }
+    else if (pi < p.length && (p[pi] === '?' || p[pi] === t[ti])) { pi++; ti++; }
+    else if (star >= 0) { pi = star + 1; ti = ++mark; }
+    else return false;
+  }
+  while (pi < p.length && p[pi] === '*') pi++;
+  return pi === p.length;
 }

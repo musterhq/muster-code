@@ -89,6 +89,11 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Blame, history and "mark resolved" work for files whose names start with "-".
 - A GitHub remote written with capital letters in the host name (GitHub.com) is recognised for pull requests and compare links.
 - Comparing two refs where a submodule moved shows the "Subproject commit" change instead of a commit log or an error.
+## Unreleased
+
+- Two wakes for the same agent arriving together now merge into one instead of leaving a stuck "throttled" wake and a stray timer, and the minimum gap between wakes counts from when the last wake actually ran.
+- A Project tool rule with many "*" no longer freezes the app when the agent runs a long command.
+- The Ledger's integrity check now reports entries removed from the end of the chain.
 
 ## 0.3.13
 

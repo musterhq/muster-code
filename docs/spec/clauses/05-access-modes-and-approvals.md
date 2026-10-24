@@ -21,6 +21,7 @@ Boundaries:
 | [MUS-SPEC-05-459B](05-access-modes-and-approvals.md#mus-spec-05-459b) | A Full access run on an HTTP route receives the no-asking rule, a Workspace run does not, and the tool note asks only before irreversibly deleting user data. | [`an API-key route in Full access gets the no-asking rule and a tool note that asks only before deleting user data`](../../../packages/agent-app/tests/agent-autonomy.test.ts) |
 | [MUS-SPEC-05-473F](05-access-modes-and-approvals.md#mus-spec-05-473f) | A mid-turn start by the agent is allowed only in Agent mode with Full access; a user start still waits for the turn. | [`commandAuthority: the agent may start mid-turn, but only in Agent mode with Full access`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 | [MUS-SPEC-05-473G](05-access-modes-and-approvals.md#mus-spec-05-473g) | The muster_background server and its instruction are added only for Agent mode with Full access. | [`the muster_background server is offered only in Agent mode with Full access, with its instruction`](../../../packages/agent-app/tests/process-continuations.test.ts) |
+| [MUS-SPEC-05-573A](05-access-modes-and-approvals.md#mus-spec-05-573a) | A rule with many stars rejects a long command quickly and still matches as before. | [`a tool-rule glob with many stars matches in linear-ish time against a long command`](../../../packages/agent-app/tests/governance-bughunt.test.ts) |
 
 ### Full access and asking
 
@@ -44,6 +45,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/agent-autonomy.test.ts::an API-key route in Full access gets the no-asking rule and a tool note that asks only before deleting user data`
 - Environment: Node test runner; a stub HTTP adapter behind the real provider adapter; no network.
 - Known gaps: The stub adapter records its input; no real model is called. Codex and CLI routes share the same instruction builder and are covered by MUS-SPEC-05-459A.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-05-573a"></a>
+#### MUS-SPEC-05-573A: A tool-rule pattern with many stars finishes fast
+
+- Precondition: A tool rule with twelve stars and a 400-character command that cannot match.
+- Action: Match the command against the rule.
+- Expected result: The answer is no, in under 500 ms. Rules are still anchored and ignore case, ? matches one character, and dots and brackets are plain.
+- Test: `packages/agent-app/tests/governance-bughunt.test.ts::a tool-rule glob with many stars matches in linear-ish time against a long command`
+- Environment: Node test runner; no network.
+- Known gaps: Tests the matcher. It does not run a tool call through the approval flow. The time limit may need care on a very slow machine. On main this test never finishes.
 - Evidence: UNVERIFIED
 
 ### Background processes and access mode
