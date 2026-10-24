@@ -19,6 +19,7 @@ Boundaries:
 | [MUS-SPEC-12-683A](12-projects-orgs-and-tasks.md#mus-spec-12-683a) | When the hand-back countdown runs out, the timer callback finishes only once the hand-back has gone through, however long reading the chat takes. | [`#683 plain folder: the countdown's timer callback finishes only when the hand-back is done`](../../../packages/agent-app/tests/checkout-service.test.ts) |
 | [MUS-SPEC-12-462A](12-projects-orgs-and-tasks.md#mus-spec-12-462a) | The run carries a protocol that limits stopping to user-only decisions, tells the agent to poll running work and no longer says not to wait. | [`G40: task runs get the muster_tasks MCP server; the host refuses callers without the token`](../../../packages/agent-app/tests/wave4-task-tools.test.ts) |
 | [MUS-SPEC-12-462B](12-projects-orgs-and-tasks.md#mus-spec-12-462b) | The protocol and the end-of-run line tell the agent to post the handoff comment with task_comment instead of asking. | [`G40: task runs get the muster_tasks MCP server; the host refuses callers without the token`](../../../packages/agent-app/tests/wave4-task-tools.test.ts) |
+| [MUS-SPEC-12-447A](12-projects-orgs-and-tasks.md#mus-spec-12-447a) | A check-out idle for days becomes one Needs-you item with how long it has been idle and a server note saying the same; Keep, Release and Hand back each clear it and do what they say. | [`#447 a check-out idle for days becomes ONE Needs-you item with how long, one server note, and Keep, Release and Hand back each do what they say`](../../../packages/agent-app/tests/checkout-service.test.ts) |
 
 ### Hand-back of a plain folder
 
@@ -31,6 +32,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/checkout-service.test.ts::#683 plain folder: the countdown's timer callback finishes only when the hand-back is done`
 - Environment: Node test runner; the checkout service with a fake server, a fake timer and a temp folder.
 - Known gaps: The real timer ignores what the callback returns. Change detection by file content was already correct and is not part of this case.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-12-447a"></a>
+#### MUS-SPEC-12-447A: An idle check-out asks its owner what to do
+
+- Precondition: A task checked out on this Mac and left alone, with the clock moving from two days to eight days and then a day more.
+- Action: Check the stale check-outs and read the Inbox items, then press Keep, Release or Hand back.
+- Expected result: At two days there is nothing. At eight days there is exactly one Needs-you item for the check-out ("No activity for 8 days") and one note on the server task that says "Idle for 8 days"; checking again does not add another note or item. Keep clears the item (a later quiet stretch brings it back with its own note), Release clears it and puts the task back, Hand back clears it. Activity in another chat of the same worktree means no note and no item. Nothing is handed back or released by itself.
+- Test: `packages/agent-app/tests/checkout-service.test.ts::#447 a check-out idle for days becomes ONE Needs-you item with how long, one server note, and Keep, Release and Hand back each do what they say`
+- Environment: Node test runner; the checkout service with a fake server and a movable clock.
+- Known gaps: The Inbox row buttons and the merge into the Inbox list are not driven here; they call the same Keep, Release and Hand back service methods.
 - Evidence: UNVERIFIED
 
 ### Task protocol
