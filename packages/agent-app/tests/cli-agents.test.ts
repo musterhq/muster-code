@@ -128,7 +128,7 @@ test('Gemini CLI: detection, streaming, tools, usage and permission flags', asyn
   const result = await adapter.run(input);
   assert.equal(result.status, 'completed', result.errorMessage ?? ''); assert.equal(result.finalMessage, 'muster-marker'); assert.equal(log.deltas, 'muster-marker'); assert.equal(result.threadId, 'gemini-session-1');
   const args = (await json(box.cwd, 'argv.json')).join(' ');
-  assert.match(args, /--output-format stream-json --approval-mode plan --model gemini-2\.5-flash --resume prev --prompt read marker/);
+  assert.match(args, /--output-format stream-json --approval-mode plan --model gemini-2\.5-flash --resume prev --prompt=read marker/);
   const items = log.events.filter(([m]) => m === 'item/completed').map(([, p]) => p.item as {type: string; status: string});
   assert.deepEqual(items.map(i => `${i.type}:${i.status}`), ['fileRead:completed', 'commandExecution:failed']);
   const usage = log.events.find(([m]) => m === 'thread/tokenUsage/updated')![1].tokenUsage as {last: {inputTokens: number; outputTokens: number; totalTokens: number}};

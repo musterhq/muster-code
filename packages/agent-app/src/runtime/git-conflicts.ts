@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {promises as fs} from 'node:fs';
 import {dirname} from 'node:path';
 import {resolveInside} from './paths.ts';
-import {capGitBytes, gitRepository, gitStatus, runGit, serial} from './git-local.ts';
+import {capGitBytes, currentBranch, gitRepository, gitStatus, runGit, serial} from './git-local.ts';
 import {hasConflictMarkers} from '../shared/conflict-markers.ts';
 import type {GitLocalStatus} from '../shared/protocol.ts';
 import type {GitConflictEntry, GitConflictFile, GitConflictState, GitOperation} from '../shared/domains/git-protocol.ts';
@@ -17,7 +17,7 @@ const STATUS_TEXT: Record<string, string> = {
 const NO_EDITOR = {GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true'};
 
 function relativePath(value: unknown): string {
-  if (typeof value !== 'string' || !value || value.length > 4096 || value.includes('\0') || value.startsWith('-')) throw new Error('Choose a conflicted file.');
+  if (typeof value !== 'string' || !value || value.length > 4096 || value.includes('\0')) throw new Error('Choose a conflicted file.');
   return value;
 }
 
@@ -62,7 +62,7 @@ export async function conflictState(root: string): Promise<GitConflictState> {
   const real = await gitRepository(root);
   const operation = await operationIn(real);
   const files = await unmergedEntries(real);
-  const branch = (await runGit(real, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim();
+  const branch = await currentBranch(real);
   let currentLabel = branch || 'HEAD', incomingLabel = 'incoming', incomingSubject: string | null = null;
   const subjectOf = async (ref: string) => capGitBytes((await runGit(real, ['log', '-1', '--format=%s', ref]).catch(() => '')).trim(), 200) || null;
   if (operation === 'merge') { incomingLabel = await shortName(real, 'MERGE_HEAD'); incomingSubject = await subjectOf('MERGE_HEAD'); }

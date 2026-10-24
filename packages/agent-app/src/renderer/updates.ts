@@ -10,7 +10,16 @@ const publish=(next:UpdateStatus)=>{status=next;for(const listener of listeners)
 function start():void {
   if(started)return;started=true;
   subscribe(event=>{if(event.type==='updateStatus')publish(event.status);});
-  void invoke('updates.status',undefined).then(publish,()=>{});
+  load();
+}
+/** The first status read can fail (runtime still starting); try again rather than leave the update button unset for the whole session. */
+export const UPDATE_STATUS_RETRY_MS=15_000;
+let attempts=0;
+function load():void {
+  void invoke('updates.status',undefined).then(publish,()=>{
+    if(status||++attempts>8)return;
+    setTimeout(load,UPDATE_STATUS_RETRY_MS);
+  });
 }
 function subscribeUpdates(listener:()=>void):()=>void {start();listeners.add(listener);return()=>{listeners.delete(listener);};}
 export const useUpdateStatus=():UpdateStatus|undefined=>useSyncExternalStore(subscribeUpdates,()=>status);

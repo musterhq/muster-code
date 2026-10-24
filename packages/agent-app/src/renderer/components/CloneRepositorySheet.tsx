@@ -19,7 +19,9 @@ const listeners = new Set<() => void>();
 const notify = () => { for (const listener of listeners) listener(); };
 // A caller that wants the cloned folder itself (New project's Sources) takes it here instead of the New-chat draft.
 let onLanded: ((folder: Folder) => void) | null = null;
-export function openCloneSheet(options?: {onLanded?: (folder: Folder) => void}): void { onLanded = options?.onLanded ?? null; if (!open || background) { open = true; background = false; notify(); } }
+// What the hint promises when a caller takes the landed folder; defaults to New project's wording.
+let landingHint: string | null = null;
+export function openCloneSheet(options?: {onLanded?: (folder: Folder) => void; landingHint?: string}): void { onLanded = options?.onLanded ?? null; landingHint = onLanded ? options?.landingHint ?? null : null; if (!open || background) { open = true; background = false; notify(); } }
 /** Drop a landing handler (its owner unmounted); a clone still running lands the usual way. */
 export function releaseCloneLanding(handler: (folder: Folder) => void): void { if (onLanded === handler) onLanded = null; }
 export function closeCloneSheet(): void { onLanded = null; if (open || background) { open = false; background = false; notify(); } }
@@ -155,6 +157,6 @@ function CloneForm({hidden}: {hidden: boolean}): React.ReactElement {
         <button type="submit" className={retry && !clone ? undefined : 'is-primary'} disabled={!!clone || !url.trim()}>{clone ? 'Cloning…' : 'Clone'}</button>
       </div>
     </form>
-    <p className="clone-hint"><GitBranch size={11} aria-hidden="true"/>{onLanded ? 'The default branch is checked out; the folder is added to the project once it lands.' : 'The default branch is checked out; a new chat opens in the folder once it lands.'}</p>
+    <p className="clone-hint"><GitBranch size={11} aria-hidden="true"/>{onLanded ? landingHint ?? 'The default branch is checked out; the folder is added to the project once it lands.' : 'The default branch is checked out; a new chat opens in the folder once it lands.'}</p>
   </ModalSheet>;
 }

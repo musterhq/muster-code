@@ -408,7 +408,15 @@ export async function reviewChanges(root: string, baseline: ReviewBaseline, base
   const roots = untracked.size ? await untrackedRoots(root) : [];
   const counts = numstat.ok ? parseNumstat(numstat.stdout) : new Map<string, { adds: number; dels: number }>();
   const binary = new Set<string>();
-  if (numstat.ok) for (const field of nulFields(numstat.stdout)) if (field.startsWith("-\t-\t") && field.length > 4) binary.add(field.slice(4));
+  if (numstat.ok) {
+    const fields = nulFields(numstat.stdout);
+    // A rename/copy is `-\t-\t` followed by the old and new path fields (keyed by the new path).
+    for (let index = 0; index < fields.length; index++) {
+      if (!fields[index].startsWith("-\t-\t")) continue;
+      if (fields[index].length > 4) binary.add(fields[index].slice(4));
+      else { const target = fields[index + 2]; if (target !== undefined) binary.add(target); index += 2; }
+    }
+  }
   const files: ReviewChange[] = entries.slice(0, MAX_FILES).map(entry => {
     const count = counts.get(entry.path) ?? { adds: 0, dels: 0 };
     const status = entry.status === "added" && untracked.has(entry.path) ? "untracked" : entry.status;
@@ -456,7 +464,7 @@ async function readDiff(root: string, path: string, baseline: ReviewBaseline, ba
     tooLarge(afterSize) ? Buffer.alloc(0) : blob(root, entry.newSha),
   ]);
   const binary = looksBinary(beforeBuffer) || looksBinary(afterBuffer);
-  const mime = IMAGE_MIME[path.split(".").pop()?.toLowerCase() ?? ""];
+  const extension = path.split(".").pop()?.toLowerCase() ?? "", mime = Object.hasOwn(IMAGE_MIME, extension) ? IMAGE_MIME[extension] : undefined;
   const dataUrl = (buffer: Buffer, size: number) => size && size <= IMAGE_BYTES && buffer.length === size ? `data:${mime};base64,${buffer.toString("base64")}` : undefined;
   const image = mime && (binary || mime === "image/svg+xml") ? { mime, ...(entry.oldSha ? { before: dataUrl(beforeBuffer, beforeSize) } : {}), ...(entry.newSha ? { after: dataUrl(afterBuffer, afterSize) } : {}) } : undefined;
   const truncated = !binary && (beforeSize > MAX_SIDE_BYTES || afterSize > MAX_SIDE_BYTES);
@@ -481,6 +489,16 @@ async function toplevel(root: string): Promise<{ top: string; prefix: string }> 
 async function writeWorktree(root: string, path: string, content: Buffer | string | null, mode?: string): Promise<void> {
   const abs = await resolveInside(root, path);
   if (content === null) { await fs.rm(abs, { force: true }); return; }
+  if (mode === "120000") {
+    // A symlink's blob is its target text: restore a link, never a regular file holding that text.
+    await fs.mkdir(dirname(abs), { recursive: true });
+    const existing = await fs.lstat(abs).catch(() => undefined);
+    if (existing?.isDirectory()) throw new Error(`Not a file: ${path}`);
+    const temp = join(dirname(abs), `.${basename(abs)}.muster-${randomUUID().slice(0, 8)}`);
+    try { await fs.symlink(content.toString(), temp); await fs.rename(temp, abs); }
+    catch (error) { await fs.rm(temp, { force: true }); throw error; }
+    return;
+  }
   const previous = await fs.stat(abs).catch(() => undefined);
   if (previous && !previous.isFile()) throw new Error(`Not a file: ${path}`);
   await fs.mkdir(dirname(abs), { recursive: true });
@@ -504,7 +522,7 @@ async function writeIndex(root: string, path: string, content: Buffer | string |
   }
   const hashed = await git(top, ["hash-object", "-w", "--stdin"], { input: content });
   if (!hashed.ok) throw new Error(hashed.stderr || "Git could not store the content.");
-  const updated = await git(top, ["update-index", "--add", "--cacheinfo", `${mode === "100755" ? "100755" : "100644"},${hashed.stdout.toString("utf8").trim()},${target}`]);
+  const updated = await git(top, ["update-index", "--add", "--cacheinfo", `${mode === "100755" || mode === "120000" ? mode : "100644"},${hashed.stdout.toString("utf8").trim()},${target}`]);
   if (!updated.ok) throw new Error(updated.stderr || "Git could not update the index.");
 }
 
