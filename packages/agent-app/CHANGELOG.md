@@ -7,12 +7,14 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 - In Full access the agent no longer ends a turn asking whether to push, commit, install or continue; it just does it.
 - Chats on API-key routes only ask before irreversibly deleting user data, not before push, install or restart.
+- Security: the agent's background-process and terminal tools now prove which chat is calling with the same per-chat token as Muster's other agent tools, so one chat can no longer start, read or stop processes, or read a terminal, as another chat. A call whose chat and token don't match is refused with a plain message.
 - Installing a plugin or MCP connector while a chat is working now makes it usable right away: the chat restarts on a fresh session (keeping its conversation) and re-sends your last message, with a short notice saying so. Idle chats whose last message asked for that plugin get the same treatment; unrelated chats are left alone.
 - Memory: facts and preferences you told Muster once now carry into project and folder chats, and recall looks at your task and recent messages (not just "continue"), with a longer wait for the memory service.
 - Memory context is sent again on the next turn after a compaction or a model/provider change.
 - The browser tab an agent is working in now stays usable when you close the browser panel mid-run: it is no longer frozen or discarded while in use, live previews revive it, and browser tool calls retry safely after a dropped connection (never repeating a click or keystroke).
 - Project task runs now keep working while a build, test or deploy is running instead of stopping to wait, and only stop for decisions the user must make.
 - Agents post the task handoff comment themselves instead of drafting it and asking whether to post it.
+- A task you checked out and then left idle for days now shows up in the Inbox under Needs you, saying how long it has been idle, with Hand back, Release and Keep. The task on the server gets one note saying how long it has been idle. Nothing is handed back or released until you choose.
 - Usage stats and Receipts now count only approvals that actually showed you a card; requests accepted automatically in Full access are no longer counted as prompts.
 - Agent mode no longer ends a turn with a promise like "I'll report back when the build finishes": the agent is told to wait for the work inside the turn, and a run that ends on such a promise is no longer counted as completed.
 - In Agent mode with Full access, the agent can start a long build, test run or deploy as a background process of the chat (shown in Commands as the agent's). If it is still running when the turn ends, its exit sends the chat one follow-up (exit code and the last 40 lines of output) through the message queue, so the agent picks up where it left off.

@@ -1,4 +1,4 @@
-/** Run with node tests/run-share-sheet-dom.mjs. */
+/** Run with npm run test:renderer (suite share-sheet-dom). */
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {setTimeout as delay} from 'node:timers/promises';

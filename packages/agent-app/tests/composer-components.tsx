@@ -78,6 +78,8 @@ const pointer=async(element:Element,type:string,props:Record<string,unknown>={})
 await store.boot();await render();
 assert.deepEqual(errors,[]);
 const byTest=(id:string)=>document.querySelector(`[data-testid="${id}"]`) as HTMLElement|null;
+// A slow CI runner can open a menu after any fixed delay: wait (up to 5 s) for the element itself.
+const until=async<T,>(find:()=>T|null|undefined,label:string):Promise<T>=>{for(let i=0;i<200;i++){const found=find();if(found)return found;await delay(25);}assert.fail(`${label} did not appear`);};
 const rowLabels=()=>Array.from(document.querySelectorAll('[data-testid="composer-row"] .composer-row-label')).map(node=>node.textContent);
 const headers=()=>Array.from(document.querySelectorAll('[data-testid="composer-popover"] .composer-menu-section')).map(node=>node.textContent);
 // Layout: Codex toolbar, no mode picker, "Do anything".
@@ -88,8 +90,8 @@ assert.deepEqual(order,['composer-plus','composer-access','composer-model','comp
 assert.equal(byTest('composer-primary')!.getAttribute('aria-label'),'Send (Enter)');
 assert.equal(byTest('composer-access')!.getAttribute('aria-label'),'Access: Ask for approval');
 // + menu: Add and Plugins sections, manifest icons or monograms, type-to-filter, Esc closes.
-await click('[data-testid="composer-plus"]');await delay(30);
-const plus=document.querySelector('[role="dialog"][aria-label="Add files and more"]') as HTMLElement;assert.ok(plus);
+await click('[data-testid="composer-plus"]');
+const plus=await until(()=>document.querySelector('[role="dialog"][aria-label="Add files and more"]') as HTMLElement|null,'the + menu');
 assert.deepEqual(headers(),['Add','Plugins','Skills']);
 assert.deepEqual(rowLabels(),['Files and folders','Capture window','Work in a project','Goal','Plan mode','Record a skill','Save as skill','Sketch','Mention file or chat…','Start in background','Stash prompt','Stashes','Gmail','HeyGen','PDF Skill'],'Codex + menu order; every row works end to end');
 const pluginRows=Array.from(plus.querySelectorAll('[data-testid="composer-row"]')).filter(row=>/Gmail|HeyGen/.test(row.textContent??''));
@@ -97,7 +99,7 @@ assert.ok(pluginRows[0].querySelector('img.item-icon'));assert.equal(pluginRows[
 await key(plus,'g');await key(plus,'m');
 assert.deepEqual(rowLabels(),['Gmail']);
 await key(plus,'Escape');assert.equal(document.querySelector('[aria-label="Add files and more"][role="dialog"]'),null);
-const plusRow=async(label:string)=>{await click('[data-testid="composer-plus"]');await delay(30);const row=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-testid="composer-row"]')).find(node=>node.querySelector('.composer-row-label')?.textContent===label);assert.ok(row,label);row!.click();await delay(50);};
+const plusRow=async(label:string)=>{await click('[data-testid="composer-plus"]');const row=await until(()=>Array.from(document.querySelectorAll<HTMLButtonElement>('[data-testid="composer-row"]')).find(node=>node.querySelector('.composer-row-label')?.textContent===label),label);row.click();await delay(50);};
 // Work in a project: an empty chat moves into the chosen project and shows it in the toolbar.
 await plusRow('Work in a project');
 assert.ok(document.querySelector('[role="dialog"][aria-label="Work in a project"]'));
