@@ -81,7 +81,7 @@ function setup(opts: { tests?: number; lazy?: boolean } = {}) {
   let salt = 0, statFails = false, stat = { count: 7, added: 120, removed: 30 }, queuedMore = false, wait: { fn: () => void | Promise<void>; ms: number; live: boolean }[] = [];
   const homeDir = mkdtempSync(join(tmpdir(), 'muster-home-'));
   // The local chat as the timeline shows it: the person's message, a file change, a test run (tool output), and the agent's last message.
-  const tl = { user: 'Implement it.', change: true, test: 'ℹ pass 12\nℹ fail 1' as string | null, testStatus: 'completed', exit: 0 as number, testCommand: 'npm test', after: null as { command: string } | null, final: 'Worked on it.', trailingTool: null as string | null, outcome: 'completed', question: false };
+  const tl = { user: 'Implement it.', change: true, test: 'ℹ pass 12\nℹ fail 1' as string | null, testStatus: 'completed', exit: 0 as number, testCommand: 'npm test', after: null as { command: string } | null, final: 'Worked on it.', trailingTool: null as string | null, outcome: 'completed', question: false as boolean | 'nonBlocking' };
   const events: unknown[] = [];
   const chatList: { id: string; path: string; activeAt: number }[] = [], sent: [string, string][] = [];
   const settings: Record<string, never> = {};
@@ -93,7 +93,7 @@ function setup(opts: { tests?: number; lazy?: boolean } = {}) {
     ...(tl.after ? [{ kind: 'tool', text: tl.after.command, data: { type: 'commandExecution', command: tl.after.command, output: '', status: 'completed', exitCode: 0 } }] : []),
     ...(tl.trailingTool !== null ? [{ kind: 'tool', text: tl.trailingTool, data: { type: 'commandExecution', command: 'env', output: tl.trailingTool, status: 'completed' } }] : []),
     { kind: 'assistant', text: tl.final },
-    ...(tl.question ? [{ kind: 'question', text: 'Which database?', status: 'pending' }] : []),
+    ...(tl.question ? [{ kind: 'question', text: 'Which database?', status: 'pending', ...(tl.question === 'nonBlocking' ? { data: { nonBlocking: true } } : {}) }] : []),
   ];
   const deps: CheckoutDeps = {
     store, backend: () => server.backend(), reader,
@@ -1255,6 +1255,7 @@ test('#345 never on a turn that errored or was stopped, while a later turn is qu
   const queued = await finishedGit(); queued.h.setHead('def456'); queued.h.tl.test = GREEN; queued.h.setQueued(true); await queued.h.svc.onTurn(queued.chat, 'r1', 'completed'); assert.deepEqual(queued.h.countdownMs(), [], 'a follow-up is waiting');
   queued.h.setQueued(false); await queued.h.svc.onTurn(queued.chat, 'r2', 'completed'); assert.deepEqual(queued.h.countdownMs(), [60_000], 'the queue drained: it starts');
   const asked = await finishedGit(); asked.h.setHead('def456'); asked.h.tl.test = GREEN; asked.h.tl.question = true; await asked.h.svc.onTurn(asked.chat, 'r1', 'completed'); assert.deepEqual(asked.h.countdownMs(), [], 'the agent is waiting for an answer');
+  const told = await finishedGit(); told.h.setHead('def456'); told.h.tl.test = GREEN; told.h.tl.question = 'nonBlocking'; await told.h.svc.onTurn(told.chat, 'r1', 'completed'); assert.deepEqual(told.h.countdownMs(), [60_000], 'an ask_user question did not hold the run, so it does not hold the hand-back');
 });
 
 test('#345 not finished: failing tests (parsed or by exit code), no changes, the agent’s words alone, a change after the run; and after Undo only a turn with new work starts it again', async () => {
@@ -1354,6 +1355,35 @@ test('#345 stale check-outs: idle for more than 3 days shows how long ago and of
   const b = setup(); mkdirSync(join(b.homeDir, 'Documents'), { recursive: true }); b.setRepo(false); await b.reader.part(CO); await b.svc.bind(CO.id, 'p-redis', join(b.homeDir, 'Documents'));
   assert.equal((await b.svc.plan('t1')).broadFolder, true, 'the check-out sheet warns'); const lb = await b.svc.start({ taskId: 't1', model: OWN, confirm: true }); assert.equal(lb.broadFolder, true, 'and so does the task');
   const ok = setup(); await plain(ok); assert.equal((await ok.svc.plan('t1')).broadFolder, false);
+});
+
+const idleNotes = (h: { server: FakeServer }) => (h.server.comments.get('t1') ?? []).map(c => c.body).filter(b => /^\*\*Idle for/.test(b));
+// Spec: MUS-SPEC-12-447A (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-447a)
+test('#447 a check-out idle for days becomes ONE Needs-you item with how long, one server note, and Keep, Release and Hand back each do what they say', async () => {
+  const DAY = 86_400_000;
+  const h = setup(); await bound(h); await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  h.advance(2 * DAY); assert.deepEqual(h.svc.inboxItems(), [], 'two days is not idle'); assert.equal(await h.svc.checkStale(), 0);
+  h.advance(6 * DAY);
+  const [item, ...rest] = h.svc.inboxItems(); assert.deepEqual(rest, [], 'one item for the check-out');
+  assert.equal(item!.kind, 'checkout'); assert.equal(item!.taskId, 't1'); assert.match(item!.title, /RAG-1/); assert.match(item!.why, /No activity for 8 days/); assert.deepEqual(item!.checkout, { days: 8 });
+  assert.equal(await h.svc.checkStale(), 1); await h.svc.sync();
+  assert.equal(idleNotes(h).length, 1); assert.match(idleNotes(h)[0]!, /Idle for 8 days\./, 'the server-side note says how long');
+  h.advance(DAY); assert.equal(await h.svc.checkStale(), 0, 'not repeated in the same stretch'); await h.svc.sync(); assert.equal(idleNotes(h).length, 1);
+  assert.equal(h.svc.inboxItems().length, 1); assert.equal(h.svc.inboxItems()[0]!.checkout!.days, 9, 'the same single item, with the days updated');
+  assert.equal(h.svc.get('t1')!.state, 'checked_out', 'nothing is handed back or released by itself');
+  // Keep: the item clears, and returns only after another quiet stretch, with its own note.
+  h.svc.remind('t1'); assert.deepEqual(h.svc.inboxItems(), [], 'Keep clears it'); assert.equal(h.svc.get('t1')!.state, 'checked_out'); assert.equal(await h.svc.checkStale(), 0);
+  h.advance(2 * DAY); assert.deepEqual(h.svc.inboxItems(), [], 'still inside the new stretch');
+  h.advance(2 * DAY); assert.equal(h.svc.inboxItems().length, 1, 'a new idle stretch shows again'); assert.equal(await h.svc.checkStale(), 1); await h.svc.sync(); assert.equal(idleNotes(h).length, 2);
+  // Release: gone, and the task goes back as it was.
+  const released = await h.svc.release('t1', 'Released after sitting idle.'); assert.equal(released.state, 'released'); assert.deepEqual(h.svc.inboxItems(), [], 'Release clears it');
+  // Hand back: gone.
+  const b = setup(); await bound(b); await b.svc.start({ taskId: 't1', model: OWN, confirm: true }); b.advance(5 * DAY); assert.equal(b.svc.inboxItems().length, 1);
+  const done = await b.svc.handBack({ taskId: 't1', reviewer: { kind: 'agent', id: 'a-qa' }, testsNote: 'Idle; nothing new to test.' }); assert.equal(done.state, 'handed_back'); assert.deepEqual(b.svc.inboxItems(), [], 'Hand back clears it');
+  // Work in another chat of the worktree is activity: no note, and the item goes.
+  const w = setup(); await bound(w); const l = await w.svc.start({ taskId: 't1', model: OWN, confirm: true }); w.advance(5 * DAY);
+  w.chatList.push({ id: 'chat:manual', path: l.worktree!, activeAt: w.now() - 60_000 });
+  assert.equal(await w.svc.checkStale(), 0); assert.deepEqual(w.svc.inboxItems(), [], 'the person is working on it'); await w.svc.sync(); assert.deepEqual(idleNotes(w), []);
 });
 
 test('#385: a task description past the 32,000-character cap is written whole to a self-ignoring .muster/task file and the brief points at it', async () => {
