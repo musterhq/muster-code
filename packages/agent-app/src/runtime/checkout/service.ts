@@ -98,7 +98,7 @@ export interface CheckoutDeps {
   /** Whether more turns are queued on the chat (nothing hands back while the person has follow-ups waiting). */
   queued?(chatId: string): boolean;
   /** The hand-back countdown's clock: `schedule` returns its cancel. Absent: real timers and 60 seconds. */
-  countdown?: { ms?: number; schedule: (fn: () => void, ms: number) => () => void };
+  countdown?: { ms?: number; schedule: (fn: () => void | Promise<void>, ms: number) => () => void };
   /** Opens a PR for the branch (GitHub). Absent or failing: the branch is pushed and the link is left for the person. */
   openPr?(worktree: string, base: string, title: string, body: string): Promise<string | null>;
   /** A folder of this Mac whose origin remote is the project's repository (`github.com/org/repo`), or null. */
@@ -900,8 +900,8 @@ export class CheckoutService {
   /** Runs the clock and saves it on the check-out, so a restart picks the countdown up again instead of losing it. */
   private armCountdown(lease: CheckoutLease, plan: AutoPlan, ms: number, pushing: Promise<unknown>): void {
     const endsAt = iso(this.d.now() + ms);
-    const schedule = this.d.countdown?.schedule ?? ((fn: () => void, wait: number) => { const t = setTimeout(fn, wait); t.unref?.(); return () => clearTimeout(t); });
-    const cancel = schedule(() => { void this.finishCountdown(lease.taskId); }, ms);
+    const schedule = this.d.countdown?.schedule ?? ((fn: () => void | Promise<void>, wait: number) => { const t = setTimeout(() => { void fn(); }, wait); t.unref?.(); return () => clearTimeout(t); });
+    const cancel = schedule(() => this.finishCountdown(lease.taskId), ms);
     this.countdowns.set(lease.taskId, { key: lease.key, to: plan.recipient.name, endsAt, cancel, plan, pushing });
     const current = this.d.store.lease(lease.taskId);
     if (current) this.d.store.putLease({ ...current, countdown: { endsAt, plan } });
