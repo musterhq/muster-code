@@ -27,6 +27,8 @@ async function rig(t:TestContext){
   t.after(async()=>{await service.dispose();provider.dispose();await rm(dataDir,{recursive:true,force:true});});
   const emit=(...lines:unknown[])=>{for(const line of lines)child.stdout.write(JSON.stringify(line)+'\n');};
   const close=(code:number)=>{child.stdout.end();child.stderr.end();setImmediate(()=>child.emit('close',code));};
+  // Stop (SIGINT) ends the fake process, as it ends the real one, so a failed assertion never hangs teardown.
+  child.kill=()=>{close(130);return true;};
   const responses=()=>stdin.trim().split('\n').filter(Boolean).map(line=>JSON.parse(line) as Record<string,any>).filter(line=>line.type==='control_response');
   const chat=await service.invoke('chat.create',{});
   await service.invoke('chat.setPermissionMode',{id:chat.id,permissionMode:'workspace'});
