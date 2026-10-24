@@ -311,3 +311,51 @@ test('MEM-X2: the recall chip previews the next turn locally and a removed note 
   const restored = await f.runtime.contributePrompt({chat: f.chat, folder: f.folder, prompt: 'Run the staging pipeline'});
   assert.match(restored.text, /id mem_a/, 'restoring brings it back');
 });
+
+// Spec: MUS-SPEC-11-467A (docs/spec/clauses/11-memory.md#mus-spec-11-467a)
+test('folder chats still get Personal directives and Personal facts the user already gave', async t => {
+  const f = await fixture(t);
+  await f.call('memory.directives.save', {directive: {kind: 'directive', text: 'Always answer in British English', priority: 5, tags: [], enabled: true}});
+  f.entries.push(note('mem_p', 'My name is Priya and I prefer pnpm over npm', {kind: 'user', id: 'local'}));
+  const result = await f.runtime.contributePrompt({chat: f.chat, folder: f.folder, prompt: 'Which package manager do I prefer, pnpm or npm?'});
+  assert.match(result.text, /British English/, 'the Personal directive reaches a folder chat');
+  assert.match(result.text, /prefer pnpm/, 'the Personal fact reaches a folder chat');
+});
+
+// Spec: MUS-SPEC-11-467B (docs/spec/clauses/11-memory.md#mus-spec-11-467b)
+test('recall query uses the task and recent user messages, so a bare "continue" still recalls', async t => {
+  const queries: string[] = [];
+  const f = await fixture(t, {client: {recall: async input => { queries.push(String(input.query)); return {bankId: 'bank', results: []}; }}});
+  f.store.appendItem(f.chat.id, 'user', 'Build the invoice exporter with the Acme staging pipeline');
+  f.store.appendItem(f.chat.id, 'assistant', 'Working on it');
+  f.store.appendItem(f.chat.id, 'user', 'Use the CSV format');
+  f.entries.push(note('mem_a', 'Acme staging pipeline needs the deploy token from vault', {kind: 'workspace', id: f.folder.id}));
+  const result = await f.runtime.contributePrompt({chat: f.chat, folder: f.folder, prompt: 'continue'});
+  assert.ok(queries.length >= 1);
+  for (const query of queries) { assert.match(query, /invoice exporter/); assert.match(query, /CSV format/); assert.match(query, /continue$/); assert.ok(query.length <= 1_600); }
+  assert.match(result.text, /deploy token/, 'a note matching the task is recalled for "continue"');
+  f.store.appendItem(f.chat.id, 'user', 'x'.repeat(5_000));
+  queries.length = 0;
+  await f.runtime.contributePrompt({chat: f.chat, folder: f.folder, prompt: 'y'.repeat(5_000)});
+  assert.ok(queries.length >= 1 && queries.every(query => query.length <= 1_600), 'the query stays bounded');
+  assert.ok(queries.every(query => query.endsWith('y'.repeat(1_500))), 'a long current message keeps most of the budget');
+});
+
+// Spec: MUS-SPEC-11-467C (docs/spec/clauses/11-memory.md#mus-spec-11-467c)
+test('the default recall timeout is raised to about four seconds', async () => {
+  const {RECALL_TIMEOUT_MS} = await import('../src/runtime/domains/memory.ts');
+  assert.equal(RECALL_TIMEOUT_MS, 4_000);
+});
+
+test('memory context goes out again after a compaction or a provider change', async () => {
+  const {ContextLedger} = await import('../src/runtime/context-budget.ts');
+  const ledger = new ContextLedger(), block = {label: 'Memory (1)', text: 'My name is Priya'};
+  ledger.delivered('c', 'thread-1', [block]);
+  assert.deepEqual(ledger.pending('c', 'thread-1', [block]), [], 'unchanged and already in the thread: not re-sent');
+  ledger.forget('c');
+  assert.deepEqual(ledger.pending('c', 'thread-1', [block]), [block], 'after compaction it is re-sent');
+  ledger.delivered('c', 'thread-1', [block]);
+  assert.deepEqual(ledger.pending('c', 'thread-2', [block]), [block], 'a new provider thread gets it');
+  ledger.forget('c'); // a provider change forgets the chat's ledger (service.ts), so even a reused thread id is re-sent
+  assert.deepEqual(ledger.pending('c', 'thread-1', [block]), [block], 'switching back to an older thread id does not trust the stale ledger');
+});

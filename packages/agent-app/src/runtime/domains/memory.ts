@@ -29,7 +29,9 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-export const RECALL_TIMEOUT_MS = 1_800;
+export const RECALL_TIMEOUT_MS = 4_000;
+/** Recall query bounds: the task (first request) plus the last few user messages, so "continue" still recalls what matters. */
+export const RECALL_QUERY_MAX_CHARS = 1_600, RECALL_RECENT_MESSAGES = 3;
 const TEST_TIMEOUT_MS = 5_000;
 type HindsightEntry = { id?: string; text: string; type?: string; score?: number; occurredAt?: string; mentionedAt?: string; documentId?: string; context?: string; tags?: readonly string[] };
 
@@ -532,16 +534,35 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
   const withoutExcluded = (chatId: string, lists: MemoryRecord[][]) => { const skip = excludedFor(chatId); return skip?.size ? lists.map(list => list.filter(record => !skip.has(record.id))) : lists; };
   // Recall joins runs only when it has something to offer; otherwise runs keep dispatching in the same tick.
   let removeContributor: (() => void) | undefined;
+  /** The task (first user message) plus the last few user messages and this one, newest last, deduplicated and bounded. */
+  const recallQuery = (chatId: string, prompt: string): string => {
+    const current = prompt.trim();
+    let first: string | undefined, recent: string[] = [];
+    try {
+      const rows = context.db();
+      first = (rows.prepare("SELECT text FROM timeline WHERE chat_id = ? AND kind = 'user' ORDER BY seq ASC LIMIT 1").get(chatId) as { text?: string } | undefined)?.text;
+      recent = (rows.prepare("SELECT text FROM timeline WHERE chat_id = ? AND kind = 'user' ORDER BY seq DESC LIMIT ?").all(chatId, RECALL_RECENT_MESSAGES) as { text?: string }[]).map(row => row.text ?? '').reverse();
+    } catch { /* no history: the current message alone */ }
+    const parts: string[] = [];
+    // Earlier messages give at most 600 chars each; the current message may use the whole budget.
+    for (const raw of [first ?? '', ...recent]) { const text = raw.trim().slice(0, 600); if (text && !parts.includes(text) && text !== current.slice(0, 600)) parts.push(text); }
+    if (current) parts.push(current.slice(0, RECALL_QUERY_MAX_CHARS));
+    // A long current message keeps priority: it is placed last and the oldest context is trimmed first.
+    let joined = parts.join('\n');
+    if (joined.length > RECALL_QUERY_MAX_CHARS) joined = joined.slice(joined.length - RECALL_QUERY_MAX_CHARS);
+    return joined || current.slice(0, RECALL_QUERY_MAX_CHARS);
+  };
   const contributor: PromptContributor = async ({ chat, folder, prompt, signal }) => {
-    const query = prompt.trim().slice(0, 4000);
+    const query = recallQuery(chat.id, prompt);
     const folderId = chat.folderId && context.store.folder(chat.folderId) ? chat.folderId : undefined;
     // A Project chat recalls from its own folder bank and its Project's shared bank together (PRJ-X5).
     const projectFolderId = chat.projectId && context.store.project(chat.projectId) ? `project:${chat.projectId}` : undefined;
-    const directives = config.settings().autoRecall ? [...listDirectives(scopeOf(folderId)), ...(projectFolderId ? listDirectives(scopeOf(projectFolderId)) : [])] : [];
+    // Personal directives and facts about the user apply in every chat, folder and Project chats included.
+    const directives = config.settings().autoRecall ? [...listDirectives(scopeOf(folderId)), ...(folderId ? listDirectives(scopeOf(undefined)) : []), ...(projectFolderId ? listDirectives(scopeOf(projectFolderId)) : [])] : [];
     const directiveText = directivesBlock(directives);
     const directiveLabel = `${directives.filter(d => d.enabled).length} directive${directives.filter(d => d.enabled).length === 1 ? '' : 's'}`;
     if (!config.settings().autoRecall || !query) return directiveText ? { label: directiveLabel, text: directiveText } : null;
-    const scopes = [folderId, ...(projectFolderId ? [projectFolderId] : [])];
+    const scopes = [folderId, ...(folderId ? [undefined] : []), ...(projectFolderId ? [projectFolderId] : [])];
     const [localByScope, remoteByScope] = await Promise.all([
       Promise.all(scopes.map(id => rankedLocalFor(id, query).catch(() => [] as MemoryRecord[]))),
       Promise.all(scopes.map(id => hindsightReady(id)
@@ -740,7 +761,7 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
       const query = typeof input.prompt === 'string' ? input.prompt.trim().slice(0, 4000) : '';
       const folderId = chat.folderId && context.store.folder(chat.folderId) ? chat.folderId : undefined;
       const projectFolderId = chat.projectId && context.store.project(chat.projectId) ? `project:${chat.projectId}` : undefined;
-      const scopes = [folderId, ...(projectFolderId ? [projectFolderId] : [])];
+      const scopes = [folderId, ...(folderId ? [undefined] : []), ...(projectFolderId ? [projectFolderId] : [])];
       const enabled = config.settings().autoRecall, engine = enabled && scopes.some(scope => hindsightReady(scope));
       if (!enabled || !query) return { enabled, engine, records: [], excluded };
       const lists = withoutExcluded(chat.id, await Promise.all(scopes.map(scope => rankedLocalFor(scope, query).catch(() => [] as MemoryRecord[]))));
