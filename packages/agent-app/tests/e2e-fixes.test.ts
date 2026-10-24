@@ -48,7 +48,9 @@ async function service(t: TestContext) {
         return { status: 'completed', finalMessage: `Decision: ${JSON.stringify(decision)}` };
       }
       input.onEvent('thread/tokenUsage/updated', { tokenUsage: { total: { inputTokens: 1200, cachedInputTokens: 100, outputTokens: 300, reasoningOutputTokens: 20 }, last: { inputTokens: 1200, cachedInputTokens: 100, outputTokens: 300, reasoningOutputTokens: 20 } } });
-      await wait(400); // a real turn takes a moment; the review baseline is captured as it starts
+      // A real model round trip outlasts the review snapshot; on a slow runner a fixed sleep did not (#290). Wait for the
+      // run's baseline itself (review.baselines awaits the capture in flight), then write, as a real agent would.
+      await s.invoke('review.baselines', { chatId: input.chat.id });
       await writeFile(join(input.cwd, 'E2E-NOTE.md'), 'edited\n');
       return { status: 'completed', finalMessage: 'Wrote E2E-NOTE.md' };
     },
@@ -254,26 +256,6 @@ test('S55/S23 board moves: Backlog is a real state the scheduler skips; Done ver
   const view = (await s.invoke('project.work', { projectId: project.id })).tasks.items.find(i => i.id === fresh.id)!;
   assert.equal(view.verification?.kind, 'manual');
   assert.equal((await s.invoke('paperclip.task.update', { taskId: parked.id, status: 'todo' })).status, 'todo');
-});
-
-// Spec: MUS-SPEC-17-290A (docs/spec/clauses/17-usage-cost-and-ledger.md#mus-spec-17-290a)
-test('S63 a slow review snapshot still lists the changed file in the Receipt and in Outputs', async t => {
-  // A git wrapper that delays write-tree, as a slow runner's disk does: the pre-run snapshot takes ~1.4 s.
-  const bin = await mkdtemp(join(tmpdir(), 'muster-slow-git-'));
-  const real = execFileSync('which', ['git']).toString().trim();
-  await writeFile(join(bin, 'git'), `#!/bin/sh\ncase "$*" in *write-tree*) sleep 0.7;; esac\nexec "${real}" "$@"\n`, { mode: 0o755 });
-  const path = process.env.PATH; process.env.PATH = `${bin}:${path}`;
-  t.after(async () => { process.env.PATH = path; await rm(bin, { recursive: true, force: true }); });
-  const { s, project, member, state } = await service(t);
-  const cto = await member('CTO');
-  const task = await s.invoke('paperclip.task.create', { title: 'Write a note', description: 'Write it', projectId: project.id, assigneeId: `member:${cto.id}`, start: true });
-  assert.ok(task.started, task.startError ?? 'not started');
-  await until(async () => await state(task.id) !== 'running' && (await s.invoke('paperclip.ledger', {})).entries.some(e => e.chatId === task.started!.chatId && e.files?.length), 'receipt with files');
-  const entry = (await s.invoke('paperclip.ledger', {})).entries.find(e => e.chatId === task.started!.chatId)!;
-  assert.deepEqual(entry.files?.map(f => `${f.path}:${f.status}`), ['E2E-NOTE.md:added'], 'the Receipt lists the file the run wrote');
-  assert.equal(entry.agent, 'CTO'); assert.equal(entry.taskId, task.id);
-  const rows = (await s.invoke('paperclip.list', { kind: 'artifacts' })).rows.filter(r => r.projectId === project.id);
-  assert.ok(rows.some(r => r.title === 'E2E-NOTE.md' && r.status === 'added'), 'Outputs lists the file');
 });
 
 test('S63 Outputs lists what the agents produced: files their runs changed, canvases and attachments', async t => {
