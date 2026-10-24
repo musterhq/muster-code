@@ -25,7 +25,7 @@ export function geminiPermissionArgs(mode: AdapterRunInput['permissionMode'], fl
 
 export const geminiBody = (input: AdapterRunInput): string => [input.instructions, input.prompt, (input.images ?? []).map(path => `@${path}`).join(' ')].filter(Boolean).join('\n\n');
 
-/** Gemini puts what it reads on stdin in front of `--prompt`: a body too long for argv goes on stdin and `--prompt` carries one short line. */
+/** Gemini's docs (Headless mode, "Stdin Input" and "Combining with File Input": `cat README.md | gemini --prompt "Summarize this documentation"`) say piped stdin is read together with `--prompt`: a body too long for argv goes on stdin and `--prompt` carries one short line. */
 export function geminiArgs(input: AdapterRunInput, flags: GeminiFlags): string[] {
   const model = input.model.replace(/^gemini-cli\//, ''), body = geminiBody(input);
   return ['--output-format', 'stream-json', ...geminiPermissionArgs(input.permissionMode, flags), ...(model && model !== 'default' ? ['--model', model] : []),

@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { cursorAdapter } from '../src/runtime/adapters/cursor-cli.ts';
 import { geminiAdapter } from '../src/runtime/adapters/gemini-cli.ts';
 import { openCodeAdapter } from '../src/runtime/adapters/opencode.ts';
+import { ARGV_PROMPT_MAX_BYTES } from '../src/runtime/adapters/cli-common.ts';
 import type { AdapterRunInput } from '../src/runtime/adapters/types.ts';
 import { PROMPT_CONTRIBUTION_MAX_BYTES } from '../src/runtime/domains/hooks.ts';
 import { wave1 } from './wave1-harness.ts';
@@ -27,6 +28,7 @@ test('#157: a task with 2,000 messages still wakes; the packet is capped to the 
   assert.match(packet, /NOTE-1999 /, 'the newest message is there');
   assert.doesNotMatch(packet, /NOTE-0 /, 'the oldest is not');
   assert.ok(bytes(packet) < PROMPT_CONTRIBUTION_MAX_BYTES + 2_000, `the packet is ${bytes(packet)} bytes`);
+  assert.ok(bytes(packet) < ARGV_PROMPT_MAX_BYTES, 'small enough for a CLI that only takes its prompt in argv');
   assert.doesNotMatch(packet, /\[truncated\]/, 'the cut never reaches the protocol');
   assert.match(packet, /Muster task protocol:/);
   const logged = (await h.activity('task.run-context')).find(a => a.refId === job.id);
@@ -45,27 +47,31 @@ function fakeChild() {
 const turn = (prompt: string): AdapterRunInput => ({ chat: { id: 'c', mode: 'agent' } as AdapterRunInput['chat'], cwd: '/work', prompt, model: 'default', permissionMode: 'workspace', signal: new AbortController().signal, onThreadReady() {}, onTurnAccepted() {}, onDelta() {}, onReasoning() {}, onEvent() {} });
 
 // Spec: MUS-SPEC-12-157B (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-157b)
-test('#157: a prompt too big for one argument reaches Cursor, Gemini and OpenCode on stdin, never in argv', async () => {
+test('#157: Gemini (whose docs say piped stdin joins --prompt) gets a prompt too big for one argument on stdin; Cursor and OpenCode keep argv, which the bounded packet keeps small', async () => {
   const big = `START ${'x'.repeat(300_000)} END`, small = 'a short prompt';
-  const runs: { name: string; start(spawn: never): Promise<unknown> }[] = [
-    { name: 'cursor', start: spawn => cursorAdapter({ binary: '/bin/cursor-agent', env: { PATH: '/usr/bin' }, spawn }).run(turn(big)) },
-    { name: 'gemini', start: spawn => geminiAdapter({ binary: '/bin/gemini', flags: () => ({ plan: true, resume: true, approvalMode: true }), env: { PATH: '/usr/bin' }, spawn }).run(turn(big)) },
-    { name: 'opencode', start: spawn => openCodeAdapter({ binary: '/bin/opencode', env: { PATH: '/usr/bin' }, spawn }).run(turn(big)) },
-  ];
-  for (const run of runs) {
-    const fake = fakeChild(); let args: string[] = [];
-    const running = run.start(((_c: string, a: string[]) => { args = a; return fake.child as unknown as ChildProcess; }) as never);
-    await new Promise(resolve => setImmediate(resolve));
-    assert.ok(Math.max(...args.map(bytes)) < 1_000, `${run.name}: no argument carries the prompt (largest ${Math.max(...args.map(bytes))} bytes)`);
-    assert.ok(fake.stdin().startsWith('START ') && fake.stdin().endsWith(' END'), `${run.name}: the whole prompt arrived on stdin`);
-    fake.finish(); await running;
-  }
-  // A short prompt keeps its place in argv and writes nothing to stdin.
   const fake = fakeChild(); let args: string[] = [];
-  const running = cursorAdapter({ binary: '/bin/cursor-agent', env: { PATH: '/usr/bin' }, spawn: ((_c: string, a: string[]) => { args = a; return fake.child as unknown as ChildProcess; }) as never }).run(turn(small));
+  const running = geminiAdapter({ binary: '/bin/gemini', flags: () => ({ plan: true, resume: true, approvalMode: true }), env: { PATH: '/usr/bin' }, spawn: ((_c: string, a: string[]) => { args = a; return fake.child as unknown as ChildProcess; }) as never }).run(turn(big));
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(args.at(-1), small); assert.equal(fake.stdin(), '');
+  assert.ok(Math.max(...args.map(bytes)) < 1_000, `no argument carries the prompt (largest ${Math.max(...args.map(bytes))} bytes)`);
+  assert.ok(fake.stdin().startsWith('START ') && fake.stdin().endsWith(' END'), 'the whole prompt arrived on stdin');
   fake.finish(); await running;
+  // A short Gemini prompt keeps its place in argv and writes nothing to stdin.
+  const shortRun = fakeChild(); let shortArgs: string[] = [];
+  const shortRunning = geminiAdapter({ binary: '/bin/gemini', flags: () => ({ plan: true, resume: true, approvalMode: true }), env: { PATH: '/usr/bin' }, spawn: ((_c: string, a: string[]) => { shortArgs = a; return shortRun.child as unknown as ChildProcess; }) as never }).run(turn(small));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(shortArgs.at(-1), small); assert.equal(shortRun.stdin(), '');
+  shortRun.finish(); await shortRunning;
+  // Cursor and OpenCode have no documented stdin prompt: the prompt stays in argv for both, whatever its size.
+  for (const [name, start] of [
+    ['cursor', (spawn: never) => cursorAdapter({ binary: '/bin/cursor-agent', env: { PATH: '/usr/bin' }, spawn }).run(turn(small))],
+    ['opencode', (spawn: never) => openCodeAdapter({ binary: '/bin/opencode', env: { PATH: '/usr/bin' }, spawn }).run(turn(small))],
+  ] as const) {
+    const child = fakeChild(); let seen: string[] = [];
+    const run = start(((_c: string, a: string[]) => { seen = a; return child.child as unknown as ChildProcess; }) as never);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(seen.includes(small), `${name}: the prompt is an argument`); assert.equal(child.stdin(), '', `${name}: nothing on stdin`);
+    child.finish(); await run;
+  }
 });
 
 // Spec: MUS-SPEC-12-157C (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-157c)

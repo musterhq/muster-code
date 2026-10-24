@@ -83,7 +83,7 @@ export interface TurnApi {
   answer(): string;
 }
 
-/** #157: a prompt this long goes to the CLI on stdin, never in argv (one argument is capped near 128 KB on Linux and 32 KB on Windows, and a thread can be far larger). */
+/** #157: a prompt this long goes to the CLI on stdin instead of argv (one argument is capped near 128 KB on Linux and 32 KB on Windows). Only for a CLI whose own docs say it reads stdin; the others keep argv. */
 export const ARGV_PROMPT_MAX_BYTES = 24_000;
 export const fitsArgv = (body: string): boolean => Buffer.byteLength(body) <= ARGV_PROMPT_MAX_BYTES;
 

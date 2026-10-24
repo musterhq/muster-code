@@ -1,7 +1,6 @@
 import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {cliSpawn, jsonLines, text} from './shared.ts';
-import {fitsArgv} from './cli-common.ts';
 import type {Spawn} from './claude-code.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
 import {launcherSpec} from '../launcher-script.ts';
@@ -74,11 +73,9 @@ export function openCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEn
   return {kind: 'cli', run(input) {
     return new Promise<AdapterRunResult>(resolve => {
       const model = input.model.replace(/^opencode\//, ''), turnId = randomUUID();
-      const body = input.instructions ? `${input.instructions}\n\n${input.prompt}` : input.prompt, onArgv = fitsArgv(body);
-      // #157: `opencode run` appends piped stdin to its message, so a prompt too long for argv goes on stdin and argv keeps one short line.
       const args = ['run', '--format', 'json', '--agent', input.permissionMode === 'read-only' ? 'plan' : 'build',
         ...(model && model !== 'default' ? ['--model', model] : []), ...(input.resumeThreadId ? ['--session', input.resumeThreadId] : []),
-        onArgv ? body : 'Carry out the request that was sent on standard input.',
+        input.instructions ? `${input.instructions}\n\n${input.prompt}` : input.prompt,
         // After the message: `--file` is an array option and would swallow a following positional.
         ...(input.images ?? []).flatMap(path => ['--file', path])];
       let child: ChildProcess;
@@ -117,7 +114,7 @@ export function openCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEn
         if (code === 0 && !failure) return finish({status: 'completed', finalMessage: answer, dispatchState: 'dispatched', ...identity});
         finish({status: 'failed', finalMessage: '', dispatchState: dispatched ? 'dispatched' : 'not-dispatched', ...identity, errorMessage: (failure || stderr.trim().split('\n').slice(-3).join(' ') || `OpenCode exited with code ${code}.`).replace(/[\x00-\x1f]+/g, ' ').slice(0, 400)});
       });
-      child.stdin?.on('error', () => {}); child.stdin?.end(onArgv ? undefined : body);
+      child.stdin?.on('error', () => {}); child.stdin?.end();
     });
   }};
 }

@@ -20,7 +20,7 @@ Boundaries:
 | [MUS-SPEC-12-462A](12-projects-orgs-and-tasks.md#mus-spec-12-462a) | The run carries a protocol that limits stopping to user-only decisions, tells the agent to poll running work and no longer says not to wait. | [`G40: task runs get the muster_tasks MCP server; the host refuses callers without the token`](../../../packages/agent-app/tests/wave4-task-tools.test.ts) |
 | [MUS-SPEC-12-462B](12-projects-orgs-and-tasks.md#mus-spec-12-462b) | The protocol and the end-of-run line tell the agent to post the handoff comment with task_comment instead of asking. | [`G40: task runs get the muster_tasks MCP server; the host refuses callers without the token`](../../../packages/agent-app/tests/wave4-task-tools.test.ts) |
 | [MUS-SPEC-12-157A](12-projects-orgs-and-tasks.md#mus-spec-12-157a) | A task with 2,000 messages still wakes: the run gets the newest messages that fit, the true count, and a logged packet size, and the protocol is never cut. | [`#157: a task with 2,000 messages still wakes; the packet is capped to the newest messages and the cap is logged in the activity`](../../../packages/agent-app/tests/wave1-fix-bounded-wake.test.ts) |
-| [MUS-SPEC-12-157B](12-projects-orgs-and-tasks.md#mus-spec-12-157b) | A prompt too big for one argument reaches Cursor, Gemini and OpenCode on stdin; a short one stays in argv. | [`#157: a prompt too big for one argument reaches Cursor, Gemini and OpenCode on stdin, never in argv`](../../../packages/agent-app/tests/wave1-fix-bounded-wake.test.ts) |
+| [MUS-SPEC-12-157B](12-projects-orgs-and-tasks.md#mus-spec-12-157b) | A prompt too big for one argument reaches Gemini on stdin (as its docs describe); a short one stays in argv, and Cursor and OpenCode keep argv. | [`#157: Gemini (whose docs say piped stdin joins --prompt) gets a prompt too big for one argument on stdin; Cursor and OpenCode keep argv, which the bounded packet keeps small`](../../../packages/agent-app/tests/wave1-fix-bounded-wake.test.ts) |
 | [MUS-SPEC-12-157C](12-projects-orgs-and-tasks.md#mus-spec-12-157c) | The same start error three times in a row raises one Inbox Problem and stops that task's retries until you resolve it. | [`#157: the same start error three times in a row raises one Problem and stops that task's retries until you act`](../../../packages/agent-app/tests/wave1-fix-bounded-wake.test.ts) |
 | [MUS-SPEC-12-157D](12-projects-orgs-and-tasks.md#mus-spec-12-157d) | Different errors, or errors that are not start errors, never add up to a start Problem. | [`#157: different errors, or a run that gets going in between, do not add up to a Problem`](../../../packages/agent-app/tests/wave1-fix-bounded-wake.test.ts) |
 
@@ -75,14 +75,14 @@ Boundaries:
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-12-157b"></a>
-#### MUS-SPEC-12-157B: A prompt too big for one argument goes to the CLI on stdin
+#### MUS-SPEC-12-157B: A prompt too big for one argument goes to Gemini on stdin
 
-- Precondition: A Cursor, Gemini or OpenCode chat whose turn text is 300,000 bytes.
-- Action: Run the turn with a fake CLI process that records its arguments and stdin.
-- Expected result: No argument is larger than 1,000 bytes. The whole text arrives on stdin. A short prompt stays in argv and nothing is written to stdin.
-- Test: `packages/agent-app/tests/wave1-fix-bounded-wake.test.ts::#157: a prompt too big for one argument reaches Cursor, Gemini and OpenCode on stdin, never in argv`
+- Precondition: A Gemini chat whose turn text is 300,000 bytes, and short Gemini, Cursor and OpenCode chats.
+- Action: Run each turn with a fake CLI process that records its arguments and stdin.
+- Expected result: For Gemini, no argument is larger than 1,000 bytes and the whole text arrives on stdin. A short Gemini prompt stays in argv with nothing on stdin. Cursor and OpenCode keep the prompt in argv with nothing on stdin.
+- Test: `packages/agent-app/tests/wave1-fix-bounded-wake.test.ts::#157: Gemini (whose docs say piped stdin joins --prompt) gets a prompt too big for one argument on stdin; Cursor and OpenCode keep argv, which the bounded packet keeps small`
 - Environment: Node test runner; fake child processes, no real CLI.
-- Known gaps: Only checks what Muster sends. It does not show the real CLIs accepting the prompt on stdin; Codex and Claude Code already use stdin and are unchanged.
+- Known gaps: Only checks what Muster sends; the real Gemini binary was not run (its docs describe stdin joined with --prompt). Cursor and OpenCode are not moved to stdin because their own docs do not confirm it, so a prompt larger than the OS argument limit still cannot start them; the bounded wake packet (case 157A) keeps Muster's own text far below that. Codex and Claude Code already use stdin and are unchanged.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-12-157c"></a>
