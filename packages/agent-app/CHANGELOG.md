@@ -85,6 +85,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Pending approvals and questions badge the Dock (or taskbar) again when you switch away from Muster, instead of staying unbadged until the count changes.
 - Arabic, Hebrew and other right-to-left messages, replies, lists and chat titles now read and align right-to-left instead of left-to-right
 - Typing in Arabic or Hebrew in the message box now flows right-to-left, and sidebar chat titles follow their own direction
+- Context you attach while a message is still sending is kept for the next message instead of being cleared with the one that was sent
+- Alt+Arrow reordering of queued follow-ups keeps working after the message you were editing was sent
 - The Dashboard follows the org you switched to. Before, a read of the previous org that was still running when you switched could answer for the new one, so the Dashboard showed the old org's spend, budget and tasks by day.
 - The Dashboard's Recent activity and the Activity list name the agent or person who acted instead of a short id such as "agent a8782383".
 - The Dashboard opens faster on a large org: it reuses the org's last read instead of reading every task page again.

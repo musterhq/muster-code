@@ -49,6 +49,7 @@ Boundaries:
 | [MUS-SPEC-02-478E](02-turns-streaming-and-queue.md#mus-spec-02-478e) | The steer returns a refusal that names the first error ("expected turn mismatch"), not a silent false. | [`Codex: a fallback that answers false after a failed steer reports the first error`](../../../packages/agent-app/tests/steer-default.test.ts) |
 | [MUS-SPEC-02-478F](02-turns-streaming-and-queue.md#mus-spec-02-478f) | With nothing stored the setting is Steer; Enter steers, a refused steer queues the message with a reason, and the draft clears. | [`while a run goes, Enter steers by default and a refused steer falls back to the queue`](../../../packages/agent-app/tests/composer-components.tsx) |
 | [MUS-SPEC-02-478G](02-turns-streaming-and-queue.md#mus-spec-02-478g) | Cmd+Enter queues the message and sends no steer for it. | [`Cmd+Enter while a run goes queues the message instead of steering`](../../../packages/agent-app/tests/composer-components.tsx) |
+| [MUS-SPEC-02-555A](02-turns-streaming-and-queue.md#mus-spec-02-555a) | After the message you were editing is sent and leaves the queue, Alt+Down on another queued message still sends a reorder request. | [`Alt+Down still reorders the queue after the message being edited has been sent`](../../../packages/agent-app/tests/queue-stale-edit-dom.tsx) |
 
 ### After Stop
 
@@ -427,4 +428,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/process-continuations.test.ts::liveness: a turn that ends promising to report back is not completed`
 - Environment: Node test runner; no provider or network.
 - Known gaps: A unit test of a text classifier, so wording it does not recognise is not caught.
+- Evidence: UNVERIFIED
+
+### Editing a queued message
+
+<a id="mus-spec-02-555a"></a>
+#### MUS-SPEC-02-555A: A queued message that is sent while you edit it does not lock the queue
+
+- Precondition: Three messages are queued. The first one is open in the queue editor. The runtime then sends it, so only two remain.
+- Action: Press Alt+Down on the first remaining queued message.
+- Expected result: The editor for the sent message is closed, and the queue sends one reorder request for the key press.
+- Test: `packages/agent-app/tests/queue-stale-edit-dom.tsx::Alt+Down still reorders the queue after the message being edited has been sent`
+- Environment: Real QueuedMessages component in a DOM suite (linkedom); fake app bridge; no network.
+- Known gaps: The queue is fed by the test, not by a real running turn. It checks the reorder request, not the new order on screen.
 - Evidence: UNVERIFIED

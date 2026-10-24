@@ -515,11 +515,12 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     if (running) { void followUp(false); return; }
     if (isCheckoutQueued(chat.id)) { flash('Already queued · starts when the other chat in this folder finishes'); return; }
     recall.current = null;
-    const ids = readyIds, payload = chipPayload(text, chips, vocabulary), goal = chat.goal, body = outgoing(text), extras = { ...payload, ...(storedEffort ? { effort } : {}) };
+    const ids = readyIds, sentContext = new Set(contextChips.map(chip => chip.id)), sentChips = new Set(chips.map(chip => chip.token)), payload = chipPayload(text, chips, vocabulary), goal = chat.goal, body = outgoing(text), extras = { ...payload, ...(storedEffort ? { effort } : {}) };
     // CHAT-06: another chat running in this checkout → worktree / queue / run anyway / cancel, before anything starts.
     void sendWithCheckoutGuard(chat.id, { hasAttachments: ids.length > 0 }, target => sendMessage(target, body, extras, target === chat.id ? ids : [])).then(sent => {
       if (!sent || currentDraft.current.chatId !== chat.id) return;
-      setChips(() => []); setContext(() => []); dropSent(ids);
+      // Only what was sent goes: a chip added while the send was in flight stays for the next message.
+      setChips(current => current.filter(chip => !sentChips.has(chip.token))); setContext(current => current.filter(chip => !sentContext.has(chip.id))); dropSent(ids);
       // A paused goal: offer to resume it now that the user is back (Codex "Resume paused goal?").
       if (goal?.status === 'paused' && !resumeDeclined.has(`${chat.id}:${goal.createdAt}`)) setAskResume(true);
     });

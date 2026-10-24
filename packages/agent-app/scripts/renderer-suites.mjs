@@ -73,6 +73,8 @@ export const suites = [
   'chat-render-bounds-dom',
   'chat-rtl-dom',
   'composer-rtl-dom',
+  'composer-inflight-chips-dom',
+  'queue-stale-edit-dom',
 ];
 
 /** Suites that open Base UI menus/portals get a split build: their `await import()` of UI code stays a separate

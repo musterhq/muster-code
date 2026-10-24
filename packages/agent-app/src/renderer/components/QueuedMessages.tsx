@@ -78,6 +78,9 @@ export function QueuedMessages({ chatId, items, paused, running = false, skills 
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<{ id: string | null; after: boolean } | null>(null);
   const cancelled = useRef(false);
+  // The message being edited left the queue (sent, deleted elsewhere): drop the editor so it cannot block the rest.
+  const editingGone = editing !== null && !items.some(item => item.id === editing.id);
+  useEffect(() => { if (editingGone) setEditing(null); }, [editingGone]);
   if (!items.length) return null;
   const ids = items.map(item => item.id);
   const run = async (id: string, action: () => Promise<unknown>) => {
