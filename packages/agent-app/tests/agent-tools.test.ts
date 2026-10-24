@@ -7,7 +7,7 @@ import {runBrowserTool,type AgentBrowserHost,type AgentPage} from '../src/main/a
 import {BrowserBridge,agentBrowserOwner,launcherScript} from '../src/main/agent-tools/browser-bridge.ts';
 import {handleMcpMessage} from '../src/main/agent-tools/browser-mcp.ts';
 import {BROWSER_TOOL_SPECS,electronKey,formatSnapshot} from '../src/main/agent-tools/browser-tools.ts';
-import {BROWSER_TOOLS,computerAction,computerUseTarget,elicitationPolicy,elicitationResult,elicitationText,isElicitationRequest,maskComputerArguments} from '../src/shared/computer-use.ts';
+import {BROWSER_TOOLS,PREVIEW_TOOLS,computerAction,computerUseTarget,elicitationPolicy,elicitationResult,elicitationText,isElicitationRequest,maskComputerArguments} from '../src/shared/computer-use.ts';
 import {computerRunOptions} from '../src/runtime/domains/computer.ts';
 import {computerPermissions} from '../src/main/computer-capture.ts';
 
@@ -25,7 +25,7 @@ function fakeHost(options:{attached?:boolean;results?:unknown[]}={}) {
 }
 
 test('tool specs and the shared tool list agree',()=>{
-  assert.deepEqual(BROWSER_TOOL_SPECS.map(spec=>spec.name),[...BROWSER_TOOLS]);
+  assert.deepEqual(BROWSER_TOOL_SPECS.map(spec=>spec.name),[...BROWSER_TOOLS,...PREVIEW_TOOLS]);
   assert.equal(electronKey('enter'),'Enter');assert.equal(electronKey('x'),'x');assert.equal(electronKey('nope'),undefined);
   assert.match(formatSnapshot({title:'T',url:'https://a.test',outline:'- link "Home" [ref=e1]',text:'hi'}),/Page: T — https:\/\/a\.test[\s\S]*\[ref=e1\][\s\S]*hi/);
 });

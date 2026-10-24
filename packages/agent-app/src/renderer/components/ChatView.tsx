@@ -50,6 +50,7 @@ import {openAttachment, openAttachmentOnKey} from '../attachmentOpen';
 
 import {useDisclosure} from './useDisclosure';
 import { Composer } from './Composer';
+import { LocalServerCards } from './LocalServerCards';
 import {RecoveryNotice} from './RecoveryNotice';
 import {AreaBoundary} from './AreaBoundary';
 import { PendingQuestion } from './PendingQuestion';
@@ -495,6 +496,7 @@ export function ChatView(): React.ReactElement {
       )}
       {timeline.value&&<LiveAnnouncer key={`announce:${chat.id}`} status={chat.status} items={timeline.value}/>}
       <TurnChanges key={`changes:${chat.id}`} items={timeline.value??[]} inline={state.showInlineFileDiffs} folder={folder?{id:folder.id,name:folder.name}:undefined}/>
+      <LocalServerCards key={`servers:${chat.id}`} chatId={chat.id}/>
       <Composer key={`composer:${chat.id}`} chat={chat} />
       <EnvironmentFooter key={`env:${chat.id}`} chat={chat} folder={folder} project={project} telemetry={state.contextTelemetry[chat.id]}/>
     </div>

@@ -16,28 +16,35 @@ export const MAX_REPORT_BYTES = 4_000_000;
 const MAX_DOCUMENTS = 48, MAX_TOTAL_BYTES = 48 * 1024 * 1024;
 const TOKEN = /^[a-f0-9]{32}$/;
 
-/** No network (`connect-src 'none'`), no frames, workers, plugins, forms or base rewrites. Inline script and style only, and only when `scripts`. */
-export function reportCsp(scripts: boolean): string {
-  return [`default-src 'none'`, `script-src ${scripts ? `'unsafe-inline'` : `'none'`}`, `style-src 'unsafe-inline'`, `img-src data: blob:`, `font-src data:`, `media-src data: blob:`,
-    `connect-src 'none'`, `frame-src 'none'`, `child-src 'none'`, `worker-src 'none'`, `object-src 'none'`, `form-action 'none'`, `base-uri 'none'`, `manifest-src 'none'`].join('; ');
+/**
+ * No network (`connect-src 'none'`), no frames, workers, plugins, forms or base rewrites. Inline script and style only, and
+ * only when `scripts`. A page the person allowed network for (render_html, per page) may also load https: scripts, styles,
+ * images, fonts and media and fetch over https:, nothing else: never http:, file:, a custom scheme or the app's own origins,
+ * and still no frames, workers, forms or popups.
+ */
+export function reportCsp(scripts: boolean, network = false): string {
+  const remote = network ? ' https:' : '';
+  return [`default-src 'none'`, `script-src ${scripts ? `'unsafe-inline'${remote}` : `'none'`}`, `style-src 'unsafe-inline'${remote}`, `img-src data: blob:${remote}`, `font-src data:${remote}`, `media-src data: blob:${remote}`,
+    `connect-src ${network && scripts ? 'https:' : `'none'`}`, `frame-src 'none'`, `child-src 'none'`, `worker-src 'none'`, `object-src 'none'`, `form-action 'none'`, `base-uri 'none'`, `manifest-src 'none'`].join('; ');
 }
 
 export interface ReportResponse {status: number; headers: Record<string, string>; body: string}
-interface Document {token: string; key?: string; html: string; scripts: boolean; version: number; bytes: number}
+interface Document {token: string; key?: string; html: string; scripts: boolean; themed: boolean; network: boolean; version: number; bytes: number}
+export interface ReportInput {html: string; scripts?: boolean; key?: string; /** Muster's theme variables and the theme/link bootstrap (agent pages). */ themed?: boolean; /** Only for a page the person allowed network for; main decides, never the renderer alone. */ network?: boolean}
 
 export class ReportRegistry {
   private documents = new Map<string, Document>();
   private bytes = 0;
 
   /** Registering again under the same `key` (a Canvas being edited) replaces the content under the same token and bumps the version in the URL. */
-  register(input: {html: string; scripts?: boolean; key?: string}): {url: string; token: string; version: number} {
+  register(input: ReportInput): {url: string; token: string; version: number} {
     if (typeof input?.html !== 'string') throw new Error('Nothing to show.');
     const bytes = Buffer.byteLength(input.html);
     if (bytes > MAX_REPORT_BYTES) throw new Error(`This page is ${(bytes / 1_000_000).toFixed(1)} MB; the limit is ${MAX_REPORT_BYTES / 1_000_000} MB.`);
     const key = typeof input.key === 'string' && input.key.length > 0 && input.key.length <= 160 ? input.key : undefined;
     let found = key ? [...this.documents.values()].find(item => item.key === key) : undefined;
-    if (found) { this.bytes -= found.bytes; this.documents.delete(found.token); found.html = input.html; found.scripts = input.scripts !== false; found.version++; found.bytes = bytes; }
-    else found = {token: randomBytes(16).toString('hex'), ...(key ? {key} : {}), html: input.html, scripts: input.scripts !== false, version: 1, bytes};
+    if (found) { this.bytes -= found.bytes; this.documents.delete(found.token); found.html = input.html; found.scripts = input.scripts !== false; found.themed = input.themed === true; found.network = input.network === true; found.version++; found.bytes = bytes; }
+    else found = {token: randomBytes(16).toString('hex'), ...(key ? {key} : {}), html: input.html, scripts: input.scripts !== false, themed: input.themed === true, network: input.network === true, version: 1, bytes};
     this.documents.set(found.token, found); this.bytes += bytes;
     // Oldest first: a tab left open long ago is the first to expire (its view says so and offers a reload).
     while (this.documents.size > MAX_DOCUMENTS || this.bytes > MAX_TOTAL_BYTES) {
@@ -66,8 +73,8 @@ export class ReportRegistry {
     if (!found) return fail(404, 'This view has expired. Reopen it from the conversation.');
     // One document, no subresources: everything a report needs is inline.
     if (parsed.pathname !== '/' && parsed.pathname !== '/index.html') return fail(404, 'Not found');
-    return {status: 200, body: prepareReportHtml(found.html, found.scripts), headers: {
-      'content-type': 'text/html; charset=utf-8', 'content-security-policy': reportCsp(found.scripts), 'x-content-type-options': 'nosniff', 'cache-control': 'no-store',
+    return {status: 200, body: prepareReportHtml(found.html, found.scripts, {themed: found.themed}), headers: {
+      'content-type': 'text/html; charset=utf-8', 'content-security-policy': reportCsp(found.scripts, found.network), 'x-content-type-options': 'nosniff', 'cache-control': 'no-store',
       'referrer-policy': 'no-referrer', 'cross-origin-opener-policy': 'same-origin', 'permissions-policy': 'camera=(), microphone=(), geolocation=(), clipboard-read=(), display-capture=(), usb=(), serial=(), hid=()',
     }};
   }

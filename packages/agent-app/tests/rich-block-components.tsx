@@ -230,12 +230,14 @@ setRichRenderers({
   const post=(source:unknown,origin:string,data:unknown)=>{const event=new window.Event('message') as any;event.source=source;event.origin=origin;event.data=data;window.dispatchEvent(event);};
   (own as any).contentWindow={};
   post((own as any).contentWindow,'null',{muster:'report-height',height:412.2});
+  await delay(10); // heights are applied once per animation frame
   post((own as any).contentWindow,'null',{muster:'report-height',height:'tall'});
   post((own as any).contentWindow,'null',{muster:'report-height',height:Infinity});
   post((own as any).contentWindow,'https://evil.example',{muster:'report-height',height:999});
   post({},'null',{muster:'report-height',height:998});
   post((own as any).contentWindow,'null',{muster:'something-else',height:997});
   post((own as any).contentWindow,'null',{muster:'report-height',height:9e9});
+  await delay(10);
   assert.deepEqual(heights,[413,100000],'only the own frame, only numbers, bounded');
 
   reportsFail=true;

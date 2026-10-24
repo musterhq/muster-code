@@ -1,4 +1,6 @@
+/* Portions adapted from T3 Code (https://github.com/pingdotgg/t3code, commit 13aa882), the agent cursor (cursorScript). Copyright (c) 2026 T3 Tools Inc., MIT License; see THIRD-PARTY-NOTICES.md and licenses/t3code-MIT.txt. */
 /** The in-app browser tools the agent sees through the muster_browser MCP server. Pure: no Electron. */
+import {HTML_RENDER_LAYOUT_GUIDE, HTML_RENDER_NETWORK_GUIDE, HTML_RENDER_THEME_GUIDE} from '../../shared/html-render.ts';
 export interface BrowserToolSpec { name: string; description: string; mutates: boolean; inputSchema: Record<string, unknown> }
 /** #424: a sub-agent's own tab. Optional on every tool; without it the chat's main tab is used. */
 const session = {session: {type: 'string', description: 'Optional short name (letters, digits, - or _) of your own browser tab, for a sub-agent working in parallel with others. Omit it to use the chat\'s tab.'}};
@@ -17,8 +19,41 @@ export const BROWSER_TOOL_SPECS: readonly BrowserToolSpec[] = [
   {name: 'browser_go_back', mutates: false, description: 'Go back in history.', inputSchema: obj({})},
   {name: 'browser_reload', mutates: false, description: 'Reload the page.', inputSchema: obj({})},
   {name: 'browser_wait_for', mutates: false, description: 'Wait for text to appear or disappear, or for a number of seconds (max 30).', inputSchema: obj({text: {type: 'string'}, textGone: {type: 'string'}, time: {type: 'number'}})},
-  {name: 'browser_console_messages', mutates: false, description: 'Recent console and network errors of the page.', inputSchema: obj({})},
+  {name: 'browser_console_messages', mutates: false, description: 'Recent console and network errors of the page.', inputSchema: obj({})},  // Previews and inline pages (#html-preview). Not browser actions: the bridge answers them itself.
+  {name: 'render_html', mutates: false, description: `Show a finished HTML page (dashboard, chart, table, report, mockup) inline in the user's chat, above your reply; call it before writing that reply, and don't describe the page again in prose. It runs in a sandbox with no access to Muster, the user's files or (by default) the network. ${HTML_RENDER_LAYOUT_GUIDE} ${HTML_RENDER_THEME_GUIDE} ${HTML_RENDER_NETWORK_GUIDE}`, inputSchema: {type: 'object', properties: {html: {type: 'string', description: 'One complete, self-contained HTML document with inline <style> and <script>, at most 512 KB.'}, title: {type: 'string', description: 'Short name for the page, shown in its header.'}, network: {type: 'boolean', description: 'Ask the user to let this page load https resources (a CDN chart library, remote images). Default false.'}}, required: ['html', 'title'], additionalProperties: false}},
+  {name: 'preview_open', mutates: false, description: 'Show the user a preview of what you built: a local dev server or web URL (url, e.g. http://localhost:5173) opens in your browser tab with a live mini player in the chat, or a self-contained .html file in the workspace (file, a path) opens as a sandboxed page in the right pane. Start the dev server first (in the background) and pass the URL it prints. panel: true opens it straight in the right pane. Returns what loaded, or why it could not (for example, the server is not running).', inputSchema: obj({url: {type: 'string', description: 'http(s) URL, usually http://localhost:<port>'}, file: {type: 'string', description: 'Path of an .html file inside the workspace (absolute or relative to it)'}, panel: {type: 'boolean', description: 'Open in the right pane instead of the mini player'}})},
+  {name: 'preview_close', mutates: false, description: 'Close the preview you opened with preview_open (your browser tab and its mini player).', inputSchema: obj({})},
 ];
+/** The bridge answers these itself; they never reach a page. */
+export const PREVIEW_TOOL_NAMES: ReadonlySet<string> = new Set(['render_html', 'preview_open', 'preview_close']);
+/**
+ * Agent cursor (adapted from T3 Code's AgentBrowserCursor, MIT; see THIRD-PARTY-NOTICES.md): a pointer drawn into the page
+ * where the agent acts, so the person watching the pane or the mini player sees what it does. It lives in a closed shadow root
+ * under one fixed, pointer-transparent host, ignores the page's styles, glides between targets, pulses on a click, dims when
+ * idle and removes itself after a while. It is never interactive and has no text, so snapshots and page text never see it.
+ */
+export const cursorScript = (ref: string, selector: string, phase: 'move' | 'click') => `(() => {
+  const ref = ${JSON.stringify(ref)}, selector = ${JSON.stringify(selector)}, phase = ${JSON.stringify(phase)};
+  const el = ref ? globalThis.__musterRefs?.get(ref)?.deref() : selector ? document.querySelector(selector) : null;
+  if (!el || !el.isConnected || !document.documentElement) return {ok: false};
+  const r = el.getBoundingClientRect(), x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2);
+  let state = globalThis.__musterCursor;
+  if (!state || !state.host.isConnected) {
+    const host = document.createElement('div');
+    host.setAttribute('aria-hidden', 'true'); host.setAttribute('data-muster-agent-cursor', '');
+    host.style.cssText = 'all:initial;position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;';
+    const root = host.attachShadow({mode: 'closed'});
+    root.innerHTML = '<style>.c{position:fixed;left:0;top:0;transition:transform .18s ease-out,opacity .15s ease-out;will-change:transform}.r{position:absolute;left:-6px;top:-6px;width:20px;height:20px;border-radius:50%;background:rgba(59,130,246,.3);animation:p .6s ease-out forwards}@keyframes p{from{transform:scale(.4);opacity:1}to{transform:scale(1.8);opacity:0}}@media (prefers-reduced-motion:reduce){.c{transition:none}.r{animation:none;opacity:0}}</style><div class="c"><svg width="20" height="20" viewBox="0 0 24 24" style="display:block;filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.35))"><path d="M4 2.5 19.5 13l-7 1.4-3.6 6.6z" fill="#fff" stroke="#2563eb" stroke-width="1.8" stroke-linejoin="round"/></svg></div>';
+    document.documentElement.appendChild(host);
+    state = globalThis.__musterCursor = {host, cursor: root.querySelector('.c'), timers: []};
+  }
+  for (const timer of state.timers) clearTimeout(timer);
+  state.cursor.style.opacity = '1';
+  state.cursor.style.transform = 'translate3d(' + (x - 3) + 'px,' + (y - 2) + 'px,0)';
+  if (phase === 'click') { const ring = document.createElement('span'); ring.className = 'r'; state.cursor.appendChild(ring); setTimeout(() => ring.remove(), 700); }
+  state.timers = [setTimeout(() => { state.cursor.style.opacity = '.35'; }, 1200), setTimeout(() => { state.host.remove(); globalThis.__musterCursor = undefined; }, 15000)];
+  return {ok: true, x, y};
+})()`;
 export const BROWSER_TOOL_NAMES = new Set(BROWSER_TOOL_SPECS.map(tool => tool.name));
 export type McpContent = {type: 'text'; text: string} | {type: 'image'; data: string; mimeType: string};
 export interface McpToolResult { content: McpContent[]; isError?: boolean }
