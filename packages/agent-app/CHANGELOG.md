@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Files written by an API-key or router chat in Workspace access can no longer be pushed outside the chat's folder by a folder or link swapped during the write, and a swapped folder no longer leaves empty folders outside.
 - Configured Responses routers no longer reconnect and fail when a completed response omits cache or reasoning usage counters. Existing counts, authentication, and chat history are preserved; truncated streams still report a failure.
 - The Linux app's terminal works again on Ubuntu 24.04. Linux builds are made on Ubuntu 24.04, so the terminal module runs there and on newer releases.
 - Settings › Muster Server buttons (invite, revoke, connector and agent actions) ignore a second click while the first is still running, so they no longer fire twice.
