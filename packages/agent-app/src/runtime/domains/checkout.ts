@@ -68,17 +68,18 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
     },
     notify: event => ctx.emit(event),
     queued: chatId => ctx.store.queue(chatId).length > 0,
-    emit: taskId => { ctx.emit({ type: 'checkoutChanged', taskId }); ctx.emit({ type: 'projectsWorkspaceChanged', scopes: ['tasks'], taskIds: taskId ? [taskId] : [] }); schedule(); },
+    emit: taskId => { ctx.emit({ type: 'checkoutChanged', taskId }); ctx.emit({ type: 'projectsWorkspaceChanged', scopes: ['tasks', 'inbox'], taskIds: taskId ? [taskId] : [] }); schedule(); },
   });
   /** Posts that could not go (offline) are tried again 30 s after a failure, doubling to a 30 minute cap, only while some are waiting. */
   const outboxRetry = new OutboxRetry({ pending: () => store.pendingCount(), authBlocked: () => svc().authBlocked(), flush: () => svc().flush(), lastError: () => store.syncState().lastError });
   const schedule = () => outboxRetry.schedule();
   /** A quiet session gets a "paused" note. One timer, only while a task is checked out here. */
-  const idle = setInterval(() => { if (store.openLeases().length) void svc().checkIdle().catch(() => undefined); }, 5 * 60_000);
+  const idle = setInterval(() => { if (store.openLeases().length) { void svc().checkIdle().catch(() => undefined); void svc().checkStale().catch(() => undefined); } }, 5 * 60_000);
   idle.unref?.();
   // A hand-back countdown that was running when the app closed starts again.
   if (store.openLeases().some(l => l.countdown)) { const resume = setTimeout(() => { try { svc().resumeCountdowns(); } catch { /* the next start tries again */ } }, 3000); resume.unref?.(); }
   hub.badge = taskId => { const l = store.openLeases().find(x => x.taskId === taskId && x.origin === origin()); return l ? badgeOf(l, store.deviceId(), Date.now(), store.staleHours()) : null; };
+  hub.checkoutInbox = () => store.openLeases().length ? svc().inboxItems() : [];
   hub.onOnline = () => { if (store.pendingCount()) void svc().flush().catch(() => undefined); };
   const offPrompt = ctx.hooks.addPromptContributor(async ({ chat }) => {
     if (!store.openLeases().length || !svc().leaseForChat(chat.id)) return null;
@@ -165,6 +166,6 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
       'checkout.remind': input => { svc().remind(id(input.taskId)); return { ok: true }; },
     },
     power(event) { if (event.state === 'resume' && store.pendingCount()) void svc().flush().catch(() => undefined); },
-    dispose() { offPrompt(); offStarted?.(); offSettled(); offCommand?.(); clearInterval(idle); outboxRetry.dispose(); hub.badge = undefined; hub.onOnline = undefined; },
+    dispose() { offPrompt(); offStarted?.(); offSettled(); offCommand?.(); clearInterval(idle); outboxRetry.dispose(); hub.badge = undefined; hub.checkoutInbox = undefined; hub.onOnline = undefined; },
   };
 }

@@ -1,4 +1,5 @@
 import React, {useEffect, useId, useMemo, useRef, useState} from 'react';
+import {imeComposing} from '../ime';
 import {Popover} from '@base-ui/react/popover';
 import {Bot, Inbox, Files as FileIcon, GitCompare, Globe, History, MessagesSquare, NotebookPen, Plus, Search, SquareTerminal} from 'lucide-react';
 import {createCanvas, openSideChat, selectedText, sideChatBindingForTab} from '../artifacts';
@@ -110,7 +111,7 @@ function ResourceAddContent({close}: {close: () => void}): React.ReactElement {
     else if (event.key === 'ArrowUp') { event.preventDefault(); move(-1); }
     else if (event.key === 'Home' && !query) { event.preventDefault(); setActive(0); }
     else if (event.key === 'End' && !query) { event.preventDefault(); setActive(enabled.length - 1); }
-    else if (event.key === 'Enter' && current) { event.preventDefault(); current.run(); }
+    else if (event.key === 'Enter' && current && !imeComposing(event)) { event.preventDefault(); current.run(); }
   };
   const optionId = (option: Option) => `${listId}-${option.id.replace(/[^\w-]/g, '_')}`;
   // Keyboard movement keeps the active row visible inside the bounded list.

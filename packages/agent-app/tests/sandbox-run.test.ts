@@ -129,19 +129,15 @@ test('sandbox tools: exec reports the container exit, writes and reads go to the
   assert.equal(((await (await post({chatId: 'c2', tool: 'sandbox_exec', arguments: {command: 'pwd'}})).json()) as any).isError, true);
 });
 
-test('the sandbox note says truthfully what the agent\'s own shell can still do on the host (#97)', async t => {
-  // Never claim the host shell is disabled: the provider process stays on the Mac.
-  for (const access of ['read-only', 'workspace', 'full'] as const) assert.doesNotMatch(sandboxNote(access), /disabled/);
-  // Never claim enforcement either: for Claude Code read-only is a permission mode, not a sandbox (#99 review).
-  for (const access of ['read-only', 'workspace', 'full'] as const) assert.doesNotMatch(sandboxNote(access), /cannot change files|is read-only for this chat/);
-  assert.match(sandboxNote('read-only'), /still run on the user's Mac, outside the container, and this chat's access there is read-only\. Do not use them/);
-  assert.match(sandboxNote('workspace'), /access there is write access to this folder\. Do not use them/);
-  assert.match(sandboxNote('full'), /access there is full access\. Do not use them/);
-  assert.equal(SANDBOX_NOTE, sandboxNote('read-only', 'host'));
-  // The run note follows the chat's current access: raised back to Full while in the sandbox, it warns.
+test('the sandbox note says truthfully what the agent\'s own tools can still do on the host (#97, #653)', async t => {
+  // #653: the host shell and edit tools are denied on every sandbox route, so the note says so; reads still reach the Mac.
+  assert.match(sandboxNote(), /Your own shell and file-editing tools are turned off for this chat: they would run on the user's Mac, outside the container\. If one is still offered, do not use it\./);
+  assert.match(sandboxNote(), /Your own read and search tools still read files on the user's Mac\./);
+  assert.equal(SANDBOX_NOTE, sandboxNote('host'));
+  // The note no longer follows the chat's access level: a sandboxed run is read-only on the host at any level (provider.ts).
   const f = await fixture(t);
   await f.call('sandbox.chatEnvironment.set', {chatId: 'sbx-chat', env: 'sandbox', mode: 'copy'});
   f.chats.set('sbx-chat', {...f.chats.get('sbx-chat')!, mode: 'agent', permissionMode: 'full'});
   const options = await f.runtime.resolveRunOptions(f.chats.get('sbx-chat')!);
-  assert.equal(options.developerInstructions, sandboxNote('full', 'host'));
+  assert.equal(options.developerInstructions, SANDBOX_NOTE);
 });

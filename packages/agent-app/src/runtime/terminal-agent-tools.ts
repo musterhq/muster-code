@@ -13,6 +13,7 @@ import path from 'node:path';
 import type {McpToolResult} from './sandbox-registry.ts';
 import {sandboxLauncherScript,textResult} from './sandbox-agent-tools.ts';
 import {launcherFile} from './launcher-script.ts';
+import {ChatBinding,CHAT_BINDING_REFUSED,CHAT_TOKEN_HEADER,registerChatTokenIssuer} from './governance/chat-binding.ts';
 import {redactSecrets} from './secret-redaction.ts';
 
 export const TERMINAL_MCP='muster_terminal';
@@ -59,11 +60,12 @@ export function terminalMcpServerSource():string {
   return `'use strict';
 const fs=require('node:fs');
 const TOOLS=${JSON.stringify(TERMINAL_TOOL_SPECS)};
-const endpointFile=process.argv[2],chatId=process.env.MUSTER_CHAT_ID||'';
+const endpointFile=process.argv[2],chatId=process.env.MUSTER_CHAT_ID||'',chatToken=process.env.MUSTER_CHAT_TOKEN||'';
 const text=(t,isError)=>({content:[{type:'text',text:t}],...(isError?{isError:true}:{})});
 async function call(tool){
   const {url,token}=JSON.parse(fs.readFileSync(endpointFile,'utf8'));
-  const response=await fetch(url,{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+token},body:JSON.stringify({chatId,tool}),signal:AbortSignal.timeout(30000)});
+  const response=await fetch(url,{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+token,'${CHAT_TOKEN_HEADER}':chatToken},body:JSON.stringify({chatId,tool}),signal:AbortSignal.timeout(30000)});
+  if(response.status===403){const refused=await response.json().catch(()=>({}));if(refused&&typeof refused.error==='string'&&refused.error!=='Forbidden')return text(refused.error,true);}
   if(!response.ok)throw new Error('terminal host answered '+response.status);
   return await response.json();
 }
@@ -90,6 +92,8 @@ export class TerminalToolHost {
   private server?:http.Server;
   private starting?:Promise<string>;
   private token=randomBytes(32);
+  private binding=new ChatBinding();
+  private unregister?:()=>void;
   private disposed=false;
   constructor(private options:{dir:string;execPath:string;allowed(chatId:string):Promise<boolean>;tails(chatId:string):readonly TerminalTailInput[]}) {this.launcher=launcherFile(path.join(options.dir,'muster-terminal-mcp'));}
   start():Promise<string> {return this.starting??=this.listen();}
@@ -106,8 +110,11 @@ export class TerminalToolHost {
     fs.writeFileSync(script,terminalMcpServerSource(),{mode:0o600});
     fs.writeFileSync(this.launcher,sandboxLauncherScript(this.options.execPath,script,endpoint),{mode:0o700});
     fs.chmodSync(this.launcher,0o700);
+    this.unregister=registerChatTokenIssuer(TERMINAL_MCP,chatId=>this.chatToken(chatId));
     return this.launcher;
   }
+  /** The value for the run's MUSTER_CHAT_TOKEN: an HMAC of the chat id under this host's own secret. */
+  chatToken(chatId:string):string {return this.binding.token(chatId);}
   private authorized(header:string|undefined):boolean {
     const presented=Buffer.from(/^Bearer ([a-f0-9]{64})$/.exec(header??'')?.[1]??'','hex');
     return presented.length===this.token.length&&timingSafeEqual(presented,this.token);
@@ -119,6 +126,7 @@ export class TerminalToolHost {
     for await(const chunk of request){size+=(chunk as Buffer).length;if(size>MAX_BODY){reply(413,{error:'Too large'});return;}chunks.push(chunk as Buffer);}
     let body:{chatId?:unknown;tool?:unknown};
     try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{reply(400,{error:'Invalid JSON'});return;}
+    if(!this.binding.verify(body.chatId,request.headers[CHAT_TOKEN_HEADER])){reply(403,{error:CHAT_BINDING_REFUSED});return;}
     reply(200,await this.call(body.chatId,body.tool));
   }
   async call(chatId:unknown,tool:unknown):Promise<McpToolResult> {
@@ -130,5 +138,5 @@ export class TerminalToolHost {
     try{return readTerminalForAgent({allowed,tails:allowed?this.options.tails(chatId):[]});}
     catch(error){return textResult(error instanceof Error?error.message:String(error),true);}
   }
-  dispose():void {this.disposed=true;this.server?.close();this.server=undefined;}
+  dispose():void {this.disposed=true;this.unregister?.();this.unregister=undefined;this.server?.close();this.server=undefined;}
 }

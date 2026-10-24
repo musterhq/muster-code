@@ -1,4 +1,4 @@
-/** Run with node tests/run-git-history-components.mjs: History tab (commit list, detail, file diff, compare), conflict resolver + banner, blame gutter, clone sheet. */
+/** Run with npm run test:renderer (suite git-history-components): History tab (commit list, detail, file diff, compare), conflict resolver + banner, blame gutter, clone sheet. */
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {setTimeout as delay} from 'node:timers/promises';

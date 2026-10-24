@@ -22,7 +22,7 @@ const hueOf = (name: string) => HUES[[...name].reduce((n, c) => n + c.charCodeAt
 export const taskDot = (status: MyWorkTask['status']): 'todo' | 'prog' | 'rev' | 'blocked' => status === 'in_progress' ? 'prog' : status === 'in_review' ? 'rev' : status === 'blocked' ? 'blocked' : 'todo';
 
 export function OrgAvatar({ name }: { name: string }): React.ReactElement {
-  return <span className="org-avatar" aria-hidden="true" style={{ background: hueOf(name) }}>{name.trim().slice(0, 1).toUpperCase() || '?'}</span>;
+  return <span className="org-avatar" aria-hidden="true" style={{ background: hueOf(name) }}>{([...name.trim()][0] ?? '').toUpperCase() || '?'}</span>;
 }
 
 export function OrgSidebar(): React.ReactElement | null {
