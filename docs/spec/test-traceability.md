@@ -12,6 +12,7 @@ One row per clause file that has at least one case. The checker reports a clause
 |---|---|
 | `MUS-SPEC-02` | [Turns, streaming and the message queue](clauses/02-turns-streaming-and-queue.md) |
 | `MUS-SPEC-03` | [Providers, models and accounts](clauses/03-providers-models-and-accounts.md) |
+| `MUS-SPEC-08` | [Git, changes and review](clauses/08-git-changes-and-review.md) |
 | `MUS-SPEC-09` | [Browser and previews](clauses/09-browser-and-previews.md) |
 | `MUS-SPEC-16` | [Notifications and attention](clauses/16-notifications-and-attention.md) |
 | `MUS-SPEC-19` | [Security and redaction](clauses/19-security-and-redaction.md) |

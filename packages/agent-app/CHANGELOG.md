@@ -83,6 +83,12 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - On router and API routes, command output and files read by the agent keep every character: accented and other multi-byte characters no longer turn into "�" where the output was split.
 - edit_file on router and API routes now refuses a file that is not UTF-8 text instead of quietly changing bytes elsewhere in it.
 - Long chats on the Anthropic API route no longer break after a message sent mid-reply or a reply with no text: the history sent to the model always starts with your message and never holds an empty reply.
+## Unreleased
+
+- The branch list and repository info name your branch correctly when a tag has the same name (it showed "heads/<name>").
+- Blame, history and "mark resolved" work for files whose names start with "-".
+- A GitHub remote written with capital letters in the host name (GitHub.com) is recognised for pull requests and compare links.
+- Comparing two refs where a submodule moved shows the "Subproject commit" change instead of a commit log or an error.
 
 ## 0.3.13
 
