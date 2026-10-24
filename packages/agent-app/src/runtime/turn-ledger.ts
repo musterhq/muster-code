@@ -22,6 +22,9 @@ const GENESIS = '0'.repeat(64);
 export type Body = Omit<LedgerEntry, 'seq' | 'hash' | 'prevHash' | 'source'>;
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(k => [k, (v as Record<string, unknown>)[k]])) : v);
 export const entryHash = (prevHash: string, body: Body) => createHash('sha256').update(prevHash).update('\n').update(canonical(body)).digest('hex');
+/** First entry number a tail/saved-head mismatch touches: the first removed entry after a truncation, or the saved head
+ *  itself when the chain was rewritten up to the same length. */
+const mismatchAt = (tail: { seq: number }, saved: { seq: number }) => tail.seq < saved.seq ? tail.seq + 1 : saved.seq;
 
 export class TurnLedger {
   constructor(private readonly db: DatabaseSync) {
@@ -37,16 +40,45 @@ export class TurnLedger {
     // The baselines a Receipt diffs against, created up front: a turn that settles before the review domain's first
     // (fire-and-forget) capture must still find the table rather than lose its whole entry.
     new ReviewBaselineStore(db);
+    // The head the chain should end at, saved with every receipt (#179). Rehashing rows alone cannot see the newest
+    // receipts being deleted or the whole chain being rewritten; comparing against this saved head can. A ledger from
+    // before this table existed adopts its current tail the first time it is opened.
+    db.exec('CREATE TABLE IF NOT EXISTS turn_ledger_anchor (id INTEGER PRIMARY KEY CHECK (id = 1), seq INTEGER NOT NULL, hash TEXT NOT NULL, broken_at INTEGER)');
+    if (!db.prepare('SELECT 1 FROM turn_ledger_anchor WHERE id = 1').get()) {
+      const tail = this.tail();
+      db.prepare('INSERT INTO turn_ledger_anchor (id, seq, hash, broken_at) VALUES (1, ?, ?, NULL)').run(tail.seq, tail.hash);
+    }
+  }
+  private tail(): { seq: number; hash: string } {
+    const row = this.db.prepare('SELECT seq, hash FROM turn_ledger ORDER BY seq DESC LIMIT 1').get() as { seq: number; hash: string } | undefined;
+    return row ?? { seq: 0, hash: GENESIS };
+  }
+  private anchor(): { seq: number; hash: string; broken_at: number | null } {
+    return this.db.prepare('SELECT seq, hash, broken_at FROM turn_ledger_anchor WHERE id = 1').get() as { seq: number; hash: string; broken_at: number | null };
   }
   head(): string { const row = this.db.prepare('SELECT hash FROM turn_ledger ORDER BY seq DESC LIMIT 1').get() as { hash: string } | undefined; return row?.hash ?? GENESIS; }
   append(body: Body): LedgerEntry {
-    const prevHash = this.head(), hash = entryHash(prevHash, body);
-    const info = this.db.prepare('INSERT INTO turn_ledger (id, chat_id, run_id, project_id, body, prev_hash, hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(body.id, body.chatId ?? '', body.runId, body.projectId, canonical(body), prevHash, hash, body.endedAt);
-    // A task run's chat is Ledger-era from its first turn: a history row the backfill made for it while it was idle
-    // between turns would show the same turn twice (under the chat title). History is not chained, so it can go.
-    if (body.trigger === 'task' && body.chatId) this.db.prepare('DELETE FROM turn_ledger_history WHERE chat_id = ?').run(body.chatId);
-    return { ...body, seq: Number(info.lastInsertRowid), prevHash, hash, source: 'local' };
+    // One transaction: a quit between the receipt and the saved head would otherwise leave a healthy ledger that every
+    // later check reports as tampered.
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const prevHash = this.head(), hash = entryHash(prevHash, body);
+      // A tail that no longer matches the saved head was truncated or rewritten. Remember where, before the new receipt
+      // chains onto the shortened tail, so appending can never make a broken ledger pass again.
+      const tail = this.tail(), saved = this.anchor();
+      if (saved.broken_at === null && (tail.seq !== saved.seq || tail.hash !== saved.hash)) this.db.prepare('UPDATE turn_ledger_anchor SET broken_at = ? WHERE id = 1').run(mismatchAt(tail, saved));
+      const info = this.db.prepare('INSERT INTO turn_ledger (id, chat_id, run_id, project_id, body, prev_hash, hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(body.id, body.chatId ?? '', body.runId, body.projectId, canonical(body), prevHash, hash, body.endedAt);
+      this.db.prepare('UPDATE turn_ledger_anchor SET seq = ?, hash = ? WHERE id = 1').run(Number(info.lastInsertRowid), hash);
+      // A task run's chat is Ledger-era from its first turn: a history row the backfill made for it while it was idle
+      // between turns would show the same turn twice (under the chat title). History is not chained, so it can go.
+      if (body.trigger === 'task' && body.chatId) this.db.prepare('DELETE FROM turn_ledger_history WHERE chat_id = ?').run(body.chatId);
+      this.db.exec('COMMIT');
+      return { ...body, seq: Number(info.lastInsertRowid), prevHash, hash, source: 'local' };
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
   /** Imported history: one row per past turn, keyed by its id, so importing again adds nothing. Returns how many were new. */
   importHistory(bodies: readonly Body[]): number {
@@ -71,18 +103,24 @@ export class TurnLedger {
     const imported = (history as { body: string }[]).map(r => ({ ...(JSON.parse(r.body) as Body), seq: null, prevHash: null, hash: null, source: 'history' as const }));
     return [...live, ...imported].sort((a, b) => b.endedAt.localeCompare(a.endedAt)).slice(0, limit);
   }
-  /** Recomputes every hash in order. `brokenAt` is the first entry whose stored hash or link does not match. */
+  /** Recomputes every hash in order, then compares the tail with the head saved when the last receipt was written.
+   *  `brokenAt` is the first entry whose stored hash or link does not match, or the first entry a truncation or rewrite
+   *  removed or replaced. */
   verify(): { ok: boolean; entries: number; head: string; brokenAt: number | null } {
-    let prev = GENESIS, count = 0;
+    let prev = GENESIS, count = 0, last = 0;
     for (const row of this.db.prepare('SELECT seq, body, prev_hash, hash FROM turn_ledger ORDER BY seq').iterate() as Iterable<{ seq: number; body: string; prev_hash: string; hash: string }>) {
       count++;
       if (row.prev_hash !== prev || entryHash(prev, JSON.parse(row.body) as Body) !== row.hash) return { ok: false, entries: count, head: prev, brokenAt: row.seq };
-      prev = row.hash;
+      prev = row.hash; last = row.seq;
     }
-    // Entries cut from the end leave the chain internally consistent; AUTOINCREMENT remembers the highest seq ever issued.
-    let issued = 0, last = 0;
-    try { issued = Number((this.db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'turn_ledger'").get() as { seq: number } | undefined)?.seq ?? 0); last = Number((this.db.prepare('SELECT MAX(seq) AS seq FROM turn_ledger').get() as { seq: number | null }).seq ?? 0); } catch { /* no sequence table yet: nothing was ever appended */ }
+    // Entries cut from the end leave the chain internally consistent; AUTOINCREMENT remembers the highest seq ever issued
+    // (this also catches a cut made before the saved head below existed).
+    let issued = 0;
+    try { issued = Number((this.db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'turn_ledger'").get() as { seq: number } | undefined)?.seq ?? 0); } catch { /* no sequence table yet: nothing was ever appended */ }
     if (issued > last) return { ok: false, entries: count, head: prev, brokenAt: last + 1 };
+    const saved = this.anchor();
+    if (saved.broken_at !== null) return { ok: false, entries: count, head: prev, brokenAt: saved.broken_at };
+    if (last !== saved.seq || prev !== saved.hash) return { ok: false, entries: count, head: prev, brokenAt: mismatchAt({ seq: last }, saved) };
     return { ok: true, entries: count, head: prev, brokenAt: null };
   }
 }
