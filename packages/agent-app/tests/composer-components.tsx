@@ -1,6 +1,7 @@
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 (globalThis as any).require=require;
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
@@ -318,27 +319,35 @@ assert.ok(!store.getState().tabs.some(t=>t.kind==='attachment'),'a non-activatin
 await click('[aria-label="Remove photo.png"]');await delay(20);
 assert.ok(!store.getState().tabs.some(t=>t.kind==='attachment'),'removing the tile never opens it');
 assert.ok(calls.some(call=>call.command==='attachments.discard'&&call.input.id===previewCall!.input.id));
-// While running, Enter queues and Cmd+Enter steers with a queue fallback.
+// While running, Enter steers (a refused steer falls back to the queue) and Cmd+Enter queues.
 chat={...chat,status:'running',mode:'agent'};emit();await delay(35);
 assert.ok(document.querySelector('.composer-run-spinner'),'run spinner left of the model');
 assert.equal(byTest('composer-primary')!.getAttribute('aria-label'),'Stop','empty draft while running shows Stop');
 store.setComposerDraft('chat','follow up');await delay(20);
 let textarea=byTest('composer-input') as HTMLTextAreaElement;
 assert.equal(textarea.getAttribute('placeholder'),'Working…');
-assert.equal(byTest('composer-primary')!.getAttribute('aria-label'),'Queue (Enter) · Steer ⌘Enter');assert.ok(document.querySelector('.composer-stop.is-ghost'));
-await key(textarea,'Enter');await delay(20);
-const queued=calls.find(call=>call.command==='chat.queue.add')!;assert.ok(queued,'Enter while running queues');
-assert.equal(queued.input.text,'follow up');
-assert.equal(store.getState().composerDrafts.chat.text,'','queued text leaves the draft');
-assert.ok(document.querySelector('[data-testid="queue-item"]')?.textContent?.includes('follow up'),'queued row appears immediately');
-store.setComposerDraft('chat','steer now');await delay(20);
-await key(byTest('composer-input')!,'Enter',{metaKey:true});await delay(30);
-assert.ok(calls.some(call=>call.command==='chat.steer'&&call.input.text==='steer now'));
-assert.ok(calls.some(call=>call.command==='chat.queue.add'&&call.input.text==='steer now'),'a refused steer falls back to the queue');
-assert.match(document.querySelector('.composer-status')?.textContent??'',/Queued: agent could not accept a steer right now/);
+// Spec: MUS-SPEC-02-478F (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-478f)
+await check('while a run goes, Enter steers by default and a refused steer falls back to the queue',async()=>{
+  assert.equal(store.getState().followUpMode,'steer','Steer is the default with nothing stored');
+  assert.equal(byTest('composer-primary')!.getAttribute('aria-label'),'Steer (Enter) · Queue ⌘Enter');assert.ok(document.querySelector('.composer-stop.is-ghost'));
+  await key(textarea,'Enter');await delay(30);
+  assert.ok(calls.some(call=>call.command==='chat.steer'&&call.input.text==='follow up'),'Enter while running steers by default');
+  const queued=calls.find(call=>call.command==='chat.queue.add')!;assert.ok(queued,'a refused steer falls back to the queue');
+  assert.equal(queued.input.text,'follow up');
+  assert.match(document.querySelector('.composer-status')?.textContent??'',/Queued: agent could not accept a steer right now/);
+  assert.equal(store.getState().composerDrafts.chat.text,'','queued text leaves the draft');
+  assert.ok(document.querySelector('[data-testid="queue-item"]')?.textContent?.includes('follow up'),'queued row appears immediately');
+});
+// Spec: MUS-SPEC-02-478G (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-478g)
+await check('Cmd+Enter while a run goes queues the message instead of steering',async()=>{
+  store.setComposerDraft('chat','queue me');await delay(20);
+  await key(byTest('composer-input')!,'Enter',{metaKey:true});await delay(30);
+  assert.ok(!calls.some(call=>call.command==='chat.steer'&&call.input.text==='queue me'),'Cmd+Enter does the opposite: it queues without steering');
+  assert.ok(calls.some(call=>call.command==='chat.queue.add'&&call.input.text==='queue me'));
+});
 // #380: a steer that failed in flight may already have reached the agent, so it is not queued as well (no double send).
 store.setComposerDraft('chat','steer in flight');await delay(20);
-await key(byTest('composer-input')!,'Enter',{metaKey:true});await delay(30);
+await key(byTest('composer-input')!,'Enter');await delay(30);
 assert.ok(calls.some(call=>call.command==='chat.steer'&&call.input.text==='steer in flight'));
 assert.ok(!calls.some(call=>call.command==='chat.queue.add'&&call.input.text==='steer in flight'),'a failed steer is never also queued');
 assert.equal(store.getState().composerDrafts.chat.text,'steer in flight','the draft stays for the user to decide');
@@ -450,6 +459,30 @@ assert.deepEqual(calls.filter(call=>call.command==='stashes.restore').at(-1)!.in
 assert.equal(store.getState().composerDrafts.chat.text,'Already typed\n\nRefactor the parser\nand add tests','restored text joins the draft');
 assert.ok((document.querySelector('.composer-attachments')?.textContent??'').includes('notes.txt'),'the stashed file is back in the attachment strip');
 assert.equal(stashPanel(),null);assert.equal(stashes.length,1);
+// Spec: MUS-SPEC-02-469A (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-469a)
+await check('a run stopped before dispatch brings its text back into the composer',async()=>{
+  // The runtime hands the text back as chat.draft; the empty local draft must not hide it.
+  chat={...chat,status:'running',draft:''};emit();await delay(30);
+  store.setComposerDraft('chat','');await delay(20);
+  chat={...chat,status:'interrupted',draft:'do not lose me'};emit();await delay(50);
+  assert.equal(store.getState().composerDrafts.chat.text,'do not lose me','stop-before-dispatch restores the draft');
+});
+// Spec: MUS-SPEC-02-469B (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-469b)
+await check('a paused queue no longer asks to confirm a send: the message sends and held items stay queued',async()=>{
+  chat={...chat,status:'interrupted',queuePaused:'interrupted',queue:[{id:'h1',text:'held',requestId:'rh',attachmentIds:[],createdAt:''}]};emit();await delay(30);
+  calls.length=0;
+  await key(byTest('composer-input') as HTMLTextAreaElement,'Enter');await delay(40);
+  assert.ok(!byTest('queue-send-confirm'));
+  assert.ok(calls.some(call=>call.command==='chat.send'&&call.input.text==='do not lose me'),'sent without a prompt');
+  assert.ok(!calls.some(call=>call.command==='chat.queue.clear'),'held messages are never cleared');
+});
+await check('a draft save with no run ending never brings back text the user deleted',async()=>{
+  chat={...chat,status:'interrupted',queuePaused:undefined,queue:undefined,draft:''};emit();await delay(30);
+  store.setComposerDraft('chat','');await delay(20);
+  chat={...chat,draft:'typed then deleted'};emit();await delay(50);
+  assert.equal(store.getState().composerDrafts.chat.text,'','a draft save without a run ending is not adopted');
+});
+chat={...chat,status:'completed',queuePaused:undefined,queue:undefined,draft:''};emit();await delay(30);
 store.setComposerDraft('chat','');await delay(20);
 assert.deepEqual(errors,[]);root.unmount();await delay(15);
 console.log('Composer component checks passed: Codex toolbar without a mode picker, + menu (Add/Plugins/Skills, icons, filter, plan toggle, project, goal strip, record a skill, sketch), mid-run access, access levels with confirmation, provider-grouped model picker with effort, / skills+commands chips, @ files/plugins chips with Backspace selection, structured send payload, attachments, queue/steer, Esc-Esc stop and stopping state.');

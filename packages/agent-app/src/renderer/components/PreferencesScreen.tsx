@@ -123,6 +123,12 @@ function GeneralSection({settings,set}:{settings:AppSettings;set:Setter}):React.
     <NotificationsGroup settings={settings} set={set}/>
     <h3 className="preference-group-title">Conversations</h3>
     <div className="preference-group">
+      <Row setting="chats.resumeAfterLimit" title="Continue when a usage limit resets" scope="All chats · each chat can opt out" description="A run that stops on a provider usage limit shows Limited and continues by itself at the reset. Queued messages follow in order.">
+        <Switch label="Continue when a usage limit resets" checked={settings['chats.resumeAfterLimit']} onChange={value=>set('chats.resumeAfterLimit',value)}/>
+      </Row>
+      <Row setting="chats.resumeAfterRestart" title="Continue interrupted chats after a restart" scope="All chats" description="Chats that were working when Muster closed continue after the next start. A chat waiting for your approval or answer is left for you.">
+        <Switch label="Continue interrupted chats after a restart" checked={settings['chats.resumeAfterRestart']} onChange={value=>set('chats.resumeAfterRestart',value)}/>
+      </Row>
       <Row title="Import conversations" scope="Codex CLI and desktop · Claude Code · ChatGPT export" description="Bring earlier sessions in as chats, matched to your folders by their working directory. The sources are only read; keys and tokens are redacted.">
         <button type="button" className="settings-button secondary" onClick={()=>openImportConversations()}><Download size={14}/>Import…</button>
       </Row>
@@ -236,11 +242,14 @@ function MemorySection():React.ReactElement {
   const folderId=activeChat()?.folderId;
   const [config,setConfig]=useState<MemoryConfigView>();
   const [editing,setEditing]=useState(false);
+  const saves=useRef(0);
   useEffect(()=>{let live=true;void invoke('memory.config.get',{}).then(result=>{if(live)setConfig(result);},()=>{});return ()=>{live=false;};},[]);
   const patch=(next:Pick<MemoryConfigView,'autoRecall'|'autoRetain'>)=>{
     if(!config)return;
     const merged={...config,...next};setConfig(merged);
-    void invoke('memory.config.set',{endpoint:merged.endpoint,autoRecall:merged.autoRecall,autoRetain:merged.autoRetain}).then(setConfig,cause=>{setConfig(config);notifyError(cause);});
+    // Only the newest save may update the row, and a failed one re-reads the real settings rather than rolling back to a stale copy that would undo a later save.
+    const mine=++saves.current;
+    void invoke('memory.config.set',{endpoint:merged.endpoint,autoRecall:merged.autoRecall,autoRetain:merged.autoRetain}).then(result=>{if(mine===saves.current)setConfig(result);},cause=>{notifyError(cause);if(mine===saves.current)void invoke('memory.config.get',{}).then(setConfig,()=>setConfig(config));});
   };
   return <div className="preference-group">
     <Row title="Memory" scope={folderId?'This chat’s folder and your personal memory':'Your personal memory'} description="Review, search, add and remove what agents remember.">
@@ -336,8 +345,8 @@ export function PreferencesScreen():React.ReactElement {
           </div>}
           {section==='chat'&&<>
             <div className="preference-group">
-              <Row title="Follow-up behavior" scope={device().title+" · while a chat runs"} description={`Queue follow-ups while Muster runs or steer the current run. Press ${MAC?'⌘':'Ctrl+'}Enter to do the opposite for one message.`}>
-                <Segmented label="Follow-up behavior" value={state.followUpMode} options={[{value:'queue',label:'Queue'},{value:'steer',label:'Steer'}]} onChange={setFollowUpMode}/>
+              <Row title="Enter while running" scope={device().title+" · while a chat runs"} description={`Steer sends your message into the current run so the agent adjusts and keeps going; Queue holds it until the run ends. Press ${MAC?'⌘':'Ctrl+'}Enter to do the opposite for one message.`}>
+                <Segmented label="Enter while running" value={state.followUpMode} options={[{value:'steer',label:'Steer'},{value:'queue',label:'Queue'}]} onChange={setFollowUpMode}/>
               </Row>
               <Row setting="chat.responseStyle" title="Response style" scope="New runs · Codex-based models" description={settings['chat.responseStyle']==='pragmatic'?'Short, direct answers that stick to the result.':settings['chat.responseStyle']==='friendly'?'Explains what it did and why, in a warmer tone.':'Uses the personality set in your Codex config, otherwise Friendly.'}>
                 <Segmented label="Response style" value={settings['chat.responseStyle']} options={[{value:'auto',label:'Automatic'},{value:'friendly',label:'Friendly'},{value:'pragmatic',label:'Pragmatic'}]} onChange={value=>set('chat.responseStyle',value)}/>

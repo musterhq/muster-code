@@ -2,6 +2,7 @@
 // provider, compact rows without "unknown" badges, collapsed Auto routes, search across providers, hidden note,
 // keyboard, the non-model first row and the reasoning control.
 import {createRequire} from 'node:module';
+import {check} from './dom-check.ts';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
 const require=createRequire(import.meta.url);
@@ -14,13 +15,19 @@ Object.assign(globalThis,{window,document:window.document,Node:window.Node,HTMLE
 let focused:any=null;
 window.HTMLElement.prototype.focus=function(){focused=this;};
 Object.defineProperty(window.document,'activeElement',{configurable:true,get:()=>focused??window.document.body});
-window.muster={subscribe(){return()=>{}},async invoke(command:string){if(command==='models.policy.get')return {hidden:[],shown:[],pricing:{}};return null;}} as any;
+const usageListeners=new Set<(event:any)=>void>();
+let usageReads=0;
+const future=new Date(Date.now()+3_600_000).toISOString();
+let usageRows:any[]=[{providerId:'hybrow',primary:null,secondary:{usedPercent:100,windowMinutes:43200,resetsAt:future},source:'live',updatedAt:new Date().toISOString()}];
+window.muster={subscribe(listener:any){usageListeners.add(listener);return()=>usageListeners.delete(listener)},async invoke(command:string){if(command==='models.policy.get')return {hidden:[],shown:[],pricing:{}};if(command==='providers.usage'){usageReads++;return usageRows;}return null;}} as any;
 
 const React=await import('react');
 const {createRoot}=await import('react-dom/client');
+const {ProviderUsageWarning,exhaustedUsage,resetSharedProviderUsage}=await import('../src/renderer/components/ProviderUsage');
+const store=await import('../src/renderer/store');
 const {ModelPicker}=await import('../src/renderer/components/ModelPicker');
 const providers:any[]=[
-  {id:'hybrow',name:'Hybrow OmniRoute',available:true,identityMasked:'',models:[
+  {id:'hybrow',codex:true,name:'Hybrow OmniRoute',available:true,identityMasked:'',models:[
     {id:'claude/claude-fable-5',name:'Claude Fable 5',contextWindow:1_000_000,images:true},
     {id:'advisor',name:'Advisor'},{id:'executor',name:'Executor'},
     ...Array.from({length:40},(_,i)=>({id:`auto/route-${String(i).padStart(2,'0')}`,name:`Auto · route ${i}`})),
@@ -69,7 +76,11 @@ assert.equal(manage,1);
 (document.querySelector('[role="tab"][aria-label="ChatGPT"]') as HTMLButtonElement).click();await delay(20);
 assert.deepEqual(names(),['GPT-6','GPT-6 Mini']);
 (document.querySelector('[role="tab"][aria-label="All providers"]') as HTMLButtonElement).click();await delay(20);
-assert.deepEqual(q('.model-picker-section').map(node=>node.textContent),['Hybrow OmniRoute','ChatGPT','Claude Code']);
+// Spec: MUS-SPEC-17-631A (docs/spec/clauses/17-usage-cost-and-ledger.md#mus-spec-17-631a)
+await check('the model picker flags a provider whose usage limit is reached and keeps the others available',async()=>{
+  assert.deepEqual(q('.model-picker-section').map(node=>node.textContent),['Hybrow OmniRoute · Limit reached','ChatGPT','Claude Code']);
+  assert.equal(q('.model-picker-limit').length,1,'exhausted provider is flagged while other providers remain available');
+});
 // Search spans every provider, whatever the tab; routes that match are listed inline.
 (document.querySelector('[role="tab"][aria-label="Claude Code"]') as HTMLButtonElement).click();await delay(20);
 await type('gpt 6');
@@ -111,5 +122,60 @@ options()[0]!.click();
 assert.equal(empty,1);
 assert.equal(document.querySelector('.model-picker-effort'),null,'no reasoning control without efforts');
 root.unmount();
+
+const pickerReads=usageReads;
+// Reopening the picker inside the snapshot window reads nothing new.
+root=createRoot(host,{onUncaughtError:error=>(errors as unknown[]).push(error)});
+root.render(<ModelPicker providers={providers} selected={null} onSelect={()=>{}}/>);
+await delay(30);
+root.unmount();
+assert.equal(usageReads,pickerReads,'reopening the picker reuses the usage snapshot');
+
+// Both composers mount this isolated warning: visible without opening a picker or hovering.
+resetSharedProviderUsage();
+store.getState().providers.value=[{id:'codex',name:'ChatGPT',codex:true,available:true,models:[]} as any,{id:'claude-code',name:'Claude Code',available:true,models:[]} as any];
+usageRows=usageRows.map(row=>({...row,providerId:'codex'}));
+const renderWarning=async(providerId:string)=>{root=createRoot(host,{onUncaughtError:error=>(errors as unknown[]).push(error)});root.render(<ProviderUsageWarning providerId={providerId}/>);await delay(40);};
+await renderWarning('codex');
+const listenersWithWarning=usageListeners.size;
+const reads=usageReads;
+// Spec: MUS-SPEC-17-631B (docs/spec/clauses/17-usage-cost-and-ledger.md#mus-spec-17-631b)
+await check('a provider that hit its usage limit shows a warning in the composer, once per limit window, with no polling',async()=>{
+  assert.match(host.textContent??'',/^ChatGPT has reached its usage limit · resets .*\. Choose a model from another provider to send now\.Dismiss$/);
+  // A chat switch remounts the composer: the warning comes back from the snapshot without another read.
+  root.unmount();await renderWarning('codex');
+  assert.match(host.textContent??'',/usage limit/);
+  assert.equal(usageReads,reads,'remounting the composer does not read usage again');
+  usageRows=[{...usageRows[0],secondary:{...usageRows[0].secondary,usedPercent:21}}];
+  for(const listener of usageListeners)listener({type:'providerUsage',usage:usageRows[0]});
+  await delay(20);
+  assert.equal(host.textContent,'','live recovery removes the warning');
+  assert.equal(usageReads,reads,'usage events do not refetch or poll');
+  usageRows=[{...usageRows[0],primary:{usedPercent:100,windowMinutes:300,resetsAt:null}}];
+  for(const listener of usageListeners)listener({type:'providerUsage',usage:usageRows[0]});
+  await delay(20);
+  assert.match(host.textContent??'',/reset time not reported/,'primary exhaustion without a reset is still warned');
+});
+// Spec: MUS-SPEC-17-631C (docs/spec/clauses/17-usage-cost-and-ledger.md#mus-spec-17-631c)
+await check('dismissing the usage warning hides it for that limit window in every composer; a new window warns again',async()=>{
+  // Dismiss hides it for this limit window in every composer, and a new window warns again.
+  (host.querySelector('[data-testid="usage-limit-warning"] button') as HTMLButtonElement).click();
+  await delay(20);
+  assert.equal(host.textContent,'','Dismiss hides the warning');
+  root.unmount();await renderWarning('codex');
+  assert.equal(host.textContent,'','a dismissed warning stays hidden in the next composer');
+  usageRows=[{...usageRows[0],primary:{usedPercent:100,windowMinutes:300,resetsAt:new Date(Date.now()+60_000).toISOString()}}];
+  for(const listener of usageListeners)listener({type:'providerUsage',usage:usageRows[0]});
+  await delay(20);
+  assert.match(host.textContent??'',/resets in 1 min/,'a new limit window warns again');
+  root.render(<ProviderUsageWarning providerId="claude-code"/>);
+  await delay(20);
+  assert.equal(host.textContent,'','switching providers does not retain the previous provider warning');
+  root.unmount();
+  assert.equal(usageReads,reads,'no reads beyond the first for the whole warning lifecycle');
+  assert.equal(usageListeners.size,listenersWithWarning,'remounts and dismissals add no event-bus listeners');
+  assert.equal(exhaustedUsage(undefined),undefined);
+  assert.equal(exhaustedUsage({...usageRows[0],primary:{usedPercent:100,windowMinutes:300,resetsAt:'2020-01-01T00:00:00Z'}}),undefined,'passed resets do not establish exhaustion');
+});
 assert.deepEqual(errors,[]);
 console.log('Shared model picker passed: opens on the current provider, compact rows, collapsed Auto routes, cross-provider search, hidden note, keyboard, default row.');

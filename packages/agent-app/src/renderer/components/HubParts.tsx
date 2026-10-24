@@ -70,7 +70,7 @@ export function LiveCount({ count }: { count: number }): React.ReactElement | nu
   return <span className="ws-live" aria-label={`${count} live`}><span className="ws-live-dot" aria-hidden="true"/>{count} live</span>;
 }
 
-const k = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+const k = (n: number) => n >= 999_950_000 ? `${(n / 1_000_000_000).toFixed(1)}B` : n >= 999_950 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 const short = (hash: string | null) => hash ? hash.slice(0, 7) : '—';
 /** Cost is never shown as $0: an unknown price says so, and a priced turn that rounds to nothing is a lower bound. */
 export function costText(entry: Pick<LedgerEntry, 'costUsd' | 'tokens'>): string | null {

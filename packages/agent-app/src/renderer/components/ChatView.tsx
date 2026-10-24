@@ -108,7 +108,7 @@ function UserMessage({item,reveal}:{item:TimelineItem;reveal:boolean}) {
   return <>
     {attachments.length>0&&<div className="msg-attachments" aria-label="Attachments">{attachments.map(attachment=><Attachment key={attachment.id} chatId={item.chatId} attachment={attachment}/>)}</div>}
     <div className={`msg msg-user${long&&!expanded?' is-clamped':''}`}>
-      <div className="msg-text"><MentionText chatId={item.chatId} text={item.text}/></div>
+      <div className="msg-text" dir="auto"><MentionText chatId={item.chatId} text={item.text}/></div>
       {long&&<button type="button" className="msg-user-more" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?'Show less':'Show more'}</button>}
     </div>
   </>;
@@ -469,13 +469,14 @@ export function ChatView(): React.ReactElement {
   const timeline = state.timelines[chat.id] ?? { phase: 'idle' as const };
   const project = chat.projectId ? state.snapshot?.projects.find(p=>p.id===chat.projectId) : undefined;
   const headStatus = displayStatus(chat, liveItems, stalled);
+  const retryId = retryTarget(liveItems, chat.status === 'running' || chat.status === 'stopping');
   const place = project?.name ?? folder?.name, placeTitle = project ? project.goal || project.name : folder?.path;
 
   return (
     <div className="chat">
       <header className="chat-head" data-scrolled={scrolled||undefined}>
         <StatusDot status={headStatus} showLabel={headStatus!=='idle'&&headStatus!=='completed'} />
-        <span className="chat-head-title" title={folder ? `${chat.title} — ${folder.path}` : chat.title}>
+        <span className="chat-head-title" dir="auto" title={folder ? `${chat.title} — ${folder.path}` : chat.title}>
           {chat.title}
         </span>
         {folder && <span className="chat-head-folder" title={folder.path}><Folder size={12} aria-hidden="true"/>{folder.name}</span>}
@@ -483,7 +484,7 @@ export function ChatView(): React.ReactElement {
       </header>
       {chat.originChatId&&(()=>{const origin=state.snapshot?.chats.find(c=>c.id===chat.originChatId);return <ForkOrigin title={origin?.title} onOpen={origin?()=>void selectChat(origin.id):undefined}/>;})()}
       {timeline.phase==='ready'&&(()=>{const imported=timeline.value?.find(item=>item.kind==='notice'&&item.data?.kind==='imported');return imported?.data?<ImportOrigin data={imported.data}/>:null;})()}
-      <RecoveryNotice key={`${chat.id}:${chat.providerThreadId ?? ""}:${chat.providerTurnId ?? ""}:${chat.recovery?.kind ?? ""}`} chat={chat}/>
+      <RecoveryNotice key={`${chat.id}:${chat.providerThreadId ?? ""}:${chat.providerTurnId ?? ""}:${chat.recovery?.kind ?? ""}`} chat={chat} onRetry={retryId?()=>retryTurn(chat.id,retryId):undefined}/>
       {timeline.phase === 'loading' || timeline.phase === 'idle' ? (
         <div className="chat-loading" role="status">
           Loading conversation…

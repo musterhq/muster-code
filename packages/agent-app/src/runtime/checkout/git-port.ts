@@ -102,7 +102,9 @@ export const realGit: GitPort = {
   async defaultBranch(path, preferred) {
     const exists = (name: string) => git(path, ['show-ref', '--verify', '--quiet', `refs/heads/${name}`]).then(() => true, () => false);
     for (const name of [preferred, 'dev', 'develop', 'main', 'master']) if (name && await exists(name)) return name;
-    return (await git(path, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    // `symbolic-ref` names the branch even when a tag shares its name (`rev-parse --abbrev-ref` answers `heads/<name>`, and so does `--short`, so the full ref is trimmed here); detached falls back to the short sha.
+    const branch = (await git(path, ['-c', 'core.fsmonitor=false', 'symbolic-ref', '-q', 'HEAD']).catch(() => '')).trim().replace(/^refs\/heads\//, '');
+    return branch || (await git(path, ['-c', 'core.fsmonitor=false', 'rev-parse', '--short', 'HEAD'])).trim();
   },
   async headSha(path, rev = 'HEAD') { return (await git(path, ['rev-parse', '--verify', `${rev}^{commit}`])).trim(); },
   async stat(path, base) {
