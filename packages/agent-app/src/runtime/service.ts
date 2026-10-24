@@ -1,4 +1,5 @@
 import { applyPendingRestore } from './backups.ts';
+import { APPROVAL_SHOWN_EVENT } from './turn-ledger.ts';
 import { addMemory, listMemory, searchMemory, inspectMemoryStore, isVisibleInScopes, projectMemoryScope } from './memory-adapter.ts';
 import { createMemoryIdentity } from './memory-identity.ts';
 import { createSnapshotCoalescer } from './snapshot-coalescer.ts';
@@ -582,7 +583,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (chat.providerBindingId && chat.providerBindingId!==bindingId) throw new Error('The selected provider account or profile changed. Select it again before sending. Your draft is retained.');
     const nativeMatches=chat.providerThreadProviderId===selectedProvider.id && chat.providerThreadBindingId===bindingId;
     if (!chat.providerBindingId || (chat.providerThreadId && !nativeMatches)) {
-      if (chat.providerThreadId && !nativeMatches) { store.appendItem(chatId,'notice','This provider will start a fresh conversation with a summary of the earlier messages. The displayed chat history is retained.','completed'); store.requireDigest(chatId); }
+      if (chat.providerThreadId && !nativeMatches) { store.appendItem(chatId,'notice','This provider will start a fresh conversation with a summary of the earlier messages. The displayed chat history is retained.','completed'); store.requireDigest(chatId); contextLedger.forget(chatId); }
       chat=store.updateChat(chatId,{providerId:selectedProvider.id,providerBindingId:bindingId,...(!nativeMatches?{providerThreadId:null,providerTurnId:null,providerThreadProviderId:null,providerThreadBindingId:null}:{})});
     }
     const access = providerAccessPolicy(chat);
@@ -858,6 +859,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               if (policy !== 'ask') return elicitationResult(policy === 'accept');
               const text = elicitationText(params);
               const expiresAt = attentionDeadline(Date.now(), await mutedUntilMs());
+              domainHooks.providerEvent({ chat, method: APPROVAL_SHOWN_EVENT, params: {} });
               const item = store.appendItem(chatId, 'approval', `${server || 'Computer use'} asks: ${text}`, 'pending', { method, kind: 'mcp', elicitation: true, reason: text, expiresAt: new Date(expiresAt).toISOString(), ...(server ? { server } : {}) });
               const approvalId = item.id;
               timeline(chatId);
@@ -890,6 +892,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             const data: ApprovalData = {...approvalData(method, params, change), ...(threat ? {reason: threat.message, protectsUserProcess: true} : {})};
             const toolItemId = typeof params.itemId === 'string' ? toolIds.get(params.itemId) : undefined;
             const expiresAt = attentionDeadline(Date.now(), await mutedUntilMs());
+            domainHooks.providerEvent({chat, method: APPROVAL_SHOWN_EVENT, params: {}});
             const item = store.appendItem(chatId, 'approval', detail(params.command ?? params.reason ?? params.changes ?? data.tool ?? data.kind), 'pending', {...data, expiresAt: new Date(expiresAt).toISOString(), ...(toolItemId ? {toolItemId} : {})});
             const approvalId = item.id;
             // F60: the tool row the provider already started is blocked on this card, not running. Flag it so the

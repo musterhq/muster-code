@@ -183,7 +183,7 @@ function route(selection) {
   return { provider: selection.provider, overrides, ids: catalogIds(selection.catalog) };
 }
 
-function launch(selection, args) {
+async function launch(selection, args) {
   const { provider, overrides, ids } = route(selection);
   if (args[0] !== 'app-server') throw new Error('Muster provider launcher only supports app-server.');
   let selectedModel;
@@ -195,7 +195,34 @@ function launch(selection, args) {
   if (!command || !existsSync(command)) throw new Error('Codex CLI not found. Install it, or set MUSTER_CODEX_COMMAND to its executable.');
   // Profile identity overrides win over CLI input, while MCP and approval
   // configuration remains intact. No --profile flag: app-server rejects it.
-  const codexArgs = [...args, ...overrides.flatMap(value => ['-c', value])];
+  // Keep the original provider identity, authentication and thread ownership. A
+  // local bridge only fills missing usage counters in Responses gateway streams.
+  // Direct sign-in never goes through it.
+  let compatibility;
+  if (provider !== 'openai') {
+    let values = new Map();
+    try { values = parseToml(readFileSync(join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'config.toml'), 'utf8')).values; } catch { /* profiles can define the entire route */ }
+    for (const override of overrides) {
+      const at = override.indexOf('='); values.set(override.slice(0, at), override.slice(at + 1));
+    }
+    const table = `model_providers.${provider}.`;
+    const string = key => {
+      const value = values.get(table + key);
+      if (typeof value !== 'string') return undefined;
+      if (/^'[^']*'$/.test(value)) return value.slice(1, -1);
+      try { const parsed = JSON.parse(value); return typeof parsed === 'string' ? parsed : undefined; } catch { return undefined; }
+    };
+    let endpoint;
+    try { endpoint = new URL(string('base_url')); } catch { /* leave unsupported configurations with the client */ }
+    // A client-managed transport proxy must keep its original connection path.
+    // This bridge cannot transparently reproduce every proxy/TLS configuration.
+    const transportProxy = ['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy'].some(name => process.env[name]);
+    if (!transportProxy && string('wire_api') === 'responses' && endpoint && ['http:', 'https:'].includes(endpoint.protocol) && !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash) {
+      compatibility = await require('./responses-compat.cjs').startResponsesCompatibility(endpoint.href);
+    }
+  }
+  const codexArgs = [...args, ...overrides.flatMap(value => ['-c', value]),
+    ...(compatibility ? ['-c', `model_providers.${provider}.base_url=${JSON.stringify(compatibility.baseUrl)}`] : [])];
   // A JS entry (a resolved npm shim on Windows) runs through this Node; a native binary runs directly.
   const script = /\.(?:c|m)?js$/i.test(command);
   const child = spawn(script ? process.execPath : command, script ? [command, ...codexArgs] : codexArgs, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
@@ -241,9 +268,10 @@ function launch(selection, args) {
     }
     write(message);
   });
-  child.on('error', () => { process.stderr.write('Selected provider app-server failed to start.\n'); process.exitCode = 1; process.stdin.destroy(); });
+  child.on('error', () => { compatibility?.close(); process.stderr.write('Selected provider app-server failed to start.\n'); process.exitCode = 1; process.stdin.destroy(); });
   child.stdin.on('error', () => { process.stderr.write('Selected provider connection closed.\n'); child.kill(); });
   child.on('exit', code => {
+    compatibility?.close();
     if (code) {
       const catalog = catalogFailure(stderrTail);
       process.stderr.write((catalog ? catalog + '\n' : '') + 'Selected provider app-server exited; check the profile, catalog and CLI configuration.\n');
@@ -269,6 +297,6 @@ function selection(argv, env) {
 
 module.exports = { profileOverrides, servesExecutor, providerOverrides, parseToml, codexCommand, modelMatches, catalogFailure };
 if (require.main === module) {
-  try { const chosen = selection(process.argv, process.env); launch(chosen.selection, chosen.args); }
+  try { const chosen = selection(process.argv, process.env); launch(chosen.selection, chosen.args).catch(error => { process.stderr.write(error.message + '\n'); process.exitCode = 1; }); }
   catch (error) { process.stderr.write(error.message + '\n'); process.exitCode = 1; }
 }

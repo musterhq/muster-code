@@ -78,3 +78,6 @@ Boundaries:
 - Environment: Node test runner; pure function, no service or network.
 - Known gaps: Unit test of the parser. The service-level test drives only the MCP command.
 - Evidence: UNVERIFIED
+A PR that changes this area adds its cases here first: one row in this table, then the case block below it (see [acceptance-cases.md](../acceptance-cases.md)).
+
+|---|---|---|
