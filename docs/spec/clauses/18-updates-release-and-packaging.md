@@ -16,6 +16,7 @@ Boundaries:
 |---|---|---|
 | [MUS-SPEC-18-479L](18-updates-release-and-packaging.md#mus-spec-18-479l) | An update never restarts Muster while a turn is running. | [`an update install waits for running work, says so once, and installs when it finishes`](../../../packages/agent-app/tests/auto-resume.test.ts) |
 | [MUS-SPEC-18-89A](18-updates-release-and-packaging.md#mus-spec-18-89a) | No package in the dependency report has the license UNKNOWN, and the license bundle records buffers as MIT with its source and the MIT terms. | [`no bundled dependency has an unknown license`](../../../packages/agent-app/tests/dependency-discipline.test.ts) |
+| [MUS-SPEC-18-561A](18-updates-release-and-packaging.md#mus-spec-18-561a) | After a failed first read a 15-second retry is scheduled, and when it runs the update status appears. | [`the update status is read again after a failed first read`](../../../packages/agent-app/tests/update-status-retry-dom.tsx) |
 
 ### Updates wait for running work
 
@@ -41,4 +42,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/dependency-discipline.test.ts::no bundled dependency has an unknown license`
 - Environment: Node test runner, no network.
 - Known gaps: The test reads the committed files; it does not rebuild the bundles. They are regenerated with `node scripts/dependency-report.mjs`.
+- Evidence: UNVERIFIED
+
+### Update status
+
+<a id="mus-spec-18-561a"></a>
+#### MUS-SPEC-18-561A: The update status is read again after a failed first read
+
+- Precondition: The runtime is still starting, so the first read of the update status fails.
+- Action: A component that shows the update status is drawn, the first read fails, and then the scheduled retry runs.
+- Expected result: At first no status is shown and one retry is scheduled. When the retry runs, the status (ready) is shown, so the update button is not missing for the whole session.
+- Test: `packages/agent-app/tests/update-status-retry-dom.tsx::the update status is read again after a failed first read`
+- Environment: Node and linkedom: a DOM suite with the real update status hook and a fake bridge; the 15-second timer is run by hand, so it does not wait.
+- Known gaps: The retry timer is run by the test, not waited for. Retries stop after 8 failed attempts; that limit is not tested.
 - Evidence: UNVERIFIED
