@@ -54,7 +54,7 @@ export function ledgerAggregates(db: DatabaseSync, input: { since: string; month
   const groups = db.prepare(`SELECT provider, model, est, cost IS NULL AS unpriced, (i > 0 OR o > 0) AS used, COALESCE(SUM(cost), 0) AS usd, SUM(i) AS i, SUM(c) AS c, SUM(w) AS w, SUM(o) AS o, COUNT(*) AS n FROM (
       SELECT ${cols} FROM turn_ledger WHERE created_at >= ? ${scope}
       UNION ALL SELECT ${cols} FROM turn_ledger_history WHERE ended_at >= ? ${history}
-    ) GROUP BY 1, 2, 3, 4, est`).all(input.monthStart, ...p, input.monthStart, ...p) as { provider: string | null; model: string | null; unpriced: number; used: number; usd: number; i: number; c: number; w: number; o: number; n: number; est: number }[];
+    ) GROUP BY 1, 2, 3, 4, 5`).all(input.monthStart, ...p, input.monthStart, ...p) as { provider: string | null; model: string | null; unpriced: number; used: number; usd: number; i: number; c: number; w: number; o: number; n: number; est: number }[];
   let usd = 0, priced = 0, unpriced = 0, tokens = 0, estimated = 0;
   for (const g of groups) {
     const n = Number(g.n), i = Number(g.i), o = Number(g.o);

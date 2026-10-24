@@ -135,7 +135,7 @@ test('#663 the Dashboard prices cache writes at the cache-write rate and counts 
   const NOW = Date.parse('2026-09-29T12:00:00.000Z');
   const db = new DatabaseSync(':memory:');
   const ledger = new TurnLedger(db);
-  const turn = (i: number, costUsd: number | null, extra: Partial<Body>): Body => ({id: `t${i}`, chatId: 'c', runId: `r${i}`, taskId: null, projectId: null, trigger: 'chat', agent: 'A', provider: 'claude-code', model: 'claude-code/sonnet', costUsd,
+  const turn = (i: number, costUsd: number | null, extra: Pick<Body, 'tokens'> & Partial<Omit<Body, 'tokens'>>): Body => ({id: `t${i}`, chatId: 'c', runId: `r${i}`, taskId: null, projectId: null, trigger: 'chat', agent: 'A', provider: 'claude-code', model: 'claude-code/sonnet', costUsd,
     tools: [], approvals: 0, tests: 0, files: null, startedAt: '2026-09-29T09:00:00.000Z', endedAt: '2026-09-29T09:00:00.000Z', durationMs: 1, outcome: 'completed', ...extra});
   ledger.append(turn(1, null, {tokens: {input: 100_000, cached: 0, output: 0, reasoning: 0, cacheWrite: 100_000}}));
   ledger.append(turn(2, 0.5, {tokens: {input: 1000, cached: 0, output: 10, reasoning: 0}, estimated: true}));
