@@ -1,3 +1,5 @@
+import {networkFailure} from '../network-failure.ts';
+import {redactSecrets} from '../secret-redaction.ts';
 import {randomUUID} from 'node:crypto';
 import {ConversationMemory, loadImages, responseError, retryAfterMs, sseEvents, type ChatMessage} from './shared.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
@@ -39,7 +41,7 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
   try { response = await first(); }
   catch (error) {
     if (input.signal.aborted) return fail('Stopped before the request was sent.');
-    return fail(`Could not reach ${label}: ${error instanceof Error ? error.message.slice(0, 200) : 'network error'}.`);
+    return fail(networkFailure(error) ?? `Could not reach ${label}: ${error instanceof Error ? redactSecrets(error.message.slice(0, 200)) : 'network error'}.`);
   }
   if (!response.ok && toolsOn && (response.status === 400 || response.status === 422)) {
     const text = await response.clone().text().catch(() => '');
@@ -49,7 +51,7 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
       toolsOn = false; toolRefusals.set(`${tooling!.endpoint}\0${input.model}`, Date.now());
       input.onEvent(TOOLS_UNAVAILABLE_EVENT, {threadId, model: input.model});
       try { response = await first(); }
-      catch (error) { return fail(`Could not reach ${label}: ${error instanceof Error ? error.message.slice(0, 200) : 'network error'}.`); }
+      catch (error) { return fail(networkFailure(error) ?? `Could not reach ${label}: ${error instanceof Error ? redactSecrets(error.message.slice(0, 200)) : 'network error'}.`); }
     }
   }
   if (!response.ok) {
@@ -158,7 +160,7 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
     takeSteers();
     const stopped = input.signal.aborted;
     if (answer || used.length) memory.commit(threadId, remember(`${answer.slice(mark)}${used.length ? `\n\n[Tools used before this stopped: ${used.slice(0, 40).join(', ')}]` : ''}`));
-    return {status: 'failed', finalMessage: '', threadId, turnId, dispatchState: 'dispatched', errorMessage: stopped ? 'Stopped.' : error instanceof Error ? error.message.slice(0, 300) : `${label} stream failed.`};
+    return {status: 'failed', finalMessage: '', threadId, turnId, dispatchState: 'dispatched', errorMessage: stopped ? 'Stopped.' : networkFailure(error) ?? (error instanceof Error ? redactSecrets(error.message.slice(0, 300)) : `${label} stream failed.`)};
   }
   const tail = answer.slice(mark), remembered = used.length ? `${tail}\n\n[Tools used this turn: ${used.slice(0, 40).join(', ')}]` : tail;
   const retained = memory.commit(threadId, remember(remembered));

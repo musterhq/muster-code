@@ -834,7 +834,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               // Codex retries a dropped model connection itself (willRetry): say so instead of looking stuck.
               if (!ownRun || !parentEvent || params.willRetry !== true) return;
               const error = params.error && typeof params.error === 'object' ? params.error as Record<string, unknown> : {};
-              const why = typeof error.message === 'string' ? error.message.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+              // Shown in the transcript: a proxy URL's user:password or a token in the provider's text is masked.
+              const why = typeof error.message === 'string' ? redactSecrets(error.message.replace(/\s+/g, ' ').trim().slice(0, 300)) : '';
               const text = why ? `Reconnecting… ${why}` : 'Reconnecting…';
               seal();
               if (reconnectNotice) { reconnectNotice = {...reconnectNotice, text}; store.updateItem(reconnectNotice.id, text, 'running', reconnectNotice.data); }
