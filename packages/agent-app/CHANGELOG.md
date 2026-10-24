@@ -140,6 +140,13 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Searching with an emoji in the command palette and chat search highlights the whole emoji instead of showing a broken character
 - The single-key shortcuts (c, g then i, j, k and the rest) now work on Russian, Greek and other non-Latin keyboard layouts
 
+## Unreleased
+
+- Review marks a renamed binary file as binary.
+- Undo on a deleted or changed symbolic link restores the link, not a text file holding its target.
+- A binary file named like `x.constructor` no longer gets a broken image preview in review.
+- Git error messages hide the whole password of a remote URL even when the password contains "@".
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.
