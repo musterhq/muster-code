@@ -18,6 +18,8 @@ One row per clause file that has at least one case. The checker reports a clause
 | `MUS-SPEC-10` | [Terminal and background processes](clauses/10-terminal-and-processes.md) |
 | `MUS-SPEC-11` | [Memory](clauses/11-memory.md) |
 | `MUS-SPEC-12` | [Projects, orgs, tasks and check-out](clauses/12-projects-orgs-and-tasks.md) |
+| `MUS-SPEC-05` | [Access modes, approvals and tool permissions](clauses/05-access-modes-and-approvals.md) |
+| `MUS-SPEC-10` | [Terminal and background processes](clauses/10-terminal-and-processes.md) |
 | `MUS-SPEC-17` | [Usage, cost and the ledger](clauses/17-usage-cost-and-ledger.md) |
 | `MUS-SPEC-19` | [Security and redaction](clauses/19-security-and-redaction.md) |
 | `MUS-SPEC-22` | [Engineering standards](clauses/22-engineering-standards.md) |
