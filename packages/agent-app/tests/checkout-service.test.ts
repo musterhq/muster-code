@@ -1356,6 +1356,35 @@ test('#345 stale check-outs: idle for more than 3 days shows how long ago and of
   const ok = setup(); await plain(ok); assert.equal((await ok.svc.plan('t1')).broadFolder, false);
 });
 
+const idleNotes = (h: { server: FakeServer }) => (h.server.comments.get('t1') ?? []).map(c => c.body).filter(b => /^\*\*Idle for/.test(b));
+// Spec: MUS-SPEC-12-447A (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-447a)
+test('#447 a check-out idle for days becomes ONE Needs-you item with how long, one server note, and Keep, Release and Hand back each do what they say', async () => {
+  const DAY = 86_400_000;
+  const h = setup(); await bound(h); await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  h.advance(2 * DAY); assert.deepEqual(h.svc.inboxItems(), [], 'two days is not idle'); assert.equal(await h.svc.checkStale(), 0);
+  h.advance(6 * DAY);
+  const [item, ...rest] = h.svc.inboxItems(); assert.deepEqual(rest, [], 'one item for the check-out');
+  assert.equal(item!.kind, 'checkout'); assert.equal(item!.taskId, 't1'); assert.match(item!.title, /RAG-1/); assert.match(item!.why, /No activity for 8 days/); assert.deepEqual(item!.checkout, { days: 8 });
+  assert.equal(await h.svc.checkStale(), 1); await h.svc.sync();
+  assert.equal(idleNotes(h).length, 1); assert.match(idleNotes(h)[0]!, /Idle for 8 days\./, 'the server-side note says how long');
+  h.advance(DAY); assert.equal(await h.svc.checkStale(), 0, 'not repeated in the same stretch'); await h.svc.sync(); assert.equal(idleNotes(h).length, 1);
+  assert.equal(h.svc.inboxItems().length, 1); assert.equal(h.svc.inboxItems()[0]!.checkout!.days, 9, 'the same single item, with the days updated');
+  assert.equal(h.svc.get('t1')!.state, 'checked_out', 'nothing is handed back or released by itself');
+  // Keep: the item clears, and returns only after another quiet stretch, with its own note.
+  h.svc.remind('t1'); assert.deepEqual(h.svc.inboxItems(), [], 'Keep clears it'); assert.equal(h.svc.get('t1')!.state, 'checked_out'); assert.equal(await h.svc.checkStale(), 0);
+  h.advance(2 * DAY); assert.deepEqual(h.svc.inboxItems(), [], 'still inside the new stretch');
+  h.advance(2 * DAY); assert.equal(h.svc.inboxItems().length, 1, 'a new idle stretch shows again'); assert.equal(await h.svc.checkStale(), 1); await h.svc.sync(); assert.equal(idleNotes(h).length, 2);
+  // Release: gone, and the task goes back as it was.
+  const released = await h.svc.release('t1', 'Released after sitting idle.'); assert.equal(released.state, 'released'); assert.deepEqual(h.svc.inboxItems(), [], 'Release clears it');
+  // Hand back: gone.
+  const b = setup(); await bound(b); await b.svc.start({ taskId: 't1', model: OWN, confirm: true }); b.advance(5 * DAY); assert.equal(b.svc.inboxItems().length, 1);
+  const done = await b.svc.handBack({ taskId: 't1', reviewer: { kind: 'agent', id: 'a-qa' }, testsNote: 'Idle; nothing new to test.' }); assert.equal(done.state, 'handed_back'); assert.deepEqual(b.svc.inboxItems(), [], 'Hand back clears it');
+  // Work in another chat of the worktree is activity: no note, and the item goes.
+  const w = setup(); await bound(w); const l = await w.svc.start({ taskId: 't1', model: OWN, confirm: true }); w.advance(5 * DAY);
+  w.chatList.push({ id: 'chat:manual', path: l.worktree!, activeAt: w.now() - 60_000 });
+  assert.equal(await w.svc.checkStale(), 0); assert.deepEqual(w.svc.inboxItems(), [], 'the person is working on it'); await w.svc.sync(); assert.deepEqual(idleNotes(w), []);
+});
+
 test('#385: a task description past the 32,000-character cap is written whole to a self-ignoring .muster/task file and the brief points at it', async () => {
   const h = setup(); await bound(h);
   h.server.description = 'Goal: do it.\n' + 'x'.repeat(40_000) + '\nEND-OF-TASK';

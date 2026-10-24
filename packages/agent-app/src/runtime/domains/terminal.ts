@@ -4,6 +4,7 @@ import type { TerminalAccess } from '../../shared/domains/terminal-protocol.ts';
 import { TERMINAL_MCP, TERMINAL_MCP_LAUNCHER_ENV } from '../terminal-agent-tools.ts';
 import { BACKGROUND_MCP, BACKGROUND_MCP_LAUNCHER_ENV, BACKGROUND_TOOL_NOTE } from '../background-agent-tools.ts';
 import type { Chat } from '../../shared/protocol.ts';
+import { chatTokenIssuer } from '../governance/chat-binding.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
 const chatId = (input: Record<string, unknown>): string => {
@@ -12,17 +13,20 @@ const chatId = (input: Record<string, unknown>): string => {
   return value;
 };
 
-/** The muster_terminal MCP server for a chat the user allowed, once main's endpoint is listening. */
-export function terminalRunOptions(chat: { id: string }, allowed: boolean, launcher = process.env[TERMINAL_MCP_LAUNCHER_ENV]) {
-  if (!allowed || !launcher || !path.isAbsolute(launcher) || !fs.existsSync(launcher)) return null;
-  return { configOverrides: { [`mcp_servers.${TERMINAL_MCP}.command`]: launcher, [`mcp_servers.${TERMINAL_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${TERMINAL_MCP}.tool_timeout_sec`]: 30 } };
+type ChatTokenIssuer = ((chatId: string) => string) | undefined;
+
+/** The muster_terminal MCP server for a chat the user allowed, once main's endpoint is listening. The run gets the
+ *  host's per-chat token (MUSTER_CHAT_TOKEN), without which the host refuses the call. */
+export function terminalRunOptions(chat: { id: string }, allowed: boolean, launcher = process.env[TERMINAL_MCP_LAUNCHER_ENV], issue: ChatTokenIssuer = chatTokenIssuer(TERMINAL_MCP)) {
+  if (!allowed || !issue || !launcher || !path.isAbsolute(launcher) || !fs.existsSync(launcher)) return null;
+  return { configOverrides: { [`mcp_servers.${TERMINAL_MCP}.command`]: launcher, [`mcp_servers.${TERMINAL_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${TERMINAL_MCP}.env.MUSTER_CHAT_TOKEN`]: issue(chat.id), [`mcp_servers.${TERMINAL_MCP}.tool_timeout_sec`]: 30 } };
 }
 
 /** The muster_background server (agent-owned long-running commands that wake the chat when they exit): Agent mode with
  *  Full access only, the same gate ProcessSessions applies to every start. */
-export function backgroundRunOptions(chat: Pick<Chat, 'id' | 'mode' | 'permissionMode'>, launcher = process.env[BACKGROUND_MCP_LAUNCHER_ENV]) {
-  if (chat.mode !== 'agent' || chat.permissionMode !== 'full' || !launcher || !path.isAbsolute(launcher) || !fs.existsSync(launcher)) return null;
-  return { configOverrides: { [`mcp_servers.${BACKGROUND_MCP}.command`]: launcher, [`mcp_servers.${BACKGROUND_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${BACKGROUND_MCP}.tool_timeout_sec`]: 60 }, developerInstructions: BACKGROUND_TOOL_NOTE };
+export function backgroundRunOptions(chat: Pick<Chat, 'id' | 'mode' | 'permissionMode'>, launcher = process.env[BACKGROUND_MCP_LAUNCHER_ENV], issue: ChatTokenIssuer = chatTokenIssuer(BACKGROUND_MCP)) {
+  if (chat.mode !== 'agent' || chat.permissionMode !== 'full' || !issue || !launcher || !path.isAbsolute(launcher) || !fs.existsSync(launcher)) return null;
+  return { configOverrides: { [`mcp_servers.${BACKGROUND_MCP}.command`]: launcher, [`mcp_servers.${BACKGROUND_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${BACKGROUND_MCP}.env.MUSTER_CHAT_TOKEN`]: issue(chat.id), [`mcp_servers.${BACKGROUND_MCP}.tool_timeout_sec`]: 60 }, developerInstructions: BACKGROUND_TOOL_NOTE };
 }
 
 /** Terminal domain: explicit, per-chat, revocable consent for the agent's read-only terminal tool (off by default). */
