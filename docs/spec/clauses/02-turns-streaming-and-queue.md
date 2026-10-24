@@ -30,7 +30,7 @@ Boundaries:
 - Precondition: A chat whose provider reports one command finished and one command started but never finished, then ends the turn as completed.
 - Action: Send a message and wait for the turn to settle.
 - Expected result: The finished command stays completed. The unfinished one is interrupted, reads Stopped, keeps its output and has a duration.
-- Test: not written yet (#387)
+- Test: `packages/agent-app/tests/tool-rows-settle-387.test.ts::#387 a tool the provider never closed is shown as Stopped once a completed turn settles`
 - Environment: Node test runner; the agent service with a fake provider and a temp data folder.
 - Known gaps: A row of a provider that still has background work for the chat is left alone and not tested here.
 - Evidence: UNVERIFIED
@@ -41,7 +41,7 @@ Boundaries:
 - Precondition: A chat whose provider starts a command, never finishes it, and ends the turn as failed.
 - Action: Send a message and wait for the turn to settle.
 - Expected result: The unfinished command is interrupted and reads Stopped; the chat shows failed.
-- Test: not written yet (#387)
+- Test: `packages/agent-app/tests/tool-rows-settle-387.test.ts::#387 a tool the provider never closed is shown as Stopped once a failed turn settles`
 - Environment: Node test runner; the agent service with a fake provider and a temp data folder.
 - Known gaps: A provider that throws instead of returning a result is not covered.
 - Evidence: UNVERIFIED
@@ -52,7 +52,7 @@ Boundaries:
 - Precondition: The app closed while a turn was running a command; the chat and the command row are saved as running, next to a finished command.
 - Action: Start the agent service on the same data folder.
 - Expected result: The chat is interrupted. The running command row is interrupted and reads Stopped; the finished one stays completed.
-- Test: not written yet (#387)
+- Test: `packages/agent-app/tests/tool-rows-settle-387.test.ts::#387 a tool row left running when Muster closed is Stopped after restart`
 - Environment: Node test runner; the agent service and the store on a temp data folder.
 - Known gaps: Does not check a provider that is still working in the background after the app restarts; nothing survives a restart.
 - Evidence: UNVERIFIED

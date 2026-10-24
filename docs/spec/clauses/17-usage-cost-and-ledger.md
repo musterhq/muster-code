@@ -28,9 +28,9 @@ Boundaries:
 - Precondition: A Git folder on `main`. Another branch differs from `main` in five files. A turn starts with its review baseline taken.
 - Action: During the turn the agent edits `a.txt`, runs `git checkout` to the other branch, then creates `d.txt` and commits it. The turn settles.
 - Expected result: The Receipt lists `a.txt` as modified and `d.txt` as added. None of the five files that the checkout brought in are listed, and the count is 2.
-- Test: not written yet (#387)
+- Test: `packages/agent-app/tests/ledger-files-387.test.ts::#387 a checkout during a turn is not counted as the turn's edits; the agent's own edit and commit are`
 - Environment: Node test runner; real `git` and a temp folder; the real turn ledger hooks.
-- Known gaps: Needs the HEAD reflog (on by default). A move in the same second the turn starts is not told apart from the turn's own. `git reset --soft` is read as a move, so a file edited before it and left uncommitted can be hidden.
+- Known gaps: The turn's own commits are found by commit time (whole seconds), so a commit made in the second the turn starts counts as the turn's. A file edited before a `git reset --soft` and left uncommitted still shows, since it differs from HEAD.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-17-387b"></a>
@@ -39,9 +39,9 @@ Boundaries:
 - Precondition: A Git folder on a feature branch. `main` gained commits that add three files. A turn starts with its review baseline taken.
 - Action: During the turn the agent edits `a.txt`, commits it and runs `git rebase main`. The turn settles.
 - Expected result: The Receipt lists `a.txt` only. The three files rebased in from `main` are not listed, and neither is a file nobody edited.
-- Test: not written yet (#387)
+- Test: `packages/agent-app/tests/ledger-files-387.test.ts::#387 a rebase during a turn adds none of the rebased-in files to the Receipt`
 - Environment: Node test runner; real `git` and a temp folder; the real turn ledger hooks.
-- Known gaps: Same as MUS-SPEC-17-387A. Merge and pull go through the same reflog path but have no test of their own.
+- Known gaps: Same as MUS-SPEC-17-387A. Merge and pull take the same path but have no test of their own.
 - Evidence: UNVERIFIED
 
 ### Approvals in the ledger
