@@ -80,6 +80,9 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 - Stop now ends the commands a Claude Code or OpenCode chat started (a dev server, a test watcher), and the run settles right away. Before, the command kept running and the chat stayed "stopping" until it exited on its own.
 - A message that starts with "-" (a list bullet, or "--version is wrong…") now reaches Gemini CLI and OpenCode as the message. Before, the CLI read it as options and the message was lost.
+- On router and API routes, command output and files read by the agent keep every character: accented and other multi-byte characters no longer turn into "�" where the output was split.
+- edit_file on router and API routes now refuses a file that is not UTF-8 text instead of quietly changing bytes elsewhere in it.
+- Long chats on the Anthropic API route no longer break after a message sent mid-reply or a reply with no text: the history sent to the model always starts with your message and never holds an empty reply.
 
 ## 0.3.13
 

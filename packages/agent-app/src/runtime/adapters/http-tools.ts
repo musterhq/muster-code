@@ -1,4 +1,5 @@
 import {spawn} from 'node:child_process';
+import {StringDecoder} from 'node:string_decoder';
 import {constants as fsc, promises as fs} from 'node:fs';
 import {basename, dirname, extname, isAbsolute, join, relative, sep} from 'node:path';
 import {isInsidePath, normalizeFsPath} from '../../shared/path-normalize.ts';
@@ -168,7 +169,8 @@ async function readLimited(path: string, limit: number, refuseHardLinked = false
     if (refuseHardLinked && info.nlink > 1) throw new Error(`${path} has other hard links, so it is not read outside Full access (it may be the same file as one outside the working folder).`);
     const buffer = Buffer.alloc(Math.min(info.size, limit));
     const {bytesRead} = await handle.read(buffer, 0, buffer.length, 0);
-    return {text: buffer.subarray(0, bytesRead).toString('utf8'), size: info.size};
+    // A cut at the limit can fall inside a character: the decoder holds back that partial character instead of emitting U+FFFD.
+    return {text: bytesRead < info.size ? new StringDecoder('utf8').write(buffer.subarray(0, bytesRead)) : buffer.subarray(0, bytesRead).toString('utf8'), size: info.size};
   } finally { await handle.close(); }
 }
 
@@ -215,8 +217,9 @@ function runCommand(command: string, timeoutSeconds: number, ctx: ToolContext): 
     // Its own process group on POSIX (so Stop can end everything it started); taskkill /T does the same job on Windows.
     const child = spawn(file, args, {cwd, windowsHide: true, detached: !WINDOWS, stdio: ['ignore', 'pipe', 'pipe'], env: agentCommandEnvironment(ctx.env)});
     let output = '', done = false;
-    const add = (chunk: Buffer) => { if (output.length < MAX_TOOL_OUTPUT * 2) output += chunk.toString('utf8'); };
-    child.stdout.on('data', add); child.stderr.on('data', add);
+    // One decoder per stream: a multi-byte character split across two pipe chunks is joined, not turned into U+FFFD.
+    const reader = (decoder: StringDecoder) => (chunk: Buffer) => { const piece = decoder.write(chunk); if (output.length < MAX_TOOL_OUTPUT * 2) output += piece; };
+    child.stdout.on('data', reader(new StringDecoder('utf8'))); child.stderr.on('data', reader(new StringDecoder('utf8')));
     const end = () => {
       if (child.pid === undefined) return;
       try { killTreeAndEscapees(child.pid, 'SIGTERM'); } catch { /* already gone */ }
@@ -332,7 +335,9 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
       if (!await approved('item/fileChange/requestApproval', {changes: [{path, kind: 'update'}]})) return finish(item, declined);
       const info = await fs.stat(path);
       if (!info.isFile() || info.size > MAX_EDIT_FILE) return finish(item, {content: `${path} is not a regular file under ${MAX_EDIT_FILE / 1024 / 1024} MB.`, ok: false});
-      const current = await fs.readFile(path, 'utf8');
+      const bytes = await fs.readFile(path), current = bytes.toString('utf8');
+      // Decoding replaces bytes that are not UTF-8 and the write would save those replacements over the whole file.
+      if (!Buffer.from(current, 'utf8').equals(bytes)) return finish(item, {content: `${path} is not valid UTF-8 text, so edit_file would change bytes outside the edit. Use run_command or ask the user.`, ok: false});
       const first = oldText ? current.indexOf(oldText) : -1;
       if (first < 0) return finish(item, {content: 'old_string was not found in the file.', ok: false});
       if (current.indexOf(oldText, first + 1) >= 0) return finish(item, {content: 'old_string occurs more than once; include more context.', ok: false});
