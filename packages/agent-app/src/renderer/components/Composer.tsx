@@ -44,6 +44,8 @@ import {Tip} from './Tooltip';
 import { Menu, MenuPopup } from './AppMenu';
 import {ConnectModelPrompt,useNoProvider} from './SetupGuide';
 import { device } from '../../shared/device-noun.ts';
+import { sandboxRouteSupported } from '../../shared/sandbox-routes.ts';
+import { sandboxRouteWarning, useChatEnvironment } from './EnvironmentFooter';
 
 const ACCESS = ACCESS_OPTIONS;
 const COMMAND_ICONS: Record<ComposerCommandId, LucideIcon> = {plan:Lightbulb,goal:Goal,project:FolderKanban,sketch:PenLine,terminal:SquareTerminal,model:Cpu,reasoning:Brain,access:CircleAlert,new:SquarePen,browser:Globe,stop:Square,compact:Shrink,fork:GitBranch,rename:Pencil,status:Gauge,mcp:Server,init:FilePlus,review:GitCompare};
@@ -224,6 +226,12 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const backgroundAttempt = useRef<{ key: string; chatId: string; requestId: string } | null>(null);
   const [chipHover, setChipHover] = useState<{ index: number; left: number; top: number; start: number } | null>(null);
   const [fullConfirm, setFullConfirm] = useState(false);
+  /** #653: the access level a sandbox chat asked to raise to, waiting on "Leave the sandbox?". */
+  const [leaveSandbox, setLeaveSandbox] = useState<Exclude<ComposerAccess, 'read-only'> | null>(null);
+  /** Set once "Leave the sandbox?" is confirmed, so the Full access confirmation that may follow keeps leaving. */
+  const leavingSandbox = useRef(false);
+  const { environment } = useChatEnvironment(chat.id);
+  const inSandbox = environment?.env === 'sandbox';
   const [settingsError, setSettingsError] = useState('');
   const [settingsChanging, setSettingsChanging] = useState(false);
   const settingsPending = useRef(false);
@@ -265,6 +273,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const imageBlind = imageBlindModel(providers, chat.providerId, chat.model);
   const toolBlind = chat.mode === 'plan' ? null : toolBlindModel(providers, chat.providerId, chat.model);
   const toolAlternative = toolBlind ? toolCapableAlternative(providers, chat.providerId, chat.model) : null;
+  const sandboxBlind = inSandbox && !sandboxRouteSupported(state.providers.value, chat.providerId);
   const selectedModel = modelOptions.find(model => model.id === chat.model && model.providerId === chat.providerId);
   const modelEfforts = selectedModel?.efforts ?? REASONING_EFFORTS;
   const storedEffort = efforts[chat.id];
@@ -285,7 +294,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   /** CS-B3-6: a plugin chip's defaultPrompt[0], shown after the chips while nothing else is typed. */
   const promptHint = pluginPromptHint(text, tokenRanges, state.plugins.value ?? []);
   const chipAtCaret = chipRanges.find(range => caret > range.start && caret <= range.end);
-  const popoverBlocked = composing.current || menu !== null || modelOpen || fullConfirm || dismissed === text;
+  const popoverBlocked = composing.current || menu !== null || modelOpen || fullConfirm || leaveSandbox !== null || dismissed === text;
   const slash = popoverBlocked ? null : readSlashQuery(text, caret);
   const mention = popoverBlocked || slash || chipAtCaret ? null : readMentionQuery(text, caret);
   const mentionQuery = mention?.query ?? '';
@@ -815,13 +824,18 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   };
   const chooseAccess = async (permissionMode: ComposerAccess, acknowledgeFullAccess = false, rememberFolder = false) => {
     if (settingsBlocked || settingsPending.current || modelPending.current) return;
-    if (permissionMode === selectedAccess && !acknowledgeFullAccess) { setMenu(null); accessTrigger.current?.focus(); return; }
+    if (permissionMode === selectedAccess && !acknowledgeFullAccess && !(inSandbox && permissionMode !== 'read-only')) { setMenu(null); accessTrigger.current?.focus(); return; }
+    // #653: raising access in a sandbox chat leaves the sandbox, and never silently.
+    const leaving = inSandbox && permissionMode !== 'read-only', confirmedLeave = leavingSandbox.current;
+    leavingSandbox.current = false;
+    if (leaving && !confirmedLeave) { setMenu(null); setLeaveSandbox(permissionMode); return; }
     // CS-B7-3: a folder where the user chose "Don't ask again" switches straight to Full access (Settings › Chat undoes it).
-    if (permissionMode === 'full' && !acknowledgeFullAccess) { if (skipsFullAccessConfirm(chat.folderId)) acknowledgeFullAccess = true; else { setMenu(null); setFullConfirm(true); return; } }
+    if (permissionMode === 'full' && !acknowledgeFullAccess) { if (skipsFullAccessConfirm(chat.folderId)) acknowledgeFullAccess = true; else { setMenu(null); leavingSandbox.current = confirmedLeave; setFullConfirm(true); return; } }
     const request = ++settingsRequest.current;
     settingsPending.current = true; setSettingsChanging(true); setSettingsError('');
     try {
-      await invoke('chat.setPermissionMode', { id: chat.id, permissionMode, ...(acknowledgeFullAccess ? { acknowledgeFullAccess: true } : {}) });
+      if (leaving) await invoke('sandbox.chatEnvironment.set', { chatId: chat.id, env: 'host', permissionMode, ...(acknowledgeFullAccess ? { acknowledgeFullAccess: true } : {}) });
+      else await invoke('chat.setPermissionMode', { id: chat.id, permissionMode, ...(acknowledgeFullAccess ? { acknowledgeFullAccess: true } : {}) });
       if (request !== settingsRequest.current || currentDraft.current.chatId !== chat.id) return;
       // Remembered so a second chat in the same folder starts with the access level this one settled on (CHAT-24).
       if (chat.folderId) saveFolderAccess(chat.folderId, permissionMode);
@@ -829,6 +843,12 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
       setFullConfirm(false); setMenu(null); if (running) flash('Access applies to the next turn'); requestAnimationFrame(() => accessTrigger.current?.focus());
     } catch (cause) { if (request === settingsRequest.current && currentDraft.current.chatId === chat.id) setSettingsError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (request === settingsRequest.current) { settingsPending.current = false; setSettingsChanging(false); } }
+  };
+  const confirmLeaveSandbox = () => {
+    const level = leaveSandbox; setLeaveSandbox(null);
+    if (!level) return;
+    leavingSandbox.current = true;
+    void chooseAccess(level);
   };
   /** The goal editor opens prefilled with the draft (minus a `/goal` token); with an empty draft it edits the unfinished goal. */
   const openGoal = (range?: { start: number; end: number }) => {
@@ -1117,6 +1137,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     <div className="composer-attachments"><AttachmentStrip chatId={chat.id} items={attachments} onRemove={removeAttachment} onRetry={retryAttachment}
       onOpen={item => { if (!sketches.current.has(item.localId)) return false; openSketch(item.localId); return true; }} /></div>
     {toolBlind && <p className="composer-tools-warning" role="status" data-testid="tools-blind-warning">{TOOLS_BLIND_NOTICE}.{toolAlternative && <> <button type="button" data-testid="tools-blind-switch" disabled={settingsBlocked || running} onClick={() => void chooseModel(toolAlternative.model, toolAlternative.providerId)}>Switch to {toolAlternative.name}</button></>}</p>}
+    {sandboxBlind && <p className="composer-tools-warning" role="status" data-testid="sandbox-route-warning">{sandboxRouteWarning()}</p>}
     {imageBlind && attachments.some(item => item.kind === 'image') && <p className="composer-image-warning" role="status" data-testid="image-blind-warning">{imageBlindWarning(imageBlind)}</p>}
     {largePaste && <div className="composer-paste-offer" role="group" aria-label="Large paste">
       <FileText size={14} aria-hidden="true" /><span>Large paste · {formatBytes(largePaste.bytes)}</span>
@@ -1217,7 +1238,10 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     {settingsError && !fullConfirm && <div className="composer-error" role="alert">{settingsError}</div>}
     <FullAccessConfirm open={fullConfirm} folderName={state.snapshot?.folders.find(folder => folder.id === chat.folderId)?.name} canRemember={Boolean(chat.folderId)}
       pending={settingsChanging} blocked={settingsBlocked} error={settingsError || undefined} cancelRef={cancelFull} finalFocus={accessTrigger}
-      onOpenChange={open => { if (!settingsPending.current) setFullConfirm(open); }} onConfirm={remember => void chooseAccess('full', true, remember)} />
+      onOpenChange={open => { if (!settingsPending.current) { setFullConfirm(open); if (!open) leavingSandbox.current = false; } }} onConfirm={remember => void chooseAccess('full', true, remember)} />
+    <ConfirmSheet open={leaveSandbox !== null} testId="leave-sandbox-confirm" title="Leave the sandbox?" description={`Commands will run on ${device().lower} with ${leaveSandbox === 'full' ? 'full' : 'workspace'} access.`}
+      onCancel={() => { setLeaveSandbox(null); requestAnimationFrame(() => accessTrigger.current?.focus()); }}
+      actions={[{ label: 'Cancel', run: () => { setLeaveSandbox(null); requestAnimationFrame(() => accessTrigger.current?.focus()); } }, { label: 'Leave sandbox', primary: true, run: confirmLeaveSandbox }]} />
     {sending ? <span className="composer-status" role="status" aria-live="polite">Sending…</span>
       : note ? <span className="composer-status" role="status" aria-live="polite">{note}</span>
       : dictation && text ? <span className="composer-status is-dictation" role="status" aria-live="polite">{dictation.interim ? `Listening… ${dictation.interim}` : 'Listening…'}</span> : null}
