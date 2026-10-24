@@ -58,18 +58,27 @@ export class TurnLedger {
   }
   head(): string { const row = this.db.prepare('SELECT hash FROM turn_ledger ORDER BY seq DESC LIMIT 1').get() as { hash: string } | undefined; return row?.hash ?? GENESIS; }
   append(body: Body): LedgerEntry {
-    const prevHash = this.head(), hash = entryHash(prevHash, body);
-    // A tail that no longer matches the saved head was truncated or rewritten. Remember where, before the new receipt
-    // chains onto the shortened tail, so appending can never make a broken ledger pass again.
-    const tail = this.tail(), saved = this.anchor();
-    if (saved.broken_at === null && (tail.seq !== saved.seq || tail.hash !== saved.hash)) this.db.prepare('UPDATE turn_ledger_anchor SET broken_at = ? WHERE id = 1').run(mismatchAt(tail, saved));
-    const info = this.db.prepare('INSERT INTO turn_ledger (id, chat_id, run_id, project_id, body, prev_hash, hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(body.id, body.chatId ?? '', body.runId, body.projectId, canonical(body), prevHash, hash, body.endedAt);
-    this.db.prepare('UPDATE turn_ledger_anchor SET seq = ?, hash = ? WHERE id = 1').run(Number(info.lastInsertRowid), hash);
-    // A task run's chat is Ledger-era from its first turn: a history row the backfill made for it while it was idle
-    // between turns would show the same turn twice (under the chat title). History is not chained, so it can go.
-    if (body.trigger === 'task' && body.chatId) this.db.prepare('DELETE FROM turn_ledger_history WHERE chat_id = ?').run(body.chatId);
-    return { ...body, seq: Number(info.lastInsertRowid), prevHash, hash, source: 'local' };
+    // One transaction: a quit between the receipt and the saved head would otherwise leave a healthy ledger that every
+    // later check reports as tampered.
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const prevHash = this.head(), hash = entryHash(prevHash, body);
+      // A tail that no longer matches the saved head was truncated or rewritten. Remember where, before the new receipt
+      // chains onto the shortened tail, so appending can never make a broken ledger pass again.
+      const tail = this.tail(), saved = this.anchor();
+      if (saved.broken_at === null && (tail.seq !== saved.seq || tail.hash !== saved.hash)) this.db.prepare('UPDATE turn_ledger_anchor SET broken_at = ? WHERE id = 1').run(mismatchAt(tail, saved));
+      const info = this.db.prepare('INSERT INTO turn_ledger (id, chat_id, run_id, project_id, body, prev_hash, hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(body.id, body.chatId ?? '', body.runId, body.projectId, canonical(body), prevHash, hash, body.endedAt);
+      this.db.prepare('UPDATE turn_ledger_anchor SET seq = ?, hash = ? WHERE id = 1').run(Number(info.lastInsertRowid), hash);
+      // A task run's chat is Ledger-era from its first turn: a history row the backfill made for it while it was idle
+      // between turns would show the same turn twice (under the chat title). History is not chained, so it can go.
+      if (body.trigger === 'task' && body.chatId) this.db.prepare('DELETE FROM turn_ledger_history WHERE chat_id = ?').run(body.chatId);
+      this.db.exec('COMMIT');
+      return { ...body, seq: Number(info.lastInsertRowid), prevHash, hash, source: 'local' };
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
   /** Imported history: one row per past turn, keyed by its id, so importing again adds nothing. Returns how many were new. */
   importHistory(bodies: readonly Body[]): number {

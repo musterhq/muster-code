@@ -75,3 +75,17 @@ test('an older ledger adopts its head and a later receipt cannot hide a truncati
   assert.equal(after.ok, false, 'appending after a truncation must not make the chain pass');
   assert.equal(after.brokenAt, 3);
 });
+
+// Spec: MUS-SPEC-17-179D (docs/spec/clauses/17-usage-cost-and-ledger.md#mus-spec-17-179d)
+test('a receipt that fails to save leaves the ledger passing', async t => {
+  const {db, ledger, turn} = fixture(t);
+  for (let n = 1; n <= 2; n++) await turn(n);
+  // Make the saved-head update fail right after the receipt row is written, as a crash or a full disk would. The ledger
+  // never fails a run, so the turn itself settles normally.
+  db.exec("CREATE TRIGGER fail_anchor BEFORE UPDATE OF seq ON turn_ledger_anchor BEGIN SELECT RAISE(ABORT, 'disk full'); END");
+  await turn(3);
+  db.exec('DROP TRIGGER fail_anchor');
+  assert.deepEqual({...ledger.verify(), head: ''}, {ok: true, entries: 2, head: '', brokenAt: null}, 'nothing half-written: no receipt without its saved head');
+  await turn(4);
+  assert.deepEqual({...ledger.verify(), head: ''}, {ok: true, entries: 3, head: '', brokenAt: null}, 'the next receipt still chains and passes');
+});

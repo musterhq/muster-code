@@ -21,6 +21,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-17-179A](17-usage-cost-and-ledger.md#mus-spec-17-179a) | After the newest receipt rows are deleted, the chain check fails and points at the first removed entry. | [`deleting the newest receipts is reported by verify`](../../../packages/agent-app/tests/turn-ledger-anchor-179.test.ts) |
 | [MUS-SPEC-17-179B](17-usage-cost-and-ledger.md#mus-spec-17-179b) | After the whole chain is rewritten with valid hashes, the chain check fails because the head no longer matches the saved head. | [`a fully rewritten chain is reported by verify`](../../../packages/agent-app/tests/turn-ledger-anchor-179.test.ts) |
 | [MUS-SPEC-17-179C](17-usage-cost-and-ledger.md#mus-spec-17-179c) | A ledger written before the saved head existed adopts its current head, then reports a later truncation; a new receipt does not hide an earlier truncation. | [`an older ledger adopts its head and a later receipt cannot hide a truncation`](../../../packages/agent-app/tests/turn-ledger-anchor-179.test.ts) |
+| [MUS-SPEC-17-179D](17-usage-cost-and-ledger.md#mus-spec-17-179d) | A receipt whose save fails partway leaves nothing half-written: the check still passes and the next receipt chains on. | [`a receipt that fails to save leaves the ledger passing`](../../../packages/agent-app/tests/turn-ledger-anchor-179.test.ts) |
 
 ### Ledger head anchor
 
@@ -55,4 +56,15 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/turn-ledger-anchor-179.test.ts::an older ledger adopts its head and a later receipt cannot hide a truncation`
 - Environment: Node with `node:sqlite`, in-memory database.
 - Known gaps: an older ledger that was already truncated before this version first opened it cannot be told apart from an intact one.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-17-179d"></a>
+#### MUS-SPEC-17-179D: A failed save leaves the ledger consistent
+
+- Precondition: a ledger with two receipts.
+- Action: make the saved-head update fail right after a receipt row is written (as a crash or a full disk would), finish that turn, then finish one more turn normally.
+- Expected result: the failed save leaves no receipt behind and the chain check still passes with two entries; the next turn is saved and the check passes with three.
+- Test: `packages/agent-app/tests/turn-ledger-anchor-179.test.ts::a receipt that fails to save leaves the ledger passing`
+- Environment: Node with `node:sqlite`, in-memory database.
+- Known gaps: a real power loss is simulated by a database trigger that fails the update, not by killing the process.
 - Evidence: UNVERIFIED
