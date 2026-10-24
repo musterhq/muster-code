@@ -37,6 +37,9 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - In Agent mode with Full access, the agent can start a long build, test run or deploy as a background process of the chat (shown in Commands as the agent's). If it is still running when the turn ends, its exit sends the chat one follow-up (exit code and the last 40 lines of output) through the message queue, so the agent picks up where it left off.
 - Configured Responses routers no longer reconnect and fail when a completed response omits cache or reasoning usage counters. Existing counts, authentication, and chat history are preserved; truncated streams still report a failure.
 - The Linux app's terminal works again on Ubuntu 24.04. Linux builds are made on Ubuntu 24.04, so the terminal module runs there and on newer releases.
+- Long replies stay smooth while they stream: the message box and every link in the transcript no longer redraw on each new word
+- Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
+- The Changes tab, Processes tab, Subagents tab and branch picker no longer redraw on every streamed word or keystroke while open
 - Settings › Muster Server buttons (invite, revoke, connector and agent actions) ignore a second click while the first is still running, so they no longer fire twice.
 - Help › Third-Party Notices now lists the license of every bundled package. The `buffers` package, which declared none, is recorded as MIT.
 - The Dashboard prices turns the provider reported no cost for from the model catalog or your Settings › Models prices; turns with no known price still count as unpriced.

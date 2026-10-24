@@ -1,6 +1,6 @@
 import { ArrowUp, AtSign, BookmarkPlus, Boxes, Brain, Check, ChevronDown, CircleAlert, CircleDot, Cpu, FilePlus, FileText, Folder, FolderKanban, Gauge, GitBranch, GitCompare, Globe, Goal, Lightbulb, LoaderCircle, MessageSquarePlus, Monitor, MessagesSquare, Mic, Paperclip, PenLine, Pencil, Plus, Search, Server, Shrink, Sparkles, Square, SquarePen, SquareTerminal, X, type LucideIcon } from 'lucide-react';
 import { MemoryRecallChip } from './MemoryRecallChip';
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MAX_ATTACHED_SKILL_BYTES, REASONING_EFFORTS, type Chat, type FileEntry, type PluginEntry, type Project, type QueuedMessage, type ReasoningEffort, type SkillEntry } from '../../shared/protocol';
 import { goalResumable } from '../../shared/domains/goals-protocol';
 import { invoke } from '../bridge';
@@ -13,7 +13,7 @@ import { createChat, flushComposerDraft, getState, loadPlugins, loadProviders, l
 import { ADD_CONTEXT_EVENT, loadComposerMemory, normalizeContextChip, saveComposerMemory, serializeContext, type ContextChip } from '../composerContext';
 import { setTerminalDock, setTerminalPaneView, terminalDock } from '../processSummary';
 import { ChipMirror, ContextStrip, TokenCard } from './ComposerTokens';
-import { useStoreSlice } from '../useStore';
+import { useStoreSelector, useStoreSlice } from '../useStore';
 import { AttachmentStrip, type ComposerAttachment } from './AttachmentStrip';
 import { CaptureSourcePicker, type CaptureResult } from './CaptureSourcePicker';
 import { accessibilityAttachment, utf8Base64 } from '../captureRegion';
@@ -161,7 +161,8 @@ export function useMentionEntries(folderId: string | undefined, query: string, e
 }
 
 export function Composer({ chat }: { chat: Chat }): React.ReactElement {
-  const state = useStoreSlice('composerDrafts','followUpMode','plugins','providers','screen','sendErrors','sending','settings','skills','snapshot','timelines');
+  const state = useStoreSlice('composerDrafts','followUpMode','plugins','providers','screen','sendErrors','sending','settings','skills','snapshot');
+  // The transcript streams several patches a second: read only the narrow facts the composer renders (see tests/chat-render-bounds-dom.tsx).
   const modEnter = state.settings['general.sendKey'] === 'mod-enter';
   const draft = state.composerDrafts[chat.id];
   const text = draft?.text ?? chat.draft;
@@ -216,7 +217,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   /** User and detected MCP servers for the + menu's Connectors & MCP section (read when the menu opens). */
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   /** CS-B11: the oldest pending provider question, answered in the panel above the card with the textarea as its custom answer. */
-  const questionFlow = useQuestionFlow(chat.id, pendingQuestionItem(state.timelines[chat.id]?.value));
+  const questionItem = useStoreSelector(current => pendingQuestionItem(current.timelines[chat.id]?.value)?.item);
+  const questionFlow = useQuestionFlow(chat.id, useMemo(() => questionItem ? pendingQuestionItem([questionItem]) : null, [questionItem]));
   /** CS-A1-3: running shells and background commands of this chat, for the Terminals pill. */
   const runningTerminals = useRunningTerminals(chat.id);
   const [popoverActive, setPopoverActive] = useState(0);
@@ -665,8 +667,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     if (source.path) { const folder = typeof source.folderId === 'string' ? source.folderId : chat.folderId; if (folder) void openFile(folder, source.path, source.line); }
   };
   /** A quote whose message is gone from the loaded timeline (edited or forked away) is marked stale. */
-  const loadedItems = state.timelines[chat.id]?.value;
-  const shownContext = contextChips.map(chip => chip.type === 'quote' && chip.source.itemId && (chip.source.chatId ?? chat.id) === chat.id && loadedItems && !loadedItems.some(item => item.id === chip.source.itemId) ? { ...chip, stale: true } : chip);
+  const staleQuotes = useStoreSelector(current => { const loaded = current.timelines[chat.id]?.value; return loaded ? contextChips.filter(chip => chip.type === 'quote' && chip.source.itemId && (chip.source.chatId ?? chat.id) === chat.id && !loaded.some(item => item.id === chip.source.itemId)).map(chip => chip.id).join('\0') : ''; });
+  const shownContext = contextChips.map(chip => staleQuotes && staleQuotes.split('\0').includes(chip.id) ? { ...chip, stale: true } : chip);
 
   const updateAttachment = (localId: string, patch: Partial<ComposerAttachment>) => setAttachments(current => current.map(item => item.localId === localId ? { ...item, ...patch } : item));
   const stage = async (item: ComposerAttachment) => {
@@ -848,9 +850,9 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     requestAnimationFrame(() => input.current?.focus());
   };
   const projects = state.snapshot?.projects ?? [];
-  const timelineItems = state.timelines[chat.id]?.value;
   /** Only a chat without messages moves; otherwise a new chat opens in the chosen project. */
-  const movesToProject = !running && Boolean(timelineItems) && !timelineItems!.some(item => item.kind === 'user');
+  const hasUserMessage = useStoreSelector(current => Boolean(current.timelines[chat.id]?.value?.some(item => item.kind === 'user')));
+  const movesToProject = useStoreSelector(current => { const loaded = current.timelines[chat.id]?.value; return !running && Boolean(loaded) && !loaded!.some(item => item.kind === 'user'); });
   const chooseProject = async (next: Project | null) => {
     setMenu(null);
     if ((next?.id ?? undefined) === chat.projectId) { restoreCaret(); return; }
@@ -863,14 +865,14 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     setMenu(null);
     if (await createChat(chat.folderId, chat.projectId, { draft: SKILL_RECORDER_PROMPT })) flash('Recording a skill · send to start the interview');
   };
-  const openSaveSkill = () => { setMenu(null); setPanel({ kind: 'skill', draft: skillDraft(timelineItems ?? []) }); };
+  const openSaveSkill = () => { setMenu(null); setPanel({ kind: 'skill', draft: skillDraft(getState().timelines[chat.id]?.value ?? []) }); };
   const skillSaved = (slug: string) => {
     setPanel(null);
     void loadSkills(true, activeFolderPath ? [activeFolderPath] : []);
     flash(`Saved skill $${slug} · find it under / and +`);
     requestAnimationFrame(() => input.current?.focus());
   };
-  const commandDisabled = (id: ComposerCommandId) => id === 'stop' ? !running : id === 'plan' ? choicesDisabled : id === 'model' || id === 'access' ? settingsBlocked : id === 'goal' || id === 'project' || id === 'sketch' || id === 'terminal' ? chat.archived : id === 'compact' ? (!chat.providerThreadId && !timelineItems?.some(item => item.kind === 'user')) : id === 'init' || id === 'review' ? chat.archived || !chat.folderId : false;
+  const commandDisabled = (id: ComposerCommandId) => id === 'stop' ? !running : id === 'plan' ? choicesDisabled : id === 'model' || id === 'access' ? settingsBlocked : id === 'goal' || id === 'project' || id === 'sketch' || id === 'terminal' ? chat.archived : id === 'compact' ? (!chat.providerThreadId && !hasUserMessage) : id === 'init' || id === 'review' ? chat.archived || !chat.folderId : false;
   const runCommand = (id: ComposerCommandId, range?: { start: number; end: number }) => {
     if (commandDisabled(id)) return;
     if (range) replaceRange(range.start, range.end, '');
@@ -1066,7 +1068,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     if (text && !(oneLine || (up ? field.selectionStart === 0 : field.selectionEnd === text.length))) return;
     if (!recall.current) {
       if (!up || text !== '') return;
-      const values = (state.timelines[chat.id]?.value ?? []).filter(item => item.kind === 'user').map(item => item.text).reverse();
+      const values = (getState().timelines[chat.id]?.value ?? []).filter(item => item.kind === 'user').map(item => item.text).reverse();
       if (!values.length) return;
       recall.current = { values, index: -1 };
     }
