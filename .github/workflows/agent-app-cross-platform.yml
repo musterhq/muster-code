@@ -31,7 +31,8 @@ jobs:
       matrix:
         include:
           - os: linux
-            runner: ubuntu-latest
+            # Build on the oldest supported Ubuntu so native modules (node-pty) run there and on anything newer (#680).
+            runner: ubuntu-24.04
             target: --linux
           - os: windows
             runner: windows-latest
@@ -43,7 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: packages/agent-app/.nvmrc
           cache: npm
@@ -194,7 +195,7 @@ jobs:
   # and the AppImage's runtime does not ask for libfuse.so.2 (#317).
   ubuntu-24-04:
     needs: package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     container: ubuntu:24.04
     defaults:
@@ -202,7 +203,7 @@ jobs:
         working-directory: packages/agent-app
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: packages/agent-app/.nvmrc
       - uses: actions/download-artifact@v8

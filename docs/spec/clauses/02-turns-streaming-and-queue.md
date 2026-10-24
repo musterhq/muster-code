@@ -36,6 +36,8 @@ Boundaries:
 | [MUS-SPEC-02-479S](02-turns-streaming-and-queue.md#mus-spec-02-479s) | The Limited row has a fallback model picker that starts with no fallback. | [`the fallback model is off by default and choosing one is saved for the chat`](../../../packages/agent-app/tests/limit-resume-dom.tsx) |
 | [MUS-SPEC-02-479T](02-turns-streaming-and-queue.md#mus-spec-02-479t) | The limit row appears only while the chat is Limited, and the queue explains that it waits. | [`a running chat shows no limit row, and the queue says it waits for the usage limit to reset`](../../../packages/agent-app/tests/limit-resume-dom.tsx) |
 | [MUS-SPEC-02-479U](02-turns-streaming-and-queue.md#mus-spec-02-479u) | Settings › General lets the user turn off continuing after a limit and continuing after a restart. | [`Settings › General has both continue switches, on by default, and they save through settings.set`](../../../packages/agent-app/tests/limit-resume-dom.tsx) |
+| [MUS-SPEC-02-473H](02-turns-streaming-and-queue.md#mus-spec-02-473h) | The no-promise rule is in Agent mode instructions and not in Ask or Plan. | [`agent-mode instructions forbid ending a turn on a promise`](../../../packages/agent-app/tests/process-continuations.test.ts) |
+| [MUS-SPEC-02-473J](02-turns-streaming-and-queue.md#mus-spec-02-473j) | A closing promise makes the run advanced or plan-only, never completed; ordinary endings stay completed. | [`liveness: a turn that ends promising to report back is not completed`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 
 ### Usage limits
 
@@ -263,4 +265,28 @@ Boundaries:
 - Test: `packages/agent-app/tests/limit-resume-dom.tsx::Settings › General has both continue switches, on by default, and they save through settings.set`
 - Environment: Node script with a fake DOM (linkedom); the real components; no Electron.
 - Known gaps: Settings are held by a fake host, not the real settings store.
+- Evidence: UNVERIFIED
+
+### Turns that end on a promise
+
+<a id="mus-spec-02-473h"></a>
+#### MUS-SPEC-02-473H: Agent mode tells the agent never to end a turn on a promise
+
+- Precondition: Chats in Agent, Ask and Plan mode.
+- Action: Build the run instructions for each.
+- Expected result: Agent mode includes the rule "Never end a turn promising future work" that tells the agent to wait with a tool call, next to the keep-going rule. Ask and Plan do not.
+- Test: `packages/agent-app/tests/process-continuations.test.ts::agent-mode instructions forbid ending a turn on a promise`
+- Environment: Node test runner; no provider or network.
+- Known gaps: Checks the instruction text only. It does not show a model obeying it.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-473j"></a>
+#### MUS-SPEC-02-473J: A turn that ends on a promise is not counted as completed
+
+- Precondition: Turns whose last paragraph promises to report back later, and turns that end with a result.
+- Action: Classify each run, with some tool calls and then with none.
+- Expected result: A promise ending counts as advanced with work and plan-only with none. A turn that merely mentions reporting earlier, or says a CI job will report, still counts as completed.
+- Test: `packages/agent-app/tests/process-continuations.test.ts::liveness: a turn that ends promising to report back is not completed`
+- Environment: Node test runner; no provider or network.
+- Known gaps: A unit test of a text classifier, so wording it does not recognise is not caught.
 - Evidence: UNVERIFIED
