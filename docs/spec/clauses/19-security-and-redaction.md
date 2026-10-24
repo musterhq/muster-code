@@ -21,6 +21,7 @@ Boundaries:
 | [MUS-SPEC-19-575B](19-security-and-redaction.md#mus-spec-19-575b) | URL credentials, including a password with an @, are masked; plain URLs are not. | [`credentials in a URL are still redacted`](../../../packages/agent-app/tests/sanitize-bughunt.test.ts) |
 | [MUS-SPEC-19-575C](19-security-and-redaction.md#mus-spec-19-575c) | Four long inputs of repeated secret words each redact in under 400 ms. | [`a long run of secret words stays linear`](../../../packages/agent-app/tests/sanitize-bughunt.test.ts) |
 | [MUS-SPEC-19-577A](19-security-and-redaction.md#mus-spec-19-577a) | Clone URLs with a token as the username are refused. | [`clone URLs whose username is a token are rejected`](../../../packages/agent-app/tests/clone-url-token.test.ts) |
+| [MUS-SPEC-19-674A](19-security-and-redaction.md#mus-spec-19-674a) | Values under key names longer than 70 characters are redacted. | [`a secret whose key name is longer than 70 characters is redacted`](../../../packages/agent-app/tests/secret-redaction-long-names.test.ts) |
 
 ### Paths from replies
 
@@ -88,4 +89,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/clone-url-token.test.ts::clone URLs whose username is a token are rejected`
 - Environment: Node test runner; no network.
 - Known gaps: Tests the validator. It does not run a clone. Two other tests in the file (ordinary usernames stay accepted; plugin sources and redaction) pass on main and are not linked.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-674a"></a>
+#### MUS-SPEC-19-674A: A secret with a very long key name is redacted
+
+- Precondition: Text with secret values under key names longer than 70 characters: dotted, hyphen-prefixed, JSON and .env styles.
+- Action: Redact the text.
+- Expected result: Each value becomes [redacted] and the key name is kept.
+- Test: `packages/agent-app/tests/secret-redaction-long-names.test.ts::a secret whose key name is longer than 70 characters is redacted`
+- Environment: Node test runner; no network.
+- Known gaps: Unit test of the redactor. It does not export a chat or save a memory. The time-limit test in the same file passes on main, so it is not linked.
 - Evidence: UNVERIFIED
