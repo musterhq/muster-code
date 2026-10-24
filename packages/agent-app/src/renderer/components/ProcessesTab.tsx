@@ -10,7 +10,7 @@ import {openBrowserTab,openTab,selectChat,stopChat} from '../store';
 import {copyText} from '../clipboard';
 import {addComposerContext,type ContextChipSource} from '../composerContext';
 import {selectionWithin} from './ToolOutput';
-import {agentCommands,portURL,refreshListeningPorts,setTerminalDock,setTerminalPaneView,subscribeTerminalDock,subscribeTerminalPaneView,terminalDock,terminalPaneView,useListeningPorts,type AgentCommand,type TerminalPaneView} from '../processSummary';
+import {agentCommands,portURL,refreshListeningPorts,requestTerminal,setTerminalDock,setTerminalPaneView,subscribeTerminalDock,subscribeTerminalPaneView,subscribeTerminalRequests,terminalRequested,terminalDock,terminalPaneView,useListeningPorts,type AgentCommand,type TerminalPaneView} from '../processSummary';
 import {clearTerminal,disposeTerminal,openTerminalFind,reconcileTerminal,TerminalView,terminalText} from './TerminalView';
 import {useDisclosure} from './useDisclosure';
 import {TerminalAgentAccess} from './TerminalAgentAccess';
@@ -201,11 +201,12 @@ function PortChips({ports}:{ports:readonly ListeningPort[]}) {
  * otherwise opens the right-pane Terminal tab. */
 export function toggleTerminal(chatId:string,label:string):void {
   const dock=terminalDock();
-  if(dock.placement==='panel')setTerminalDock({open:!dock.open});else openTerminalTab(chatId,label,'terminals');
+  if(dock.placement==='panel'){if(!dock.open)requestTerminal(chatId);setTerminalDock({open:!dock.open});}else openTerminalTab(chatId,label,'terminals');
 }
 /** Open (or focus) the chat's Terminal resource, optionally revealing a kind of row. */
 export function openTerminalTab(chatId:string,label:string,view?:TerminalPaneView):void {
   void label; // one resource, one name: "Terminal"
+  if(!view||view==='terminals')requestTerminal(chatId);
   // Shells shown in the bottom panel open there rather than in a second right-pane copy.
   if(view==='terminals'&&terminalDock().placement==='panel'){setTerminalDock({open:true});return;}
   if(view)setTerminalPaneView(chatId,view);
@@ -216,6 +217,7 @@ const chosen=new Map<string,string>(),autoOpened=new Set<string>();
 /** Interactive PTYs for a conversation. Each emulator lives in a module registry,
  * so switching tabs or placements re-attaches it instead of replaying or restarting it. */
 function useTerminals(chatId:string,active:boolean,autoStart:boolean) {
+  const requested=useSyncExternalStore(subscribeTerminalRequests,()=>terminalRequested(chatId));
   const archived=useStoreSelector(state=>!!state.snapshot?.chats.find(chat=>chat.id===chatId)?.archived);
   const [terminals,setTerminals]=useState<TerminalInfo[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[creating,setCreating]=useState(false);
   const [loadError,setLoadError]=useState(''),[attempt,setAttempt]=useState(0);
@@ -243,7 +245,7 @@ function useTerminals(chatId:string,active:boolean,autoStart:boolean) {
     const initialLoad=()=>{void load().then(list=>{
       if(disposed)return;setLoading(false);
       // Opening Terminal on a conversation with no terminal starts one, once per window.
-      if(autoStart&&!list.length&&!autoOpened.has(chatId)&&!archived){autoOpened.add(chatId);void create();}
+      if(autoStart&&requested&&!list.length&&!autoOpened.has(chatId)&&!archived){autoOpened.add(chatId);void create();}
     },cause=>{
       if(disposed)return;
       if(retries<2){retryTimer=setTimeout(initialLoad,250*2**retries++);return;}
@@ -254,7 +256,7 @@ function useTerminals(chatId:string,active:boolean,autoStart:boolean) {
     const returned=()=>{if(document.visibilityState!=='hidden')void load().catch(()=>{});};
     document.addEventListener('visibilitychange',returned);window.addEventListener('focus',returned);
     return()=>{disposed=true;clearTimeout(retryTimer);unsubscribe();document.removeEventListener('visibilitychange',returned);window.removeEventListener('focus',returned);};
-  },[chatId,active,autoStart,attempt]);
+  },[chatId,active,autoStart,requested,attempt]);
   const current=terminals.find(row=>row.id===selected)??[...terminals].reverse().find(row=>row.status==='running')??terminals[terminals.length-1];
   const close=async(row:TerminalInfo)=>{
     setError('');
@@ -407,7 +409,7 @@ function DesktopProcessesTab({chatId,active=true}:{chatId:string;active?:boolean
   const agentPorts=ports.filter(port=>port.owner==='agent');
   const running=shells.terminals.filter(row=>row.status==='running').length+commands.sessions.filter(session=>isActiveProcess(session.status)).length+agent.filter(row=>row.running).length+agentPorts.length;
   const total=shells.terminals.length+commands.sessions.length+agent.length+agentPorts.length;
-  const newShell=()=>{if(inPane)void shells.create();else setTerminalDock({open:true});};
+  const newShell=()=>{if(inPane)void shells.create();else openTerminalTab(chatId,'Terminal','terminals');};
   return <section className="processes-tab terminal-pane" aria-label="Terminal">
     <header className="terminal-pane-head">
       <h2>Terminal</h2><span className="terminal-pane-count" role="status">{running} running{total>running?` · ${total-running} finished`:''}</span>
@@ -433,7 +435,7 @@ function DesktopProcessesTab({chatId,active=true}:{chatId:string;active?:boolean
     </div>
     <div className="terminal-pane-body">
       {inPane?<>{shells.current&&<div className="terminal-shell-tools" aria-label="Shell tools"><span className="terminal-shell-name">{shells.labelOf(shells.current)}</span><ShellTools chatId={chatId} shells={shells}/></div>}<ShellBody shells={shells} active={active}/></>
-        :<div className="processes-empty"><PanelBottom size={24} aria-hidden="true"/><p>Terminals are shown in the bottom panel under the conversation.</p><div className="terminal-placement-actions"><button type="button" className="terminal-start" onClick={()=>setTerminalDock({open:true})}><PanelBottom size={12}/>Show panel</button><button type="button" className="terminal-start" onClick={()=>setTerminalDock({placement:'pane',open:false})}><PanelRight size={12}/>Show here instead</button></div></div>}
+        :<div className="processes-empty"><PanelBottom size={24} aria-hidden="true"/><p>Terminals are shown in the bottom panel under the conversation.</p><div className="terminal-placement-actions"><button type="button" className="terminal-start" onClick={()=>openTerminalTab(chatId,'Terminal','terminals')}><PanelBottom size={12}/>Show panel</button><button type="button" className="terminal-start" onClick={()=>setTerminalDock({placement:'pane',open:false})}><PanelRight size={12}/>Show here instead</button></div></div>}
     </div>
   </section>;
 }

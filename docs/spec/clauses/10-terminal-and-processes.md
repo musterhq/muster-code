@@ -24,6 +24,7 @@ Boundaries:
 | [MUS-SPEC-10-473C](10-terminal-and-processes.md#mus-spec-10-473c) | An exit during a running turn, including a later turn, queues no follow-up. | [`no continuation when the chat is still mid-turn at exit (the agent sees it itself), and not later either`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 | [MUS-SPEC-10-473D](10-terminal-and-processes.md#mus-spec-10-473d) | User-owned processes, stopped processes, stopped turns and deleted or archived chats never queue a follow-up. | [`never for a user-started process, a user-stopped process, a user-stopped turn, a deleted or archived chat`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 | [MUS-SPEC-10-473E](10-terminal-and-processes.md#mus-spec-10-473e) | stop_background refuses the user's command, stops the agent's own process, and a stopped process sends no follow-up. | [`stop_background stops only the agent’s own process, and a stopped process sends no follow-up`](../../../packages/agent-app/tests/process-continuations.test.ts) |
+| [MUS-SPEC-10-642A](10-terminal-and-processes.md#mus-spec-10-642a) | With the terminal dock open, moving through five chats starts no shell and shows the empty state with New terminal; opening Terminal starts exactly one shell for that chat, and opening it again adds none. | [`browsing chats with the terminal dock open starts no shell; opening Terminal starts exactly one`](../../../packages/agent-app/tests/processes-components.tsx) |
 
 ### What the agent may stop
 
@@ -128,4 +129,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/process-continuations.test.ts::stop_background stops only the agent’s own process, and a stopped process sends no follow-up`
 - Environment: Node test runner; real child processes on a temp folder; no provider or network.
 - Known gaps: Uses the real process registry; the follow-up queue is a recording stub.
+- Evidence: UNVERIFIED
+
+### When a terminal starts
+
+<a id="mus-spec-10-642a"></a>
+#### MUS-SPEC-10-642A: Switching chats does not start a shell
+
+- Precondition: The bottom terminal dock is open and no chat has a terminal.
+- Action: Move through five chats one after another. Then press "Open Terminal" for the current chat, and press it once more.
+- Expected result: No shell is started while moving through the chats; each chat shows "No terminal is open" with a New terminal button. Opening Terminal starts exactly one shell, for the current chat, and reloads that chat's terminal list once. Opening it again does not start a second shell.
+- Test: `packages/agent-app/tests/processes-components.tsx::browsing chats with the terminal dock open starts no shell; opening Terminal starts exactly one`
+- Environment: DOM suite (`linkedom`); the app's calls are faked, so no real shell starts.
+- Known gaps: Counts the create requests the screen sends, not real shells. The Show panel button in the Terminal pane and the retry after a failed open are asserted in the same suite but outside this check, and the first also passes on `main`, so they are not linked. The suite `tests/terminal-load-retry-dom.tsx` was changed to ask for a terminal first; it is not linked here.
 - Evidence: UNVERIFIED
