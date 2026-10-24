@@ -1,4 +1,4 @@
-/** Run with node tests/run-recovery-notice.mjs; the store is imported after the DOM and bridge exist. */
+/** Run with npm run test:renderer (suite recovery-notice); the store is imported after the DOM and bridge exist. */
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {setTimeout as delay} from 'node:timers/promises';
