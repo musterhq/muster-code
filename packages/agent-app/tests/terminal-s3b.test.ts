@@ -7,6 +7,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {TerminalSessions} from '../src/runtime/terminal-sessions.ts';
 import {availableShells,resolveTerminalShell,shellArgs,validCustomShell,type ShellProbe} from '../src/runtime/terminal-shell.ts';
 import {spawnRemoteTerminal,type AppServerConnection} from '../src/runtime/remote-terminal.ts';
+import {registerChatTokenIssuer} from '../src/runtime/governance/chat-binding.ts';
 import {readTerminalForAgent,TerminalToolHost,TERMINAL_EMPTY,TERMINAL_MCP,TERMINAL_MCP_LAUNCHER_ENV,TERMINAL_NOT_ALLOWED} from '../src/runtime/terminal-agent-tools.ts';
 import {isTerminalShellPreference,validateSetting,SETTING_DEFAULTS} from '../src/shared/domains/settings-protocol.ts';
 import {createAgentService} from '../src/runtime/service.ts';
@@ -161,6 +162,7 @@ test('C3.b4: consent is explicit, per chat, persisted and revocable; only allowe
   await fs.writeFile(launcher,'#!/bin/sh\n',{mode:0o700});
   const saved=process.env[TERMINAL_MCP_LAUNCHER_ENV];process.env[TERMINAL_MCP_LAUNCHER_ENV]=launcher;
   t.after(()=>{if(saved===undefined)delete process.env[TERMINAL_MCP_LAUNCHER_ENV];else process.env[TERMINAL_MCP_LAUNCHER_ENV]=saved;});
+  const unissue=registerChatTokenIssuer(TERMINAL_MCP,id=>`token-for-${id}`);t.after(unissue);
   const inputs:ProviderInput[]=[];
   const provider:ProviderAdapter={info,async run(input){inputs.push(input);return {status:'completed',finalMessage:'ok'} satisfies ProviderResult;},stop:async()=>true,dispose(){}};
   let service=createAgentService({dataDir,provider,onEvent(){}});
@@ -173,6 +175,7 @@ test('C3.b4: consent is explicit, per chat, persisted and revocable; only allowe
   const run=await send(chat.id);
   assert.equal(run.configOverrides?.[`mcp_servers.${TERMINAL_MCP}.command`],launcher);
   assert.equal(run.configOverrides?.[`mcp_servers.${TERMINAL_MCP}.env.MUSTER_CHAT_ID`],chat.id);
+  assert.equal(run.configOverrides?.[`mcp_servers.${TERMINAL_MCP}.env.MUSTER_CHAT_TOKEN`],`token-for-${chat.id}`);
   assert.equal((await send(other.id)).configOverrides?.[`mcp_servers.${TERMINAL_MCP}.command`],undefined,'consent is per chat');
   await service.dispose();
   service=createAgentService({dataDir,provider,onEvent(){}});
