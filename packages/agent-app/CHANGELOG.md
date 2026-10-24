@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - The agent's rule about not stopping processes it did not start now applies to local processes only. Remote hosts, systemd or launchd services, and anything you explicitly ask it to stop or restart are no longer refused.
+- Installing a plugin or MCP connector while a chat is working now makes it usable right away: the chat restarts on a fresh session (keeping its conversation) and re-sends your last message, with a short notice saying so. Idle chats whose last message asked for that plugin get the same treatment; unrelated chats are left alone.
 - Memory: facts and preferences you told Muster once now carry into project and folder chats, and recall looks at your task and recent messages (not just "continue"), with a longer wait for the memory service.
 - Memory context is sent again on the next turn after a compaction or a model/provider change.
 - The browser tab an agent is working in now stays usable when you close the browser panel mid-run: it is no longer frozen or discarded while in use, live previews revive it, and browser tool calls retry safely after a dropped connection (never repeating a click or keystroke).
