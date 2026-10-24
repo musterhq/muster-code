@@ -20,6 +20,8 @@ Boundaries:
 | [MUS-SPEC-02-608B](02-turns-streaming-and-queue.md#mus-spec-02-608b) | A reconnect that stalls after one failure is stopped when the reconnect time limit passes, with the proxy named. | [`stalled reconnect stops by deadline without further transport events`](../../../packages/agent-app/tests/network-reconnect.test.ts) |
 | [MUS-SPEC-02-608C](02-turns-streaming-and-queue.md#mus-spec-02-608c) | A failed web request to a model gives a plain cause for a proxy, DNS, certificate or refused connection, marks the turn as not sent, and never shows the user name or password in the address. | [`HTTP fetch failures explain nested proxy, DNS, TLS and refused causes without credentials`](../../../packages/agent-app/tests/network-reconnect.test.ts) |
 | [MUS-SPEC-02-608D](02-turns-streaming-and-queue.md#mus-spec-02-608d) | The failure banner for a network error shows Retry even with an empty draft, runs the turn retry once per click with a busy state, and never sends the text in the composer instead. | [`a failed network turn offers Retry, which re-runs the turn and never sends the draft in its place`](../../../packages/agent-app/tests/recovery-notice.tsx) |
+| [MUS-SPEC-02-473H](02-turns-streaming-and-queue.md#mus-spec-02-473h) | The no-promise rule is in Agent mode instructions and not in Ask or Plan. | [`agent-mode instructions forbid ending a turn on a promise`](../../../packages/agent-app/tests/process-continuations.test.ts) |
+| [MUS-SPEC-02-473J](02-turns-streaming-and-queue.md#mus-spec-02-473j) | A closing promise makes the run advanced or plan-only, never completed; ordinary endings stay completed. | [`liveness: a turn that ends promising to report back is not completed`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 
 ### Network failures and reconnects
 
@@ -65,4 +67,28 @@ Boundaries:
 - Test: `packages/agent-app/tests/recovery-notice.tsx::a failed network turn offers Retry, which re-runs the turn and never sends the draft in its place`
 - Environment: DOM suite (`linkedom`), run with `tests/run-recovery-notice.mjs`; the app's calls are faked.
 - Known gaps: The retry handler is a stand-in that counts calls, so the test does not show the turn really starting again. It is not part of `test:renderer`; run it by hand.
+- Evidence: UNVERIFIED
+
+### Turns that end on a promise
+
+<a id="mus-spec-02-473h"></a>
+#### MUS-SPEC-02-473H: Agent mode tells the agent never to end a turn on a promise
+
+- Precondition: Chats in Agent, Ask and Plan mode.
+- Action: Build the run instructions for each.
+- Expected result: Agent mode includes the rule "Never end a turn promising future work" that tells the agent to wait with a tool call, next to the keep-going rule. Ask and Plan do not.
+- Test: `packages/agent-app/tests/process-continuations.test.ts::agent-mode instructions forbid ending a turn on a promise`
+- Environment: Node test runner; no provider or network.
+- Known gaps: Checks the instruction text only. It does not show a model obeying it.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-473j"></a>
+#### MUS-SPEC-02-473J: A turn that ends on a promise is not counted as completed
+
+- Precondition: Turns whose last paragraph promises to report back later, and turns that end with a result.
+- Action: Classify each run, with some tool calls and then with none.
+- Expected result: A promise ending counts as advanced with work and plan-only with none. A turn that merely mentions reporting earlier, or says a CI job will report, still counts as completed.
+- Test: `packages/agent-app/tests/process-continuations.test.ts::liveness: a turn that ends promising to report back is not completed`
+- Environment: Node test runner; no provider or network.
+- Known gaps: A unit test of a text classifier, so wording it does not recognise is not caught.
 - Evidence: UNVERIFIED

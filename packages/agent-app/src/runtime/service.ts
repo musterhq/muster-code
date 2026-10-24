@@ -1,4 +1,5 @@
 import { applyPendingRestore } from './backups.ts';
+import { APPROVAL_SHOWN_EVENT } from './turn-ledger.ts';
 import { addMemory, listMemory, searchMemory, inspectMemoryStore, isVisibleInScopes, projectMemoryScope } from './memory-adapter.ts';
 import { createMemoryIdentity } from './memory-identity.ts';
 import { createSnapshotCoalescer } from './snapshot-coalescer.ts';
@@ -8,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs, existsSync, mkdirSync, copyFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { rescanProviderListings, setProviderListingStore } from './provider-instances.ts';
-import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, TimelineItem, WakeReason } from '../shared/protocol.ts';
+import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, QueuedMessage, TimelineItem, WakeReason } from '../shared/protocol.ts';
 import { CONTEXT_OVERFLOW, musterCompactAt, withUserWindow } from '../shared/context-window.ts';
 import type { PendingAttentionSummary, AttentionRequest } from '../shared/attention-protocol.ts';
 import { discoverLocalProviders } from './provider-discovery.ts';
@@ -43,6 +44,7 @@ import {parseKillIntent, userProcessThreat, type UserProcessTarget, type UserPro
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
 import { ProjectTaskStore, type TaskStatus } from './project-tasks.ts';
 import { ChatQueue, queueActionAfter } from './chat-queue.ts';
+import { PluginReloads, installedPlugin, lastTurn, pluginReloadNotice, turnAbout, turnMentions, type InstalledPlugin } from './plugin-reload.ts';
 import { createNativeThreadBridge } from './codex-native.ts';
 import { createNativeTurnObserver } from './native-turns.ts';
 import { createNativeQueueMirror } from './native-queue.ts';
@@ -138,6 +140,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   // M4 (#319): ids merged by the duplicate-folder migration are remapped in the stores that keep their own database files.
   try { const aliases = store.pendingFolderAliases(); if (Object.keys(aliases).length && applyFolderAliases(options.dataDir, aliases)) store.clearFolderAliases(); } catch { /* retried on the next start */ }
   const queue = new ChatQueue(store);
+  const pluginReloads = new PluginReloads();
   const attachments = new ChatAttachments(store.database(), options.dataDir);
   const domainHooks = createDomainHooks();
   const steered = new Map<string, string>();
@@ -580,7 +583,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (chat.providerBindingId && chat.providerBindingId!==bindingId) throw new Error('The selected provider account or profile changed. Select it again before sending. Your draft is retained.');
     const nativeMatches=chat.providerThreadProviderId===selectedProvider.id && chat.providerThreadBindingId===bindingId;
     if (!chat.providerBindingId || (chat.providerThreadId && !nativeMatches)) {
-      if (chat.providerThreadId && !nativeMatches) { store.appendItem(chatId,'notice','This provider will start a fresh conversation with a summary of the earlier messages. The displayed chat history is retained.','completed'); store.requireDigest(chatId); }
+      if (chat.providerThreadId && !nativeMatches) { store.appendItem(chatId,'notice','This provider will start a fresh conversation with a summary of the earlier messages. The displayed chat history is retained.','completed'); store.requireDigest(chatId); contextLedger.forget(chatId); }
       chat=store.updateChat(chatId,{providerId:selectedProvider.id,providerBindingId:bindingId,...(!nativeMatches?{providerThreadId:null,providerTurnId:null,providerThreadProviderId:null,providerThreadBindingId:null}:{})});
     }
     const access = providerAccessPolicy(chat);
@@ -680,7 +683,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         let retryDetail: string | undefined;
         const stoppedBeforeDispatch: ProviderResult = {status:'failed',finalMessage:'',dispatchState:'not-dispatched',recovery:{kind:'cancelled',retryable:false,reason:'Stopped before the request was sent.'}};
         const attempt = () => run.stopped ? Promise.resolve(stoppedBeforeDispatch) : provider.run({ chat: {...chat,providerTurnId:undefined,recovery:undefined}, cwd, prompt: contextualPrompt,
-          ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) ? {connectorsRequested: true} : {}),
+          ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) || pluginReloads.wantsConnectors(chatId) ? {connectorsRequested: true} : {}),
           ...(runOptions.configOverrides ? {configOverrides: runOptions.configOverrides as Record<string, string | number | boolean | string[]>} : {}), ...(runOptions.developerInstructions ? {developerInstructions: runOptions.developerInstructions} : {}),
           onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
           onThreadReady: threadId => persistIdentity(threadId),
@@ -857,6 +860,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               if (policy !== 'ask') return elicitationResult(policy === 'accept');
               const text = elicitationText(params);
               const expiresAt = attentionDeadline(Date.now(), await mutedUntilMs());
+              domainHooks.providerEvent({ chat, method: APPROVAL_SHOWN_EVENT, params: {} });
               const item = store.appendItem(chatId, 'approval', `${server || 'Computer use'} asks: ${text}`, 'pending', { method, kind: 'mcp', elicitation: true, reason: text, expiresAt: new Date(expiresAt).toISOString(), ...(server ? { server } : {}) });
               const approvalId = item.id;
               timeline(chatId);
@@ -889,6 +893,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             const data: ApprovalData = {...approvalData(method, params, change), ...(threat ? {reason: threat.message, protectsUserProcess: true} : {})};
             const toolItemId = typeof params.itemId === 'string' ? toolIds.get(params.itemId) : undefined;
             const expiresAt = attentionDeadline(Date.now(), await mutedUntilMs());
+            domainHooks.providerEvent({chat, method: APPROVAL_SHOWN_EVENT, params: {}});
             const item = store.appendItem(chatId, 'approval', detail(params.command ?? params.reason ?? params.changes ?? data.tool ?? data.kind), 'pending', {...data, expiresAt: new Date(expiresAt).toISOString(), ...(toolItemId ? {toolItemId} : {})});
             const approvalId = item.id;
             // F60: the tool row the provider already started is blocked on this card, not running. Flag it so the
@@ -999,6 +1004,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   }
   /** A completed run hands the queue head to chat.send; any other ending pauses the queue until the user resumes it (Codex). */
   function afterRun(chatId: string, status: Chat['status']) {
+    // A turn stopped because a plugin was installed mid-run: the re-sent message goes next, on a fresh session.
+    if (pluginReloads.settled(chatId) && !closing && !disposed) { queue.resume(chatId); provider.markStale?.(); dispatchQueued(chatId); state(); return; }
     if (!store.queue(chatId).length || closing || disposed) return;
     if (queueActionAfter(status) === 'dispatch') { dispatchQueued(chatId); return; }
     queue.pause(chatId, status === 'interrupted' ? 'interrupted' : 'failed'); state();
@@ -1140,6 +1147,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     timeline(chat.id);
   }
   async function deleteChat(chatId: string): Promise<void> {
+    pluginReloads.forget(chatId);
     for (const item of queue.list(chatId)) queue.remove(chatId, item.id);
     const run = runs.get(chatId);
     if (run) {
@@ -1652,9 +1660,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'chat.stop': { const chatId = id(p.id); chatFor(chatId); const run = runs.get(chatId); if (!run) return;
         // Codex pauses an active goal before interrupting, so the stop never triggers a continuation.
         if (goalsByChat().get(chatId)?.status === 'active') { try { await domains.handlers.get('goals.pause')?.({chatId}); } catch { /* the goal was cleared meanwhile */ } }
-        run.stopped = true; run.retry.abort(); store.updateChat(chatId, {status: 'stopping'}); settleApprovals(chatId); settleQuestions(chatId); state(); await provider.stop(chatId);
-        // A turn the app-server started itself settles on its own turn/completed; if its session is gone, settle it here.
-        nativeTurns.stopped(chatId, !!provider.nativeThread?.(chatId)); return; }
+        await interruptRun(chatId, run); return; }
       case 'chat.reconcile': {
         const chatId=id(p.id),chat=chatFor(chatId);
         if (runs.has(chatId) || chat.status === 'running' || chat.status === 'stopping') return {chat,resolved:false,reason:'This attempt is still running locally. Stop it or wait before checking recovery.'};
@@ -1842,6 +1848,38 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       }
     }
   }
+  async function interruptRun(chatId: string, run: ActiveRun) {
+    run.stopped = true; run.retry.abort(); store.updateChat(chatId, {status: 'stopping'}); settleApprovals(chatId); settleQuestions(chatId); state(); await provider.stop(chatId);
+    // A turn the app-server started itself settles on its own turn/completed; if its session is gone, settle it here.
+    nativeTurns.stopped(chatId, !!provider.nativeThread?.(chatId));
+  }
+  /** A plugin or MCP server installed while chats work: the provider's tool list is fixed per session, so chats whose
+   *  current or recent turn was about it restart on a fresh session that resumes their thread and re-send their
+   *  last message through the queue. Once per install and chat. */
+  function reloadForInstall(plugin: InstalledPlugin) {
+    if (closing || disposed) return;
+    // Idle warm sessions re-launch (resuming the same thread) before their next send, so every chat sees the new tools.
+    provider.markStale?.();
+    for (const chat of store.snapshot().chats) {
+      if (chat.archived || chat.recovery?.kind === 'recovery-needed' || compactions.has(chat.id)) continue;
+      const run = runs.get(chat.id), running = !!run && !run.stopped;
+      if (!running && (run || chat.status === 'running' || chat.status === 'stopping')) continue;
+      const turn = lastTurn(store.timeline(chat.id));
+      if (!turn.prompt?.text.trim()) continue;
+      // Only chats whose turn is about this plugin: other running work is never interrupted and re-sent.
+      if (running ? !turnMentions(plugin, turn) : !turnAbout(plugin, turn, chat.updatedAt)) continue;
+      if (!pluginReloads.claim(plugin, chat.id)) continue;
+      let item: QueuedMessage;
+      try { item = queue.add(chat.id, {text: turn.prompt.text, requestId: randomUUID(), attachmentIds: []}); queue.promote(chat.id, item.id); }
+      catch { continue; }
+      store.appendItem(chat.id, 'notice', pluginReloadNotice(plugin.name), 'completed', {kind: 'plugin-reloaded', plugin: plugin.name});
+      timeline(chat.id);
+      if (running) { pluginReloads.await(chat.id); void interruptRun(chat.id, run!).catch(() => undefined); }
+      else { queue.resume(chat.id); dispatchQueued(chat.id); }
+    }
+    state();
+  }
+  const offInstalls = domainHooks.hooks.onCommand?.(({command, output}) => { const plugin = installedPlugin(command, output); if (plugin) reloadForInstall(plugin); });
   // --- S3-B Codex native thread APIs: goals, queue and projects delegate to the app-server where it supports them ---
   const native = provider.nativeThread && provider.nativeCall ? createNativeThreadBridge({
     thread: chatId => provider.nativeThread!(chatId),
@@ -1939,7 +1977,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     disposal = (async () => {
       watcher.dispose(); watchedFolders.clear();
       for (const [chatId, run] of runs) { run.stopped = true; run.retry.abort(); settleApprovals(chatId); settleQuestions(chatId); }
-      offIdleEvents?.(); offQueueEvents(); nativeTurns.dispose();
+      offIdleEvents?.(); offQueueEvents(); offInstalls?.(); nativeTurns.dispose();
       provider.dispose();
       // Main owns the user-visible deadline. Keep the database open until all
       // tracked callbacks settle, even if main times out and keeps the app open.
