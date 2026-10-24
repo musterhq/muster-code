@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- The browser tab an agent is working in now stays usable when you close the browser panel mid-run: it is no longer frozen or discarded while in use, live previews revive it, and browser tool calls retry safely after a dropped connection (never repeating a click or keystroke).
 - Project task runs now keep working while a build, test or deploy is running instead of stopping to wait, and only stop for decisions the user must make.
 - Agents post the task handoff comment themselves instead of drafting it and asking whether to post it.
 - Usage stats and Receipts now count only approvals that actually showed you a card; requests accepted automatically in Full access are no longer counted as prompts.
