@@ -40,6 +40,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Long replies stay smooth while they stream: the message box and every link in the transcript no longer redraw on each new word
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 - The Changes tab, Processes tab, Subagents tab and branch picker no longer redraw on every streamed word or keystroke while open
+- Cloning refuses a repository URL that has an access token in place of a username, so the token is never saved in the new repository's settings.
 - Settings › Muster Server buttons (invite, revoke, connector and agent actions) ignore a second click while the first is still running, so they no longer fire twice.
 - Help › Third-Party Notices now lists the license of every bundled package. The `buffers` package, which declared none, is recorded as MIT.
 - The Dashboard prices turns the provider reported no cost for from the model catalog or your Settings › Models prices; turns with no known price still count as unpriced.
