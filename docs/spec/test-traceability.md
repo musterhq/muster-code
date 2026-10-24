@@ -11,6 +11,7 @@ One row per clause file that has at least one case. The checker reports a clause
 | Clause | Area |
 |---|---|
 | `MUS-SPEC-02` | [Turns, streaming and the message queue](clauses/02-turns-streaming-and-queue.md) |
+| `MUS-SPEC-03` | [Providers, models and accounts](clauses/03-providers-models-and-accounts.md) |
 | `MUS-SPEC-04` | [Context window and compaction](clauses/04-context-window-and-compaction.md) |
 | `MUS-SPEC-05` | [Access modes, approvals and tool permissions](clauses/05-access-modes-and-approvals.md) |
 | `MUS-SPEC-10` | [Terminal and background processes](clauses/10-terminal-and-processes.md) |

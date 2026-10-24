@@ -77,3 +77,6 @@ Boundaries:
 - Environment: Node test runner; real child processes on a temp folder; no provider or network.
 - Known gaps: Uses the real process registry; the follow-up queue is a recording stub.
 - Evidence: UNVERIFIED
+A PR that changes this area adds its cases here first: one row in this table, then the case block below it (see [acceptance-cases.md](../acceptance-cases.md)).
+
+|---|---|---|

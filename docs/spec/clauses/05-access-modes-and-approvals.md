@@ -43,3 +43,6 @@ Boundaries:
 - Environment: Node test runner; temp folder; no provider or network.
 - Known gaps: Checks the run options, not a model using the tool.
 - Evidence: UNVERIFIED
+A PR that changes this area adds its cases here first: one row in this table, then the case block below it (see [acceptance-cases.md](../acceptance-cases.md)).
+
+|---|---|---|
