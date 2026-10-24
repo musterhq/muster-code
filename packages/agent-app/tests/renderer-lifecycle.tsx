@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
+import {check} from './dom-check.ts';
 import { setTimeout as delay } from 'node:timers/promises';
 const require = createRequire(import.meta.url);
 const {parseHTML} = require('linkedom');
@@ -267,11 +268,17 @@ assert.equal(selection,'Data!B101');
 const down=new window.Event('keydown',{bubbles:true});Object.assign(down,{key:'ArrowDown'});
 tableRoot.querySelector('[data-cell="100:1"]')!.dispatchEvent(down);await delay(20);
 assert.match(tableRoot.querySelector('[data-selected="true"]')!.textContent!,/row 101/);
-tableReact.render(<WorkbookFile workbook={{...workbook,revision:'two',sheets:[{...workbook.sheets[0],rows:[['short','refresh']]}]}} onLocation={value=>{selection=value;}}/>);await delay(40);
-assert.match(tableRoot.querySelector('.workbook-pages')!.textContent!,/1–1 of 1 rows/);
-assert.match(tableRoot.querySelector('.workbook-grid')!.textContent!,/refresh/);
-assert.ok(tableRoot.querySelectorAll('.workbook-grid tbody tr').length>1,'sheet surface fills the viewport with addressable blank Excel rows after used data');
-assert.equal(tableRoot.querySelector('[data-selected="true"]')?.getAttribute('data-selected'),'true','refreshed sheet selects its first available cell');
+// Spec: MUS-SPEC-07-276A (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-276a)
+await check('refreshed sheet selects its first available cell',async()=>{
+  // A starved runner renders late: make the first read of the refreshed rows cost 120 ms of CPU, as on the slow Intel runner.
+  let slow=true;const refreshedRows=[['short','refresh']];
+  const refreshed={...workbook.sheets[0]};Object.defineProperty(refreshed,'rows',{get(){if(slow){slow=false;for(const end=Date.now()+120;Date.now()<end;);}return refreshedRows;}});
+  tableReact.render(<WorkbookFile workbook={{...workbook,revision:'two',sheets:[refreshed]}} onLocation={value=>{selection=value;}}/>);await delay(40);
+  assert.match(tableRoot.querySelector('.workbook-pages')!.textContent!,/1–1 of 1 rows/);
+  assert.match(tableRoot.querySelector('.workbook-grid')!.textContent!,/refresh/);
+  assert.ok(tableRoot.querySelectorAll('.workbook-grid tbody tr').length>1,'sheet surface fills the viewport with addressable blank Excel rows after used data');
+  assert.equal(tableRoot.querySelector('[data-selected="true"]')?.getAttribute('data-selected'),'true','refreshed sheet selects its first available cell');
+});
 (tableRoot.querySelector('[data-cell="15:7"]') as HTMLButtonElement).click();await delay(20);
 assert.equal(tableRoot.querySelector('.workbook-grid td[data-selected="true"] button')?.getAttribute('aria-label'),'H16 (blank)','visible empty worksheet cells remain selectable and announce their address');
 assert.match(tableRoot.querySelector('.workbook-grid thead')!.textContent!,/H/,'worksheet column letters continue across the visible blank grid');
