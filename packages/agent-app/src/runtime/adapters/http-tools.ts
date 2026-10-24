@@ -158,15 +158,20 @@ async function writeConfined(resolved: Resolved, content: string): Promise<void>
   const existed = before !== undefined;
   const noFollow = typeof fsc.O_NOFOLLOW === 'number' ? fsc.O_NOFOLLOW : 0;
   const handle = await fs.open(file, fsc.O_WRONLY | fsc.O_CREAT | noFollow, 0o644);
-  // Cleanup removes only the file this call created: the inode the handle holds, wherever it ended up. A name that now
-  // resolves to some other file (a racer swapped in a link) is never unlinked.
+  // Where the open really put the file, read straight away: a racer can swap a folder on the way for a link and back again,
+  // so the name alone may no longer lead to it by the time cleanup runs.
+  const landed = await Promise.all([fs.realpath(file).catch(() => undefined), fs.realpath(dirname(file)).then(dir => join(dir, name), () => undefined)]);
+  // Cleanup removes only the file this call created: the inode the handle holds, where it landed or where the name leads
+  // now. A path that holds some other file (a racer swapped in a link) is never unlinked. Content is written only after the
+  // open file is proven to be inside the folder, so a file a racer redirected elsewhere is empty.
   let ours: {dev: number; ino: number} | undefined;
   const removeOurs = async () => {
     if (existed || !ours) return;
-    const stray = await fs.realpath(file).catch(() => undefined);
-    if (!stray || isInsidePath(base, stray)) return;
-    const seen = await fs.lstat(stray).catch(() => undefined);
-    if (seen && !seen.isSymbolicLink() && seen.dev === ours.dev && seen.ino === ours.ino) await fs.unlink(stray).catch(() => {});
+    const places = new Set([...landed, await fs.realpath(file).catch(() => undefined)].filter((place): place is string => !!place && !isInsidePath(base, place)));
+    for (const stray of places) {
+      const seen = await fs.lstat(stray).catch(() => undefined);
+      if (seen && !seen.isSymbolicLink() && seen.dev === ours.dev && seen.ino === ours.ino) await fs.unlink(stray).catch(() => {});
+    }
   };
   try {
     const info = await handle.stat();
