@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {stripAnsi,appendCommandOutput} from '../src/runtime/command-output-buffer.ts';
+import {PROCESS_OWNERSHIP_RULE} from '../src/runtime/provider.ts';
 import {userProcessNote} from '../src/runtime/service.ts';
 import {goalDeclaredDone,goalUpdate} from '../src/runtime/domains/goals.ts';
 import {withAdmissionRetry,isSafeTransientFailure,TRANSIENT_RETRY_MAX} from '../src/runtime/admission-retry.ts';
@@ -12,11 +13,20 @@ test('tool output drops ANSI colour codes, including a sequence split across chu
   assert.equal(joined, 'ok green');
 });
 
+// Spec: MUS-SPEC-10-455A (docs/spec/clauses/10-terminal-and-processes.md#mus-spec-10-455a)
 test('the agent is told which live processes belong to the user', () => {
   assert.equal(userProcessNote([], '/repo'), '');
   const note = userProcessNote([{pgid: 4100, label: 'terminal zsh', chatId: 'c', cwd: '/elsewhere'}, {pgid: 4200, label: 'terminal zsh', chatId: 'c', cwd: '/repo/apps/web'}], '/repo');
-  assert.match(note, /Never signal, kill or restart/);
+  assert.match(note, /Never signal, kill or restart the process groups listed below/);
+  assert.match(note, /remote hosts \(ssh, servers\), systemd or launchd services, and anything the user explicitly asks for are allowed/);
   assert.ok(note.indexOf('4200') < note.indexOf('4100'), 'processes in this folder are listed first');
+});
+
+// Spec: MUS-SPEC-10-455B (docs/spec/clauses/10-terminal-and-processes.md#mus-spec-10-455b)
+test('the process-ownership rule is scoped to local processes and names the allowed exceptions', () => {
+  assert.match(PROCESS_OWNERSHIP_RULE, /local machine only/);
+  assert.match(PROCESS_OWNERSHIP_RULE, /in-app terminals, Commands-tab commands and dev servers/);
+  assert.match(PROCESS_OWNERSHIP_RULE, /does not apply to remote hosts \(ssh, servers\), systemd or launchd services, or anything the user explicitly asks/);
 });
 
 test('goal completion is read from the update line; a plain declaration is only recognised (it earns the completion check), not from plans', () => {
