@@ -17,7 +17,7 @@ test('clone URLs whose username is a token are rejected', () => {
     'https://x-access-token:@github.com/o/r.git',
     'https://oauth2:@gitlab.com/o/r.git',
     'https://x-token-auth@bitbucket.org/o/r.git',
-    `https://${TOKEN.replace('_', '%5F')}@github.com/o/r.git`,
+    `https://${TOKEN.replaceAll('_', '%5F')}@github.com/o/r.git`,
     'https://0123456789abcdef0123456789abcdef01234567@host.example/o/r.git',
     'http://AbCdEfGhIjKlMnOpQrStUvWxYz1234@host.example/o/r.git',
     // git splits user:password before decoding, so an encoded colon still stores the token in .git/config.
