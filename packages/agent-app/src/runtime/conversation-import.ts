@@ -235,7 +235,16 @@ export async function* readCodexRollout(path: string, maxBytes?: number): AsyncG
       if (announce()) yield { type: 'meta', meta };
       continue;
     }
-    if (type === 'turn_context') { const p = record(row.payload); if (p) { meta.cwd = str(p.cwd) || meta.cwd; meta.model = str(p.model) || meta.model; } continue; }
+    if (type === 'turn_context') {
+      const p = record(row.payload);
+      if (p) {
+        const model = str(p.model);
+        meta.cwd = str(p.cwd) || meta.cwd;
+        // The header was announced before this line: announce again when it names a new model, so the importer records it.
+        if (model && model !== meta.model) { meta.model = model; if (announced) yield { type: 'meta', meta: { ...meta } }; }
+      }
+      continue;
+    }
     if (type === 'event_msg') {
       const p = record(row.payload);
       if (p?.type === 'turn_aborted') yield { type: 'item', item: { kind: 'notice', text: 'Turn interrupted', status: 'completed', createdAt: at, data: { kind: 'interrupted' } } };
@@ -314,7 +323,7 @@ function claudeToolItem(id: string, name: string, input: Record<string, unknown>
 }
 /** Streams a Claude Code session transcript. Sidechain (subagent) lines and injected context are skipped. */
 export async function* readClaudeTranscript(path: string, maxBytes?: number): AsyncGenerator<ImportedEvent> {
-  const meta: SessionMeta = { sessionId: basename(path, '.jsonl') };
+  const meta: SessionMeta = { sessionId: basename(path, '.jsonl'), provider: 'anthropic' };
   let announced = false, at = mtimeIso(path);
   for await (const row of jsonLines(path, maxBytes)) {
     if (typeof row.timestamp === 'string') at = isoAt(row.timestamp, at);
@@ -328,7 +337,7 @@ export async function* readClaudeTranscript(path: string, maxBytes?: number): As
     if (typeof row.sessionId === 'string' && row.sessionId) meta.sessionId = row.sessionId;
     if (!announced) { announced = true; meta.startedAt = at; yield { type: 'meta', meta }; }
     const message = record(row.message); if (!message) continue;
-    if (typeof message.model === 'string') meta.model = message.model;
+    if (typeof message.model === 'string' && message.model !== meta.model) { meta.model = message.model; yield { type: 'meta', meta: { ...meta } }; }
     const content = message.content;
     if (type === 'user') {
       const blocks = Array.isArray(content) ? content.map(record).filter((b): b is Record<string, unknown> => !!b) : [];
@@ -627,8 +636,8 @@ async function openCodeMessages(storage: string, sessionId: string): Promise<Arr
     if (rows.length >= MAX_ITEMS_PER_SESSION) break;
     const message = await openCodeRecord(join(dir, `${id}.json`), OPENCODE_RECORD_BYTES);
     if (!message || (message.role !== 'user' && message.role !== 'assistant')) continue;
-    const created = record(message.time)?.created, model = str(message.modelID) || str(record(message.model)?.modelID);
-    rows.push({ id, role: str(message.role), createdAt: isoAt(created, new Date(0).toISOString()), at: typeof created === 'number' ? created : 0, ...(model ? { model } : {}) });
+    const created = record(message.time)?.created, model = str(message.modelID) || str(record(message.model)?.modelID), provider = str(message.providerID) || str(record(message.model)?.providerID);
+    rows.push({ id, role: str(message.role), createdAt: isoAt(created, new Date(0).toISOString()), at: typeof created === 'number' ? created : 0, ...(model ? { model } : {}), ...(provider ? { provider } : {}) });
   }
   return rows.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id)).map(({ at: _at, ...row }) => row);
 }
@@ -669,6 +678,7 @@ export async function* readOpenCodeSession(sessionPath: string, dataDir: string)
   let announced = false;
   for (const message of await openCodeMessages(storage, sessionId)) {
     if (message.model) meta.model = message.model;
+    if (message.provider) meta.provider = message.provider;
     if (!announced) { announced = true; yield { type: 'meta', meta }; }
     const parts = await openCodeParts(storage, message.id), at = message.createdAt;
     if (message.role === 'user') {

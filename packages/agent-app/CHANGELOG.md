@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - Configured Responses routers no longer reconnect and fail when a completed response omits cache or reasoning usage counters. Existing counts, authentication, and chat history are preserved; truncated streams still report a failure.
+- Imported chats keep the model and provider their own session ran (for example a Codex session on GPT, or a Claude Code session on Claude). The note at the top of the chat names them as read-only text, and the Ledger attributes the imported turns to that model instead of the app default.
 - The Linux app's terminal works again on Ubuntu 24.04. Linux builds are made on Ubuntu 24.04, so the terminal module runs there and on newer releases.
 - Settings › Muster Server buttons (invite, revoke, connector and agent actions) ignore a second click while the first is still running, so they no longer fire twice.
 - The Dashboard prices turns the provider reported no cost for from the model catalog or your Settings › Models prices; turns with no known price still count as unpriced.
