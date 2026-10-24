@@ -37,6 +37,7 @@ Boundaries:
 | [MUS-SPEC-12-558B](12-projects-orgs-and-tasks.md#mus-spec-12-558b) | A failed impact check shows its error and a Try again button, and clicking it shows the impact list. | [`archive confirmation offers Try again after a failed impact check`](../../../packages/agent-app/tests/project-confirm-retry-dom.tsx) |
 | [MUS-SPEC-12-558C](12-projects-orgs-and-tasks.md#mus-spec-12-558c) | After the runtime rejects a quiet-hours value of 9999, the field shows the saved value 8. | [`a quiet-hours value the runtime rejects is replaced by the saved value`](../../../packages/agent-app/tests/checkout-settings-reject-dom.tsx) |
 | [MUS-SPEC-12-560C](12-projects-orgs-and-tasks.md#mus-spec-12-560c) | On a Russian layout the physical C, G then I keys run New task and Go to Inbox; on a Dvorak-style Latin layout the typed letter still wins. | [`single-key shortcuts follow the physical letter on non-Latin layouts`](../../../packages/agent-app/tests/wave3-nav.test.ts) |
+| [MUS-SPEC-12-572A](12-projects-orgs-and-tasks.md#mus-spec-12-572a) | A priority named like an object key is dropped, not sent. | [`creating a task ignores a priority that is an Object.prototype key`](../../../packages/agent-app/tests/protocol-bughunt.test.ts) |
 
 <a id="mus-spec-12-573a"></a>
 #### MUS-SPEC-12-573A: Two wakes in one moment join into one waiting wake
@@ -279,4 +280,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/wave3-nav.test.ts::single-key shortcuts follow the physical letter on non-Latin layouts`
 - Environment: Node test runner; no UI and no network.
 - Known gaps: Unit test of the shortcut resolver with key event objects, not real key presses in a window. The resolver's use in the screens is not driven.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-12-572a"></a>
+#### MUS-SPEC-12-572A: A task priority named like an object key is ignored
+
+- Precondition: A workspace with one project and a fake command channel.
+- Action: Create a task whose priority is constructor, toString, __proto__ or hasOwnProperty.
+- Expected result: Each task is still created, and none of them carries a priority.
+- Test: `packages/agent-app/tests/protocol-bughunt.test.ts::creating a task ignores a priority that is an Object.prototype key`
+- Environment: Node test runner; no network.
+- Known gaps: The command channel is fake. It does not use the New task form.
 - Evidence: UNVERIFIED

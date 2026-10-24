@@ -32,6 +32,7 @@ Boundaries:
 | [MUS-SPEC-07-565B](07-files-editor-and-search.md#mus-spec-07-565b) | Writing files into .next, .turbo and __pycache__ produces no change notice. | [`always-generated caches (.next, .turbo, __pycache__) never trigger refreshes`](../../../packages/agent-app/tests/workspace-watch.test.ts) |
 | [MUS-SPEC-07-565C](07-files-editor-and-search.md#mus-spec-07-565c) | Twenty writes each into an ignored dist/ and target/debug/ send no notice, and a source file written next still does. | [`a git-ignored dist/ or target/ does not refresh; source files still do`](../../../packages/agent-app/tests/workspace-watch.test.ts) |
 | [MUS-SPEC-07-565D](07-files-editor-and-search.md#mus-spec-07-565d) | After dist/ is added to .gitignore, edits inside it stop sending notices without re-opening the folder. | [`ignoring dist/ in .gitignore takes effect without re-watching the folder`](../../../packages/agent-app/tests/workspace-watch.test.ts) |
+| [MUS-SPEC-07-572A](07-files-editor-and-search.md#mus-spec-07-572a) | Search prefixes named like object keys stay plain words in the all scope. | [`search scope prefixes named after Object.prototype keys are plain words`](../../../packages/agent-app/tests/protocol-bughunt.test.ts) |
 
 <a id="mus-spec-07-276a"></a>
 #### MUS-SPEC-07-276A: A refreshed spreadsheet selects its first cell, however slow the paint
@@ -215,4 +216,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/workspace-watch.test.ts::ignoring dist/ in .gitignore takes effect without re-watching the folder`
 - Environment: Node test runner; no network, no provider. Needs `git`; the test skips itself when it is missing. Real file watcher on a temp repository.
 - Known gaps: The test skips itself when git is missing. The case that a committed dist/ keeps refreshing already passes on main, so it is not linked.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-07-572a"></a>
+#### MUS-SPEC-07-572A: Search words named like object keys are plain text
+
+- Precondition: No setup.
+- Action: Parse the search text constructor:foo, toString:foo, __proto__:foo, hasOwnProperty:foo, valueOf:foo and the in: form of each.
+- Expected result: Each stays in the all scope with its text unchanged.
+- Test: `packages/agent-app/tests/protocol-bughunt.test.ts::search scope prefixes named after Object.prototype keys are plain words`
+- Environment: Node test runner; no network.
+- Known gaps: Tests the query parser. It does not type into the search box.
 - Evidence: UNVERIFIED

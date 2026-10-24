@@ -147,6 +147,10 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - A binary file named like `x.constructor` no longer gets a broken image preview in review.
 - Git error messages hide the whole password of a remote URL even when the password contains "@".
 
+## Unreleased
+
+- Task priorities, search prefixes and custom theme settings are checked strictly: words like "constructor" are treated as plain text, and a custom theme with extra fields is rejected instead of being saved as given.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.
