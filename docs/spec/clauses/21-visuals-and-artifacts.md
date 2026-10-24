@@ -25,12 +25,12 @@ A PR that changes this area adds its cases here first: one row in this table, th
 <a id="mus-spec-21-43a"></a>
 #### MUS-SPEC-21-43A: Back to chat returns to the parent conversation
 
-- Precondition: A side chat was opened from a main chat and its tab is showing in the right pane, while another chat is on screen.
+- Precondition: A side chat was opened from a main chat. Its tab fills the maximized right pane, so the main conversation is covered.
 - Action: Click "Back to chat" in the side chat's header.
-- Expected result: The main chat the side chat was opened from becomes the active conversation, and the side chat tab stays open with its messages.
+- Expected result: The main chat the side chat was opened from is the active conversation, the pane is restored so the conversation shows beside it, the conversation's message box has focus, and the side chat stays open with its messages.
 - Test: `packages/agent-app/tests/side-chat-back-dom.tsx::Back to chat opens the parent conversation and keeps the side chat tab`
 - Environment: DOM suite (linkedom) with a stubbed bridge; no provider or network.
-- Known gaps: Does not show which chat is the parent when the side chat is created (the runtime stores `parentChatId`); the test supplies it.
+- Known gaps: The pane's maximize state is held by a small stand-in with the same toggle contract as the real resource pane. The test does not show which chat is recorded as the parent when the side chat is created (the runtime stores `parentChatId`); it supplies it.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-21-43b"></a>
