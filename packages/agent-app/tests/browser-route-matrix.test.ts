@@ -135,6 +135,21 @@ test('bridge: one tab per sub-agent session, a hung call answers with a clear er
   retry.dispose();broken.dispose();bridge.dispose();
 });
 
+// Spec: MUS-SPEC-09-465C (docs/spec/clauses/09-browser-and-previews.md#mus-spec-09-465c)
+test('MCP server: connection resets retry read-only tools with backoff but never repeat a click',async()=>{
+  let reads=0;
+  const reset=async()=>{if(++reads<3)throw new Error('fetch failed: ECONNRESET');return {content:[{type:'text' as const,text:'ok'}]};};
+  assert.equal(((await callWithRetry(reset,'browser_snapshot',{},1)).content[0] as {text:string}).text,'ok');assert.equal(reads,3);
+  let clicks=0;
+  const resetClick=async()=>{clicks++;throw new Error('fetch failed: ECONNRESET');};
+  await assert.rejects(callWithRetry(resetClick,'browser_click',{},1),/ECONNRESET/);assert.equal(clicks,1);
+  let refused=0;
+  const down=async()=>{if(++refused<3)throw new Error('fetch failed: ECONNREFUSED');return {content:[{type:'text' as const,text:'up'}]};};
+  assert.equal(((await callWithRetry(down,'browser_click',{},1)).content[0] as {text:string}).text,'up');assert.equal(refused,3);
+  let always=0;
+  await assert.rejects(callWithRetry(async()=>{always++;throw new Error('ECONNREFUSED');},'browser_snapshot',{},1));assert.equal(always,4);
+});
+
 test('MCP server: a refused connection is retried once; a timeout is not',async()=>{
   let attempts=0;
   const flaky=async()=>{if(++attempts===1)throw new Error('fetch failed: ECONNREFUSED');return {content:[{type:'text' as const,text:'ok'}]};};
