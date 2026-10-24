@@ -27,14 +27,22 @@ export async function handleMcpMessage(message: Message, options: McpServerOptio
 
 /** One bridge request; the endpoint file is re-read every time (a relaunched Muster listens on a new port and token). */
 export type BridgeRequest = (tool: string, args: unknown) => Promise<McpToolResult>;
-/** #387: a refused connection, a stale token (403) or a missing endpoint file while Muster restarts gets one retry. A
- *  timeout does not: the bridge answers every call within its own limit, so a timeout means the call already ran. */
+/** Errors that prove the request never reached the bridge (nothing listening, stale or missing endpoint): always safe to resend. */
+const NOT_DELIVERED = /ECONNREFUSED|ENOENT|EHOSTUNREACH|ENETUNREACH|bridge answered 403/i;
+/** #387: a refused connection, a stale token (403) or a missing endpoint file while Muster restarts is retried with a
+ *  bounded backoff (up to 3 retries). A connection reset or a 5xx is ambiguous (the call may have run), so only a tool that
+ *  never presses, types or selects is resent. A timeout is never retried: the bridge answers every call within its own limit. */
 export async function callWithRetry(request: BridgeRequest, tool: string, args: unknown, delayMs = 750): Promise<McpToolResult> {
-  try { return await request(tool, args); }
-  catch (error) {
-    if (error instanceof Error && /timeout|aborted/i.test(`${error.name} ${error.message}`)) throw new Error(`no answer within 110 s`);
-    await new Promise(resolve => setTimeout(resolve, delayMs));
-    return await request(tool, args);
+  const mutates = BROWSER_TOOL_SPECS.find(spec => spec.name === tool)?.mutates ?? true;
+  for (let attempt = 0; ; attempt++) {
+    try { return await request(tool, args); }
+    catch (error) {
+      const text = error instanceof Error ? `${error.name} ${error.message}` : String(error);
+      if (/timeout|aborted/i.test(text)) throw new Error(`no answer within 110 s`);
+      const safe = NOT_DELIVERED.test(text) || !mutates;
+      if (!safe || attempt >= 3) throw error;
+      await new Promise(resolve => setTimeout(resolve, delayMs * 2 ** attempt));
+    }
   }
 }
 
