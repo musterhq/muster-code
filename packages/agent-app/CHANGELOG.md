@@ -151,6 +151,11 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 - Task priorities, search prefixes and custom theme settings are checked strictly: words like "constructor" are treated as plain text, and a custom theme with extra fields is rejected instead of being saved as given.
 
+## Unreleased
+
+- Very long text from Muster Server (task descriptions, comments) no longer stalls the app while secrets are removed from it.
+- A server status or kind named like "constructor" falls back to the default label instead of breaking the display.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.

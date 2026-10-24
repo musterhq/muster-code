@@ -21,6 +21,7 @@ One row per clause file that has at least one case. The checker reports a clause
 | `MUS-SPEC-10` | [Terminal and background processes](clauses/10-terminal-and-processes.md) |
 | `MUS-SPEC-11` | [Memory](clauses/11-memory.md) |
 | `MUS-SPEC-12` | [Projects, orgs, tasks and check-out](clauses/12-projects-orgs-and-tasks.md) |
+| `MUS-SPEC-13` | [Muster Server](clauses/13-muster-server.md) |
 | `MUS-SPEC-14` | [Sub-agents, skills, plugins and automations](clauses/14-agents-skills-plugins-and-automations.md) |
 | `MUS-SPEC-15` | [Settings and themes](clauses/15-settings-and-themes.md) |
 | `MUS-SPEC-16` | [Notifications and attention](clauses/16-notifications-and-attention.md) |
