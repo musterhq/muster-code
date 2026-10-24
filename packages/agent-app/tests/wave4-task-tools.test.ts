@@ -23,6 +23,8 @@ async function runAndCall(h: Wave1, title: string, owner: string) {
   return { task, run, call, tool, url, token, chatToken };
 }
 
+// Spec: MUS-SPEC-12-462A (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-462a)
+// Spec: MUS-SPEC-12-462B (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-462b)
 test('G40: task runs get the muster_tasks MCP server; the host refuses callers without the token', async t => {
   const h = await wave1(t); const cto = await h.member('CTO');
   const r = await runAndCall(h, 'First task', cto.id);
@@ -31,6 +33,9 @@ test('G40: task runs get the muster_tasks MCP server; the host refuses callers w
   assert.equal((await fetch(r.url, { method: 'POST', body: '{}' })).status, 403);
   assert.equal((await fetch(r.url, { method: 'POST', headers: { authorization: `Bearer ${'0'.repeat(64)}` }, body: '{}' })).status, 403);
   assert.ok(TASK_PROTOCOL.split('\n').length >= 6);
+  assert.match(TASK_PROTOCOL, /only the user can decide/); assert.match(TASK_PROTOCOL, /build, tests, a deploy[^\n]*polling with a tool call/); assert.doesNotMatch(TASK_PROTOCOL, /Do not wait or poll/);
+  assert.match(TASK_PROTOCOL, /Post the handoff comment yourself[^\n]*never draft it and ask/);
+  assert.match(r.call.text, /Post it yourself with task_comment/);
   assert.ok(JSON.stringify(TASK_TOOL_SPECS).length < 5000, 'the schemas stay small');
   const own = await r.tool('task_get'); assert.match(own.text, /OSS-\d+ “First task”/);
   assert.match((await r.tool('task_get', {}, 'not-a-chat')).text, /not running a task/, 'a properly bound chat that runs no task');
