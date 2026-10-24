@@ -130,9 +130,9 @@ test('Claude Code reports each API message once with its final usage, matching t
     ccResult(ccUsage(2,29784,2007,5)),
   ]);
   assert.deepEqual(usage,[
-    {last:{inputTokens:26271,cachedInputTokens:0,outputTokens:74}},
-    {last:{inputTokens:29786,cachedInputTokens:26269,outputTokens:86}},
-    {last:{inputTokens:31793,cachedInputTokens:29784,outputTokens:5}},
+    {last:{inputTokens:26271,cachedInputTokens:0,cacheWriteTokens:26269,outputTokens:74}},
+    {last:{inputTokens:29786,cachedInputTokens:26269,cacheWriteTokens:3515,outputTokens:86}},
+    {last:{inputTokens:31793,cachedInputTokens:29784,cacheWriteTokens:2007,outputTokens:5}},
   ]);
   // The CLI's own session totals for that run: 6 input + 56,053 cache reads + 31,791 cache writes, 165 output.
   assert.deepEqual(totals,{input:87850,cached:56053,output:165});
@@ -144,11 +144,11 @@ test('Claude Code result usage fills in what its messages under-reported, and no
       ccBlock('m1',{type:'text',text:'a'},ccUsage(10,20,5,1)), ccBlock('m1',{type:'text',text:'b'},ccUsage(10,20,5,1)), ccBlock('m2',{type:'text',text:'c'},ccUsage(3,35,0,2)),
       ccResult(ccUsage(13,55,5,90)),
     ],expected:[
-      {last:{inputTokens:35,cachedInputTokens:20,outputTokens:1},partial:true},
+      {last:{inputTokens:35,cachedInputTokens:20,cacheWriteTokens:5,outputTokens:1},partial:true},
       {last:{inputTokens:38,cachedInputTokens:35,outputTokens:2},partial:true},
       {last:{inputTokens:0,cachedInputTokens:0,outputTokens:87},reconciliation:true},
     ]},
-    {name:'result only',lines:[ccResult(ccUsage(10,20,5,42))],expected:[{last:{inputTokens:35,cachedInputTokens:20,outputTokens:42},reconciliation:true}]},
+    {name:'result only',lines:[ccResult(ccUsage(10,20,5,42))],expected:[{last:{inputTokens:35,cachedInputTokens:20,cacheWriteTokens:5,outputTokens:42},reconciliation:true}]},
     {name:'missing result keeps the partial counts, marked',lines:[ccBlock('m1',{type:'text',text:'a'},{input_tokens:10,output_tokens:3}),{type:'result',subtype:'success',result:'Done'}],
       expected:[{last:{inputTokens:10,cachedInputTokens:0,outputTokens:3},partial:true}]},
     {name:'a stream cut off before any result keeps the partial counts',lines:[ccStart('m1',ccUsage(10,0,0,1)), ccBlock('m1',{type:'text',text:'a'},ccUsage(10,0,0,1))],
