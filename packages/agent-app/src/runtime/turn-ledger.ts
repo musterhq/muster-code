@@ -105,13 +105,13 @@ async function ownPaths(cwd: string, startedAt: number): Promise<Set<string> | n
 export async function filesChanged(cwd: string, beforeTree: string | null, head?: { before: string | null; startedAt: number }): Promise<LedgerFile[] | null> {
   if (!beforeTree) return null;
   try {
-    const after = await snapshotTree(cwd);
+    // HEAD is read alongside the snapshot so the Receipt is not written any later than before (#387).
+    const [after, headNow] = await Promise.all([snapshotTree(cwd), head ? headCommit(cwd) : Promise.resolve(null)]);
     if (after === beforeTree) return [];
     const [out, numstat] = await Promise.all([git(cwd, ['diff-tree', '-r', '--no-renames', '-z', beforeTree, after]), git(cwd, ['diff-tree', '-r', '--no-renames', '--numstat', '-z', beforeTree, after]).catch(() => '')]);
     const counts = new Map<string, { added: number | null; removed: number | null }>();
     for (const row of numstat.split('\0').filter(Boolean)) { const [a, r, ...path] = row.split('\t'); counts.set(path.join('\t'), { added: a === '-' ? null : Number(a), removed: r === '-' ? null : Number(r) }); }
     const parts = out.split('\0').filter(Boolean), files: LedgerFile[] = [];
-    const headNow = head ? await headCommit(cwd) : null;
     const own = head && head.before && headNow && headNow !== head.before ? await ownPaths(cwd, head.startedAt) : undefined;
     for (let i = 0; i + 1 < parts.length && files.length < 200; i += 2) {
       const [, , before, afterHash, status] = parts[i].slice(1).split(' '), path = parts[i + 1], n = counts.get(path);
