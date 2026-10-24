@@ -56,6 +56,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Chats show a quiet "Today 0:52" divider where a conversation starts or resumes after a 30-minute pause or on a new day.
 - Stopping a turn settles unfinished tool rows as Stopped, retaining partial output after reopening; denied commands say Did not run.
 
+- 19 more built-in themes in Settings › Appearance (13 dark, 6 light), each holding WCAG AA contrast on every text pair.
 - Codex offers GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna when its model cache is unavailable; a readable provider catalog keeps precedence.
 - Untracked files can be discarded to Trash with confirmation from Changes or a diff, file actions stay visible, and opening a diff preserves the Changes compare mode.
 

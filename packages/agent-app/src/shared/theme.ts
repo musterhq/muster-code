@@ -277,6 +277,121 @@ export const BUILT_IN_THEMES: readonly Theme[] = [
     alpha: [5, 8, 12, 92, 82], files: ['#2f62a8', '#85650a', '#3f6b2a', '#a8302a', '#6b43a0', '#1f7068'],
     info: '#2f62a8', violet: '#5f4fb0', pink: '#a03a6c', sunken: '#eee5cf', hueL: '34%', strong: '#1f1710',
   }, '59 47 32', 'rgb(59 47 32 / 30%)', 'rgb(59 47 32 / 24%)'),
+  // Studio palettes: popular editor-app looks, tuned so every text pair holds WCAG AA 4.5:1.
+  make('charcoal', 'Charcoal', 'dark', {
+    bg: '#2d2d2b', raised: '#363635', nav: '#373735', menu: '#3d3d3b', text: '#f9f9f7', accent: '#ce8264', link: '#ce8264', selection: '#5a4339',
+    danger: '#f07a6b', ok: '#80b898', warn: '#f1b467', primary: '#f9f9f7', primaryFg: '#2d2d2b', onAccent: '#0b0b0b',
+    alpha: [6, 10, 8, 74, 60], files: ['#6aa8ff', '#e6c35c', '#8fd16a', '#f07a6b', '#c79bf2', '#5cc8c4'],
+    info: '#9fc1df', violet: '#a8abea', pink: '#df8fc1', sunken: '#1d1d1c', hueL: '64%',
+  }, '255 255 255', '#000', 'rgb(0 0 0 / 55%)'),
+  make('chalk', 'Chalk', 'light', {
+    bg: '#f9f9f7', raised: '#ffffff', nav: '#f4f4f2', menu: '#ffffff', text: '#2d2d2b', accent: '#9f624a', link: '#9f624a', selection: '#ecd6cc',
+    danger: '#b42318', ok: '#2e7d4f', warn: '#8a5a00', primary: '#2d2d2b', primaryFg: '#f9f9f7', onAccent: '#ffffff',
+    alpha: [5, 8, 10, 78, 66], files: ['#1f6fd1', '#8a6a00', '#3f7a1f', '#b42318', '#6f42c1', '#0f766e'],
+    info: '#1f5f99', violet: '#5a4fb0', pink: '#a03a6c', sunken: '#f0f0ee', hueL: '34%',
+  }, '0 0 0', 'rgb(0 0 0 / 28%)', 'rgb(0 0 0 / 22%)'),
+  make('midnight', 'Midnight', 'dark', {
+    bg: '#111111', raised: '#1c1c1c', nav: '#131313', menu: '#232323', text: '#fcfcfc', accent: '#2780d4', link: '#2780d4', selection: '#0d2a45',
+    danger: '#e34643', ok: '#00a240', warn: '#f1b467', primary: '#fcfcfc', primaryFg: '#111111', onAccent: '#0b0b0b',
+    alpha: [6, 10, 8, 74, 60], files: ['#6aa8ff', '#e6c35c', '#85df7b', '#f67576', '#b06dff', '#5cc8c4'],
+    info: '#9fc1df', violet: '#9840ff', pink: '#df8fc1', sunken: '#0b0b0b', hueL: '64%',
+  }, '255 255 255', '#000', 'rgb(0 0 0 / 55%)'),
+  make('daylight', 'Daylight', 'light', {
+    bg: '#ffffff', raised: '#ffffff', nav: '#fcfcfc', menu: '#ffffff', text: '#0d0d0d', accent: '#0169cc', link: '#0169cc', selection: '#b8d5f1',
+    danger: '#d72c28', ok: '#008435', warn: '#8a5a00', primary: '#0d0d0d', primaryFg: '#ffffff', onAccent: '#ffffff',
+    alpha: [5, 8, 10, 78, 62], files: ['#1f6fd1', '#8a6a00', '#008809', '#d53538', '#751ed9', '#0f766e'],
+    info: '#1f5f99', violet: '#9840ff', pink: '#a03a6c', sunken: '#f6f6f6', hueL: '34%',
+  }, '0 0 0', 'rgb(0 0 0 / 28%)', 'rgb(0 0 0 / 22%)'),
+  make('indigo-night', 'Indigo Night', 'dark', {
+    bg: '#0f0f11', raised: '#1a1a1c', nav: '#080a0f', menu: '#212123', text: '#e3e4e6', accent: '#6c76d0', link: '#6a76d6', selection: '#262845',
+    danger: '#ff7e78', ok: '#69c967', warn: '#f1b467', primary: '#e3e4e6', primaryFg: '#0f0f11', onAccent: '#0b0b0b',
+    alpha: [6, 10, 8, 74, 60], files: ['#6aa8ff', '#e6c35c', '#8fd16a', '#f07a6b', '#c79bf2', '#5cc8c4'],
+    info: '#9fc1df', violet: '#c2a1ff', pink: '#df8fc1', sunken: '#0a0a0b', hueL: '64%',
+  }, '255 255 255', '#000', 'rgb(0 0 0 / 55%)'),
+  make('indigo-day', 'Indigo Day', 'light', {
+    bg: '#fcfcfd', raised: '#ffffff', nav: '#f2f4f8', menu: '#ffffff', text: '#1b1b1b', accent: '#5a66ca', link: '#5a66ca', selection: '#d0d3f1',
+    danger: '#c94446', ok: '#40803e', warn: '#8a5a00', primary: '#1b1b1b', primaryFg: '#fcfcfd', onAccent: '#ffffff',
+    alpha: [5, 8, 10, 78, 62], files: ['#1f6fd1', '#8a6a00', '#3f7a1f', '#b42318', '#6f42c1', '#0f766e'],
+    info: '#1f5f99', violet: '#8160d8', pink: '#a03a6c', sunken: '#f3f3f4', hueL: '34%',
+  }, '0 0 0', 'rgb(0 0 0 / 28%)', 'rgb(0 0 0 / 22%)'),
+  make('deep-navy', 'Deep Navy', 'dark', {
+    bg: '#111827', raised: '#1c2231', nav: '#111827', menu: '#232937', text: '#e4e4e7', accent: '#ff5c5c', link: '#ff5c5c', selection: '#542b36',
+    danger: '#f07a6b', ok: '#80b898', warn: '#f1b467', primary: '#e4e4e7', primaryFg: '#111827', onAccent: '#0b0b0b',
+    alpha: [6, 10, 8, 74, 60], files: ['#6aa8ff', '#e6c35c', '#8fd16a', '#f07a6b', '#c79bf2', '#5cc8c4'],
+    info: '#9fc1df', violet: '#a8abea', pink: '#df8fc1', sunken: '#0b1019', hueL: '64%',
+  }, '255 255 255', '#000', 'rgb(0 0 0 / 55%)'),
+  make('phosphor', 'Phosphor', 'dark', {
+    bg: '#040805', raised: '#0f1310', nav: '#020402', menu: '#171b18', text: '#b8ffca', accent: '#1eff5a', link: '#1eff5a', selection: '#0b4d1d',
+    danger: '#f07a6b', ok: '#80b898', warn: '#f1b467', primary: '#b8ffca', primaryFg: '#040805', onAccent: '#0b0b0b',
+    alpha: [6, 10, 8, 74, 60], files: ['#6aa8ff', '#e6c35c', '#8fd16a', '#f07a6b', '#c79bf2', '#5cc8c4'],
+    info: '#9fc1df', violet: '#a8abea', pink: '#df8fc1', sunken: '#030503', hueL: '64%',
+  }, '255 255 255', '#000', 'rgb(0 0 0 / 55%)'),
+  make('ink', 'Ink', 'dark', {
+    bg: '#191919', raised: '#232323', nav: '#151515', menu: '#2a2a2a', text: '#d9d9d8', accent: '#3988da', link: '#3988da', selection: '#20374e',
+    danger: '#f07a6b', ok: '#80b898', warn: '#f1b467', primary: '#d9d9d8', primaryFg: '#191919', onAccent: '#0b0b0b',
+    alpha: [6, 10, 8, 74, 60], files: ['#6aa8ff', '#e6c35c', '#8fd16a', '#f07a6b', '#c79bf2', '#5cc8c4'],
+    info: '#9fc1df', violet: '#a8abea', pink: '#df8fc1', sunken: '#101010', hueL: '64%',
+  }, '255 255 255', '#000', 'rgb(0 0 0 / 55%)'),
+  make('linen', 'Linen', 'light', {
+    bg: '#ffffff', raised: '#ffffff', nav: '#f7f6f3', menu: '#ffffff', text: '#37352f', accent: '#2b74bf', link: '#2b74bf', selection: '#c5dcf4',
+    danger: '#b42318', ok: '#2e7d4f', warn: '#8a5a00', primary: '#37352f', primaryFg: '#ffffff', onAccent: '#ffffff',
+    alpha: [5, 8, 10, 78, 68], files: ['#1f6fd1', '#8a6a00', '#3f7a1f', '#b42318', '#6f42c1', '#0f766e'],
+    info: '#1f5f99', violet: '#5a4fb0', pink: '#a03a6c', sunken: '#f6f6f6', hueL: '34%',
+  }, '0 0 0', 'rgb(0 0 0 / 28%)', 'rgb(0 0 0 / 22%)'),
+  make('slate', 'Slate', 'dark', {
+    bg: '#343541', raised: '#3d3e4a', nav: '#202123', menu: '#43444f', text: '#d1d5db', accent: '#3cb497', link: '#3cb497', selection: '#2a5452',
+    danger: '#f17f71', ok: '#80b898', warn: '#f1b467', primary: '#d1d5db', primaryFg: '#343541', onAccent: '#0b0b0b',
+    alpha: [6, 10, 8, 74, 66], files: ['#6aa8ff', '#e6c35c', '#8fd16a', '#f07a6b', '#c79bf2', '#5cc8c4'],
+    info: '#9fc1df', violet: '#a8abea', pink: '#df8fc1', sunken: '#22222a', hueL: '64%',
+  }, '255 255 255', '#000', 'rgb(0 0 0 / 55%)'),
+  make('stone', 'Stone', 'light', {
+    bg: '#f5f3ed', raised: '#ffffff', nav: '#efede6', menu: '#ffffff', text: '#2f312d', accent: '#3d755d', link: '#3d755d', selection: '#c1d0c5',
+    danger: '#b42318', ok: '#2c784c', warn: '#8a5a00', primary: '#2f312d', primaryFg: '#f5f3ed', onAccent: '#ffffff',
+    alpha: [5, 8, 10, 78, 68], files: ['#1f6fd1', '#8a6a00', '#3f7a1f', '#b42318', '#6f42c1', '#0f766e'],
+    info: '#1f5f99', violet: '#5a4fb0', pink: '#a03a6c', sunken: '#eceae5', hueL: '34%',
+  }, '0 0 0', 'rgb(0 0 0 / 28%)', 'rgb(0 0 0 / 22%)'),
+  make('ember-dark', 'Ember Dark', 'dark', {
+    bg: '#101010', raised: '#101010', nav: '#101010', menu: '#101010', text: '#fefefe', accent: '#ff6363', link: '#ff6363', selection: '#323232',
+    danger: '#ff6363', ok: '#59d499', warn: '#ffc531', primary: '#fefefe', primaryFg: '#101010', onAccent: '#0b0b0b',
+    alpha: [6, 10, 8, 74, 60], files: ['#56c2ff', '#ffc531', '#59d499', '#ff6363', '#cf2f98', '#56c2ff'],
+    info: '#56c2ff', violet: '#cf2f98', pink: '#df8fc1', sunken: '#0a0a0a', hueL: '64%',
+  }, '255 255 255', '#000', 'rgb(0 0 0 / 55%)'),
+  make('ember-light', 'Ember Light', 'light', {
+    bg: '#ffffff', raised: '#fcfcfc', nav: '#fcfcfc', menu: '#fcfcfc', text: '#030303', accent: '#c04b4b', link: '#c04b4b', selection: '#fdfdfd',
+    danger: '#b12424', ok: '#006b4f', warn: '#9e6800', primary: '#030303', primaryFg: '#ffffff', onAccent: '#ffffff',
+    alpha: [5, 8, 10, 78, 62], files: ['#138af2', '#f8a300', '#006b4f', '#b12424', '#9a1b6e', '#138af2'],
+    info: '#138af2', violet: '#9a1b6e', pink: '#a03a6c', sunken: '#f6f6f6', hueL: '34%',
+  }, '0 0 0', 'rgb(0 0 0 / 28%)', 'rgb(0 0 0 / 22%)'),
+  make('aubergine', 'Aubergine', 'dark', {
+    bg: '#2d2935', raised: '#36333e', nav: '#26222d', menu: '#3d3944', text: '#e6dff9', accent: '#9785f6', link: '#9785f6', selection: '#40356b',
+    danger: '#f07a6b', ok: '#80b898', warn: '#f1b467', primary: '#e6dff9', primaryFg: '#2d2935', onAccent: '#0b0b0b',
+    alpha: [6, 10, 8, 74, 60], files: ['#6aa8ff', '#e6c35c', '#8fd16a', '#f07a6b', '#c79bf2', '#5cc8c4'],
+    info: '#9fc1df', violet: '#a8abea', pink: '#df8fc1', sunken: '#1d1b22', hueL: '64%',
+  }, '255 255 255', '#000', 'rgb(0 0 0 / 55%)'),
+  make('moss', 'Moss', 'dark', {
+    bg: '#02120c', raised: '#0d1d17', nav: '#1d2d0f', menu: '#15241e', text: '#c7e6da', accent: '#e4f222', link: '#e4f222', selection: '#415112',
+    danger: '#f07a6b', ok: '#80b898', warn: '#f1b467', primary: '#c7e6da', primaryFg: '#02120c', onAccent: '#0b0b0b',
+    alpha: [6, 10, 8, 74, 60], files: ['#6aa8ff', '#e6c35c', '#8fd16a', '#f07a6b', '#c79bf2', '#5cc8c4'],
+    info: '#9fc1df', violet: '#a8abea', pink: '#df8fc1', sunken: '#010c08', hueL: '64%',
+  }, '255 255 255', '#000', 'rgb(0 0 0 / 55%)'),
+  make('pure-black', 'Pure Black', 'dark', {
+    bg: '#000000', raised: '#0b0b0b', nav: '#000000', menu: '#131313', text: '#ededed', accent: '#0a74fe', link: '#006efe', selection: '#001f47',
+    danger: '#f13342', ok: '#00ad3a', warn: '#f1b467', primary: '#ededed', primaryFg: '#000000', onAccent: '#0b0b0b',
+    alpha: [6, 10, 8, 74, 60], files: ['#6aa8ff', '#e6c35c', '#8fd16a', '#f07a6b', '#c79bf2', '#5cc8c4'],
+    info: '#9fc1df', violet: '#9540d5', pink: '#df8fc1', sunken: '#000000', hueL: '64%',
+  }, '255 255 255', '#000', 'rgb(0 0 0 / 55%)'),
+  make('pure-white', 'Pure White', 'light', {
+    bg: '#ffffff', raised: '#ffffff', nav: '#ffffff', menu: '#ffffff', text: '#171717', accent: '#006aff', link: '#006aff', selection: '#b8d5ff',
+    danger: '#eb001d', ok: '#208438', warn: '#8a5a00', primary: '#171717', primaryFg: '#ffffff', onAccent: '#ffffff',
+    alpha: [5, 8, 10, 78, 62], files: ['#1f6fd1', '#8a6a00', '#3f7a1f', '#b42318', '#6f42c1', '#0f766e'],
+    info: '#1f5f99', violet: '#a100f8', pink: '#a03a6c', sunken: '#f6f6f6', hueL: '34%',
+  }, '0 0 0', 'rgb(0 0 0 / 28%)', 'rgb(0 0 0 / 22%)'),
+  make('studio', 'Studio', 'dark', {
+    bg: '#1f1f24', raised: '#29292e', nav: '#1f1f24', menu: '#303034', text: '#ffffff', accent: '#5482ff', link: '#5482ff', selection: '#515b70',
+    danger: '#f07a6b', ok: '#80b898', warn: '#f1b467', primary: '#ffffff', primaryFg: '#1f1f24', onAccent: '#0b0b0b',
+    alpha: [6, 10, 8, 74, 60], files: ['#6aa8ff', '#e6c35c', '#8fd16a', '#f07a6b', '#c79bf2', '#5cc8c4'],
+    info: '#9fc1df', violet: '#a8abea', pink: '#df8fc1', sunken: '#141417', hueL: '64%',
+  }, '255 255 255', '#000', 'rgb(0 0 0 / 55%)'),
 ];
 
 export const DEFAULT_LIGHT_THEME_ID = MUSTER_LIGHT.id;
