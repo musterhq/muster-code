@@ -59,8 +59,8 @@ export function LocalCheckoutsCard(): React.ReactElement | null {
       </span>
     </li>)}</ul>
     {settings && <div className="ws-orgs-prefs">
-      <label className="project-edit-goal"><span>{device().title} is called</span><input value={settings.deviceName} maxLength={80} onChange={e => setSettings({ ...settings, deviceName: e.target.value })} onBlur={() => void invoke('checkout.settings', { deviceName: settings.deviceName }).then(setSettings, fail)}/></label>
-      <label className="project-edit-goal"><span>Remind me after (hours quiet)</span><input type="number" min={0} max={720} value={settings.staleHours} onChange={e => setSettings({ ...settings, staleHours: Number(e.target.value) })} onBlur={() => void invoke('checkout.settings', { staleHours: settings.staleHours }).then(setSettings, fail)}/></label>
+      <label className="project-edit-goal"><span>{device().title} is called</span><input value={settings.deviceName} maxLength={80} onChange={e => setSettings({ ...settings, deviceName: e.target.value })} onBlur={() => void invoke('checkout.settings', { deviceName: settings.deviceName }).then(setSettings, cause => { fail(cause); load(); })}/></label>
+      <label className="project-edit-goal"><span>Remind me after (hours quiet)</span><input type="number" min={0} max={720} value={settings.staleHours} onChange={e => setSettings({ ...settings, staleHours: Number(e.target.value) })} onBlur={() => void invoke('checkout.settings', { staleHours: settings.staleHours }).then(setSettings, cause => { fail(cause); load(); })}/></label>
     </div>}
   </section>;
 }

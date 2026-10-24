@@ -124,7 +124,7 @@ export function CanvasTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
         onChange={event => edit(event.currentTarget.value)}
         onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void save(); } }}/>}
       {shown !== 'edit' && <div className="canvas-preview" aria-label="Preview">
-        {kind === 'markdown' ? <div className="canvas-markdown"><MessageBody text={draft}/></div>
+        {kind === 'markdown' ? <div className="canvas-markdown"><MessageBody text={draft} asDocument/></div>
           // No sandbox tokens: scripts, forms, popups and same-origin access are all off; the page is shown, never run.
           : <iframe className="canvas-html" title={`${canvas.title} preview`} sandbox="" referrerPolicy="no-referrer" srcDoc={draft}/>}
       </div>}

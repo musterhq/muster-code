@@ -1,4 +1,4 @@
-/** Run with node tests/run-git-components.mjs: composer environment/branch footer, branch switch with carried changes, summary card fetch wording, sandbox scope, PR detail. */
+/** Run with npm run test:renderer (suite git-components): composer environment/branch footer, branch switch with carried changes, summary card fetch wording, sandbox scope, PR detail. */
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -161,15 +161,22 @@ await delay(200);
 const center=host.querySelector<HTMLElement>('.center')!;
 const pane=host.querySelector<HTMLElement>('.workspace')!;
 const card=()=>host.querySelector<HTMLElement>('[data-testid="summary-card"]');
-// The reserve gutter is pure CSS: every rule using --summary-reserve must target only the transcript's
-// scroller (or the empty-state prompt), never the composer, its queued strip/footer, the header or .chat.
+// The reserve gutter is pure CSS. Padding rules (the gutter itself) must target only the transcript's scroller (or the
+// empty-state prompt). The composer, changes bar and footer shift beside the transcript with `translate` and a max-width,
+// so every column edge lines up (centred beside the card): those rules must still leave the header and banners alone.
 const {readFileSync}=await import('node:fs');
 const cardCss=readFileSync(`${process.cwd()}/src/renderer/components/summary-card.css`,'utf8');
-const reserveRules=[...cardCss.replace(/\/\*[\s\S]*?\*\//g,'').matchAll(/([^{}]+)\{([^{}]*var\(--summary-reserve\)[^{}]*)\}/g)].map(m=>m[1].trim());
+const reserveBlocks=[...cardCss.replace(/\/\*[\s\S]*?\*\//g,'').matchAll(/([^{}]+)\{([^{}]*var\(--summary-reserve\)[^{}]*)\}/g)].map(m=>({selector:m[1].trim(),body:m[2]}));
+const reserveRules=reserveBlocks.map(block=>block.selector);
 assert.ok(reserveRules.length>0,'the reserve gutter rule exists');
-for(const selector of reserveRules.flatMap(rule=>rule.split(',').map(part=>part.trim()))){
-  assert.match(selector,/(\.timeline|\.chat-empty)$/,`the gutter applies to the transcript only: ${selector}`);
-  assert.doesNotMatch(selector,/composer|chat-head|footer|turn-changes/,`the gutter never reaches ${selector}`);
+for(const {selector,body} of reserveBlocks.filter(block=>/padding/.test(block.body))){
+  for(const part of selector.split(',').map(part=>part.trim())){
+    assert.match(part,/(\.timeline|\.chat-empty)$/,`the gutter applies to the transcript only: ${part}`);
+    assert.doesNotMatch(part,/composer|chat-head|footer|turn-changes/,`the gutter never reaches ${part}`);
+  }
+}
+for(const {selector,body} of reserveBlocks.filter(block=>/translate/.test(block.body))){
+  assert.match(selector,/:not\([^)]*\.chat-head[^)]*\.timeline-shell[^)]*\)/,`the shift leaves the header and the transcript alone: ${selector}`);
 }
 const assertComposerUntouched=(layout:string)=>{
   const composer=host.querySelector<HTMLElement>('[data-testid="composer"]')!;

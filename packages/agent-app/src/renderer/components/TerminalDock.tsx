@@ -3,7 +3,7 @@ import {PanelRight,X} from 'lucide-react';
 import {DOCK_MIN,setTerminalDock,subscribeTerminalDock,terminalDock} from '../processSummary';
 import {focusComposer} from '../focus';
 import {useStoreSelector} from '../useStore';
-import {openTerminalTab,TerminalsPanel} from './ProcessesTab';
+import {openTerminalTab,toggleTerminal,TerminalsPanel} from './ProcessesTab';
 import './terminal-dock.css';
 import {Tip} from './Tooltip';
 
@@ -29,7 +29,7 @@ export function TerminalDock({chatId}:{chatId:string}) {
       // resource pane instead of silently switching the user's choice to Bottom.
       if(current.placement==='pane'){openTerminalTab(target.current.chatId,target.current.title,'terminals');return;}
       if(current.open){setTerminalDock({open:false});if(inside)focusComposer();}
-      else setTerminalDock({open:true});
+      else toggleTerminal(target.current.chatId,target.current.title);
     };
     window.addEventListener('keydown',key,true);return()=>window.removeEventListener('keydown',key,true);
   },[]);
