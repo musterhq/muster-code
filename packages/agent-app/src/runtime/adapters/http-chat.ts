@@ -1,3 +1,5 @@
+import {networkFailure} from '../network-failure.ts';
+import {redactSecrets} from '../secret-redaction.ts';
 import {randomUUID} from 'node:crypto';
 import {ConversationMemory, loadImages, responseError, retryAfterMs, sseEvents, type ChatMessage} from './shared.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
@@ -39,7 +41,7 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
   try { response = await first(); }
   catch (error) {
     if (input.signal.aborted) return fail('Stopped before the request was sent.');
-    return fail(`Could not reach ${label}: ${error instanceof Error ? error.message.slice(0, 200) : 'network error'}.`);
+    return fail(networkFailure(error) ?? `Could not reach ${label}: ${error instanceof Error ? redactSecrets(error.message.slice(0, 200)) : 'network error'}.`);
   }
   if (!response.ok && toolsOn && (response.status === 400 || response.status === 422)) {
     const text = await response.clone().text().catch(() => '');
@@ -49,7 +51,7 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
       toolsOn = false; toolRefusals.set(`${tooling!.endpoint}\0${input.model}`, Date.now());
       input.onEvent(TOOLS_UNAVAILABLE_EVENT, {threadId, model: input.model});
       try { response = await first(); }
-      catch (error) { return fail(`Could not reach ${label}: ${error instanceof Error ? error.message.slice(0, 200) : 'network error'}.`); }
+      catch (error) { return fail(networkFailure(error) ?? `Could not reach ${label}: ${error instanceof Error ? redactSecrets(error.message.slice(0, 200)) : 'network error'}.`); }
     }
   }
   if (!response.ok) {
@@ -101,23 +103,29 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
     return true;
   };
   /** What the next turn remembers: the prompt, each steer in order with the reply before it, then the rest of the answer. */
-  const remember = (tail: string): ChatMessage[] => [...history, {role: 'user', content: input.prompt}, ...injected, ...(tail.trim() || !injected.length ? [{role: 'assistant' as const, content: tail}] : [])];
+  const remember = (tail: string): ChatMessage[] => [...history, {role: 'user', content: input.prompt}, ...injected, ...(tail.trim() || !injected.length ? [{role: 'assistant' as const, content: tail.trim() ? tail : '(no reply)'}] : [])];
   try {
     for (let round = 0, roundStart = 0; ; round++, roundStart = answer.length) {
+      // The last round allowed: a steer sent from here on could never be read, so it queues instead (the sender returns false).
+      if (round >= MAX_TOOL_ROUNDS) lane.open = false;
       const streamed = await stream(response, delta => { answer += delta; input.onDelta(delta); });
       if (streamed?.usage) usages.push(streamed.usage as {inputTokens?: number; outputTokens?: number; totalTokens?: number});
       let calls = streamed?.calls ?? [];
       if (input.signal.aborted) break;
       if (!toolsOn || !calls.length) {
-        // A steer that arrived during the last stream gets one more round, after the reply it interrupted.
-        if (!steers.length || round >= MAX_TOOL_ROUNDS) break;
+        // A steer that arrived during the last stream gets one more round, after the reply it interrupted. The lane closes
+        // in the same synchronous step as the decision to stop, so no steer is accepted and then left unread.
+        if (!steers.length) { lane.open = false; break; }
         extra.push({role: 'assistant', content: answer.slice(roundStart) || '(no reply)'});
         takeSteers();
         response = await send(history, extra, toolsOn);
         if (!response.ok || !response.body) throw new Error(response.ok ? `${label} returned an empty stream.` : await responseError(response, label));
         continue;
       }
-      if (round >= MAX_TOOL_ROUNDS || callsThisTurn >= MAX_CALLS_PER_TURN || Date.now() > deadline) { await closingStatus(); break; }
+      if (round >= MAX_TOOL_ROUNDS || callsThisTurn >= MAX_CALLS_PER_TURN || Date.now() > deadline) {
+        // No more rounds: stop taking steers, and let the closing status read the ones already accepted.
+        lane.open = false; takeSteers(); await closingStatus(); break;
+      }
       calls = calls.slice(0, Math.min(MAX_CALLS_PER_ROUND, MAX_CALLS_PER_TURN - callsThisTurn));
       callsThisTurn += calls.length;
       extra.push({role: 'assistant', content: null, tool_calls: calls.map(call => ({id: call.id, type: 'function', function: {name: call.name, arguments: resent(call.arguments)}}))});
@@ -125,7 +133,7 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
       for (const message of extra) if (pictures.delete(message)) message.content = '[an earlier image was shown here and has been omitted to save space]';
       const seen: Array<{role: string; content: unknown[]}> = [];
       for (const call of calls) {
-        const result = await executeTool(call, {chatId: input.chat.id, ...(browserOffered(input.browserTools) ? {browser: true} : {}), cwd: input.cwd, access: input.permissionMode, ...(input.vision ? {vision: true} : {}), visionNote, signal: input.signal, emit: input.onEvent, threadId, turnId, ...(input.authorize ? {authorize: input.authorize} : {}), ...(input.env ? {env: input.env} : {}), deadline});
+        const result = await executeTool(call, {chatId: input.chat.id, ...(browserOffered(input.browserTools) ? {browser: true} : {}), cwd: input.cwd, access: input.permissionMode, ...(input.vision ? {vision: true} : {}), visionNote, signal: input.signal, emit: input.onEvent, threadId, turnId, ...(input.authorize ? {authorize: input.authorize} : {}), ...(input.askUser ? {askUser: input.askUser} : {}), ...(input.env ? {env: input.env} : {}), deadline});
         used.push(`${call.name}${result.ok ? '' : ' (failed)'}`);
         extra.push({role: 'tool', tool_call_id: call.id, content: result.content});
         // A tool message cannot carry a picture: it follows as a user message once every tool reply of this round is in.
@@ -148,9 +156,11 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
     }
   } catch (error) {
     lane.open = false;
+    // Steers accepted before the failure stay in what the next turn remembers.
+    takeSteers();
     const stopped = input.signal.aborted;
     if (answer || used.length) memory.commit(threadId, remember(`${answer.slice(mark)}${used.length ? `\n\n[Tools used before this stopped: ${used.slice(0, 40).join(', ')}]` : ''}`));
-    return {status: 'failed', finalMessage: '', threadId, turnId, dispatchState: 'dispatched', errorMessage: stopped ? 'Stopped.' : error instanceof Error ? error.message.slice(0, 300) : `${label} stream failed.`};
+    return {status: 'failed', finalMessage: '', threadId, turnId, dispatchState: 'dispatched', errorMessage: stopped ? 'Stopped.' : networkFailure(error) ?? (error instanceof Error ? redactSecrets(error.message.slice(0, 300)) : `${label} stream failed.`)};
   }
   const tail = answer.slice(mark), remembered = used.length ? `${tail}\n\n[Tools used this turn: ${used.slice(0, 40).join(', ')}]` : tail;
   const retained = memory.commit(threadId, remember(remembered));
@@ -170,11 +180,11 @@ export function openAICompatibleAdapter(options: HttpOptions & {tools?: boolean}
     const images = loadImages(input.images);
     const user = images.length ? [{type: 'text', text: input.prompt}, ...images.map(image => ({type: 'image_url', image_url: {url: `data:${image.mediaType};base64,${image.data}`}}))] : input.prompt;
     const browser = browserOffered(input.browserTools);
-    const system = [input.instructions, tools ? toolInstructions(input.permissionMode, input.cwd, browser) : undefined].filter(Boolean).join('\n\n');
+    const system = [input.instructions, tools ? toolInstructions(input.permissionMode, input.cwd, browser, !!input.askUser) : undefined].filter(Boolean).join('\n\n');
     const messages = [...(system ? [{role: 'system', content: system}] : []), ...history, {role: 'user', content: user}, ...extra];
     return request(`${options.endpoint}/chat/completions`, {method: 'POST', redirect: 'error', signal: input.signal,
       headers: {'content-type': 'application/json', accept: 'text/event-stream', ...(key ? {authorization: `Bearer ${key}`} : {})},
-      body: JSON.stringify({model: input.model, stream: true, stream_options: {include_usage: true}, messages, ...(tools ? {tools: toolSpecs(input.permissionMode, browser), tool_choice: 'auto'} : {})})});
+      body: JSON.stringify({model: input.model, stream: true, stream_options: {include_usage: true}, messages, ...(tools ? {tools: toolSpecs(input.permissionMode, browser, !!input.askUser), tool_choice: 'auto'} : {})})});
   }, async (response, emit) => {
     let usage: Record<string, unknown> | undefined;
     const pending = new Map<number, ToolCall>();

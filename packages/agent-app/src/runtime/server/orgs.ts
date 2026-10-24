@@ -4,7 +4,7 @@
  * work in each. It reuses the one `ServerBackend` (same token, same ETag cache), never opens another connection, and reads nothing for an org
  * the person unticked.
  */
-import type { WorkspaceCompany, WorkspaceTask } from '../../shared/domains/paperclip-protocol.ts';
+import type { WorkspaceCompany, WorkspaceInboxItem, WorkspaceTask } from '../../shared/domains/paperclip-protocol.ts';
 import type { MyWorkTask, OrgEntry, OrgsList, OrgWork } from '../../shared/domains/checkout-protocol.ts';
 import { groupByProject, leadAgentIds, mineOnly, normalizeOrgSetting, projectCounts, scopeInbox, workTasks, type Me, type OrgSetting } from '../../shared/org-work.ts';
 import type { ServerBackend, ServerPart } from './backend.ts';
@@ -150,6 +150,8 @@ export interface ServerHub {
   badge?: (taskId: string) => MyWorkTask['checkout'];
   /** The server answered again after being unreachable: queued posts are sent (set by the checkout domain). */
   onOnline?: () => void;
+  /** Needs-you rows for this Mac's idle check-outs (set by the checkout domain): the Inbox lists them with Hand back, Release and Keep. */
+  checkoutInbox?: () => WorkspaceInboxItem[];
 }
 const hubs = new WeakMap<object, ServerHub>();
 export function serverHubFor(context: object): ServerHub {

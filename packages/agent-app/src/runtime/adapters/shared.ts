@@ -97,6 +97,9 @@ export class ConversationMemory {
     if (file) try {
       if (statSync(file).size <= 2 * this.maxChars + 65536) { const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown; if (Array.isArray(parsed)) known = parsed.filter((m): m is ChatMessage => !!m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string'); }
     } catch { known = undefined; }
+    // A history saved by an older build can open with a reply or hold an empty reply; the APIs reject both on every turn.
+    while (known && known.length > 0 && known[0]!.role !== 'user') known = known.slice(1);
+    known = known?.map(m => m.role === 'assistant' && !m.content.trim() ? {...m, content: '(no reply)'} : m);
     return known ? {threadId: threadId!, history: [...known], resumed: true} : {threadId: randomUUID(), history: [], resumed: false};
   }
   /** Saves the thread, trimmed to the newest 80 messages / `maxChars`. Returns how many user turns the saved
@@ -104,6 +107,8 @@ export class ConversationMemory {
   commit(threadId: string, messages: ChatMessage[]): {retainedUserTurns: number; trimmed: boolean} {
     let kept = messages.slice(-80), size = kept.reduce((n, m) => n + m.content.length, 0);
     while (kept.length > 2 && size > this.maxChars) { size -= kept[0]!.content.length + kept[1]!.content.length; kept = kept.slice(2); }
+    // A steer makes two user messages in a row, so a cut can land on a reply; a resent history must open with the user.
+    while (kept.length > 1 && kept[0]!.role !== 'user') kept = kept.slice(1);
     this.threads.delete(threadId); this.threads.set(threadId, kept);
     while (this.threads.size > this.maxThreads) this.threads.delete(this.threads.keys().next().value!);
     const file = this.file(threadId);

@@ -6,7 +6,7 @@ import type { TimelineItem } from '../../shared/protocol';
 import { SUBAGENT_STEER_MAX, type SubagentControlAction, type SubagentControlCapabilities, type SubagentTranscript } from '../../shared/domains/subagents-protocol';
 import type { WorkspaceTab } from '../store';
 import { notifyError, notifySuccess, retryTimeline } from '../store';
-import { useStore } from '../useStore';
+import { useStoreSlice } from '../useStore';
 import { invoke } from '../bridge';
 import { copyText } from '../clipboard';
 import { AgentGlyph, agentDisplayName } from '../agentIdentity';
@@ -249,7 +249,7 @@ function SubagentDetail({agent, chatId, parentItems, parentModel, controls}: {ag
 }
 
 export function SubagentsTab({tab}: {tab:WorkspaceTab}): React.ReactElement {
-  const state = useStore();
+  const state = useStoreSlice('snapshot', 'timelines');
   const chatId = tab.chatId;
   const chat = state.snapshot?.chats.find(chat => chat.id === chatId);
   const loadable = chatId ? state.timelines[chatId] : undefined;

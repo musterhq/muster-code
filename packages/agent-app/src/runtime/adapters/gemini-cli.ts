@@ -29,7 +29,8 @@ export const geminiBody = (input: AdapterRunInput): string => [input.instruction
 export function geminiArgs(input: AdapterRunInput, flags: GeminiFlags): string[] {
   const model = input.model.replace(/^gemini-cli\//, ''), body = geminiBody(input);
   return ['--output-format', 'stream-json', ...geminiPermissionArgs(input.permissionMode, flags), ...(model && model !== 'default' ? ['--model', model] : []),
-    ...(input.resumeThreadId && flags.resume ? ['--resume', input.resumeThreadId] : []), '--prompt', fitsArgv(body) ? body : 'Carry out the request that was sent on standard input.'];
+    // `--prompt=<body>`: as a separate token, a prompt starting with "-" (a markdown bullet) is read as flags and the prompt is lost.
+    ...(input.resumeThreadId && flags.resume ? ['--resume', input.resumeThreadId] : []), `--prompt=${fitsArgv(body) ? body : 'Carry out the request that was sent on standard input.'}`];
 }
 
 /** Signed in when an API key / Vertex / Code Assist login is configured. Reads local files only; no network. */
