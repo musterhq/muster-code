@@ -13,6 +13,14 @@ export function looksLikePlan(text: string): boolean {
   if (/\?[\s"'”’)\]*_`]*$/.test(t) || /\b(could you|can you|please (provide|confirm|let me know)|i need (your|you to)|which (one|do you)|do you want)\b/i.test(t)) return false;
   return PLAN.test(t) && !DONE.test(t);
 }
+/** A closing paragraph that promises future work ("I'll report back when the build finishes"): nothing wakes the agent to keep it. */
+const PROMISE = /\b(i['’]?ll|i will|i['’]?m going to)\s+(report back|get back to you|follow up|update you|let you know|check (back|again|on (it|this|that|the)\b)|circle back|ping you|keep you posted|report (the )?results?)\b|\b(once|when|after) (it|that|this|they|the [\w .-]{1,40}) (finish(es)?|complete[sd]?|(is|are) (done|finished|complete)|ends?|exits?)\b[^.!?\n]*\b(i['’]?ll|i will)\b/i;
+export function endsWithPromise(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  const last = t.split(/\n\s*\n/).filter(part => part.trim()).at(-1)!;
+  return PROMISE.test(last.slice(-600));
+}
 export function classifyRun(f: RunFacts): Liveness {
   if (f.status === 'failed') return 'failed';
   if (f.status === 'interrupted') return 'blocked';
@@ -20,6 +28,8 @@ export function classifyRun(f: RunFacts): Liveness {
   if (!text && !worked) return 'empty_response';
   if (!text && worked) return 'advanced';
   if (!worked && looksLikePlan(text)) return 'plan_only';
+  // Ending on a promise of future work is not a finished run, whatever it did before.
+  if (endsWithPromise(text)) return worked ? 'advanced' : 'plan_only';
   return 'completed';
 }
 export type FailureKind = 'transient' | 'limit' | 'permanent';
