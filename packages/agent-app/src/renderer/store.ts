@@ -585,9 +585,10 @@ export async function createChat(folderId?: string, projectId?: string, options:
   }
 }
 
-/** A hoisted declaration: it runs while `state` initializes, before any module constant exists. */
+/** A hoisted declaration: it runs while `state` initializes, before any module constant exists.
+ *  Enter while a run is going steers it by default; Queue is the opt-in (Cmd/Ctrl+Enter does the other one either way). */
 function readFollowUpMode(): FollowUpMode {
-  try { return localStorage.getItem('muster.followUpMode') === 'steer' ? 'steer' : 'queue'; } catch { return 'queue'; }
+  try { return localStorage.getItem('muster.followUpMode') === 'queue' ? 'queue' : 'steer'; } catch { return 'steer'; }
 }
 export function setFollowUpMode(mode: FollowUpMode): void {
   if (state.followUpMode !== mode) set({followUpMode: mode});
