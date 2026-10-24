@@ -166,6 +166,30 @@ test('a router error fails the turn with its message', async t => {
   assert.equal(r.sent.length, 1, 'nothing is resent');
 });
 
+/** A stream that sends these text pieces and then an error event, as the router does when Claude answers nothing. */
+const failing = (text: string[]) => new Response([
+  {type: 'message_start', message: {id: 'msg', role: 'assistant', content: [], usage: {input_tokens: 3, output_tokens: 1}}},
+  ...(text.length ? [{type: 'content_block_start', index: 0, content_block: {type: 'text', text: ''}}, ...text.map(piece => ({type: 'content_block_delta', index: 0, delta: {type: 'text_delta', text: piece}}))] : []),
+  {type: 'error', error: {type: 'server_error', message: 'Claude returned an empty response (no content block)'}},
+].map(e => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join(''), {headers: {'content-type': 'text/event-stream'}});
+
+// Spec: MUS-SPEC-03-688O (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-688o)
+test('an error event before any content is sent once more; after content it fails the turn', async t => {
+  const cwd = await workspace(t);
+  const first = router([failing([]), [DONE]]);
+  const run = input(cwd);
+  const result = await adapter(first.fetch).run(run.value);
+  assert.equal(result.status, 'completed', result.errorMessage ?? 'turn did not complete');
+  assert.equal(first.sent.length, 2, 'the same request went once more');
+  assert.deepEqual(first.sent[1]!.body.messages, first.sent[0]!.body.messages);
+  assert.ok(first.sent.every(sent => ['high', 'xhigh'].includes(String((sent.body as {output_config?: {effort?: unknown}}).output_config?.effort))), 'every request asks for high effort');
+  const late = router([failing(['Partly ']), [DONE]]);
+  const lost = await adapter(late.fetch).run(input(cwd).value);
+  assert.equal(lost.status, 'failed');
+  assert.match(lost.errorMessage ?? '', /empty response/);
+  assert.equal(late.sent.length, 1, 'text already reached the chat, so nothing is resent');
+});
+
 // Spec: MUS-SPEC-03-688G (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-688g)
 test('a restart continues with the saved blocks unchanged', async t => {
   const cwd = await workspace(t);

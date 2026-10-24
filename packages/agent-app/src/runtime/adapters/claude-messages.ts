@@ -189,7 +189,18 @@ export function claudeMessagesAdapter(options: Options): RunnableAdapter {
     try {
       for (let round = 0; ; round++) {
         if (!response.body) throw new Error(`${label} returned an empty stream.`);
-        const reply = await readReply(response, label, input, delta => { answer += delta; input.onDelta(delta); });
+        let streamed = false;
+        const onText = (delta: string) => { streamed = true; answer += delta; input.onDelta(delta); };
+        let reply: Reply;
+        try { reply = await readReply(response, label, input, onText); }
+        catch (error) {
+          // The router can answer a request with an error event before any content ("Claude returned an empty response",
+          // seen live on #688). Nothing reached the chat yet, so the same request is sent once more.
+          if (streamed || input.signal.aborted || !(error instanceof Error && error.message.startsWith(`${label} error:`))) throw error;
+          response = await send();
+          if (!response.ok || !response.body) throw error;
+          reply = await readReply(response, label, input, onText);
+        }
         last = reply.usage; outputTokens += reply.usage.outputTokens ?? 0;
         if (reply.blocks.length) add({role: 'assistant', content: reply.blocks});
         if (input.signal.aborted) break;

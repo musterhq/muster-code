@@ -34,6 +34,7 @@ Boundaries:
 | [MUS-SPEC-03-688L](03-providers-models-and-accounts.md#mus-spec-03-688l) | The turn is retried once with a freshly fetched token and completes; the second request carries the new token. | [`a 401 is retried once with a fresh token before the turn fails`](../../../packages/agent-app/tests/claude-messages-lane.test.ts) |
 | [MUS-SPEC-03-688M](03-providers-models-and-accounts.md#mus-spec-03-688m) | The Messages-lane chat is interrupted with no recovery needed and the provider is never asked; the same chat on the Codex client still needs recovery. | [`a run on the Messages lane that was open when Muster closed is interrupted, never asked about at the provider`](../../../packages/agent-app/tests/claude-messages-lane.test.ts) |
 | [MUS-SPEC-03-688N](03-providers-models-and-accounts.md#mus-spec-03-688n) | The saved conversation starts with a user message that holds the person's own text, stays within its limits and holds no image data. | [`saved Claude history never starts with an assistant message`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
+| [MUS-SPEC-03-688O](03-providers-models-and-accounts.md#mus-spec-03-688o) | An error event before any content is retried once and the turn completes; an error after text has streamed fails the turn without resending; every request asks for high effort. | [`an error event before any content is sent once more; after content it fails the turn`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
 
 ### Configured routers
 <a id="mus-spec-03-1a"></a>
@@ -234,4 +235,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/claude-messages-driver.test.ts::saved Claude history never starts with an assistant message`
 - Environment: Node test runner; no network.
 - Known gaps: When one turn alone exceeds the limits its history is dropped, and the next turn starts with only the new message.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-688o"></a>
+#### MUS-SPEC-03-688O: A router hiccup before any output is retried once
+
+- Precondition: A Claude model on a configured router. The router sometimes answers a streamed request with an error event before any content ("Claude returned an empty response"), as seen on the live router.
+- Action: Send a message when the first answer is such an error, then send one whose error arrives after some text has streamed.
+- Expected result: The first turn sends the same request once more and completes with the second answer. The second turn fails with the router's message and nothing is resent, because text already reached the chat. Every request asks the router for at least high effort, so tool turns keep their thinking.
+- Test: `packages/agent-app/tests/claude-messages-driver.test.ts::an error event before any content is sent once more; after content it fails the turn`
+- Environment: Node test runner; a scripted router; no network.
+- Known gaps: Only one retry; a router that keeps failing fails the turn. The live router's effort behaviour is measured, not documented by the router.
 - Evidence: UNVERIFIED
