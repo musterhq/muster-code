@@ -27,9 +27,9 @@ A PR that changes this area adds its cases here first: one row in this table, th
 <a id="mus-spec-16-1a"></a>
 #### MUS-SPEC-16-1A: Toasts stack bottom-right, above the status row
 
-- Precondition: A 1440 by 900 window shows a chat with the summary card open in the top-right (down to y=360) and the right pane closed. The transcript column ends at x=1072 and the composer at x=1040. The status row starts at y=810.
+- Precondition: A 1440 by 900 window shows a chat with the summary card open in the top-right (down to y=360) and the right pane closed. The transcript column and the composer both end at x=1040. The status row starts at y=810.
 - Action: Two notices appear.
-- Expected result: The stack is 16px from the right edge and starts at least 8px right of the transcript column. Its bottom edge is 8px above the top of the status row (y=802), and it cannot reach higher than 8px below the card (y=368). It is not at the top of the window.
+- Expected result: The stack is 16px from the right edge and starts right of the transcript column and the composer (x=1044 or more). Its bottom edge is 8px above the top of the status row (y=802), and it cannot reach higher than 8px below the card (y=368). It is not at the top of the window.
 - Test: not written yet (#627)
 - Environment: DOM suite (`linkedom`); layout sizes are faked per element, so no real window is used.
 - Known gaps: Positions come from faked sizes, not a real layout, so it does not show the look on screen; before and after screenshots are needed.
