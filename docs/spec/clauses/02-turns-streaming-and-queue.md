@@ -16,9 +16,9 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
-| [MUS-SPEC-02-387A](02-turns-streaming-and-queue.md#mus-spec-02-387a) | A tool row the provider started and never finished is interrupted, with its output kept, when the turn completes.  | not written yet (#387) |
-| [MUS-SPEC-02-387B](02-turns-streaming-and-queue.md#mus-spec-02-387b) | The same row is interrupted when the turn fails.  | not written yet (#387) |
-| [MUS-SPEC-02-387C](02-turns-streaming-and-queue.md#mus-spec-02-387c) | A tool row left running when the app closed mid-turn is interrupted when Muster restarts.  | not written yet (#387) |
+| [MUS-SPEC-02-387A](02-turns-streaming-and-queue.md#mus-spec-02-387a) | A tool row the provider started and never finished is interrupted, with its output kept, when the turn completes. | [`#387 a tool the provider never closed is shown as Stopped once a completed turn settles`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
+| [MUS-SPEC-02-387B](02-turns-streaming-and-queue.md#mus-spec-02-387b) | The same row is interrupted when the turn fails. | [`#387 a tool the provider never closed is shown as Stopped once a failed turn settles`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
+| [MUS-SPEC-02-387C](02-turns-streaming-and-queue.md#mus-spec-02-387c) | A tool row left running when the app closed mid-turn is interrupted when Muster restarts. | [`#387 a tool row left running when Muster closed is Stopped after restart`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
 | [MUS-SPEC-02-473H](02-turns-streaming-and-queue.md#mus-spec-02-473h) | The no-promise rule is in Agent mode instructions and not in Ask or Plan. | [`agent-mode instructions forbid ending a turn on a promise`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 | [MUS-SPEC-02-473J](02-turns-streaming-and-queue.md#mus-spec-02-473j) | A closing promise makes the run advanced or plan-only, never completed; ordinary endings stay completed. | [`liveness: a turn that ends promising to report back is not completed`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 
