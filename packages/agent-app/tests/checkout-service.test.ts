@@ -112,7 +112,7 @@ function setup(opts: { tests?: number; lazy?: boolean } = {}) {
   const rawOnTurn = svc.onTurn.bind(svc);
   svc.onTurn = async (...args) => { await rawOnTurn(...args); if (autoFire) await fire(); };
   /** Lets the 60 second countdown run out (or says there is none). */
-  const fire = async (sync = true): Promise<number> => { const live = wait.filter(t => t.live); wait = wait.filter(t => !live.includes(t)); for (const t of live) { t.live = false; t.fn(); } await new Promise(r => setTimeout(r, 20)); if (sync) await svc.sync(); return live.length; };
+  const fire = async (sync = true): Promise<number> => { const live = wait.filter(t => t.live); wait = wait.filter(t => !live.includes(t)); await Promise.all(live.map(t => { t.live = false; return t.fn(); })); await new Promise(r => setTimeout(r, 20)); if (sync) await svc.sync(); return live.length; };
   return { events, chatList, sent, fire, hold: (v = true) => { autoFire = !v; }, countdownMs: () => wait.filter(t => t.live).map(t => t.ms), statCalls, setSalt: (v: number) => { salt = v; }, setStatFails: (v: boolean) => { statFails = v; }, setStat: (v: typeof stat) => { stat = v; }, setQueued: (v: boolean) => { queuedMore = v; }, tl, orgDir, homeDir, gitCalls, commits, setNoRemote: (v: boolean) => { noRemote = v; }, setCommitOk: (v: boolean) => { commitOk = v; }, setHasTests: (v: boolean) => { hasTests = v; }, setRepo: (v: boolean) => { repo = v; }, dirty: () => !clean, setClean: (v: boolean) => { clean = v; }, setHead: (v: string) => { head = v; }, setPushedHead: (v: boolean) => { pushedHead = v; }, setOrigin: (v: string) => { origin = v; }, prOk, server, db, store, svc, reader, advance: (ms: number) => { clock += ms; }, worktrees, pushed, emitted, setPush: (v: boolean) => { pushOk = v; }, now: () => clock };
 }
 /** The fake git, with every call counted (a plain folder must make none). */
@@ -1233,6 +1233,20 @@ test('#345 plain folder: files changed since check-out and a turn that completed
   writeFileSync(join(dir, 'notes.md'), 'hello, edited\n'); writeFileSync(join(dir, 'new.txt'), 'x');
   await h.svc.onTurn(l.chatId!, 'r2', 'completed'); assert.deepEqual(h.countdownMs(), [60_000]); await h.fire();
   assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.match(handedBack(h)!, /Added \(1\): `new\.txt`/); assert.deepEqual(h.pushed, []); assert.ok(!h.gitCalls.some(c => c !== 'isRepo'), 'no git calls beyond the bind check');
+});
+
+// Spec: MUS-SPEC-12-683A (docs/spec/clauses/12-projects-orgs-and-tasks.md#mus-spec-12-683a)
+test('#683 plain folder: the countdown\'s timer callback finishes only when the hand-back is done', async () => {
+  const h = setup(); const dir = await plain(h); h.hold(); h.setHasTests(false); h.server.policy = [{ type: 'review', participants: [{ kind: 'agent', id: 'a-qa' }] }];
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  writeFileSync(join(dir, 'notes.md'), 'hello, edited\n'); writeFileSync(join(dir, 'new.txt'), 'x');
+  await h.svc.onTurn(l.chatId!, 'r1', 'completed'); assert.deepEqual(h.countdownMs(), [60_000]);
+  // A loaded machine: reading the chat for the hand-back summary takes much longer than the harness's own grace period.
+  const chats = (h.svc as unknown as { d: CheckoutDeps }).d.chats, read = chats.timeline;
+  chats.timeline = async (id: string) => { await new Promise(r => setTimeout(r, 150)); return read(id); };
+  await h.fire(false);
+  assert.equal(h.svc.get('t1')!.state, 'handed_back', 'the timer callback returned before the hand-back was done');
+  assert.match(handedBack(h)!, /Added \(1\): `new\.txt`/);
 });
 
 test('#345 never on a turn that errored or was stopped, while a later turn is queued, or while the agent asked a question', async () => {
