@@ -22,6 +22,10 @@ function toolArgs(servers: AdapterRunInput['mcpServers']): string[] {
     '--allowedTools', ...CLAUDE_SUBAGENT_TOOLS, ...names.map(name => `mcp__${name}`)];
 }
 
+/** #653: Claude Code's host tools that run commands or change files, denied outright while the chat is sandboxed. Reads
+ *  (Read, Grep, Glob, LS) stay; commands and edits go through the muster_sandbox tools. */
+export const CLAUDE_SANDBOX_DENIED_TOOLS = ['Bash', 'BashOutput', 'KillShell', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit'];
+
 export function claudeArgs(input: AdapterRunInput, sessionId: string): string[] {
   const alias = input.model.replace(/^claude-code\//, '');
   return ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
@@ -31,7 +35,9 @@ export function claudeArgs(input: AdapterRunInput, sessionId: string): string[] 
     // Muster's own tool servers (in-app browser, terminal, mailbox…): loaded alongside the user's, and allowed, since
     // they are first-party and each enforces its own lease and scope. Both flags are variadic, so a flag follows them.
     ...toolArgs(input.mcpServers),
-    '--permission-mode', claudePermissionMode(input.permissionMode),
+    // Variadic too, so a flag follows it. A deny rule wins over every permission mode and allow rule.
+    ...(input.sandboxed ? ['--disallowedTools', ...CLAUDE_SANDBOX_DENIED_TOOLS] : []),
+    '--permission-mode', claudePermissionMode(input.sandboxed ? 'read-only' : input.permissionMode),
     ...(alias && alias !== 'default' ? ['--model', alias] : []),
     ...(input.reasoningEffort ? ['--effort', input.reasoningEffort] : []),
     ...(input.resumeThreadId ? ['--resume', input.resumeThreadId] : ['--session-id', sessionId]),

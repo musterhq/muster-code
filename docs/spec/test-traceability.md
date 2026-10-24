@@ -15,6 +15,7 @@ One row per clause file that has at least one case. The checker reports a clause
 | `MUS-SPEC-03` | [Providers, models and accounts](clauses/03-providers-models-and-accounts.md) |
 | `MUS-SPEC-04` | [Context window and compaction](clauses/04-context-window-and-compaction.md) |
 | `MUS-SPEC-05` | [Access modes, approvals and tool permissions](clauses/05-access-modes-and-approvals.md) |
+| `MUS-SPEC-06` | [Sandbox and scoped computers](clauses/06-sandbox.md) |
 | `MUS-SPEC-07` | [Files, editor and search](clauses/07-files-editor-and-search.md) |
 | `MUS-SPEC-08` | [Git, changes and review](clauses/08-git-changes-and-review.md) |
 | `MUS-SPEC-09` | [Browser and previews](clauses/09-browser-and-previews.md) |

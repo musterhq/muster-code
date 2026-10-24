@@ -74,6 +74,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Codex offers GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna when its model cache is unavailable; a readable provider catalog keeps precedence.
 - Preserve single line breaks in assistant prose while keeping code blocks and tables unchanged; Markdown file previews still reflow hard-wrapped paragraphs.
 - Untracked files can be discarded to Trash with confirmation from Changes or a diff, file actions stay visible, and opening a diff preserves the Changes compare mode.
+- Sandbox chats say what runs where: commands and edits made with the sandbox tools run in the container, and the agent can still read files on this Mac. The Sandbox environment is offered only on models whose tools can use it. While a chat is sandboxed, the agent's own shell and edit tools on this Mac are turned off on every model, and choosing Ask for approval or Full access first asks "Leave the sandbox?".
 
 - Commands stopped during startup now remain stopped when a launch error arrives, avoiding failure follow-ups.
 - Retrying suggested task creation after a failure reuses each suggestion’s tasks, and failed task batches roll back together.

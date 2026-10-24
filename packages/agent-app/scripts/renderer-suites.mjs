@@ -89,6 +89,7 @@ export const suites = [
   'update-status-retry-dom',
   'markdown-breaks-dom',
   'setup-clone-handoff-dom',
+  'sandbox-honesty-dom',
 ];
 
 /** Suites that open Base UI menus/portals get a split build: their `await import()` of UI code stays a separate
@@ -121,6 +122,7 @@ export const split = new Set([
   'spotlight-palette-dom',
   'limit-resume-dom',
   'ime-enter-dom',
+  'sandbox-honesty-dom',
 ]);
 
 /** tests/*.tsx files that are deliberately not suites, with the reason. */
