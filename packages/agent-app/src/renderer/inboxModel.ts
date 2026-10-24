@@ -26,11 +26,13 @@ export interface ActivityItem {
   projectId?: string | null; taskId?: string | null; agentId?: string | null;
   /** A Paperclip approval this row stands for: Approve, Reject and Request revision act on it. */
   approval?: { id: string; verbs: ApprovalDecision[] };
+  /** An idle check-out of this Mac: Hand back, Release and Keep act on its task. */
+  checkout?: { days: number };
   /** G36: it comes from a run that started by itself (an automation, a timer, a heartbeat). */
   routine?: boolean;
 }
 
-const KIND_BUCKET: Record<InboxKind, InboxBucket> = { question: 'needs', approval: 'needs', review: 'review', blocked: 'problems', failed_run: 'problems', agent_error: 'problems', budget: 'problems', mail: 'mentions', mention: 'mentions', other: 'review' };
+const KIND_BUCKET: Record<InboxKind, InboxBucket> = { question: 'needs', approval: 'needs', checkout: 'needs', review: 'review', blocked: 'problems', failed_run: 'problems', agent_error: 'problems', budget: 'problems', mail: 'mentions', mention: 'mentions', other: 'review' };
 const DONE_WINDOW_MS = 3 * 86_400_000;
 /** A turn cut short because Muster quit is not a failure: it can simply be continued. */
 export const INTERRUPTED_WHY = 'Interrupted when Muster quit — continue?';
@@ -62,7 +64,7 @@ export function buildActivity(app: Pick<Snapshot, 'chats' | 'folders' | 'project
   const runTrigger = new Map((workspace?.runs ?? []).map(r => [r.id, r.trigger]));
   for (const item of workspace?.inbox ?? []) {
     items.push({ id: `ws:${item.id}`, bucket: KIND_BUCKET[item.kind], title: item.title, why: item.why, at: item.at, group: item.group ?? workspace?.paperclip?.company?.name ?? 'Muster', unread: item.severity === 'high',
-      source: item.source === 'paperclip' ? 'paperclip' : 'muster', kind: item.kind, projectId: item.projectId ?? null, taskId: item.taskId, agentId: item.agentId, ...(item.org ? { org: item.org } : {}), ...(item.approvalId ? { approval: { id: item.approvalId, verbs: item.approvalVerbs ?? ['approve', 'reject', 'request_revision'] } } : {}),
+      source: item.source === 'paperclip' ? 'paperclip' : 'muster', kind: item.kind, projectId: item.projectId ?? null, taskId: item.taskId, agentId: item.agentId, ...(item.org ? { org: item.org } : {}), ...(item.approvalId ? { approval: { id: item.approvalId, verbs: item.approvalVerbs ?? ['approve', 'reject', 'request_revision'] } } : {}), ...(item.checkout ? { checkout: item.checkout } : {}),
       ...(item.runId && isRoutineTrigger(runTrigger.get(item.runId)) ? { routine: true } : {}),
       action: item.taskId ? { kind: 'task', taskId: item.taskId } : item.agentId ? { kind: 'agent', agentId: item.agentId } : { kind: 'none' } });
   }

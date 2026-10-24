@@ -25,8 +25,10 @@ const str = (v: unknown): string | null => typeof v === 'string' && v ? v : null
 const arr = (v: unknown): Json[] => Array.isArray(v) ? v.filter((x): x is Json => Boolean(x) && typeof x === 'object') : [];
 const obj = (v: unknown): Json => v && typeof v === 'object' && !Array.isArray(v) ? v as Json : {};
 const PRIORITY: Record<string, 0 | 1 | 2 | 3> = { critical: 0, high: 1, medium: 2, low: 3 };
+Object.setPrototypeOf(PRIORITY, null); // server-supplied keys must not reach Object.prototype
 /** Paperclip status → the Muster state it can be set to by hand. In progress starts only from a real Muster run. */
 const STATE: Record<string, TaskState | 'verified'> = { backlog: 'todo', todo: 'todo', in_progress: 'todo', in_review: 'review', blocked: 'blocked', done: 'verified', cancelled: 'cancelled' };
+Object.setPrototypeOf(STATE, null); // server-supplied keys must not reach Object.prototype
 const ACCEPTANCE_MAX = 4000;
 
 /** Runner and model for an imported agent, in Muster's terms. Codex agents keep their custom model provider. */

@@ -11,14 +11,16 @@ export async function resolveInside(root: string, rel: string): Promise<string> 
   if (rel.includes('\0')) throw new Error('Path contains NUL.');
   const realRoot = await fs.realpath(root);
   const candidate = resolve(realRoot, rel);
+  // A filesystem root ("/" or "D:\\") already ends in a separator.
+  const prefix = realRoot.endsWith(sep) ? realRoot : realRoot + sep;
   // Lexical containment first: rejects `..` escapes even for nonexistent paths.
-  if (candidate !== realRoot && !candidate.startsWith(realRoot + sep)) {
+  if (candidate !== realRoot && !candidate.startsWith(prefix)) {
     throw new Error(`Path escapes folder root: ${rel}`);
   }
   // Physical containment: a symlink inside the tree must not point outside it.
   try {
     const real = await fs.realpath(candidate);
-    if (real !== realRoot && !real.startsWith(realRoot + sep)) {
+    if (real !== realRoot && !real.startsWith(prefix)) {
       throw new Error(`Path resolves outside folder root: ${rel}`);
     }
     return real;
@@ -29,7 +31,7 @@ export async function resolveInside(root: string, rel: string): Promise<string> 
       while (parent !== realRoot) {
         try {
           const real = await fs.realpath(parent);
-          if (real !== realRoot && !real.startsWith(realRoot + sep)) throw new Error('Path resolves outside folder root.');
+          if (real !== realRoot && !real.startsWith(prefix)) throw new Error('Path resolves outside folder root.');
           break;
         } catch (parentError) {
           if ((parentError as NodeJS.ErrnoException).code !== 'ENOENT') throw parentError;

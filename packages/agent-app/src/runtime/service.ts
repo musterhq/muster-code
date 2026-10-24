@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs, existsSync, mkdirSync, copyFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { rescanProviderListings, setProviderListingStore } from './provider-instances.ts';
-import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, TimelineItem, WakeReason } from '../shared/protocol.ts';
+import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, QueuedMessage, ChatFallback, TimelineItem, WakeReason } from '../shared/protocol.ts';
 import { CONTEXT_OVERFLOW, musterCompactAt, withUserWindow } from '../shared/context-window.ts';
 import type { PendingAttentionSummary, AttentionRequest } from '../shared/attention-protocol.ts';
 import { discoverLocalProviders } from './provider-discovery.ts';
@@ -26,7 +26,7 @@ import {OutputLog} from './output-log.ts';
 import {ProjectEventLog} from './project-event-log.ts';
 import { toolEventDetails } from './tool-event-details.ts';
 import { applyProviderEvent, COMPACTION_TEXT, isForeignThreadEvent } from './context-telemetry.ts';
-import { listFiles, readFile, searchFiles } from './files.ts';
+import { forgetQuickOpen, listFiles, readFile, searchFiles } from './files.ts';
 import { readAsset, readChatImage } from './file-assets.ts';
 import {readDocument} from './document-preview.ts';
 import {readWorkbook} from './workbook-preview.ts';
@@ -43,7 +43,11 @@ import {providerAccessPolicy} from './provider-run-lifecycle.ts';
 import {parseKillIntent, userProcessThreat, type UserProcessTarget, type UserProcessThreat} from './user-process-guard.ts';
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
 import { ProjectTaskStore, type TaskStatus } from './project-tasks.ts';
-import { ChatQueue, queueActionAfter } from './chat-queue.ts';
+import { ChatQueue, QueueChangedError, queueActionAfter } from './chat-queue.ts';
+import { AutoResumeStore, LIMIT_MAX_ATTEMPTS, limitClass, NATIVE_CONTINUATION, RESTART_CONTINUATION, autoResumeTiming, autoResumeView, hasNativeSession, isChatFallback, isUsageLimit, MAX_CHAT_FALLBACKS, limitResumeAt, resetClock, type AutoResumeRow } from './auto-resume.ts';
+import { liveProviderUsage } from './provider-usage.ts';
+import type { ProviderUsage } from '../shared/domains/providers-protocol.ts';
+import { PluginReloads, installedPlugin, lastTurn, pluginReloadNotice, turnAbout, turnMentions, type InstalledPlugin } from './plugin-reload.ts';
 import { createNativeThreadBridge } from './codex-native.ts';
 import { createNativeTurnObserver } from './native-turns.ts';
 import { createNativeQueueMirror } from './native-queue.ts';
@@ -69,6 +73,8 @@ import { isGitWorkTree } from './review-baseline.ts';
 import type { ReviewBaselineInfo } from '../shared/domains/review-protocol.ts';
 import type { EditRestorePreview } from '../shared/protocol.ts';
 import { randomUUID } from 'node:crypto';
+import { ToolHost, toolText } from './governance/tool-host.ts';
+import { ASK_MCP, ASK_USER_METHOD, ASK_USER_SPEC, ASK_QUESTION_ID, askUserAnswerMessage, askUserCard, askUserReply, askUserRunOverrides, isNonBlockingQuestion, parseAskUser } from './ask-user.ts';
 import { plural } from '../shared/wording.ts';
 import { device } from '../shared/device-noun.ts';
 
@@ -99,7 +105,7 @@ function detail(value: unknown): string {
   if (typeof value === 'string') return value.slice(0, 65536);
   try { return JSON.stringify(value ?? {}).slice(0, 65536); } catch { return 'Details unavailable'; }
 }
-interface ActiveRun { cwd: string; stopped: boolean; promise?: Promise<void>; retry: AbortController; seal?(): void }
+interface ActiveRun { cwd: string; stopped: boolean; prompt?: string; promise?: Promise<void>; retry: AbortController; seal?(): void; /** #448: the run ended on a provider usage limit. */ limit?: {text: string; retryAfterMs?: number; notDispatched: boolean; prompt: string; attachmentIds: string[]}; /** #449: Muster quit under this run (not a user Stop); `shutdown` when it continues after the next start. */ quit?: boolean; shutdown?: boolean }
 interface PendingApproval { chatId: string; createdAt: string; expiresAt: number; resolve(decision: ApprovalDecision): void; timer: ReturnType<typeof setTimeout> }
 /** `null` answers mean the question was dismissed, expired or interrupted: the provider gets a cancel, never empty answers. */
 type QuestionAnswers = Record<string, {answers: string[]}> | null;
@@ -128,17 +134,21 @@ export function userProcessNote(groups: readonly UserProcessGroup[], cwd: string
   const inFolder = (group: UserProcessGroup) => !!group.cwd && (group.cwd === cwd || group.cwd.startsWith(`${cwd}/`));
   const relevant = [...groups].sort((a, b) => Number(inFolder(b)) - Number(inFolder(a))).slice(0, 16);
   if (!relevant.length) return '';
-  return ['User-owned processes (started by the user in Muster, not by you). Never signal, kill or restart these process groups or their children, and do not free ports they hold; if a port is taken, use another port or ask:',
+  return ['User-owned local processes (started by the user in Muster, not by you). Never signal, kill or restart the process groups listed below or their children, and do not free ports they hold; if a local port is taken, use another port or ask. This applies to nothing else: remote hosts (ssh, servers), systemd or launchd services, and anything the user explicitly asks for are allowed:',
     ...relevant.map(group => `- process group ${group.pgid}: ${group.label.replace(/[\x00-\x1f]/g, ' ').slice(0, 80)}${group.cwd ? ` (cwd ${group.cwd.slice(0, 200)})` : ''}`)].join('\n');
 }
 const PROVIDER_LISTING_WAIT_MS = 15_000;
-export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; userProcesses?: () => readonly UserProcessGroup[]; userProcessTargets?: () => Promise<readonly UserProcessTarget[]>; provider?: ProviderAdapter; reconcileProvider?: (input: ReconciliationInput) => Promise<ReconciliationResult>; domains?: readonly DomainFactory[] }) {
+export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; userProcesses?: () => readonly UserProcessGroup[]; userProcessTargets?: () => Promise<readonly UserProcessTarget[]>; provider?: ProviderAdapter; reconcileProvider?: (input: ReconciliationInput) => Promise<ReconciliationResult>; domains?: readonly DomainFactory[];
+  /** Serve the ask_user MCP server to CLI routes (default: on outside tests). */ askUserTools?: boolean }) {
   applyPendingRestore(options.dataDir);
   setProviderListingStore(join(options.dataDir, 'provider-listings'));
   const store = new AgentStore(options.dataDir);
   // M4 (#319): ids merged by the duplicate-folder migration are remapped in the stores that keep their own database files.
   try { const aliases = store.pendingFolderAliases(); if (Object.keys(aliases).length && applyFolderAliases(options.dataDir, aliases)) store.clearFolderAliases(); } catch { /* retried on the next start */ }
   const queue = new ChatQueue(store);
+  /** #450: chats whose queue head is being sent right now (its row stays queued until the receipt is recorded). */
+  const dispatching = new Set<string>();
+  const pluginReloads = new PluginReloads();
   const attachments = new ChatAttachments(store.database(), options.dataDir);
   const domainHooks = createDomainHooks();
   const steered = new Map<string, string>();
@@ -186,12 +196,46 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   let closing = false;
   let disposal: Promise<void> | undefined;
   const invocations = new Set<Promise<unknown>>();
-  store.recoverOrphanedRuns(chat => isAdapterProvider(chat.providerThreadProviderId ?? chat.providerId ?? ''));
+  // #448/#449: pending automatic continuations live in SQLite, so they are re-armed after a restart.
+  const autoResume = new AutoResumeStore(store.database());
+  /** #449: chats that were working when Muster closed and may continue after this start. Never one that was waiting on an
+   *  approval or a question (that decision is the user's), never one being stopped, never a continuation cut short again. */
+  const restartCandidates: string[] = [];
+  for (const chat of store.snapshot().chats) {
+    const prior = autoResume.get(chat.id);
+    // A clean quit settled the run already and left a 'shutdown' row (with its prompt) to continue from.
+    if (prior?.state === 'shutdown') {
+      if (chat.archived) { autoResume.delete(chat.id); continue; }
+      restartCandidates.push(chat.id);
+      if (store.queue(chat.id).length && !queue.paused(chat.id)) queue.pause(chat.id, 'interrupted');
+      continue;
+    }
+    if (chat.status !== 'running' && chat.status !== 'stopping') {
+      if (prior?.state === 'running') {
+        autoResume.delete(chat.id);
+        // Its continuation was cut short by the quit (the quit settled it as interrupted): never continue it a second time.
+        if (prior.kind === 'restart' && chat.status === 'interrupted') store.appendItem(chat.id, 'notice', 'Muster closed again before the automatic continuation finished, so it was not continued again. Send a message to continue.', 'completed', {kind:'auto-resume', reason:'restart-again'});
+      }
+      continue;
+    }
+    if (prior?.state === 'running') {
+      autoResume.delete(chat.id);
+      if (prior.kind === 'restart') { store.appendItem(chat.id, 'notice', 'Muster closed again before the automatic continuation finished, so it was not continued again. Send a message to continue.', 'completed', {kind:'auto-resume', reason:'restart-again'}); continue; }
+    }
+    if (chat.status !== 'running' || chat.archived) continue;
+    if (store.timeline(chat.id).some(item => (item.kind === 'approval' || item.kind === 'question') && item.status === 'pending')) continue;
+    restartCandidates.push(chat.id);
+  }
+  const orphaned = store.recoverOrphanedRuns(chat => isAdapterProvider(chat.providerThreadProviderId ?? chat.providerId ?? ''));
+  // #450: rows already sent are dropped and natively held rows come back; an orphaned chat's queue waits for it to continue.
+  queue.recoverAtBoot();
+  for (const chatId of orphaned) if (store.queue(chatId).length && !queue.paused(chatId)) queue.pause(chatId, 'interrupted');
   for (const chat of store.snapshot().chats) {
     for (const item of store.timeline(chat.id)) {
       // The provider request ended with the previous process; the card stays readable but cannot be reopened.
       // No handler survives a restart. The same read-time rule decides: past its stored deadline it expired, otherwise it was lost.
-      if ((item.kind === 'question' || item.kind === 'approval') && item.status === 'pending') { const settled = pendingStatusAtRead(item, Date.now(), false); store.updateItem(item.id, item.text, settled.status, {...item.data, expiredReason:settled.reason}); }
+      // An ask_user question never had a waiting handler: it stays answerable, and its answer becomes the next turn.
+      if ((item.kind === 'question' || item.kind === 'approval') && item.status === 'pending' && !isNonBlockingQuestion(item.data)) { const settled = pendingStatusAtRead(item, Date.now(), false); store.updateItem(item.id, item.text, settled.status, {...item.data, expiredReason:settled.reason}); }
       // A manual compaction request in flight when the app closed: no new process will ever settle this row.
       if (item.kind === 'notice' && item.data?.kind === 'compaction' && item.status === 'running') store.updateItem(item.id, 'Compaction status unknown: Muster restarted while it was in progress. History is unchanged. Retry, or continue in a fresh thread with a summary.', 'failed', {...item.data, status: 'failed', actions: ['retry', 'fresh']});
     }
@@ -200,6 +244,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const projectFeed = new ProjectEventLog(store.database());
   const emit = (event: AgentEvent) => {
     if (disposed) return;
+    if (event.type === 'workspaceChanged') forgetQuickOpen();
     if (event.type === 'projectChanged' && event.seq === undefined) { try { event = {...event, seq: projectFeed.append(event.projectId, event.taskId)}; } catch { /* An unsequenced event still reloads; the next replay resets. */ } }
     options.onEvent(event);
   };
@@ -211,6 +256,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     folderId => emit({type:'workspaceChanged',folderId}),
     (folderId,error) => { watchedFolders.delete(folderId); emit({type:'notice',message:`Live file updates stopped: ${error.message}`}); },
   );
+  /** Queue chips and pause, the goal strip and a usage limit's resume (#448) ride on the snapshot's chats. */
+  function decorateChat(chat: Chat, goal: ChatGoal | undefined, resume: AutoResumeRow | undefined, fallbacks: ChatFallback[] | undefined = autoResume.fallbacks(chat.id)): Chat {
+    const decorated = queue.decorate(chat), view = autoResumeView(resume);
+    return {...decorated, ...(goal ? {goal} : {}), ...(view ? {autoResume: view} : {}), ...(fallbacks?.length ? {fallbacks} : {})};
+  }
   /** Goals live in the goals domain table; chats carry them so the composer strip survives restarts. */
   const goalsByChat = (): Map<string, ChatGoal> => {
     // Before the domains exist (during construction) there are simply no goals to show.
@@ -226,8 +276,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     folderStats.set(path, {at, missing}); return missing;
   };
   const snapshot = () => {
-    const stored = store.snapshot(), goals = goalsByChat();
-    const current = {...stored, folders: stored.folders.map(folder => folderMissing(folder.path) ? {...folder, missing: true} : folder), chats: stored.chats.map(chat => { const decorated = queue.decorate(chat), goal = goals.get(chat.id); return goal ? {...decorated, goal} : decorated; })};
+    const stored = store.snapshot(), goals = goalsByChat(), resumes = new Map(autoResume.all().map(row => [row.chatId, row])), fallbacks = autoResume.allFallbacks();
+    const current = {...stored, folders: stored.folders.map(folder => folderMissing(folder.path) ? {...folder, missing: true} : folder), chats: stored.chats.map(chat => decorateChat(chat, goals.get(chat.id), resumes.get(chat.id), fallbacks.get(chat.id)))};
     const requests = new Map<string, AttentionRequest[]>();
     const add = (chatId: string, request: AttentionRequest) => {
       const group = requests.get(chatId) ?? []; group.push(request); requests.set(chatId, group);
@@ -253,7 +303,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const publishedTimelineRevisions = new Map<string, number>();
   /** The last assistant message of the latest turn (after the last user message), or '' when the turn said nothing. */
   const finalAssistantText = (chatId: string): string => { const items = store.timeline(chatId); for (let i = items.length - 1; i >= 0; i--) { const it = items[i]!; if (it.kind === 'user') return ''; if (it.kind === 'assistant' && it.text.trim()) return it.text; } return ''; };
+  /** The streaming reply of each running chat, written to the store at most once per timeline publish (not once per delta). */
+  const segmentFlushes = new Map<string, () => void>();
   const timeline = (chatId: string) => {
+    segmentFlushes.get(chatId)?.();
     const after = publishedTimelineRevisions.get(chatId) ?? 0;
     const patch = store.timelineChanges(chatId, after);
     if (patch.revision > after) {
@@ -381,6 +434,57 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (status === 'expired') store.appendItem(pending.chatId, 'notice', 'A question timed out before you answered, so the agent was told it was cancelled. Use Ask again to have it re-ask.', 'completed', {kind:'attention-expired', itemId});
     timeline(pending.chatId); state();
     pending.resolve(answers); pending.waiters.splice(0).forEach(resolve => resolve(answers));
+  }
+  // ── ask_user: non-blocking questions ─────────────────────────────────────
+  /** Posts the question card and answers the tool at once with the default. Never waits, in any access mode. */
+  function askUser(chatId: string, args: Record<string, unknown>): {content: Array<{type: 'text'; text: string}>; isError?: true; text: string} {
+    const reply = (text: string, isError = false) => ({...toolText(text, isError), text} as {content: Array<{type: 'text'; text: string}>; isError?: true; text: string});
+    const chat = store.chat(chatId);
+    if (disposed || closing || !chat) return reply('This chat is not available.', true);
+    const input = parseAskUser(args);
+    if (typeof input === 'string') return reply(input, true);
+    store.appendItem(chatId, 'question', input.question, 'pending', {...askUserCard(input)});
+    timeline(chatId); state();
+    return reply(askUserReply(input));
+  }
+  let askHost: ToolHost | undefined, askLauncher: string | undefined;
+  if (options.askUserTools ?? !process.env.NODE_TEST_CONTEXT) {
+    askHost = new ToolHost({dir: join(options.dataDir, 'agent-tools', 'ask'), name: ASK_MCP, title: 'Muster questions', specs: [ASK_USER_SPEC], execPath: process.execPath, timeoutMs: 30_000,
+      run: (chatId, _tool, args) => { const {text: _text, ...result} = askUser(chatId, args); return result; }});
+    void askHost.start().then(launcher => { askLauncher = launcher; }, error => console.warn(`Agent question tool unavailable: ${error instanceof Error ? error.message : String(error)}`));
+  }
+  /** Adds the muster_ask MCP server to a run (CLI routes load it; HTTP routes offer ask_user natively instead). */
+  function withAskUser<T extends {configOverrides?: Record<string, unknown>}>(chatId: string, runOptions: T): T {
+    const extra = askHost && askLauncher ? askUserRunOverrides(chatId, askLauncher, askHost.chatToken(chatId)) : {};
+    return Object.keys(extra).length ? {...runOptions, configOverrides: {...runOptions.configOverrides, ...extra}} : runOptions;
+  }
+  /** A later answer: recorded on the card at once (so a second answer is a no-op), then delivered as a steer while the
+   *  run is going and the route takes one, or as the next turn through the chat queue. */
+  async function answerAsked(itemId: string, raw: unknown): Promise<void> {
+    const item = store.item(itemId);
+    if (!item || item.kind !== 'question') throw new Error('This question no longer exists.');
+    if (item.status === 'answered') return;
+    if (item.status !== 'pending') throw new Error('This question was already closed.');
+    const chat = chatFor(item.chatId);
+    if (chat.archived) throw new Error('Restore this chat before answering.');
+    const values = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>)[ASK_QUESTION_ID] : undefined;
+    const list = values && typeof values === 'object' && !Array.isArray(values) ? (values as Record<string, unknown>).answers : undefined;
+    if (!Array.isArray(list) || list.length !== 1 || typeof list[0] !== 'string' || !list[0].trim() || list[0].length > 4096) throw new Error('Invalid question answers.');
+    const answer = list[0].trim();
+    const question = Array.isArray(item.data?.questions) ? String((item.data.questions[0] as {question?: unknown} | undefined)?.question ?? item.text) : item.text;
+    store.updateItem(itemId, item.text, 'answered', {...item.data, answers: {[ASK_QUESTION_ID]: {answers: [answer]}}});
+    timeline(chat.id); state();
+    const message = askUserAnswerMessage(question, answer), requestId = `ask-${itemId}`;
+    let delivered: 'steered' | 'queued' = 'queued';
+    if (runs.has(chat.id) && (await steerRun(chat, message, requestId, {})).steered) delivered = 'steered';
+    else await dispatch('chat.queue.add', {id: chat.id, text: message, requestId});
+    const latest = store.item(itemId);
+    if (latest) { store.updateItem(itemId, latest.text, latest.status, {...latest.data, delivered}); timeline(chat.id); }
+  }
+  function dismissAsked(itemId: string): void {
+    const item = store.item(itemId);
+    if (!item || item.status !== 'pending') return;
+    store.updateItem(itemId, item.text, 'dismissed', item.data); timeline(item.chatId); state();
   }
   function settleApprovals(chatId: string) {
     for (const [itemId, pending] of approvals) if (pending.chatId === chatId) finishApproval(itemId, pending, 'decline', 'interrupted');
@@ -521,7 +625,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (defaults.providerId && defaults.model?.trim()) return { providerId: defaults.providerId, model: defaults.model.trim(), ...(defaults.effort ? { effort: defaults.effort } : {}) };
     return firstReadyModel(provider.info());
   }
-  async function send(chatId: string, prompt: string, requestId: string, skill?: string | string[], attachmentIds: string[] = [], invoked: {pluginIds?: string[]; effort?: ReasoningEffort; reuseUserItemId?: string} = {}) {
+  async function send(chatId: string, prompt: string, requestId: string, skill?: string | string[], attachmentIds: string[] = [], invoked: {pluginIds?: string[]; effort?: ReasoningEffort; reuseUserItemId?: string; queued?: QueuedMessage; userData?: Record<string, unknown>} = {}) {
     // /compact is Muster's command in every chat type and provider: never a message for the model.
     if (isCompactCommand(prompt) && attachmentIds.length === 0 && skill === undefined) { await compactChat(chatId); return {runId: ''}; }
     // A compaction in flight settles first: the next turn goes to the compacted (or fresh) thread.
@@ -586,9 +690,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     }
     const access = providerAccessPolicy(chat);
     // A fork (or a replaced turn) starts a fresh provider conversation: carry the visible history once, bounded.
-    const digest = store.needsDigest(chatId) ? transcriptDigest(store.timeline(chatId)) : '';
+    const digest = store.needsDigest(chatId) ? transcriptDigest(store.timeline(chatId), cwd) : '';
     const files = attachments.resolve(chatId, attachmentIds);
-    const accepted = store.recordSend(chatId, requestId, prompt, fingerprint, {...(files.length ? {userData: {attachments: files.map(({path: _path, ...ref}) => ({...ref, state: 'sent'}))}, within: () => attachments.markSent(attachmentIds)} : {}), ...(invoked.reuseUserItemId ? {reuseUserItemId: invoked.reuseUserItemId} : {})});
+    // #450: a queued message leaves the queue in the same transaction that records its receipt.
+    const queued = invoked.queued;
+    const userData = {...(invoked.userData ?? {}), ...(files.length ? {attachments: files.map(({path: _path, ...ref}) => ({...ref, state: 'sent'}))} : {})};
+    const accepted = store.recordSend(chatId, requestId, prompt, fingerprint, {...(Object.keys(userData).length ? {userData} : {}), ...(files.length || queued ? {within: () => { if (files.length) attachments.markSent(attachmentIds); if (queued) queue.consume(chatId, queued); }} : {}), ...(invoked.reuseUserItemId ? {reuseUserItemId: invoked.reuseUserItemId} : {})});
     if (accepted.replay) return {runId: accepted.runId};
     if (!digest) store.clearDigest(chatId);
     // Several chats may work in one folder (as in Codex). Warn once per chat
@@ -608,7 +715,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       store.appendItem(chatId, 'notice', `${modelName} (${selectedProvider.name}) can’t view images, so ${attachedImages.length === 1 ? `“${attachedImages[0]!.name}” was` : `${attachedImages.length} images were`} not sent to the model. Switch to a vision model to include ${attachedImages.length === 1 ? 'it' : 'them'}.`, 'completed', {kind: 'images-unsupported', names: attachedImages.map(file => file.name)});
     }
     const fileLines = [attachedFileLines(files), blind ? `The user attached ${attachedImages.length === 1 ? 'an image' : `${attachedImages.length} images`} (${attachedImages.map(file => file.name).join(', ')}) that this model cannot view. Do not guess or describe ${attachedImages.length === 1 ? 'its' : 'their'} contents; tell the user you cannot see ${attachedImages.length === 1 ? 'it' : 'them'} if it matters.` : ''].filter(Boolean).join('\n');
-    const run: ActiveRun = {cwd, stopped: false, retry: new AbortController()}; runs.set(chatId, run); state(); timeline(chatId);
+    const run: ActiveRun = {cwd, stopped: false, retry: new AbortController(), prompt}; runs.set(chatId, run); state(); timeline(chatId);
     let segment: TimelineItem | undefined;
     let producedAssistant = false;
     const toolIds = new Map<string, string>();
@@ -633,9 +740,14 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       if (kind === 'assistant') producedAssistant = true;
       if (segment && segment.kind !== kind) seal();
       if (!segment) segment = store.appendItem(chatId, kind, '', 'running');
-      segment = {...segment, text: segment.text + delta}; store.updateItem(segment.id, segment.text, 'running'); scheduleTimeline(chatId);
+      // Rewriting the whole growing text on every delta made a long reply O(n²) in SQLite writes; the text is
+      // written when the next timeline patch goes out (≤33 ms later) and when the segment is sealed.
+      segment = {...segment, text: segment.text + delta}; segmentDirty = true; scheduleTimeline(chatId);
     };
-    const seal = () => { if (segment) store.updateItem(segment.id, segment.text, 'completed'); segment = undefined; };
+    let segmentDirty = false;
+    const flushSegment = () => { if (segment && segmentDirty && !disposed) store.updateItem(segment.id, segment.text, 'running'); segmentDirty = false; };
+    segmentFlushes.set(chatId, flushSegment);
+    const seal = () => { if (segment) store.updateItem(segment.id, segment.text, 'completed'); segment = undefined; segmentDirty = false; };
     run.seal = seal;
     run.promise = (async () => {
       try {
@@ -650,7 +762,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // No registered hooks: dispatch in the same tick, exactly as before the seam existed.
         const hooked = domainHooks.hasRunHooks();
         const contributed = hooked ? await domainHooks.contributePrompt({chat, ...(folder ? {folder} : {}), ...(project ? {project} : {}), prompt}) : {text:'', sources:[] as string[], blocks:[] as ContextBlock[]};
-        const runOptions = hooked ? await domainHooks.resolveRunOptions(chat) : {};
+        const runOptions = withAskUser(chat.id, hooked ? await domainHooks.resolveRunOptions(chat) : {});
         if (hooked) await domainHooks.runStarted({chat, runId: accepted.runId, cwd});
         if (disposed) return;
         let ownership = '';
@@ -681,7 +793,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         let retryDetail: string | undefined;
         const stoppedBeforeDispatch: ProviderResult = {status:'failed',finalMessage:'',dispatchState:'not-dispatched',recovery:{kind:'cancelled',retryable:false,reason:'Stopped before the request was sent.'}};
         const attempt = () => run.stopped ? Promise.resolve(stoppedBeforeDispatch) : provider.run({ chat: {...chat,providerTurnId:undefined,recovery:undefined}, cwd, prompt: contextualPrompt,
-          ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) ? {connectorsRequested: true} : {}),
+          ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) || pluginReloads.wantsConnectors(chatId) ? {connectorsRequested: true} : {}),
           ...(runOptions.configOverrides ? {configOverrides: runOptions.configOverrides as Record<string, string | number | boolean | string[]>} : {}), ...(runOptions.developerInstructions ? {developerInstructions: runOptions.developerInstructions} : {}),
           onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
           onThreadReady: threadId => persistIdentity(threadId),
@@ -695,7 +807,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             while (last >= 0 && items[last]!.kind !== 'user') last--;
             store.appendItem(chatId, 'notice', 'The saved provider conversation could not be resumed, so a fresh one started with a summary of the earlier messages. The displayed chat history is retained.', 'completed', {kind: 'thread-reset'});
             scheduleTimeline(chatId);
-            return [transcriptDigest(items.slice(0, Math.max(0, last))), ...staticBlocks.filter(block => !pendingBlocks.has(block)).map(block => block.text)].filter(Boolean).join('\n\n') || undefined;
+            return [transcriptDigest(items.slice(0, Math.max(0, last)), cwd), ...staticBlocks.filter(block => !pendingBlocks.has(block)).map(block => block.text)].filter(Boolean).join('\n\n') || undefined;
           },
           onTurnAccepted: identity => persistIdentity(identity.threadId,identity.turnId),
           onEvent(method, params) {
@@ -722,7 +834,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               // Codex retries a dropped model connection itself (willRetry): say so instead of looking stuck.
               if (!ownRun || !parentEvent || params.willRetry !== true) return;
               const error = params.error && typeof params.error === 'object' ? params.error as Record<string, unknown> : {};
-              const why = typeof error.message === 'string' ? error.message.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+              // Shown in the transcript: a proxy URL's user:password or a token in the provider's text is masked.
+              const why = typeof error.message === 'string' ? redactSecrets(error.message.replace(/\s+/g, ' ').trim().slice(0, 300)) : '';
               const text = why ? `Reconnecting… ${why}` : 'Reconnecting…';
               seal();
               if (reconnectNotice) { reconnectNotice = {...reconnectNotice, text}; store.updateItem(reconnectNotice.id, text, 'running', reconnectNotice.data); }
@@ -807,6 +920,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             const background = current ? current !== run && !current.stopped : provider.hasActiveWork?.(chatId) === true;
             if (disposed || closing || run.stopped || (current !== run && !background) || !store.chat(chatId)) return undefined;
             seal();
+            // ask_user from an HTTP route: the card is posted and the run continues with the default, in every access mode.
+            if (method === ASK_USER_METHOD) return askUser(chatId, params);
+            // Muster's own ask_user MCP server never needs a card: calling it only posts a question.
+            if ((/^item\/mcpToolCall\/requestApproval$/.test(method) || isElicitationRequest(method)) && (params.server === ASK_MCP || params.serverName === ASK_MCP || elicitationServer(params) === ASK_MCP)) return isElicitationRequest(method) ? elicitationResult(true) : {decision: 'accept'};
             if (method === 'item/tool/requestUserInput') {
               const rawQuestions = Array.isArray(params.questions) ? params.questions : [];
               if (rawQuestions.length === 0 || rawQuestions.length > 32) throw new Error('Invalid provider questions.');
@@ -938,7 +1055,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // settled that attempt as failed, which Inbox and Pulse explain in a plain sentence and which may be run again.
         // A failure with no message at all stays unconfirmed (recovery-needed).
         const said = (result.errorMessage ?? '').replace(/\s+/g, ' ').trim().slice(0, 600);
-        let recovery: ChatRecovery | undefined = result.recovery ?? (run.stopped ? {kind:'cancelled',retryable:false,reason:'Stopped.'}
+        // A quit is not a Stop (#449), but a provider that may still be running the turn keeps that state for the check.
+        let recovery: ChatRecovery | undefined = run.quit && result.recovery?.kind !== 'recovery-needed' ? shutdownRecovery(!!run.shutdown) : result.recovery ?? (run.stopped ? {kind:'cancelled',retryable:false,reason:'Stopped.'}
           : result.status === 'failed' ? (said && result.dispatchState !== 'unknown' ? {kind:'failed',retryable:false,reason:`The provider attempt failed: ${said}`} : {kind:'recovery-needed',retryable:false,reason:'The provider attempt did not settle with confirmed outcome. Check its saved turn before continuing; the prompt was not resent.'}) : undefined);
         // #426: the provider refused the turn because the conversation no longer fits the model's window. That is a settled
         // refusal, never an unconfirmed attempt: say so, and offer compaction or a fresh thread with a summary.
@@ -947,18 +1065,25 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           recovery = {kind:'failed', retryable:false, reason:`${modelName} refused this turn: the conversation no longer fits its context window.`};
           store.appendItem(chatId, 'notice', `The conversation no longer fits ${modelName}’s context window. Compact it and send again, or continue in a fresh thread with a summary.`, 'failed', {kind:'compaction', status:'failed', reason:'context-overflow', actions:['retry','fresh']});
         }
+        // #448: a provider usage or rate limit. Its own refusal ended the turn, so it is settled (never "may still be running"),
+        // and the chat waits for the reset to continue.
+        if (recovery && recovery.kind !== 'cancelled' && !run.stopped && isUsageLimit(`${said} ${recovery.kind === 'recovery-needed' ? '' : recovery.reason}`)) {
+          if (recovery.kind === 'recovery-needed') recovery = {kind:'failed', retryable:false, reason:`The provider attempt failed: ${said}`};
+          run.limit = {text:`${said} ${recovery.reason}`, ...(result.failure?.retryAfterMs ? {retryAfterMs:result.failure.retryAfterMs} : {}), notDispatched: result.dispatchState === 'not-dispatched', prompt, attachmentIds};
+        }
         if (result.threadId) persistIdentity(result.threadId,result.turnId);
         // Only a turn the provider actually took delivered its context blocks to the thread.
         if (result.status === 'completed' && result.dispatchState !== 'not-dispatched' && !compactedInRun) contextLedger.delivered(chatId, store.chat(chatId)?.providerThreadId, threadReset ? staticBlocks : [...pendingBlocks], retainedTurns);
         else if (result.dispatchState !== 'not-dispatched') contextLedger.forget(chatId);
         if (recovery) store.appendItem(chatId,'notice',recovery.reason,recovery.kind,{recovery,providerThreadId:store.chat(chatId)?.providerThreadId,providerTurnId:store.chat(chatId)?.providerTurnId});
-        const restoreDraft=result.status==='failed' && result.dispatchState==='not-dispatched' && recovery?.kind!=='recovery-needed' && store.chat(chatId)?.draft==='';
+        // #448: a limited turn that never started re-runs its own prompt at reset, so it is not also handed back as a draft (sent twice).
+        const restoreDraft=result.status==='failed' && result.dispatchState==='not-dispatched' && recovery?.kind!=='recovery-needed' && store.chat(chatId)?.draft==='' && !(run.limit && settingOn('chats.resumeAfterLimit'));
         if (restoreDraft && attachmentIds.length) attachments.restage(attachmentIds);
         store.updateChat(chatId, {status:recovery?.kind === 'recovery-needed' ? 'failed' : run.stopped ? 'interrupted' : result.status,recovery:recovery ?? null,error:recovery?.reason ?? result.errorMessage ?? null,...(restoreDraft?{draft:prompt}:{})});
       } catch (error) {
         if (!disposed) {
           seal();
-          const recovery: ChatRecovery = error instanceof ProviderPreDispatchError
+          const recovery: ChatRecovery = run.quit ? shutdownRecovery(!!run.shutdown) : error instanceof ProviderPreDispatchError
             ? {kind:'failed',retryable:true,reason:error.message}
             : run.stopped ? {kind:'cancelled',retryable:false,reason:'Stopped.'}
             : {kind:'recovery-needed',retryable:false,reason:'The provider attempt ended without a confirmed outcome. Check its saved turn before continuing; the prompt was not resent.'};
@@ -969,14 +1094,18 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         }
       } finally {
         // Background sub-agents can still be waiting on a card after the parent turn ended: keep it answerable.
-        if (run.stopped || disposed || !provider.hasActiveWork?.(chatId)) { settleApprovals(chatId); settleQuestions(chatId); }
+        const settled = run.stopped || disposed || !provider.hasActiveWork?.(chatId);
+        if (settled) { settleApprovals(chatId); settleQuestions(chatId); seal(); }
+        flushSegment(); if (segmentFlushes.get(chatId) === flushSegment) segmentFlushes.delete(chatId);
         // Stop can close the provider before it sends item/completed, and a completed or failed turn can end with a tool the
         // provider never closed (#387). Persist the terminal state once, keeping completed tools and partial output intact.
         // Background sub-agents still working after the turn keep their rows live until they report back.
-        if (run.stopped || disposed || !provider.hasActiveWork?.(chatId)) {
+        if (settled) {
           const startedById = new Map([...toolIds].map(([providerId, localId]) => [localId, toolStarted.get(providerId)]));
           store.settleToolItems(chatId, item => startedById.get(item.id));
         }
+        // #449: any tool row still running once the run's work has ended settles as interrupted.
+        if (settled) store.settleRunningTools(chatId);
         runs.delete(chatId);
         // #426: a compaction asked for during the turn runs now (before any queued message is dispatched).
         const deferred = deferredCompactions.get(chatId);
@@ -989,7 +1118,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           // CHAT-15: "until new activity" wakes when a run settles (one transition, unread + one notification).
           if(finalChat?.snoozeUntilActivity&&wake(chatId,'activity'))finalChat=store.chat(chatId);
           if(finalChat&&(finalChat.status==='completed'||finalChat.status==='failed'||finalChat.status==='interrupted')){const task=projectTasks.settleRunForChat(chatId,finalChat.status,finalChat.error,finalAssistantText(chatId));if(task)emit({type:'projectChanged',projectId:task.projectId,taskId:task.id});}state();
-          if (finalChat) { domainHooks.runSettled({chat:finalChat,runId:accepted.runId,status:finalChat.status}); afterRun(chatId, finalChat.status); }
+          if (finalChat) { domainHooks.runSettled({chat:finalChat,runId:accepted.runId,status:finalChat.status}); settleAutoResume(chatId, run, finalChat); afterRun(chatId, finalChat.status); }
           // A turn the app-server started itself (native goal or queue) while this run settled is adopted now.
           nativeTurns.drain(chatId); }
       }
@@ -998,9 +1127,170 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   }
   /** A completed run hands the queue head to chat.send; any other ending pauses the queue until the user resumes it (Codex). */
   function afterRun(chatId: string, status: Chat['status']) {
+    // A turn stopped because a plugin was installed mid-run: the re-sent message goes next, on a fresh session.
+    if (pluginReloads.settled(chatId) && !closing && !disposed) { queue.resume(chatId); provider.markStale?.(); dispatchQueued(chatId); state(); return; }
     if (!store.queue(chatId).length || closing || disposed) return;
     if (queueActionAfter(status) === 'dispatch') { dispatchQueued(chatId); return; }
-    queue.pause(chatId, status === 'interrupted' ? 'interrupted' : 'failed'); state();
+    // #448: behind a usage limit the queue waits for the continuation, then sends in order.
+    const waiting = autoResume.get(chatId);
+    queue.pause(chatId, waiting?.kind === 'limit' && waiting.state === 'armed' ? 'limited' : status === 'interrupted' ? 'interrupted' : 'failed'); state();
+  }
+  // --- #448 / #449: automatic continuation after a usage limit resets, and after a restart ---
+  /** A run Muster's own quit interrupted: a neutral ending (never "Stopped", never "will not resume"). */
+ const shutdownRecovery = (continues: boolean): ChatRecovery => ({kind:'cancelled', retryable:false, reason: continues && settingOn('chats.resumeAfterRestart') ? 'Muster quit while this was working. It continues when Muster starts again.' : 'Muster quit while this was working. Send a message to continue.'});
+  const resumeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Settings are read live (sync handler); anything unreadable keeps the default, on. */
+  const settingOn = (key: 'chats.resumeAfterLimit' | 'chats.resumeAfterRestart'): boolean => {
+    try { const result = domains.handlers.get('settings.get')?.({}) as {values?: Record<string, unknown>} | undefined; return result?.values?.[key] !== false; } catch { return true; }
+  };
+  /** Codex usage windows for this chat's route (live, else its session logs). */
+  function usageFor(chat: Chat): ProviderUsage[] {
+    const rows: ProviderUsage[] = [];
+    const id = chat.providerThreadProviderId ?? chat.providerId;
+    if (!id) return rows;
+    const live = liveProviderUsage(id); if (live) rows.push(live);
+    try { const listed = domains.handlers.get('providers.usage')?.({id}); if (Array.isArray(listed)) rows.push(...(listed as ProviderUsage[])); } catch { /* no usage source for this route */ }
+    return rows;
+  }
+  function cancelResumeTimer(chatId: string) { const timer = resumeTimers.get(chatId); if (timer) clearTimeout(timer); resumeTimers.delete(chatId); }
+  function clearAutoResume(chatId: string) { cancelResumeTimer(chatId); autoResume.delete(chatId); }
+  /** Timers wake at most hourly to re-read the stored time, so a long wait survives clock changes and sleep. */
+  function armResume(chatId: string) {
+    cancelResumeTimer(chatId);
+    const row = autoResume.get(chatId);
+    if (!row || row.state !== 'armed' || disposed || closing) return;
+    const wait = Math.min(Math.max((row.resumeAt ? Date.parse(row.resumeAt) : Date.now()) - Date.now(), 0), 60 * 60_000);
+    const timer = setTimeout(() => {
+      resumeTimers.delete(chatId);
+      const current = autoResume.get(chatId);
+      if (current?.state === 'armed' && current.resumeAt && Date.parse(current.resumeAt) > Date.now() + 250) { armResume(chatId); return; }
+      void fireResume(chatId);
+    }, wait);
+    timer.unref?.();
+    resumeTimers.set(chatId, timer);
+  }
+  function autoResumeNotice(row: AutoResumeRow, text: string): string {
+    const item = row.noticeId ? store.item(row.noticeId) : undefined;
+    if (item && item.chatId === row.chatId) { store.updateItem(item.id, text, 'completed', {...item.data, kind:'auto-resume'}); return item.id; }
+    return store.appendItem(row.chatId, 'notice', text, 'completed', {kind:'auto-resume', reason:row.kind}).id;
+  }
+  /** The next model in this chat's opt-in fallback list (after the current one), available and listing the model. */
+  function nextFallback(chat: Chat): {providerId: string; model: string; bindingId: string; name: string} | undefined {
+    const list = autoResume.fallbacks(chat.id);
+    if (!list.length) return undefined;
+    const current = list.findIndex(entry => entry.providerId === chat.providerId && entry.model === chat.model);
+    for (const entry of list.slice(current + 1)) {
+      if (entry.providerId === chat.providerId && entry.model === chat.model) continue;
+      const route = provider.info().find(candidate => candidate.id === entry.providerId && candidate.available && (candidate.models.length === 0 || candidate.models.some(model => model.id === entry.model)));
+      if (route) return {providerId: route.id, model: entry.model, bindingId: route.bindingId ?? route.id, name: route.models.find(model => model.id === entry.model)?.name ?? entry.model};
+    }
+    return undefined;
+  }
+  /** Moves a limited chat to its next fallback and continues at once. False when there is none to use. */
+  function useFallback(chatId: string): boolean {
+    const chat = store.chat(chatId), row = autoResume.get(chatId);
+    if (!chat || !row || row.kind !== 'limit' || busy(chat) || runs.has(chatId) || providerSelections.has(chatId)) return false;
+    const next = nextFallback(chat);
+    if (!next) return false;
+    const was = provider.info().find(entry => entry.id === chat.providerId)?.models.find(model => model.id === chat.model)?.name ?? chat.model;
+    store.updateChat(chatId, {providerId: next.providerId, providerBindingId: next.bindingId, model: next.model});
+    store.appendItem(chatId, 'notice', `${was} is limited, so this chat continues with ${next.name}, its fallback model.`, 'completed', {kind:'auto-resume', reason:'fallback', providerId: next.providerId, model: next.model});
+    // A fresh conversation on the fallback: never "the limit has reset".
+    autoResume.update(chatId, {state:'armed', resumeAt:new Date().toISOString(), native:false});
+    timeline(chatId); state();
+    queueMicrotask(() => { void fireResume(chatId); });
+    return true;
+  }
+  /** A run settled: a usage limit arms (or backs off) the resume; anything else ends the automatic continuation it was. */
+  function settleAutoResume(chatId: string, run: ActiveRun, chat: Chat) {
+    const row = autoResume.get(chatId);
+    // A quit leaves the row for the next launch (a 'shutdown' row, or a continuation that must not run twice).
+    if (run.quit) return;
+    if (!run.limit || run.stopped) { if (row && (row.state === 'running' || run.stopped || chat.status === 'completed')) clearAutoResume(chatId); return; }
+    const again = row?.kind === 'limit' && row.state === 'running';
+    const attempts = again ? row.attempts + 1 : 0, kind = limitClass(run.limit.text) ?? 'quota';
+    // A refused turn that never started re-runs its own prompt; one that did work continues from where it stopped.
+    const reuse = run.limit.notDispatched ? [...store.timeline(chatId)].reverse().find(item => item.kind === 'user' && item.data?.steered !== true && item.data?.autoResume === undefined) : undefined;
+    const base: Omit<AutoResumeRow, 'createdAt' | 'state' | 'resumeAt' | 'attempts' | 'noticeId'> = again && row.prompt !== undefined
+      ? {...row, limitClass: kind}
+      : {chatId, kind:'limit', limitClass: kind, prompt: reuse ? reuse.text : null, reuseItemId: reuse?.id ?? null, attachmentIds: reuse ? run.limit.attachmentIds : [], native: hasNativeSession(chat)};
+    const noticeId = again ? row.noticeId : null;
+    if (attempts >= LIMIT_MAX_ATTEMPTS[kind]) {
+      const stopped = autoResume.set({...base, state:'gave-up', resumeAt:null, attempts, noticeId});
+      autoResume.update(chatId, {noticeId: autoResumeNotice(stopped, `Still limited after ${attempts} automatic tries, so Muster stopped continuing this chat. Send a message once the limit resets.`)});
+      cancelResumeTimer(chatId);
+      useFallback(chatId);
+      return;
+    }
+    const {at} = limitResumeAt({text: run.limit.text, usage: usageFor(chat), ...(run.limit.retryAfterMs ? {retryAfterMs: run.limit.retryAfterMs} : {}), attempts});
+    let next = autoResume.set({...base, state: again || settingOn('chats.resumeAfterLimit') ? 'armed' : 'off', resumeAt: new Date(at).toISOString(), attempts, noticeId});
+    // An opt-in fallback model continues at once instead of waiting for the reset.
+    if (next.state === 'armed' && useFallback(chatId)) return;
+    // Said once: the first refusal after a reset adds one line; later ones update it.
+    if (again) next = autoResume.update(chatId, {noticeId: autoResumeNotice(next, `The provider still refused at reset. Muster tries again at ${resetClock(at)}${attempts + 1 < LIMIT_MAX_ATTEMPTS[kind] ? '' : ', for the last time'}.`)})!;
+    armResume(chatId);
+  }
+  /** Continues a chat at its stored time: the limited turn's own prompt (never dispatched), or a short continuation. */
+  async function fireResume(chatId: string): Promise<void> {
+    cancelResumeTimer(chatId);
+    const row = autoResume.get(chatId);
+    if (!row || row.state !== 'armed' || disposed || closing) return;
+    const chat = store.chat(chatId);
+    if (!chat || chat.archived) { clearAutoResume(chatId); state(); return; }
+    // The user (or another run) already took over; nothing to continue.
+    if (runs.has(chatId) || busy(chat) || dispatching.has(chatId) || compactions.has(chatId) || chat.recovery?.kind === 'recovery-needed') { if (row.kind === 'restart' || busy(chat)) clearAutoResume(chatId); state(); return; }
+    if (!settingOn(row.kind === 'limit' ? 'chats.resumeAfterLimit' : 'chats.resumeAfterRestart')) { if (row.kind === 'limit') autoResume.update(chatId, {state:'off'}); else autoResume.delete(chatId); state(); return; }
+    autoResume.update(chatId, {state:'running'});
+    // Queued messages wait for this continuation, then send in order once it completes.
+    if (queue.paused(chatId)) queue.resume(chatId);
+    const draft = chat.draft, requestId = `auto-${row.kind}-${randomUUID()}`;
+    const rerun = row.kind === 'limit' && row.reuseItemId && row.prompt && store.item(row.reuseItemId)?.chatId === chatId;
+    const native = row.native && hasNativeSession(chat);
+    // After a restart a route without a session is told what happened; after a limit the short line is enough.
+    const text = rerun ? row.prompt! : row.kind === 'restart' && !native ? RESTART_CONTINUATION : NATIVE_CONTINUATION;
+    try {
+      await send(chatId, text, requestId, undefined, rerun ? row.attachmentIds : [], rerun ? {reuseUserItemId: row.reuseItemId!} : {userData: {autoResume: row.kind}});
+      // The send took the composer's text with it; a draft the user was writing (not the limited prompt) is kept.
+      if (draft && draft !== row.prompt) store.updateChat(chatId, {draft});
+    } catch (error) {
+      if (disposed) return;
+      const reason = (error instanceof Error ? error.message : String(error)).replace(/[.\s]+$/, '');
+      const current = autoResume.get(chatId);
+      if (row.kind === 'limit' && current) {
+        // Treated as one more refusal: back off, never retry at once.
+        const attempts = current.attempts + 1, kind = current.limitClass ?? 'quota';
+        if (attempts >= LIMIT_MAX_ATTEMPTS[kind]) { autoResume.update(chatId, {state:'gave-up', attempts, resumeAt:null}); autoResume.update(chatId, {noticeId: autoResumeNotice(autoResume.get(chatId)!, `Muster could not continue this chat after the limit: ${reason}. It stopped trying; send a message to continue.`)}); }
+        else { autoResume.update(chatId, {state:'armed', attempts, resumeAt: new Date(limitResumeAt({text: kind === 'rate' ? '429' : 'usage limit', attempts}).at).toISOString()}); armResume(chatId); }
+      } else {
+        clearAutoResume(chatId);
+        store.appendItem(chatId, 'notice', `Muster could not continue this chat after the restart: ${reason}. Send a message to continue.`, 'completed', {kind:'auto-resume', reason:'restart-failed'});
+      }
+      timeline(chatId);
+    }
+    state();
+  }
+  /** #449, after launch: re-arm stored limit resumes, and continue the chats that were working when Muster closed. */
+  async function bootAutoResume(): Promise<void> {
+    for (const row of autoResume.all()) if (row.kind === 'limit' && row.state === 'armed') armResume(row.chatId);
+    // #450: a queue head whose dispatch was cut short by the quit is still queued (no receipt): an idle chat whose queue
+    // is not paused sends it now, instead of holding it until the user acts.
+    for (const chat of store.snapshot().chats) if (!chat.archived && !restartCandidates.includes(chat.id) && store.queue(chat.id).length && !queue.paused(chat.id) && !busy(chat) && !runs.has(chat.id) && !autoResume.get(chat.id)) dispatchQueued(chat.id);
+    if (!restartCandidates.length) return;
+    if (!settingOn('chats.resumeAfterRestart')) { for (const chatId of restartCandidates) if (autoResume.get(chatId)?.kind === 'restart') autoResume.delete(chatId); return; }
+    await firstProviderProbe();
+    await new Promise(resolve => { const timer = setTimeout(resolve, autoResumeTiming.restartDelayMs); timer.unref?.(); });
+    if (disposed || closing) return;
+    for (const chatId of restartCandidates) {
+      const chat = store.chat(chatId);
+      const prior = autoResume.get(chatId);
+      if (!chat || chat.archived || busy(chat) || (prior && prior.state !== 'shutdown')) continue;
+      const native = hasNativeSession(chat);
+      const row = {chatId, kind:'restart' as const, attempts:0, prompt: prior?.prompt ?? null, reuseItemId:null, attachmentIds:[], noticeId:null, native};
+      // A provider-side attempt is checked first (RecoveryNotice, "Continue anyway"); a check that finds it interrupted continues it.
+      if (chat.recovery?.kind === 'recovery-needed') { autoResume.set({...row, state:'check', resumeAt:null}); continue; }
+      autoResume.set({...row, state:'armed', resumeAt:new Date().toISOString()});
+      await fireResume(chatId);
+    }
   }
   function dispatchQueued(chatId: string) {
     if (runs.has(chatId) || closing || disposed || queue.paused(chatId) || compactions.has(chatId)) return;
@@ -1013,13 +1303,25 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const head = queue.list(chatId)[0];
     if (head && nativeQueue.pending(head.id)) return;
     if (nativeQueue.owns(chatId)) { void nativeQueue.start(chatId).then(started => { if (!started) dispatchQueued(chatId); }); return; }
-    const item = queue.take(chatId);
+    // #450: one dispatch per chat at a time; the head stays queued (and survives a quit) until its send is recorded.
+    if (dispatching.has(chatId)) return;
+    const item = queue.head(chatId);
     if (!item) return;
-    state();
-    const pending = send(chatId, item.text, item.requestId, item.skillIds?.length ? item.skillIds : undefined, item.attachmentIds, {pluginIds: item.pluginIds ?? [], ...(item.effort ? {effort: item.effort} : {})}).catch(error => {
+    // Already sent under this request id (a replay, or steered into a run): drop the row instead of sending it again.
+    if (store.receipt(item.requestId) || steered.get(item.requestId) === chatId) { queue.dropSent(chatId, item.id); state(); dispatchQueued(chatId); return; }
+    dispatching.add(chatId);
+    const pending = send(chatId, item.text, item.requestId, item.skillIds?.length ? item.skillIds : undefined, item.attachmentIds, {pluginIds: item.pluginIds ?? [], ...(item.effort ? {effort: item.effort} : {}), queued: item}).then(() => {
+      dispatching.delete(chatId);
+      // Handled without a turn (an edited row that became /compact): it never leaves the queue on its own.
+      if (!disposed && queue.list(chatId).some(entry => entry.id === item.id) && !store.receipt(item.requestId) && !runs.has(chatId)) queue.dropSent(chatId, item.id);
+      state();
+    }, error => {
+      dispatching.delete(chatId);
       if (disposed) return;
+      // Edited or removed while the send was being prepared: nothing was sent; the queue as it is now goes next.
+      if (error instanceof QueueChangedError) { state(); if (!runs.has(chatId)) dispatchQueued(chatId); return; }
       const reason = error instanceof Error ? error.message : String(error);
-      if (!store.receipt(item.requestId)) queue.restore(chatId, item, reason);
+      if (!store.receipt(item.requestId) && queue.list(chatId).some(entry => entry.id === item.id)) queue.fail(item.id, reason);
       store.appendItem(chatId, 'notice', `Queued message was not sent: ${reason}`, 'failed', {kind:'queue-failed', queueId:item.id});
       timeline(chatId); state();
     });
@@ -1139,6 +1441,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     timeline(chat.id);
   }
   async function deleteChat(chatId: string): Promise<void> {
+    clearAutoResume(chatId);
+    pluginReloads.forget(chatId);
     for (const item of queue.list(chatId)) queue.remove(chatId, item.id);
     const run = runs.get(chatId);
     if (run) {
@@ -1441,6 +1745,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // A message the user sends by hand resumes a paused queue once its turn completes (Codex); goal turns do not.
         const requestId = id(p.requestId);
         if (!requestId.startsWith('goal-') && queue.paused(chatId)) { queue.resume(chatId); state(); }
+        // #448/#449: the user took over; a pending automatic continuation is dropped.
+        if (autoResume.get(chatId)) { clearAutoResume(chatId); state(); }
         return send(chatId, text(p.text, 'message', MAX_QUEUED_TEXT), requestId, skillIds.length ? skillIds : undefined, attachmentIds, {pluginIds, ...(p.effort !== undefined ? {effort: p.effort as ReasoningEffort} : {})});
       }
       case 'chat.queue.add': {
@@ -1644,6 +1950,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         if (last === undefined || index < last) throw new Error('Only the latest turn can be retried.');
         const prompt = items[last]!;
         if (!prompt.text.trim()) throw new Error('This turn only sent files. Attach them again to retry.');
+        if (autoResume.get(chatId)) clearAutoResume(chatId);
         // F46: re-run the original prompt without appending a second copy of it to the transcript.
         const result = await send(chatId, prompt.text, requestId, undefined, [], {reuseUserItemId: prompt.id});
         return {runId: result.runId, requestId};
@@ -1651,9 +1958,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'chat.stop': { const chatId = id(p.id); chatFor(chatId); const run = runs.get(chatId); if (!run) return;
         // Codex pauses an active goal before interrupting, so the stop never triggers a continuation.
         if (goalsByChat().get(chatId)?.status === 'active') { try { await domains.handlers.get('goals.pause')?.({chatId}); } catch { /* the goal was cleared meanwhile */ } }
-        run.stopped = true; run.retry.abort(); store.updateChat(chatId, {status: 'stopping'}); settleApprovals(chatId); settleQuestions(chatId); state(); await provider.stop(chatId);
-        // A turn the app-server started itself settles on its own turn/completed; if its session is gone, settle it here.
-        nativeTurns.stopped(chatId, !!provider.nativeThread?.(chatId)); return; }
+        await interruptRun(chatId, run); return; }
       case 'chat.reconcile': {
         const chatId=id(p.id),chat=chatFor(chatId);
         if (runs.has(chatId) || chat.status === 'running' || chat.status === 'stopping') return {chat,resolved:false,reason:'This attempt is still running locally. Stop it or wait before checking recovery.'};
@@ -1671,7 +1976,14 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           if (!result.resolved || !result.terminalStatus) return {chat:current,resolved:false,reason:result.reason,...(/still active/i.test(result.reason) ? {stillRunning:true} : {})};
           const updated=store.updateChat(chatId,{recovery:null,error:null,status:result.terminalStatus === 'completed' ? 'completed' : result.terminalStatus === 'interrupted' ? 'interrupted' : 'failed'});
           store.appendItem(chatId,'notice',result.reason,'completed',{providerThreadId:chat.providerThreadId,providerTurnId:chat.providerTurnId,reconciledStatus:result.terminalStatus});
-          timeline(chatId);state();return {chat:updated,resolved:true,reason:result.reason};
+          timeline(chatId);state();
+          // #449: the check found the restart-interrupted turn ended: continue it in the same thread (or drop the wait when it completed).
+          const waiting = autoResume.get(chatId);
+          if (waiting?.kind === 'restart' && waiting.state === 'check') {
+            if (result.terminalStatus === 'completed' || !settingOn('chats.resumeAfterRestart')) clearAutoResume(chatId);
+            else { autoResume.update(chatId, {state:'armed', resumeAt:new Date().toISOString(), native: hasNativeSession(updated)}); void fireResume(chatId); }
+          }
+          return {chat:updated,resolved:true,reason:result.reason};
         } finally {reconciliations.delete(chatId);}
       }
       case 'approval.respond': { const approvalId = id(p.id); if (typeof p.approved !== 'boolean') throw new Error('Invalid approval decision.');
@@ -1700,19 +2012,48 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         store.updateItem(item.id, item.text, item.status, {...item.data, reaskedAt: new Date().toISOString()}); timeline(chatId);
         return send(chatId, message, requestId);
       }
+      case 'chat.autoResume': {
+        const chatId = id(p.id); chatFor(chatId);
+        if (typeof p.resume !== 'boolean') throw new Error('Invalid resume choice.');
+        const row = autoResume.get(chatId);
+        if (!row || row.kind !== 'limit' || row.state === 'running') throw new Error('This chat is not waiting for a usage limit.');
+        if (p.resume) {
+          const at = Math.max(row.resumeAt ? Date.parse(row.resumeAt) : 0, Date.now() + autoResumeTiming.minWaitMs);
+          autoResume.update(chatId, {state:'armed', resumeAt: new Date(at).toISOString(), ...(row.state === 'gave-up' ? {attempts: 0} : {})});
+          armResume(chatId);
+        } else { cancelResumeTimer(chatId); autoResume.update(chatId, {state:'off'}); }
+        if (queue.paused(chatId) && store.queue(chatId).length) queue.pause(chatId, p.resume ? 'limited' : 'failed');
+        state();
+        return decorateChat(chatFor(chatId), goalsByChat().get(chatId), autoResume.get(chatId));
+      }
+      case 'chat.fallbacks': {
+        const chatId = id(p.id); chatFor(chatId);
+        if (!Array.isArray(p.fallbacks) || p.fallbacks.length > MAX_CHAT_FALLBACKS || !p.fallbacks.every(isChatFallback)) throw new Error(`Choose at most ${MAX_CHAT_FALLBACKS} fallback models.`);
+        const list = p.fallbacks.filter((entry, index, all) => all.findIndex(other => other.providerId === entry.providerId && other.model === entry.model) === index);
+        autoResume.setFallbacks(chatId, list);
+        // Chosen while the chat waits on a limit: it continues on the fallback now.
+        const waiting = autoResume.get(chatId);
+        if (waiting?.kind === 'limit' && (waiting.state === 'armed' || waiting.state === 'off' || waiting.state === 'gave-up') && list.length) { cancelResumeTimer(chatId); useFallback(chatId); }
+        state();
+        return decorateChat(chatFor(chatId), goalsByChat().get(chatId), autoResume.get(chatId));
+      }
       case 'chat.continueAnyway': {
         const chatId = id(p.id), chat = chatFor(chatId);
         if (runs.has(chatId) || chat.status === 'running' || chat.status === 'stopping') throw new Error('This attempt is still running here. Stop it or wait first.');
         if (chat.recovery?.kind !== 'recovery-needed') return chat;
         // The user's own call: the earlier attempt stays unconfirmed and is recorded as such, but it no longer blocks the chat.
         const updated = store.updateChat(chatId, {recovery: null, error: null, status: 'interrupted'});
+        // The user's call replaces the automatic continuation that waited for this check.
+        if (autoResume.get(chatId)?.state === 'check') clearAutoResume(chatId);
         store.appendItem(chatId, 'notice', 'Continued without confirming the earlier attempt. It may still have been working at the provider; nothing was resent.', 'completed', {kind: 'continue-anyway', providerThreadId: chat.providerThreadId, providerTurnId: chat.providerTurnId});
         timeline(chatId); state(); return updated;
       }
-      case 'question.dismiss': { const questionId = id(p.id); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.'); finishQuestion(questionId, pending, null, 'dismissed'); return; }
+      case 'question.dismiss': { const questionId = id(p.id); if (!questions.has(questionId) && isNonBlockingQuestion(store.item(questionId)?.data)) return dismissAsked(questionId); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.'); finishQuestion(questionId, pending, null, 'dismissed'); return; }
       case 'chat.compact': await compactChat(id(p.id), {fresh: p.fresh === true}); return;
       case 'question.respond': {
-        const questionId = id(p.id); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.');
+        const questionId = id(p.id);
+        if (!questions.has(questionId) && isNonBlockingQuestion(store.item(questionId)?.data)) return answerAsked(questionId, p.answers);
+        const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.');
         if (Date.now() >= pending.expiresAt) { finishQuestion(questionId, pending, null, 'expired'); throw new Error('This question timed out before it was answered. Use Ask again.'); }
         { const stale = staleAttention(pending.chatId, questionId); if (stale) { finishQuestion(questionId, pending, null, 'interrupted', undefined, 'stale'); throw new Error(stale); } }
         if (!p.answers || typeof p.answers !== 'object' || Array.isArray(p.answers)) throw new Error('Invalid question answers.');
@@ -1841,6 +2182,38 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       }
     }
   }
+  async function interruptRun(chatId: string, run: ActiveRun) {
+    run.stopped = true; run.retry.abort(); store.updateChat(chatId, {status: 'stopping'}); settleApprovals(chatId); settleQuestions(chatId); state(); await provider.stop(chatId);
+    // A turn the app-server started itself settles on its own turn/completed; if its session is gone, settle it here.
+    nativeTurns.stopped(chatId, !!provider.nativeThread?.(chatId));
+  }
+  /** A plugin or MCP server installed while chats work: the provider's tool list is fixed per session, so chats whose
+   *  current or recent turn was about it restart on a fresh session that resumes their thread and re-send their
+   *  last message through the queue. Once per install and chat. */
+  function reloadForInstall(plugin: InstalledPlugin) {
+    if (closing || disposed) return;
+    // Idle warm sessions re-launch (resuming the same thread) before their next send, so every chat sees the new tools.
+    provider.markStale?.();
+    for (const chat of store.snapshot().chats) {
+      if (chat.archived || chat.recovery?.kind === 'recovery-needed' || compactions.has(chat.id)) continue;
+      const run = runs.get(chat.id), running = !!run && !run.stopped;
+      if (!running && (run || chat.status === 'running' || chat.status === 'stopping')) continue;
+      const turn = lastTurn(store.timeline(chat.id));
+      if (!turn.prompt?.text.trim()) continue;
+      // Only chats whose turn is about this plugin: other running work is never interrupted and re-sent.
+      if (running ? !turnMentions(plugin, turn) : !turnAbout(plugin, turn, chat.updatedAt)) continue;
+      if (!pluginReloads.claim(plugin, chat.id)) continue;
+      let item: QueuedMessage;
+      try { item = queue.add(chat.id, {text: turn.prompt.text, requestId: randomUUID(), attachmentIds: []}); queue.promote(chat.id, item.id); }
+      catch { continue; }
+      store.appendItem(chat.id, 'notice', pluginReloadNotice(plugin.name), 'completed', {kind: 'plugin-reloaded', plugin: plugin.name});
+      timeline(chat.id);
+      if (running) { pluginReloads.await(chat.id); void interruptRun(chat.id, run!).catch(() => undefined); }
+      else { queue.resume(chat.id); dispatchQueued(chat.id); }
+    }
+    state();
+  }
+  const offInstalls = domainHooks.hooks.onCommand?.(({command, output}) => { const plugin = installedPlugin(command, output); if (plugin) reloadForInstall(plugin); });
   // --- S3-B Codex native thread APIs: goals, queue and projects delegate to the app-server where it supports them ---
   const native = provider.nativeThread && provider.nativeCall ? createNativeThreadBridge({
     thread: chatId => provider.nativeThread!(chatId),
@@ -1859,6 +2232,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     folderFor: folderId => folderFor(folderId), invoke, hooks: domainHooks.hooks,
     modelCatalog: () => { const providers = provider.info(); return {providers, builtin: firstReadyModel(providers)}; },
     modelCatalogReady: firstProviderProbe,
+    providersSettled: () => Promise.resolve(provider.ready?.()).catch(() => undefined),
     ...(native ? {native} : {}),
   }, options.domains);
   // --- CHAT-15 snooze and wake · CHAT-16 auto-archive ------------------------------------------------
@@ -1923,6 +2297,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   }
   scheduleSnoozes();
   queueMicrotask(() => { void sweepIdleChats(); });
+  queueMicrotask(() => { void bootAutoResume().catch(() => undefined); });
   archiveTimer = setInterval(() => { void sweepIdleChats(); }, 60 * 60_000); archiveTimer.unref?.();
   /** SBX-13: lock-screen / unlock-screen are accepted and ignored. */
   function powerEvent(input: {state: PowerState}): Promise<PowerOutcome> {
@@ -1935,10 +2310,22 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     closing = true;
     if (snoozeTimer) clearTimeout(snoozeTimer);
     if (archiveTimer) clearInterval(archiveTimer);
+    for (const timer of resumeTimers.values()) clearTimeout(timer); resumeTimers.clear();
     disposal = (async () => {
       watcher.dispose(); watchedFolders.clear();
-      for (const [chatId, run] of runs) { run.stopped = true; run.retry.abort(); settleApprovals(chatId); settleQuestions(chatId); }
-      offIdleEvents?.(); offQueueEvents(); nativeTurns.dispose();
+      for (const [chatId, run] of runs) {
+        // #449: a quit is not a Stop. The live turn is kept as interrupted by shutdown (its thread and turn ids are already
+        // on the chat; the prompt goes in the row) and continues after the next start. Never one waiting on an approval or
+        // question, one the user was already stopping, or a continuation that was itself cut short.
+        const prior = autoResume.get(chatId), chat = store.chat(chatId);
+        if (!run.stopped) run.quit = true;
+        if (chat && !run.stopped && !approvalsFor(chatId) && !(prior?.kind === 'restart' && prior.state === 'running')) {
+          run.shutdown = true;
+          autoResume.set({chatId, kind:'restart', state:'shutdown', resumeAt:null, attempts:0, prompt: run.prompt ?? null, reuseItemId:null, attachmentIds:[], noticeId:null, native: hasNativeSession(chat)});
+        }
+        run.stopped = true; run.retry.abort(); settleApprovals(chatId); settleQuestions(chatId);
+      }
+      offIdleEvents?.(); offQueueEvents(); offInstalls?.(); nativeTurns.dispose(); askHost?.dispose();
       provider.dispose();
       // Main owns the user-visible deadline. Keep the database open until all
       // tracked callbacks settle, even if main times out and keeps the app open.

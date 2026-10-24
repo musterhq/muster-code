@@ -12,7 +12,7 @@ import { NAMES } from '../../shared/workspace-names';
 import { invoke, subscribe } from '../bridge';
 import { useStore } from '../useStore';
 import { notifyError } from '../store';
-import { relativeTime } from './ProjectTasks';
+import { agoLabel as relativeTime } from '../relativeTime';
 import './mailbox-inbox.css';
 import {Tip} from './Tooltip';
 

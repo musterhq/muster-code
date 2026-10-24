@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, readFile, rm, symlink, writeFile} from 'node:fs/promises';
+import {mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, test} from 'node:test';
@@ -72,4 +72,26 @@ test('files.write refuses a stale revision and otherwise writes atomically',asyn
   const second=await writeFileAtomic(dir,'doc.txt','v3', first.conflict?undefined:first.revision);
   assert.equal(second.conflict,false);
   assert.equal(await readFile(join(dir,'doc.txt'),'utf8'),'v3');
+});
+
+// Spec: MUS-SPEC-07-563A (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-563a)
+test('a folder cannot be moved into itself and says so plainly',async()=>{
+  const dir=await workspace();
+  await mkdir(join(dir,'a'));
+  await assert.rejects(moveFile(dir,'a','a/b'),/into itself/i);
+});
+
+// Spec: MUS-SPEC-07-563B (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-563b)
+test('renaming a file or folder to a different capitalisation works on case-insensitive disks',async()=>{
+  const dir=await workspace();
+  await writeFile(join(dir,'probe.tmp'),'');
+  if(await stat(join(dir,'PROBE.TMP')).then(()=>false,()=>true))return;// case-sensitive disk: nothing to prove
+  await writeFile(join(dir,'Readme.md'),'keep');
+  await mkdir(join(dir,'Docs'));
+  await moveFile(dir,'Readme.md','README.md');
+  await moveFile(dir,'Docs','docs');
+  const names=await readdir(dir);
+  assert.ok(names.includes('README.md')&&!names.includes('Readme.md'));
+  assert.ok(names.includes('docs')&&!names.includes('Docs'));
+  assert.equal(await readFile(join(dir,'README.md'),'utf8'),'keep');
 });

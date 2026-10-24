@@ -111,6 +111,16 @@ export function StaleCheckout({ lease, onChanged }: { lease: Pick<LeaseView, 'ta
 }
 /** "Checked out 4 days ago · idle". */
 export const staleLabel = (days: number): string => `Checked out ${days} days ago · idle`;
+/** The Inbox row of an idle check-out: Hand back (the usual sheet), Release, or Keep it (starts a new quiet stretch). Nothing happens until one is pressed. */
+export function IdleCheckoutActions({ taskId, onChanged }: { taskId: string; onChanged: () => void }): React.ReactElement {
+  const [handBack, setHandBack] = useState(false);
+  return <div className="ws-card-actions" data-idle-checkout>
+    <button type="button" className="settings-button secondary" onClick={() => void invoke('checkout.remind', { taskId }).then(onChanged, fail)}>Keep</button>
+    <button type="button" className="settings-button secondary" onClick={() => void invoke('checkout.release', { taskId, note: 'Released after sitting idle.' }).then(onChanged, fail)}>Release</button>
+    <button type="button" className="settings-button" onClick={() => setHandBack(true)}>Hand back</button>
+    {handBack && <HandBackSheet taskId={taskId} onClose={() => setHandBack(false)} onDone={() => { setHandBack(false); onChanged(); }}/>}
+  </div>;
+}
 function ConflictCard({ lease, onChanged }: { lease: LeaseView; onChanged: () => void }): React.ReactElement {
   const [rows, setRows] = useState<PendingPost[] | null>(null);
   const [editing, setEditing] = useState(false);
