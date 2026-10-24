@@ -29,7 +29,7 @@ export function MyWorkPage(): React.ReactElement {
   const [view, setView] = useState<'list' | 'board'>('list');
   const all = useMemo(() => (work?.orgs ?? []).flatMap(o => o.tasks.map(t => ({ task: t, orgId: o.org.id, why: t.why }))), [work]);
   const rows = useMemo(() => applyFilter(all, { orgIds: orgs, statuses }).map(r => r.task), [all, orgs, statuses]);
-  if (!work && error) return <ResourceState kind="error" message="Your work could not be read." detail={error}/>;
+  if (!work && error) return <ResourceState kind="error" message="Your work could not be read." detail={error} onRetry={() => void loadMyWork(true)}/>;
   if (!work) return <ResourceState kind="loading" label="Loading your work" rows={4}/>;
   if (!work.connected) return <div className="ws-page"><PageHeader title={NAMES.myWork}/><ResourceState kind="empty" message={`Connect ${NAMES.server} in Settings › ${NAMES.integrations} to see your work across orgs.`}/></div>;
   const toggle = <T,>(set: ReadonlySet<T> | null, value: T): ReadonlySet<T> | null => { const next = new Set(set ?? []); if (next.has(value)) next.delete(value); else next.add(value); return next.size ? next : null; };

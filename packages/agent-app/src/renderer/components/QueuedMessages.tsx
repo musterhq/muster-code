@@ -78,6 +78,9 @@ export function QueuedMessages({ chatId, items, paused, running = false, skills 
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<{ id: string | null; after: boolean } | null>(null);
   const cancelled = useRef(false);
+  // The message being edited left the queue (sent, deleted elsewhere): drop the editor so it cannot block the rest.
+  const editingGone = editing !== null && !items.some(item => item.id === editing.id);
+  useEffect(() => { if (editingGone) setEditing(null); }, [editingGone]);
   if (!items.length) return null;
   const ids = items.map(item => item.id);
   const run = async (id: string, action: () => Promise<unknown>) => {
@@ -115,7 +118,7 @@ export function QueuedMessages({ chatId, items, paused, running = false, skills 
   };
   return <section className={`composer-queue${paused ? ' is-paused' : ''}`} aria-label={plural(items.length, 'queued follow-up')}>
     {paused && <div className="composer-queue-banner" role="status">
-      <span>{paused === 'interrupted' ? 'Queue paused because you interrupted' : 'Queue paused because the last run did not finish'}</span>
+      <span>{paused === 'interrupted' ? 'Queue paused because you interrupted' : paused === 'limited' ? 'Queue waits for the usage limit to reset' : 'Queue paused because the last run did not finish'}</span>
       <button type="button" disabled={Boolean(busy)} onClick={() => void run('resume', () => invoke('chat.queue.resume', { id: chatId }))}><Play size={11} />Resume</button>
     </div>}
     <ol onDragOver={event => { if (dragging) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; } }} onDrop={drop}>

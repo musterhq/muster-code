@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { isAbsolute, join, sep } from 'node:path';
 
 // Mutations reject symlink components rather than modifying their targets.
@@ -19,7 +20,7 @@ export async function mutablePath(root: string, relative: string, existing = fal
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || existing || i !== parts.length - 1) throw error;
     }
   }
-  if (!current.startsWith(realRoot + sep)) throw new Error('Cannot change the workspace root.');
+  if (!current.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep)) throw new Error('Cannot change the workspace root.');
   return current;
 }
 
@@ -59,6 +60,19 @@ export async function moveFile(root: string, from: string, to: string): Promise<
     const target = await mutablePath(root, to);
     if (source === target) return;
     const before = await fs.lstat(source);
+    if (before.isDirectory() && target.startsWith(source + sep)) throw new Error('A folder cannot be moved into itself.');
+    // A capitalisation-only rename ("Readme.md" to "README.md") names the same item on a case-insensitive disk: rename it
+    // through a temporary name instead of reporting that the destination already exists.
+    if (source.toLowerCase() === target.toLowerCase()) {
+      const existing = await fs.lstat(target).catch(() => undefined);
+      if (existing && existing.ino === before.ino && existing.dev === before.dev) {
+        const parked = `${source}.muster-rename-${randomBytes(6).toString('hex')}`;
+        await fs.rename(source, parked);
+        try { await fs.rename(parked, target); }
+        catch (error) { await fs.rename(parked, source).catch(() => {}); throw error; }
+        return;
+      }
+    }
     if (before.isDirectory()) {
       // Directories cannot be hardlinked; verify the destination is free, then rename
       // (same volume only, and this is not atomic against a concurrent create — best effort).

@@ -380,7 +380,8 @@ export function setFullAccessSkip(folderId:string|undefined,skip:boolean):void{
 export function pendingQuestionItem(items:readonly TimelineItem[]|undefined):{item:TimelineItem;data:PendingQuestionData}|null{
   for(const item of items??[]){
     const data=item.data;
-    if(item.kind!=='question'||item.status!=='pending'||!data||data.method!=='item/tool/requestUserInput'||!Array.isArray(data.questions)||!data.questions.length)continue;
+    // An ask_user question (nonBlocking) stays in the timeline: the agent is still working, so the composer stays free to steer.
+    if(item.kind!=='question'||item.status!=='pending'||!data||data.nonBlocking===true||data.method!=='item/tool/requestUserInput'||!Array.isArray(data.questions)||!data.questions.length)continue;
     return {item,data:data as unknown as PendingQuestionData};
   }
   return null;

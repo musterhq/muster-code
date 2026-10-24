@@ -29,7 +29,7 @@ export type LeaseEventName = 'checkout' | 'handback' | 'release';
 export type MarkerKind = LeaseEventName | 'activity';
 export interface LeaseMarker { v: 1; event: LeaseEventName; deviceId: string; device: string; by: string; at: string }
 const encode = (value: string): string => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/-->/g, '--&gt;');
-const decode = (value: string): string => value.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+const decode = (value: string): string => value.replace(/--&gt;/g, '-->').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
 export const markerFor = (kind: MarkerKind, attrs: Record<string, string | undefined> = {}): string => {
   const rendered = Object.entries(attrs).filter((e): e is [string, string] => typeof e[1] === 'string' && e[1] !== '').map(([k, v]) => `${k}="${encode(v)}"`).join(' ');
   return `<!-- muster:${kind}${rendered ? ` ${rendered}` : ''} -->`;
@@ -136,17 +136,20 @@ export function canCheckout(derived: DerivedLease | null, deviceId: string, take
 }
 
 export const hoursSince = (iso: string, now: number): number => { const t = Date.parse(iso); return Number.isFinite(t) ? Math.max(0, (now - t) / 3_600_000) : 0; };
+/** When the quiet stretch began: the last activity, or the later moment the person said "keep it". */
+export const quietSince = (lease: Pick<CheckoutLease, 'lastActivityAt'> & { remindedAt?: string | null }): string => lease.remindedAt && lease.remindedAt > lease.lastActivityAt ? lease.remindedAt : lease.lastActivityAt;
 /** Checked out but silent for `staleHours` or more. Handed back and released leases are never stale. */
-export const isStale = (lease: Pick<CheckoutLease, 'state' | 'lastActivityAt'> & { remindedAt?: string | null }, now: number, staleHours: number): boolean => {
-  const last = lease.remindedAt && lease.remindedAt > lease.lastActivityAt ? lease.remindedAt : lease.lastActivityAt;
-  return lease.state === 'checked_out' && staleHours > 0 && hoursSince(last, now) >= staleHours;
-};
+export const isStale = (lease: Pick<CheckoutLease, 'state' | 'lastActivityAt'> & { remindedAt?: string | null }, now: number, staleHours: number): boolean =>
+  lease.state === 'checked_out' && staleHours > 0 && hoursSince(quietSince(lease), now) >= staleHours;
 
 /** A check-out idle for more than this many days is surfaced in My work and on the task with Hand back and Release (never released automatically). */
 export const IDLE_DAYS = 3;
-/** Whole days since check-out when the check-out has been idle for more than three days, else null. */
-export const staleDaysOf = (lease: Pick<CheckoutLease, 'state' | 'since' | 'lastActivityAt'>, now: number): number | null =>
-  lease.state === 'checked_out' && hoursSince(lease.lastActivityAt, now) > IDLE_DAYS * 24 ? Math.max(IDLE_DAYS, Math.floor(hoursSince(lease.since, now) / 24)) : null;
+/** Whole days since check-out when the check-out has been idle for more than three days (and "keep it" was not said since), else null. */
+export const staleDaysOf = (lease: Pick<CheckoutLease, 'state' | 'since' | 'lastActivityAt'> & { remindedAt?: string | null }, now: number): number | null =>
+  lease.state === 'checked_out' && hoursSince(quietSince(lease), now) > IDLE_DAYS * 24 ? Math.max(IDLE_DAYS, Math.floor(hoursSince(lease.since, now) / 24)) : null;
+/** Whole days of quiet once a check-out has been idle for more than three days, else null. A new quiet stretch starts at every activity and at "Keep it". */
+export const idleDaysOf = (lease: Pick<CheckoutLease, 'state' | 'lastActivityAt'> & { remindedAt?: string | null }, now: number): number | null =>
+  lease.state === 'checked_out' && hoursSince(quietSince(lease), now) > IDLE_DAYS * 24 ? Math.floor(hoursSince(quietSince(lease), now) / 24) : null;
 export const toView = (lease: CheckoutLease, deviceId: string, now: number, staleHours: number, broadFolder = false): LeaseView => ({ ...lease, thisMac: lease.deviceId === deviceId, stale: isStale(lease, now, staleHours), staleHours, staleDays: staleDaysOf(lease, now), broadFolder });
 export { badgeText } from '../../shared/domains/checkout-protocol.ts';
 export const badgeOf = (lease: LeaseView | CheckoutLease | null, deviceId: string, now: number, staleHours: number): CheckoutBadge | null =>

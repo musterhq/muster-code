@@ -90,13 +90,14 @@ export function ConfirmProjectAction({ project, action, onClose, onArchived, onD
   const [impact, setImpact] = useState<ProjectImpact | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!action) return;
     let cancelled = false;
     setImpact(null); setError('');
     invoke('project.preview', { id: project.id }).then(p => { if (!cancelled) setImpact(p); }).catch(err => { if (!cancelled) setError(message(err, 'Could not preview this change.')); });
     return () => { cancelled = true; };
-  }, [action, project.id]);
+  }, [action, project.id, attempt]);
   const running = impact ? impact.chats.running + impact.tasks.running : 0;
   const blocked = action === 'delete' && running > 0;
   async function confirm() {
@@ -121,6 +122,7 @@ export function ConfirmProjectAction({ project, action, onClose, onArchived, onD
       {blocked && <p className="settings-error">Stop the running {impact.chats.running ? 'chats' : 'tasks'} before deleting this project.</p>}
     </section>}
     {error && <p role="alert" className="settings-error">{error}</p>}
+    {error && !impact && <div><button type="button" onClick={() => setAttempt(n => n + 1)}>Try again</button></div>}
     <div><button type="button" onClick={onClose} disabled={busy}>Cancel</button>
       <button type="button" className={action === 'delete' ? 'is-danger' : undefined} disabled={busy || !impact || blocked} onClick={() => void confirm()}>{busy ? (action === 'delete' ? 'Deleting…' : 'Archiving…') : action === 'delete' ? 'Delete project' : 'Archive project'}</button></div>
   </ModalSheet>;

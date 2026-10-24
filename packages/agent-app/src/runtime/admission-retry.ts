@@ -11,8 +11,8 @@ export const RETRY_AFTER_CAP_MS = 5 * 60_000;
 
 export interface AdmissionOutcome { errorMessage?: string; recovery?: {kind: string; retryable?: boolean; reason?: string}; dispatchState?: string; turnId?: string; failure?: {retryAfterMs?: number; statusCode?: number} }
 export interface AdmissionWait { attempt: number; max: number; delayMs: number; retryAt: string; reason?: 'admission' | 'transient'; detail?: string }
-/** Short, bounded schedule for transient launch/handshake failures that provably never dispatched. */
-export const TRANSIENT_RETRY_SCHEDULE_MS = [750, 2_000] as const;
+/** Bounded exponential schedule (1, 2, 4, 8, 16 s) for transient launch/handshake/network failures that provably never dispatched. */
+export const TRANSIENT_RETRY_SCHEDULE_MS = [1_000, 2_000, 4_000, 8_000, 16_000] as const;
 export const TRANSIENT_RETRY_MAX = TRANSIENT_RETRY_SCHEDULE_MS.length;
 
 /** A failed attempt that never reached the provider (no turn id, not dispatched) is safe to resend. */

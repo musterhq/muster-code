@@ -67,8 +67,8 @@ export function redactGitText(text: string): string {
   return text
     // The scheme is bounded: an unbounded `[a-z0-9+.-]*` rescans every long kebab/dotted run to its end from
     // each word boundary (quadratic: 150k chars of `sk-sk-…` took seconds). Real schemes are short.
-    // Userinfo ends at the authority: a '?' or '#' means the '@' is in a query/fragment (`?q=a@b`), not a credential.
-    .replace(/\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/@?#]+@/gi, '$1***@')
+    // Userinfo runs to the LAST '@' of the authority (a password may hold a raw '@'); a '?' or '#' means the '@' is in a query/fragment (`?q=a@b`), not a credential.
+    .replace(/\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/?#]+@/gi, '$1***@')
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,})\b/g, '***');
 }
 
@@ -111,7 +111,7 @@ async function repository(root: string): Promise<string> {
 /** Web URL for a GitHub remote in any of git's URL syntaxes; undefined for anything else. */
 export function githubWebUrl(remote: string): string | undefined {
   const value = remote.trim();
-  const match = /^(?:(?:ssh|git|https?):\/\/(?:[^@\/]+@)?|(?:[^@\/:]+@)?)(?:www\.)?github\.com(?::\d+)?[\/:]([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(value);
+  const match = /^(?:(?:ssh|git|https?):\/\/(?:[^@\/]+@)?|(?:[^@\/:]+@)?)(?:www\.)?github\.com(?::\d+)?[\/:]([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(value);
   if (!match) return undefined;
   const [, owner, repo] = match;
   if (!repo || repo === '.' || repo === '..' || owner === '.' || owner === '..') return undefined;
@@ -383,13 +383,19 @@ async function commitish(real: string, value: unknown): Promise<string> {
   return sha;
 }
 
+/** The checked-out branch name, or '' when detached. `symbolic-ref --short` would answer `heads/x` when a tag is also named x. */
+export async function currentBranch(real: string): Promise<string> {
+  const ref = (await git(real, ['symbolic-ref', '--quiet', 'HEAD']).catch(() => '')).trim();
+  return ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : '';
+}
+
 const BRANCH_LIMIT = 500;
 export async function listBranches(root: string): Promise<GitBranches> {
   const real = await repository(root);
   const [refs, head, reflog] = await Promise.all([
     git(real, ['for-each-ref', '--sort=-committerdate', `--count=${BRANCH_LIMIT + 1}`,
-      '--format=%(refname:short)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(committerdate:iso-strict)%00%(worktreepath)%00', 'refs/heads']),
-    git(real, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => ''),
+      '--format=%(refname:lstrip=2)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(committerdate:iso-strict)%00%(worktreepath)%00', 'refs/heads']),
+    currentBranch(real),
     git(real, ['reflog', 'show', '--format=%gs', '-n', '300', 'HEAD']).catch(() => ''),
   ]);
   const fields = refs.split('\0');
@@ -425,7 +431,7 @@ export async function gitInfo(root: string): Promise<GitRepoInfo> {
   const real = await repository(root);
   const [paths, head, remotes] = await Promise.all([
     git(real, ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--git-path', 'FETCH_HEAD']),
-    git(real, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => ''),
+    currentBranch(real),
     git(real, ['remote']).catch(() => ''),
   ]);
   const [gitDir = '', commonDir = '', fetchHead = ''] = paths.trimEnd().split('\n');
