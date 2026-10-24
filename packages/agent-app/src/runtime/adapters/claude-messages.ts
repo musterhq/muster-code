@@ -22,6 +22,8 @@ const MAX_TOOL_ROUNDS = 400, MAX_CALLS_PER_ROUND = 16, MAX_CALLS_PER_TURN = 1000
 const MAX_TOOL_INPUT_BYTES = 1024 * 1024, MAX_BLOCKS_PER_REPLY = 256;
 /** Output budget per request, and the thinking budget inside it, by reasoning effort. */
 const BUDGETS = {low: 2_000, medium: 8_000, high: 16_000, xhigh: 32_000} as const;
+/** The router's effort setting for each chat effort; never below `high` (see the request below). */
+const OUTPUT_EFFORT = {low: 'high', medium: 'high', high: 'high', xhigh: 'xhigh'} as const;
 
 /** Saved conversations keep whole content blocks, so signatures survive a restart. Bounded per thread like the text
  *  memory: the newest 80 messages and about 2 MB; a cut never splits a tool call from its result. */
@@ -164,7 +166,9 @@ export function claudeMessagesAdapter(options: Options): RunnableAdapter {
     const live: ClaudeMessage[] = [...history, prompt];
     const post = async (force: boolean) => request(`${options.endpoint.replace(/\/+$/, '')}/messages`, {method: 'POST', redirect: 'error', signal: input.signal,
       headers: {...await options.headers(force), 'content-type': 'application/json', accept: 'text/event-stream', 'anthropic-version': '2023-06-01'},
-      body: JSON.stringify({model: input.model, max_tokens: budget + 8_000, stream: true, thinking: {type: 'enabled', budget_tokens: budget}, system, tools, messages: live})});
+      // Measured on a live router (#688): with tools offered, Opus 5.5 often skips thinking unless the request names an
+      // effort; `high` or above brings it back every time. Low and medium chats still ask for high so a tool turn thinks.
+      body: JSON.stringify({model: input.model, max_tokens: budget + 8_000, stream: true, thinking: {type: 'enabled', budget_tokens: budget}, output_config: {effort: OUTPUT_EFFORT[input.reasoningEffort ?? 'medium']}, system, tools, messages: live})});
     // An expired helper token answers 401 before any output: fetch a fresh one and send the same request once more.
     const send = async () => {
       const response = await post(false);
