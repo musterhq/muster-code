@@ -7,7 +7,7 @@ This file is the authoring convention. The behaviour itself is not here: it live
 - File: the clause file for the area, `docs/spec/clauses/NN-<area>.md`. The files are listed in the [clause index](README.md#clause-index).
 - Section: `## Acceptance cases`. Every clause file has this heading. A case heading anywhere else is an error.
 - The section starts with an index table, one row per case (see [Index row](#index-row)). The case blocks follow. A `###` heading may group cases by topic.
-- Pick the next free group number or letter in the clause file on `main` and in any open PR that edits the same file. When two PRs touch one clause file, each adds its own cases and keeps the other's when it merges `main`.
+- The group number is the issue or PR number that adds the cases (`MUS-SPEC-02-455A`), so two PRs never pick the same ID. Older cases with small group numbers keep theirs. When two PRs touch one clause file, each adds its rows and blocks and keeps the other's when it merges `main`.
 
 ## Case ID
 
