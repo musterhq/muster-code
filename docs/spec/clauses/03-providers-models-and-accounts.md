@@ -27,6 +27,13 @@ Boundaries:
 | [MUS-SPEC-03-688E](03-providers-models-and-accounts.md#mus-spec-03-688e) | Each request offers the tools that access level allows, in the Messages tool format: Read only can only read and list, Workspace can also edit files, Full access can also run commands. | [`the tools offered follow the chat's access level`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
 | [MUS-SPEC-03-688F](03-providers-models-and-accounts.md#mus-spec-03-688f) | The turn fails with the router's error message, and nothing is resent. | [`a router error fails the turn with its message`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
 | [MUS-SPEC-03-688G](03-providers-models-and-accounts.md#mus-spec-03-688g) | The request carries the saved earlier blocks, signatures included, unchanged. | [`a restart continues with the saved blocks unchanged`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
+| [MUS-SPEC-03-688H](03-providers-models-and-accounts.md#mus-spec-03-688h) | The router receives a Messages request (not a Codex run) with the chat's prompt and tools; the Codex client is never started; the instructions sent do not mention tools the Messages route lacks. | [`a Claude model in a Full access chat on a router gateway runs over the Messages API, with the overrides the service adds`](../../../packages/agent-app/tests/claude-messages-lane.test.ts) |
+| [MUS-SPEC-03-688I](03-providers-models-and-accounts.md#mus-spec-03-688i) | The combo whose probe reports a Claude model runs over the Messages API; the one that reports a GPT model runs on Codex; each is probed once inside the cache window and again after it. | [`a router combo runs over the Messages API only when its probe reports a Claude model, and the answer is cached`](../../../packages/agent-app/tests/claude-messages-lane.test.ts) |
+| [MUS-SPEC-03-688J](03-providers-models-and-accounts.md#mus-spec-03-688j) | Both turns run on the Codex client; the router receives no Messages request. | [`Workspace chats and turns with project tools stay on the Codex route`](../../../packages/agent-app/tests/claude-messages-lane.test.ts) |
+| [MUS-SPEC-03-688K](03-providers-models-and-accounts.md#mus-spec-03-688k) | The second turn does not resume the Codex thread; the Messages request holds a summary of the first exchange before the new message; the chat says a fresh conversation started and records the Messages thread. | [`the first Messages turn after a Codex turn starts a fresh conversation with a summary, not the Codex thread`](../../../packages/agent-app/tests/claude-messages-lane.test.ts) |
+| [MUS-SPEC-03-688L](03-providers-models-and-accounts.md#mus-spec-03-688l) | The turn is retried once with a freshly fetched token and completes; the second request carries the new token. | [`a 401 is retried once with a fresh token before the turn fails`](../../../packages/agent-app/tests/claude-messages-lane.test.ts) |
+| [MUS-SPEC-03-688M](03-providers-models-and-accounts.md#mus-spec-03-688m) | The Messages-lane chat is interrupted with no recovery needed and the provider is never asked; the same chat on the Codex client still needs recovery. | [`a run on the Messages lane that was open when Muster closed is interrupted, never asked about at the provider`](../../../packages/agent-app/tests/claude-messages-lane.test.ts) |
+| [MUS-SPEC-03-688N](03-providers-models-and-accounts.md#mus-spec-03-688n) | The saved conversation starts with a user message that holds the person's own text, stays within its limits and holds no image data. | [`saved Claude history never starts with an assistant message`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
 
 ### Configured routers
 <a id="mus-spec-03-1a"></a>
@@ -83,7 +90,7 @@ Boundaries:
 - Expected result: The second request carries the first reply's thinking block, with its text and signature exactly as received, then the tool call, then the tool result. The turn completes with the final answer.
 - Test: `packages/agent-app/tests/claude-messages-driver.test.ts::a tool round sends the signed thinking and tool call back exactly as received`
 - Environment: Node test runner; the adapter talks to a fake router over fetch; no network.
-- Known gaps: The router is a local fake; the live router is checked by hand (see the PR).
+- Known gaps: The router is a local fake; the live router is checked by hand (see the PR). Only Full access chats with no Project, mailbox, terminal, SSH, sandbox or user tool servers and no goal run on this route; Workspace and Read-only chats, sandbox chats and those turns stay on the Codex client.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-03-688b"></a>
@@ -150,4 +157,81 @@ Boundaries:
 - Test: `packages/agent-app/tests/claude-messages-driver.test.ts::a restart continues with the saved blocks unchanged`
 - Environment: Node test runner; the adapter talks to a fake router over fetch; no network.
 - Known gaps: Uses a temp folder for the saved conversation.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-688h"></a>
+#### MUS-SPEC-03-688H: A Claude model in a Full access chat runs over the Messages API
+
+- Precondition: A Full access Agent chat on a router gateway route (a Codex configuration), model `cc/claude-opus-5-5`. The service adds its usual per-chat tool servers (browser, canvas, background commands).
+- Action: Send a message.
+- Expected result: The router receives a Messages request (not a Codex run) with the chat's prompt and tools; the Codex client is never started; the instructions sent do not mention tools the Messages route lacks.
+- Test: `packages/agent-app/tests/claude-messages-lane.test.ts::a Claude model in a Full access chat on a router gateway runs over the Messages API, with the overrides the service adds`
+- Environment: Node test runner; the real service and domains with a fake router over fetch and a fake Codex client; no network.
+- Known gaps: Workspace and Read-only chats, chats in a sandbox and turns with Project, mailbox, terminal, SSH or user tool servers or an active goal stay on the Codex client (688J). The canvas, background-command and computer-use tools are not offered on the Messages route.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-688i"></a>
+#### MUS-SPEC-03-688I: A router combo is routed by the model it really runs
+
+- Precondition: Two Full access chats on a router gateway route, one on a combo (`intelligent-planner`) whose Messages answer reports `claude-opus-5-5`, one on a combo (`executor`) whose answer reports `gpt-5.6-terra`.
+- Action: Send two messages in each chat, then wait past the cache window and send one more in the first.
+- Expected result: The combo whose probe reports a Claude model runs over the Messages API; the one that reports a GPT model runs on Codex; each is probed once inside the cache window and again after it.
+- Test: `packages/agent-app/tests/claude-messages-lane.test.ts::a router combo runs over the Messages API only when its probe reports a Claude model, and the answer is cached`
+- Environment: Node test runner; a fake router over fetch, a fake Codex client and a fake clock; no network.
+- Known gaps: A combo that sends different requests to different backends is routed by what the probe saw. A failed probe sends the turn to Codex and is retried after one minute.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-688j"></a>
+#### MUS-SPEC-03-688J: Workspace chats and turns with project tools stay on Codex
+
+- Precondition: A Claude model on a router gateway route. One chat has Workspace access. Another has Full access, but the turn carries a user tool server.
+- Action: Send a message in each.
+- Expected result: Both turns run on the Codex client; the router receives no Messages request.
+- Test: `packages/agent-app/tests/claude-messages-lane.test.ts::Workspace chats and turns with project tools stay on the Codex route`
+- Environment: Node test runner; a fake router over fetch and a fake Codex client; no network.
+- Known gaps: Claude models in these turns still hit the signed-thinking failure (#688) until the Messages route can offer their tools.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-688k"></a>
+#### MUS-SPEC-03-688K: Switching from Codex to the Messages route keeps the conversation
+
+- Precondition: A chat finished one turn on the Codex client (Workspace access) and has a Codex thread. Its access is then raised to Full.
+- Action: Send a second message.
+- Expected result: The second turn does not resume the Codex thread; the Messages request holds a summary of the first exchange before the new message; the chat says a fresh conversation started and records the Messages thread.
+- Test: `packages/agent-app/tests/claude-messages-lane.test.ts::the first Messages turn after a Codex turn starts a fresh conversation with a summary, not the Codex thread`
+- Environment: Node test runner; the real service with a fake router over fetch and a fake Codex client; no network.
+- Known gaps: Context blocks the Codex thread held are sent again with the summary, so the first Messages turn is larger.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-688l"></a>
+#### MUS-SPEC-03-688L: An expired router token is refreshed once
+
+- Precondition: A Full access chat on a Claude model of a router gateway route whose auth helper hands out a new token when asked to refresh. The router answers 401 to the old token.
+- Action: Send a message.
+- Expected result: The turn is retried once with a freshly fetched token and completes; the second request carries the new token.
+- Test: `packages/agent-app/tests/claude-messages-lane.test.ts::a 401 is retried once with a fresh token before the turn fails`
+- Environment: Node test runner; a fake router over fetch; no network.
+- Known gaps: A second 401 fails the turn with the router's message.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-688m"></a>
+#### MUS-SPEC-03-688M: A Messages-route run cut off by closing Muster needs no recovery
+
+- Precondition: A chat was running on the Messages route when Muster closed. Another chat was running on the Codex client.
+- Action: Start Muster again and reconcile the first chat.
+- Expected result: The Messages-lane chat is interrupted with no recovery needed and the provider is never asked; the same chat on the Codex client still needs recovery.
+- Test: `packages/agent-app/tests/claude-messages-lane.test.ts::a run on the Messages lane that was open when Muster closed is interrupted, never asked about at the provider`
+- Environment: Node test runner; a temporary data folder; no network.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-688n"></a>
+#### MUS-SPEC-03-688N: Saved Claude history always starts with the person's message
+
+- Precondition: A conversation with far more tool rounds than the saved history keeps, and tool results that carried images.
+- Action: Save it and open it again.
+- Expected result: The saved conversation starts with a user message that holds the person's own text, stays within its limits and holds no image data.
+- Test: `packages/agent-app/tests/claude-messages-driver.test.ts::saved Claude history never starts with an assistant message`
+- Environment: Node test runner; no network.
+- Known gaps: When one turn alone exceeds the limits its history is dropped, and the next turn starts with only the new message.
 - Evidence: UNVERIFIED

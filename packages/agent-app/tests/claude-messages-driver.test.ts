@@ -5,7 +5,7 @@ import {test, type TestContext} from 'node:test';
 import {mkdtemp, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {claudeMessagesAdapter, ClaudeConversationMemory} from '../src/runtime/adapters/claude-messages.ts';
+import {claudeMessagesAdapter, ClaudeConversationMemory, type ClaudeMessage} from '../src/runtime/adapters/claude-messages.ts';
 import type {AdapterRunInput} from '../src/runtime/adapters/types.ts';
 import {removeTmp} from './fixtures/tmp-dir.ts';
 
@@ -179,4 +179,40 @@ test('a restart continues with the saved blocks unchanged', async t => {
   const result = await adapter(r.fetch, new ClaudeConversationMemory(64, 2_000_000, () => saved)).run(after.value);
   assert.equal(result.status, 'completed', result.errorMessage ?? 'turn did not complete');
   assert.deepEqual(r.sent[2]!.body.messages[1]!.content, [SIGNED, READ], 'the signature survived the restart');
+});
+
+// Spec: MUS-SPEC-03-688N (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-688n)
+test('saved Claude history never starts with an assistant message', async t => {
+  const saved = await mkdtemp(join(tmpdir(), 'muster-claude-trim-'));
+  t.after(() => removeTmp(saved));
+  const thread = '12345678-1234-1234-1234-123456789abc';
+  const shot = (id: string): ClaudeMessage[] => [
+    {role: 'assistant', content: [{type: 'tool_use', id, name: 'browser_screenshot', input: {}}]},
+    {role: 'user', content: [{type: 'tool_result', tool_use_id: id, content: [{type: 'text', text: 'shot'}, {type: 'image', source: {type: 'base64', media_type: 'image/png', data: 'AAAA'.repeat(1000)}}]}]},
+  ];
+  // One tool turn with far more rounds than the 80 messages kept, ending on the model's answer.
+  const long: ClaudeMessage[] = [{role: 'user', content: 'Do the long job.'}];
+  for (let round = 0; round < 60; round++) long.push(...shot(`t${round}`));
+  long.push({role: 'assistant', content: [{type: 'text', text: 'Done.'}]});
+  // A short turn with a screenshot, then a long one: the cut must land on the next real prompt.
+  const mixed = [{role: 'user' as const, content: 'Look at it.'}, ...shot('s1'), {role: 'assistant' as const, content: [{type: 'text', text: 'Seen.'}]}, ...long];
+  for (const [name, history] of [['long turn', long], ['short then long turn', mixed]] as const) {
+    for (const limit of [2_000_000, 400, 10]) {
+      const memory = new ClaudeConversationMemory(64, limit, () => saved);
+      memory.commit(thread, history);
+      for (const reopened of [memory.open(thread).history, new ClaudeConversationMemory(64, limit, () => saved).open(thread).history]) {
+        if (!reopened.length) continue;
+        const first = reopened[0]!, where = `${name}, limit ${limit}`;
+        assert.equal(first.role, 'user', `${where}: starts with a user message`);
+        assert.equal(typeof first.content, 'string', `${where}: that message is the person's own text`);
+        assert.doesNotMatch(JSON.stringify(reopened), /"type":"image"|AAAAAAAA/, `${where}: no image data is kept`);
+        assert.ok(JSON.stringify(reopened).length <= Math.max(limit, 200), `${where}: stays inside the limit`);
+      }
+    }
+  }
+  const small = [{role: 'user' as const, content: 'Look at it.'}, ...shot('s2'), {role: 'assistant' as const, content: [{type: 'text', text: 'Seen.'}]}];
+  new ClaudeConversationMemory(64, 2_000_000, () => saved).commit(thread, small);
+  const kept = new ClaudeConversationMemory(64, 2_000_000, () => saved).open(thread).history;
+  assert.equal(kept[0]!.content, 'Look at it.', 'a turn that fits is kept whole');
+  assert.doesNotMatch(JSON.stringify(kept), /"type":"image"/, 'its screenshot is not saved');
 });
