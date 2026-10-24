@@ -22,6 +22,8 @@ Boundaries:
 | [MUS-SPEC-01-555A](01-chat-and-composer.md#mus-spec-01-555a) | After a send finishes, the chip that was sent is gone from the composer, and a chip added while the send was in flight is still there. | [`a context chip added while a send is in flight is kept, and only the sent chip is cleared`](../../../packages/agent-app/tests/composer-inflight-chips-dom.tsx) |
 | [MUS-SPEC-01-560A](01-chat-and-composer.md#mus-spec-01-560a) | Enter pressed to confirm an IME composition (or the key that follows it) leaves the search palette open and screen unchanged; a plain Enter opens the row. | [`Enter that confirms an IME composition does not open the highlighted search row`](../../../packages/agent-app/tests/ime-enter-dom.tsx) |
 | [MUS-SPEC-01-560B](01-chat-and-composer.md#mus-spec-01-560b) | Search highlight ranges cover a whole emoji, merge adjacent emoji, and never split a surrogate pair. | [`fuzzyMatch ranges never cut an emoji in half`](../../../packages/agent-app/tests/spotlight-model.test.ts) |
+| [MUS-SPEC-01-599A](01-chat-and-composer.md#mus-spec-01-599a) | In a reply, single newlines in prose, list items and quotes become line breaks; blank lines still split paragraphs; bold is kept; an explicit break is not doubled; code blocks and table rows get no breaks. Both when animated and not. | [`a single newline in assistant prose, lists and quotes shows as a line break`](../../../packages/agent-app/tests/markdown-breaks-dom.tsx) |
+| [MUS-SPEC-01-599B](01-chat-and-composer.md#mus-spec-01-599b) | A streamed reply that adds lines one at a time keeps a break for each and fades in only the new lines. | [`streamed text that arrives on a new line still fades in with its line break`](../../../packages/agent-app/tests/markdown-breaks-dom.tsx) |
 
 ### Text direction
 
@@ -104,4 +106,28 @@ Boundaries:
 - Test: `packages/agent-app/tests/spotlight-model.test.ts::fuzzyMatch ranges never cut an emoji in half`
 - Environment: Node test runner; no UI and no network.
 - Known gaps: Unit test of the matcher and the splitter, not the rendered highlight in the palette.
+- Evidence: UNVERIFIED
+
+### Line breaks in replies
+
+<a id="mus-spec-01-599a"></a>
+#### MUS-SPEC-01-599A: A single newline in a reply shows as a line break
+
+- Precondition: An assistant reply has three lines with no blank line between them (with bold and inline code), a list item that continues on the next line, a two-line quote, a line that ends with an explicit Markdown break, a fenced code block, an indented code block and a two-row table.
+- Action: Render the reply, once plain and once with the streaming fade turned on.
+- Expected result: The first paragraph holds 2 line breaks and keeps its bold text. A blank line still starts a new paragraph. The list item and the quote each hold 1 line break. The explicit break gives 1 line break, not 2. Both code blocks keep their text with the newline inside, no break element appears in code or the table, and the table still has its two rows.
+- Test: `packages/agent-app/tests/markdown-breaks-dom.tsx::a single newline in assistant prose, lists and quotes shows as a line break`
+- Environment: Real MessageBody in a DOM suite (linkedom); no network.
+- Known gaps: Checks the break elements in the DOM, not how the text is laid out on screen. The code and table assertions already hold on main (they guard against over-fixing). The same suite also checks that a Markdown file opened as a document keeps soft breaks as spaces; that check passes on main too, so it carries no case.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-599b"></a>
+#### MUS-SPEC-01-599B: Streamed lines keep their break and still fade in
+
+- Precondition: A reply is streaming and has one line of text.
+- Action: A second, then a third line arrive, one at a time.
+- Expected result: The new lines ("Line two arrives" and "Line three") fade in, the first line does not, and the reply holds 2 line breaks.
+- Test: `packages/agent-app/tests/markdown-breaks-dom.tsx::streamed text that arrives on a new line still fades in with its line break`
+- Environment: Real MessageBody in a DOM suite (linkedom); no network.
+- Known gaps: Does not run a real stream; the test sends the growing text itself. The fade is checked by its class, not by looking at it.
 - Evidence: UNVERIFIED
