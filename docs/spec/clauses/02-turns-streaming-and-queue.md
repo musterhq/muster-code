@@ -38,6 +38,8 @@ Boundaries:
 | [MUS-SPEC-02-479S](02-turns-streaming-and-queue.md#mus-spec-02-479s) | The Limited row has a fallback model picker that starts with no fallback. | [`the fallback model is off by default and choosing one is saved for the chat`](../../../packages/agent-app/tests/limit-resume-dom.tsx) |
 | [MUS-SPEC-02-479T](02-turns-streaming-and-queue.md#mus-spec-02-479t) | The limit row appears only while the chat is Limited, and the queue explains that it waits. | [`a running chat shows no limit row, and the queue says it waits for the usage limit to reset`](../../../packages/agent-app/tests/limit-resume-dom.tsx) |
 | [MUS-SPEC-02-479U](02-turns-streaming-and-queue.md#mus-spec-02-479u) | Settings › General lets the user turn off continuing after a limit and continuing after a restart. | [`Settings › General has both continue switches, on by default, and they save through settings.set`](../../../packages/agent-app/tests/limit-resume-dom.tsx) |
+| [MUS-SPEC-02-567A](02-turns-streaming-and-queue.md#mus-spec-02-567a) | A command left running by the CLI is killed on Stop and the run settles as Stopped within 5 seconds. | [`Claude Code: Stop ends the commands the CLI started and the run settles`](../../../packages/agent-app/tests/adapter-process-tree.test.ts) |
+| [MUS-SPEC-02-567B](02-turns-streaming-and-queue.md#mus-spec-02-567b) | A command left running by the OpenCode CLI is killed on Stop and the run settles as Stopped within 5 seconds. | [`OpenCode: Stop ends the commands the CLI started and the run settles`](../../../packages/agent-app/tests/adapter-process-tree.test.ts) |
 | [MUS-SPEC-02-473H](02-turns-streaming-and-queue.md#mus-spec-02-473h) | The no-promise rule is in Agent mode instructions and not in Ask or Plan. | [`agent-mode instructions forbid ending a turn on a promise`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 | [MUS-SPEC-02-473J](02-turns-streaming-and-queue.md#mus-spec-02-473j) | A closing promise makes the run advanced or plan-only, never completed; ordinary endings stay completed. | [`liveness: a turn that ends promising to report back is not completed`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 | [MUS-SPEC-02-478A](02-turns-streaming-and-queue.md#mus-spec-02-478a) | The steer is wrapped in a note that says to fold the message in, continue the current task and not stop after acknowledging it, and it ends with the user's words. | [`Claude Code: a steer tells the model to continue the current task, and the run stays open until the work after it ends`](../../../packages/agent-app/tests/steer-default.test.ts) |
@@ -377,6 +379,30 @@ Boundaries:
 - Test: `packages/agent-app/tests/limit-resume-dom.tsx::Settings › General has both continue switches, on by default, and they save through settings.set`
 - Environment: Node script with a fake DOM (linkedom); the real components; no Electron.
 - Known gaps: Settings are held by a fake host, not the real settings store.
+- Evidence: UNVERIFIED
+
+### Stopping CLI agents
+
+<a id="mus-spec-02-567a"></a>
+#### MUS-SPEC-02-567A: Stop ends the commands a Claude Code chat started
+
+- Precondition: A Claude Code chat is running a CLI that started a long command (`sleep 30`) which holds the output pipe open.
+- Action: Press Stop.
+- Expected result: The run settles with "Stopped." within 5 seconds and the long command is no longer running.
+- Test: `packages/agent-app/tests/adapter-process-tree.test.ts::Claude Code: Stop ends the commands the CLI started and the run settles`
+- Environment: Node test runner; no network, no provider. POSIX only (process groups); the test skips itself on Windows. Uses a small shell script as the CLI.
+- Known gaps: Uses a fake CLI script, not the real Claude Code. Not run on Windows.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-567b"></a>
+#### MUS-SPEC-02-567B: Stop ends the commands an OpenCode chat started
+
+- Precondition: An OpenCode chat is running a CLI that started a long command (`sleep 30`) which holds the output pipe open.
+- Action: Press Stop.
+- Expected result: The run settles with "Stopped." within 5 seconds and the long command is no longer running.
+- Test: `packages/agent-app/tests/adapter-process-tree.test.ts::OpenCode: Stop ends the commands the CLI started and the run settles`
+- Environment: Node test runner; no network, no provider. POSIX only (process groups); the test skips itself on Windows. Uses a small shell script as the CLI.
+- Known gaps: Uses a fake CLI script, not the real OpenCode. Not run on Windows.
 - Evidence: UNVERIFIED
 
 ### Turns that end on a promise

@@ -78,6 +78,9 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - The Dashboard's Recent activity and the Activity list name the agent or person who acted instead of a short id such as "agent a8782383".
 - The Dashboard opens faster on a large org: it reuses the org's last read instead of reading every task page again.
 
+- Stop now ends the commands a Claude Code or OpenCode chat started (a dev server, a test watcher), and the run settles right away. Before, the command kept running and the chat stayed "stopping" until it exited on its own.
+- A message that starts with "-" (a list bullet, or "--version is wrong…") now reaches Gemini CLI and OpenCode as the message. Before, the CLI read it as options and the message was lost.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.

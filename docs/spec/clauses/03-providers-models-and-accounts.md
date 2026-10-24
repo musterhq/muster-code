@@ -17,6 +17,8 @@ Boundaries:
 | Case | What the assertions check | Test |
 |---|---|---|
 | [MUS-SPEC-03-463A](03-providers-models-and-accounts.md#mus-spec-03-463a) | After a busy turn full of tool rows, the digest for the new provider still holds the first request, the last five user messages, the last assistant summary and the folder's branch and changes; the repo's own hook does not run. | [`digest on a busy turn still leads with the task: first request, last 5 user messages, last summary and git state`](../../../packages/agent-app/tests/fork-edit.test.ts) |
+| [MUS-SPEC-03-567A](03-providers-models-and-accounts.md#mus-spec-03-567a) | The Gemini arguments carry the whole message in `--prompt=…` or as a token that does not start with "-". | [`Gemini: a prompt starting with a dash is never a separate argv token after --prompt`](../../../packages/agent-app/tests/cli-dash-prompt.test.ts) |
+| [MUS-SPEC-03-567B](03-providers-models-and-accounts.md#mus-spec-03-567b) | For the message "--version is wrong in package.json, fix it" the OpenCode argument holding it does not start with a dash. | [`OpenCode: a message starting with dashes is not passed as a flag`](../../../packages/agent-app/tests/cli-dash-prompt.test.ts) |
 | [MUS-SPEC-03-1A](03-providers-models-and-accounts.md#mus-spec-03-1a) | All four turns complete without reconnecting; one request per turn with valid credentials; real counters preserved. | [`router usage compatibility: two independent chats complete successive turns without reconnecting`](../../../packages/agent-app/tests/router-usage-workflow.test.ts) |
 | [MUS-SPEC-03-1B](03-providers-models-and-accounts.md#mus-spec-03-1b) | The first turn completes and the truncated one fails, on the same thread. | [`router usage compatibility: a genuinely truncated stream still fails`](../../../packages/agent-app/tests/router-usage-workflow.test.ts) |
 | [MUS-SPEC-03-1C](03-providers-models-and-accounts.md#mus-spec-03-1c) | 404 without the private path; nothing forwarded; the real request is forwarded unchanged. | [`router bridge: a request without the private path prefix is refused and never forwarded`](../../../packages/agent-app/tests/responses-compat.test.ts) |
@@ -33,6 +35,30 @@ Boundaries:
 - Test: `packages/agent-app/tests/fork-edit.test.ts::digest on a busy turn still leads with the task: first request, last 5 user messages, last summary and git state`
 - Environment: Node test runner; a temporary git repo and the `git` binary; no provider or network.
 - Known gaps: Calls the digest builder directly, not through a provider switch in a running chat.
+- Evidence: UNVERIFIED
+
+### Messages that start with a dash
+
+<a id="mus-spec-03-567a"></a>
+#### MUS-SPEC-03-567A: A message starting with "-" reaches Gemini CLI as the message
+
+- Precondition: The user sends "- fix the list bullets" to a Gemini CLI chat.
+- Action: Build the Gemini CLI arguments for that message.
+- Expected result: The message is passed as `--prompt=<message>` (or a value that does not start with a dash), so the CLI does not read it as options.
+- Test: `packages/agent-app/tests/cli-dash-prompt.test.ts::Gemini: a prompt starting with a dash is never a separate argv token after --prompt`
+- Environment: Node test runner; no network, no provider.
+- Known gaps: Checks the arguments, not a run of the real Gemini CLI. The fake-CLI test in cli-agents.test.ts follows the new form.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-567b"></a>
+#### MUS-SPEC-03-567B: A message starting with "--" reaches OpenCode as the message
+
+- Precondition: The user sends "--version is wrong in package.json, fix it" to an OpenCode chat.
+- Action: Run the OpenCode adapter with a fake process and read the arguments it spawned.
+- Expected result: The argument that holds the message does not start with "-", so the CLI does not read it as an option.
+- Test: `packages/agent-app/tests/cli-dash-prompt.test.ts::OpenCode: a message starting with dashes is not passed as a flag`
+- Environment: Node test runner; no network, no provider. Fake child process; nothing is launched.
+- Known gaps: Checks the arguments, not a run of the real OpenCode.
 - Evidence: UNVERIFIED
 
 ### Configured routers
