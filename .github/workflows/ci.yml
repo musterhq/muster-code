@@ -23,11 +23,16 @@ jobs:
         with:
           version: 10.33.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           # @musterhq/core (built below) declares engines.node >=24.
           node-version: "24"
           cache: pnpm
+
+      # Required check: every acceptance case names one real, non-skipped test and that test names it back
+      # (docs/spec/acceptance-cases.md). No install needed; runs before the build so a broken link fails fast.
+      - name: Spec links
+        run: node scripts/check-spec.mjs
 
       # packages/builtin depends on "link:../../../muster/packages/core", i.e. a sibling checkout of
       # github.com/musterhq/muster next to this repo. The npm release of @musterhq/core lags that source and
