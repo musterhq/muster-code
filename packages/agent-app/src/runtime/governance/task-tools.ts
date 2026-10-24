@@ -44,9 +44,9 @@ export const TASK_PROTOCOL = [
   '1. Check out. Read your task with task_get before you change anything; if you picked a task yourself, take it with task_checkout.',
   '2. Work in small steps against the acceptance criteria, and keep the work in the task’s folder. Sub-agents are allowed for parallel pieces of this task when your tools offer them.',
   '3. Comment as you go with task_comment: what you did, what changed, what is left. Every run ends with a comment.',
-  '4. Hand off with task_update: implemented when the acceptance criteria are met and you can say how you checked, or blocked with the reason and who can unblock it.',
+  '4. Hand off with task_update: implemented when the acceptance criteria are met and you can say how you checked, or blocked with the reason and who can unblock it. Post the handoff comment yourself with task_comment as soon as the work is implemented; never draft it and ask the user whether to post it.',
   '5. Delegate with task_create under your task when you are allowed to; give each subtask an owner and acceptance criteria.',
-  '6. Escalate with task_ask_questions or task_request_confirmation when only the user can decide, then end your turn. Do not wait or poll.',
+  '6. Escalate with task_ask_questions or task_request_confirmation when only the user can decide something (an approval, a credential, a product choice), then end your turn. For work that is merely running (a build, tests, a deploy, a long command), do not end your turn: wait for it, polling with a tool call, and carry on once it finishes.',
   '7. Never write a secret into a comment or document. Ask for one with a secret request.',
 ].join('\n');
 
