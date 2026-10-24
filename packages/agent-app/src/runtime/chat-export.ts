@@ -6,6 +6,7 @@
  */
 import type { Chat, ChatExport, Folder, Project, TimelineItem } from '../shared/protocol.ts';
 import { SECRET_MASK, SECRET_PATTERNS, redactSecrets } from './secret-redaction.ts';
+import { redactKnownSecrets } from './secret-registry.ts';
 import { plural } from '../shared/wording.ts';
 
 const MASK = SECRET_MASK;
@@ -35,7 +36,9 @@ export const escapeHtml = (value: string): string => value.replace(/[&<>"'`]/g, 
  *  questions are always masked because they were entered as secrets. */
 export function exportChat(source: ExportSource, format: ChatExportFormat, options: { redact?: boolean } = {}): ChatExport {
   const redacted = { value: 0 }, redact = options.redact !== false;
-  const clean = (value: string) => redact ? redactSecrets(value, redacted) : value;
+  // Values Muster knows by name (secret store, credential env vars) are masked as ••••(NAME), even in rows saved before the
+  // secret existed (#154); then the pattern-based redactor catches secret-looking strings it does not know.
+  const clean = (value: string) => redact ? redactSecrets(redactKnownSecrets(value, redacted), redacted) : value;
   let reasoning = 0, toolOutput = 0, files = 0, secretAnswers = 0, streaming = 0;
   const entries: Entry[] = [];
   for (const item of source.items) {

@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Secrets you saved in Muster, and environment variables named like credentials (`*_TOKEN`, `*_API_KEY`, `*_SECRET`, `*_PASSWORD`…), are masked as `••••(NAME)` wherever a chat is saved: the thread, tool output logs, chat titles and exports, including chats exported after the secret was saved.
 - Configured Responses routers no longer reconnect and fail when a completed response omits cache or reasoning usage counters. Existing counts, authentication, and chat history are preserved; truncated streams still report a failure.
 - The Linux app's terminal works again on Ubuntu 24.04. Linux builds are made on Ubuntu 24.04, so the terminal module runs there and on newer releases.
 - Settings › Muster Server buttons (invite, revoke, connector and agent actions) ignore a second click while the first is still running, so they no longer fire twice.
