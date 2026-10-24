@@ -27,8 +27,4 @@ for (const name of suites) {
   // without a cap that exhausted a 24 GB machine. Fail fast instead.
   if (!runSuite(name, outfile)) failed++;
 }
-// Suites that need their own build (code splitting) ship a standalone runner.
-for (const runner of ['run-git-history-components.mjs', 'run-spotlight-palette-dom.mjs']) {
-  if (!runSuite(runner, path.join(root, 'tests', runner))) failed++;
-}
 process.exitCode = failed ? 1 : 0;

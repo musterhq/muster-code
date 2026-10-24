@@ -216,7 +216,7 @@ Boundaries:
 - Expected result: Every `tests/*.tsx` file is in `suites` or in `excluded` with a reason, and every name in either list has a file. A DOM suite that nobody lists fails the unit suite, which CI runs on every PR.
 - Test: `packages/agent-app/tests/renderer-suites.test.ts::every tests/*.tsx file is a renderer suite or is excluded with a reason`
 - Environment: Node test runner; reads the real `tests` folder.
-- Known gaps: Proves the suite is listed, not that it passes; the renderer step of CI runs it. A suite in `excluded` is not run by anything.
+- Known gaps: Proves the suite is listed, not that it passes; the renderer step of CI runs it. A suite in `excluded` is not run by `test:renderer`; the one excluded today (`terminal-load-retry-dom`) is built and run by its own node test.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-22-5b"></a>

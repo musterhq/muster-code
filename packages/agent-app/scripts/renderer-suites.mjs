@@ -55,6 +55,20 @@ export const suites = [
   'broken-image-gallery-dom',
   'markdown-table-dom',
   'org-sidebar-pages-dom',
+  'clone-retry-dom',
+  'composer-components',
+  'composer-s3a-components',
+  'git-components',
+  'git-history-components',
+  'highlighted-code-streaming',
+  'hindsight-panel-lifecycle',
+  'pending-attention',
+  'recovery-notice',
+  'resource-pane-components',
+  'share-sheet-dom',
+  'sidebar-navigation',
+  'spotlight-palette-dom',
+  'file-viewer-parity',
 ];
 
 /** Suites that open Base UI menus/portals get a split build: their `await import()` of UI code stays a separate
@@ -75,11 +89,22 @@ export const split = new Set([
   'chat-polish-dom',
   'device-noun-dom-win32',
   'device-noun-dom-linux',
+  'composer-components',
+  'composer-s3a-components',
+  'git-components',
+  'git-history-components',
+  'highlighted-code-streaming',
+  'hindsight-panel-lifecycle',
+  'pending-attention',
+  'resource-pane-components',
+  'sidebar-navigation',
+  'spotlight-palette-dom',
 ]);
 
 /** tests/*.tsx files that are deliberately not suites, with the reason. */
 export const excluded = {
   'device-noun-dom-body': 'shared body imported by the device-noun-dom-win32 and device-noun-dom-linux entry files; it cannot run on its own',
+  'terminal-load-retry-dom': 'built and run by tests/terminal-load-retry.test.ts, which the node test job already runs',
 };
 
 /** Names that break the rule: a tests/*.tsx file in neither list, a listed or excluded name with no file, and a name in both. */

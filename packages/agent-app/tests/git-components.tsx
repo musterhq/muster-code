@@ -1,4 +1,4 @@
-/** Run with node tests/run-git-components.mjs: composer environment/branch footer, branch switch with carried changes, summary card fetch wording, sandbox scope, PR detail. */
+/** Run with npm run test:renderer (suite git-components): composer environment/branch footer, branch switch with carried changes, summary card fetch wording, sandbox scope, PR detail. */
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {setTimeout as delay} from 'node:timers/promises';
