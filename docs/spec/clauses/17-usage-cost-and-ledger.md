@@ -17,6 +17,7 @@ Boundaries:
 | Case | What the assertions check | Test |
 |---|---|---|
 | [MUS-SPEC-17-573A](17-usage-cost-and-ledger.md#mus-spec-17-573a) | Rows removed from the end of the ledger are reported as a break. | [`verify() notices entries deleted from the end of the chain`](../../../packages/agent-app/tests/turn-ledger-bughunt.test.ts) |
+| [MUS-SPEC-17-458A](17-usage-cost-and-ledger.md#mus-spec-17-458a) | With two approval requests accepted automatically a turn records 0 approvals; a turn that also shows a card records 1. | [`ledger approvals count only cards shown to the user, never Full-access auto-accepts`](../../../packages/agent-app/tests/ledger-history.test.ts) |
 
 <a id="mus-spec-17-573a"></a>
 #### MUS-SPEC-17-573A: The ledger check notices entries cut from the end
@@ -27,4 +28,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/turn-ledger-bughunt.test.ts::verify() notices entries deleted from the end of the chain`
 - Environment: Node test runner; in-memory SQLite.
 - Known gaps: The ledger is in memory. It does not show how the Dashboard words a failed check.
+- Evidence: UNVERIFIED
+
+### Approvals in the ledger
+
+<a id="mus-spec-17-458a"></a>
+#### MUS-SPEC-17-458A: Approvals in a turn receipt count only cards shown to the user
+
+- Precondition: A chat in Full access, where the provider asks for approval and Muster accepts at once with no card. A second turn where an approval card is shown.
+- Action: Run both turns through the ledger's run hooks and settle each one.
+- Expected result: The first turn's receipt records 0 approvals. The second turn's receipt records 1.
+- Test: `packages/agent-app/tests/ledger-history.test.ts::ledger approvals count only cards shown to the user, never Full-access auto-accepts`
+- Environment: Node test runner; in-memory SQLite database; no provider or network.
+- Known gaps: Drives the ledger's run hooks with hand-made events, not the agent service. It does not show the service sending the shown-card event when it creates a card.
 - Evidence: UNVERIFIED
