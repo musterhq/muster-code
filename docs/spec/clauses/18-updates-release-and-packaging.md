@@ -12,7 +12,19 @@ Boundaries:
 
 ## Acceptance cases
 
-A PR that changes this area adds its cases here first: one row in this table, then the case block below it (see [acceptance-cases.md](../acceptance-cases.md)).
-
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-18-479L](18-updates-release-and-packaging.md#mus-spec-18-479l) | An update never restarts Muster while a turn is running. | [`an update install waits for running work, says so once, and installs when it finishes`](../../../packages/agent-app/tests/auto-resume.test.ts) |
+
+### Updates wait for running work
+
+<a id="mus-spec-18-479l"></a>
+#### MUS-SPEC-18-479L: An update waits until running chats finish, then installs
+
+- Precondition: Two turns are running when an update install is requested.
+- Action: Request the install twice, then let the turns finish one at a time, then request it again.
+- Expected result: The install waits and says "Muster will update when the running work finishes." once. It runs once when the last turn ends, and runs at once when nothing is running.
+- Test: `packages/agent-app/tests/auto-resume.test.ts::an update install waits for running work, says so once, and installs when it finishes`
+- Environment: Node test runner; a fake gate with fake notices; no Electron and no real updater.
+- Known gaps: Tests the gate on its own; the app's main process wiring is not run.
+- Evidence: UNVERIFIED

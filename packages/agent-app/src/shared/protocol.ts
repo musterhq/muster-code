@@ -9,8 +9,12 @@ import type {ChatGoal} from './domains/goals-protocol.ts';
 import type {ExcludedModel, ModelPricing} from './model-catalog.ts';
 /** The only renderer capability surface. Main validates every command and sender. */
 export type ChatPermissionMode = 'read-only' | 'workspace' | 'full';
-/** 'waiting' (approval or question open), 'queued' and 'reconnecting' are display states derived in the renderer; the runtime never persists them. */
-export type ChatStatus = 'idle' | 'running' | 'stopping' | 'completed' | 'failed' | 'interrupted' | 'waiting' | 'queued' | 'reconnecting';
+/** 'waiting' (approval or question open), 'queued', 'reconnecting' and 'limited' (a usage limit is waiting to reset) are display states derived in the renderer; the runtime never persists them. */
+export type ChatStatus = 'idle' | 'running' | 'stopping' | 'completed' | 'failed' | 'interrupted' | 'waiting' | 'queued' | 'reconnecting' | 'limited';
+/** #448: a run stopped on a provider usage limit. `resume` is this chat's "Resume at reset" choice; `gaveUp` once repeated refusals stopped the retries. */
+/** #448: an opt-in per-chat fallback model, used when the chat's model is limited. */
+export interface ChatFallback { providerId: string; model: string }
+export interface ChatAutoResume { resumeAt: string | null; resume: boolean; attempts: number; /** 'usage': a usage window or quota · 'rate': a rate limit or outage (429/503). */ reason: 'usage' | 'rate'; gaveUp?: boolean }
 /** `missing` is set when the folder path was not a directory at snapshot time (cached ~10s); the sidebar offers Relink. */
 export interface Folder { id: string; path: string; name: string; missing?: boolean }
 export interface ChatRecovery { kind: 'admission-rejected' | 'recovery-needed' | 'failed' | 'cancelled'; retryable: boolean; reason: string; /** The provider rejected the credentials (401/403); fixed in Accounts & providers. */ auth?: {providerId: string; status: 401 | 403} }
@@ -19,8 +23,8 @@ export interface QueuedMessage {id:string; text:string; requestId:string; attach
 /** Codex limits: 100 queued items per thread, 1 MiB of text per item. */
 export const MAX_QUEUED_MESSAGES = 100;
 export const MAX_QUEUED_TEXT = 1024 * 1024;
-/** Why a chat's queue is not dispatching: the user interrupted the run, or the run failed. */
-export type QueuePause = 'interrupted' | 'failed';
+/** Why a chat's queue is not dispatching: the user interrupted the run, the run failed, or it waits for a usage limit to reset (#448). */
+export type QueuePause = 'interrupted' | 'failed' | 'limited';
 /** While a turn runs, a follow-up queues or steers; the invert shortcut does the other for one message. */
 export type FollowUpMode = 'queue' | 'steer';
 /** A file staged in a chat's composer ('staged') or delivered with a message ('sent'). Bytes stay in main. */
@@ -28,7 +32,7 @@ export interface AttachmentRef {id:string; chatId:string; name:string; mime:stri
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
 export const ATTACHMENT_IMAGE_MIMES = ['image/png','image/jpeg','image/gif','image/webp'] as const;
-export interface Chat { id: string; folderId?: string; projectId?: string; title: string; pinned: boolean; pinOrder?: number; archived: boolean; draft: string; status: ChatStatus; updatedAt: string; providerId?: string; providerBindingId?: string; providerThreadProviderId?: string; providerThreadBindingId?: string; providerThreadId?: string; providerTurnId?: string; recovery?: ChatRecovery; model: string; unread?: boolean; lastViewedAt?: string; mode: 'ask' | 'plan' | 'agent'; permissionMode?: ChatPermissionMode; error?: string; queue?: QueuedMessage[]; queuePaused?: QueuePause; goal?: ChatGoal;
+export interface Chat { id: string; folderId?: string; projectId?: string; title: string; pinned: boolean; pinOrder?: number; archived: boolean; draft: string; status: ChatStatus; updatedAt: string; providerId?: string; providerBindingId?: string; providerThreadProviderId?: string; providerThreadBindingId?: string; providerThreadId?: string; providerTurnId?: string; recovery?: ChatRecovery; model: string; unread?: boolean; lastViewedAt?: string; mode: 'ask' | 'plan' | 'agent'; permissionMode?: ChatPermissionMode; error?: string; queue?: QueuedMessage[]; queuePaused?: QueuePause; autoResume?: ChatAutoResume; /** #448: opt-in fallback models (off when absent). */ fallbacks?: ChatFallback[]; goal?: ChatGoal;
   /** 'default' until the first exchange names it, 'generated' after, 'user' once renamed (never overwritten). */
   titleSource?: ChatTitleSource;
   /** Set on a fork: the chat and item it branched from. */
@@ -226,6 +230,10 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'chat.reconcile': {input: {id: string}; output: {chat: Chat; resolved: boolean; reason: string; stillRunning?: boolean}};
  /** Clears an unconfirmed-attempt block so the user is never stuck; the earlier attempt is left as it is. */
  'chat.continueAnyway': {input: {id: string}; output: Chat};
+ /** #448: this chat's choice after a usage limit: continue at reset, or not. */
+ 'chat.autoResume': {input: {id: string; resume: boolean}; output: Chat};
+ /** #448: this chat's fallback models, in order; an empty list turns fallback off. A limited chat continues on the first one at once. */
+ 'chat.fallbacks': {input: {id: string; fallbacks: ChatFallback[]}; output: Chat};
  /** Codex `thread/compact/start` on the chat's live provider session; a timeline row tracks intent, completion and failure. */
  'chat.compact': {input: {id: string; /** Skip the provider: continue in a fresh provider thread seeded with a summary of the transcript. */ fresh?: boolean}; output: void};
  /** Asks the agent again after an approval or question expired or was lost to a restart. */

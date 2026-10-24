@@ -69,6 +69,7 @@ export const suites = [
   'sidebar-navigation',
   'spotlight-palette-dom',
   'file-viewer-parity',
+  'limit-resume-dom',
 ];
 
 /** Suites that open Base UI menus/portals get a split build: their `await import()` of UI code stays a separate
@@ -99,6 +100,7 @@ export const split = new Set([
   'resource-pane-components',
   'sidebar-navigation',
   'spotlight-palette-dom',
+  'limit-resume-dom',
 ]);
 
 /** tests/*.tsx files that are deliberately not suites, with the reason. */
