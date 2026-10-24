@@ -5,12 +5,13 @@
  * time per chat. The chat id in the call is the caller's identity, bound to it by a per-chat HMAC (MUSTER_CHAT_TOKEN) that only the
  * run's own MCP process is given, so one chat's tools cannot speak as another chat. The runner decides what that chat may do.
  */
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { launcherFile, nodeLauncherScript } from '../launcher-script.ts';
 import type { McpToolResult } from '../sandbox-registry.ts';
+import { ChatBinding, CHAT_TOKEN_HEADER } from './chat-binding.ts';
 
 export interface ToolSpec { name: string; description: string; inputSchema: Record<string, unknown> }
 export type ToolRunner = (chatId: string, tool: string, args: Record<string, unknown>) => Promise<McpToolResult> | McpToolResult;
@@ -53,6 +54,7 @@ export class ToolHost {
   private server?: http.Server;
   private starting?: Promise<string>;
   private token = randomBytes(32);
+  private binding = new ChatBinding(this.token);
   private queues = new Map<string, Promise<unknown>>();
   private disposed = false;
   constructor(private options: { dir: string; name: string; title: string; specs: readonly ToolSpec[]; execPath: string; run: ToolRunner; /** How long the MCP process waits for one call (default 60 s). Match the provider's tool timeout. */ timeoutMs?: number; /** Largest call body (default 256 KB). */ maxBody?: number }) {
@@ -77,12 +79,7 @@ export class ToolHost {
     return this.launcher;
   }
   /** The value for the run's MUSTER_CHAT_TOKEN: an HMAC of the chat id under this host's secret. */
-  chatToken(chatId: string): string { return createHmac('sha256', this.token).update(chatId).digest('hex'); }
-  private boundTo(chatId: unknown, header: string | string[] | undefined): boolean {
-    if (typeof chatId !== 'string' || typeof header !== 'string' || !/^[a-f0-9]{64}$/.test(header)) return false;
-    const want = Buffer.from(this.chatToken(chatId), 'hex'), got = Buffer.from(header, 'hex');
-    return got.length === want.length && timingSafeEqual(got, want);
-  }
+  chatToken(chatId: string): string { return this.binding.token(chatId); }
   private authorized(header: string | undefined): boolean {
     const presented = Buffer.from(/^Bearer ([a-f0-9]{64})$/.exec(header ?? '')?.[1] ?? '', 'hex');
     return presented.length === this.token.length && timingSafeEqual(presented, this.token);
@@ -94,7 +91,7 @@ export class ToolHost {
     for await (const chunk of request) { size += (chunk as Buffer).length; if (size > (this.options.maxBody ?? MAX_BODY)) { reply(413, { error: 'Too large' }); return; } chunks.push(chunk as Buffer); }
     let body: { chatId?: unknown; tool?: unknown; arguments?: unknown };
     try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { reply(400, { error: 'Invalid JSON' }); return; }
-    if (!this.boundTo(body.chatId, request.headers['x-muster-chat-token'])) { reply(403, { error: 'Forbidden' }); return; }
+    if (!this.binding.verify(body.chatId, request.headers[CHAT_TOKEN_HEADER])) { reply(403, { error: 'Forbidden' }); return; }
     reply(200, await this.call(body.chatId, body.tool, body.arguments));
   }
   /** Calls for one chat run one at a time, so a retry never races its first attempt. */
