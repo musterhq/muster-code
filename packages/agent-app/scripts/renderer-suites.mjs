@@ -88,6 +88,7 @@ export const suites = [
   'ime-enter-dom',
   'update-status-retry-dom',
   'markdown-breaks-dom',
+  'setup-clone-handoff-dom',
 ];
 
 /** Suites that open Base UI menus/portals get a split build: their `await import()` of UI code stays a separate

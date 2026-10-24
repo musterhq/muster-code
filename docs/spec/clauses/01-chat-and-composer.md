@@ -24,6 +24,8 @@ Boundaries:
 | [MUS-SPEC-01-560B](01-chat-and-composer.md#mus-spec-01-560b) | Search highlight ranges cover a whole emoji, merge adjacent emoji, and never split a surrogate pair. | [`fuzzyMatch ranges never cut an emoji in half`](../../../packages/agent-app/tests/spotlight-model.test.ts) |
 | [MUS-SPEC-01-599A](01-chat-and-composer.md#mus-spec-01-599a) | In a reply, single newlines in prose, list items and quotes become line breaks; blank lines still split paragraphs; bold is kept; an explicit break is not doubled; code blocks and table rows get no breaks. Both when animated and not. | [`a single newline in assistant prose, lists and quotes shows as a line break`](../../../packages/agent-app/tests/markdown-breaks-dom.tsx) |
 | [MUS-SPEC-01-599B](01-chat-and-composer.md#mus-spec-01-599b) | A streamed reply that adds lines one at a time keeps a break for each and fades in only the new lines. | [`streamed text that arrives on a new line still fades in with its line break`](../../../packages/agent-app/tests/markdown-breaks-dom.tsx) |
+| [MUS-SPEC-01-670A](01-chat-and-composer.md#mus-spec-01-670a) | Clicking Clone a repository on the folder step closes the guide for the clone sheet and starts no interval timer. | [`cloning from the setup guide hands back through the clone sheet and leaves no background poll`](../../../packages/agent-app/tests/setup-clone-handoff-dom.tsx) |
+| [MUS-SPEC-01-670B](01-chat-and-composer.md#mus-spec-01-670b) | After the clone sheet is closed without a clone, a folder that arrives in a later snapshot leaves the setup guide closed after more than a second. | [`a folder added later does not reopen the setup guide after an abandoned clone`](../../../packages/agent-app/tests/setup-clone-handoff-dom.tsx) |
 
 ### Text direction
 
@@ -130,4 +132,28 @@ Boundaries:
 - Test: `packages/agent-app/tests/markdown-breaks-dom.tsx::streamed text that arrives on a new line still fades in with its line break`
 - Environment: Real MessageBody in a DOM suite (linkedom); no network.
 - Known gaps: Does not run a real stream; the test sends the growing text itself. The fade is checked by its class, not by looking at it.
+- Evidence: UNVERIFIED
+
+### Cloning from the setup guide (#670)
+
+<a id="mus-spec-01-670a"></a>
+#### MUS-SPEC-01-670A: Cloning from the setup guide leaves no background timer
+
+- Precondition: The setup guide is open on the folder step, with git available and no folder added yet.
+- Action: Click "Clone a repository…".
+- Expected result: The guide closes to make room for the clone sheet, and no interval timer is started, so nothing keeps watching for new folders in the background.
+- Test: `packages/agent-app/tests/setup-clone-handoff-dom.tsx::cloning from the setup guide hands back through the clone sheet and leaves no background poll`
+- Environment: DOM suite on linkedom, built and run by scripts/test-renderer.mjs; the runtime is a fake; no network or git.
+- Known gaps: Does not run a clone to the end, so it does not show the guide reopening on the folder step when the clone lands or the new "setup continues once it lands" hint. It counts calls to setInterval during the click, so a timer made another way is not seen.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-670b"></a>
+#### MUS-SPEC-01-670B: A folder added later does not reopen the setup guide
+
+- Precondition: The user clicked "Clone a repository…" from the setup guide, so the guide is closed, and then closed the clone sheet without cloning.
+- Action: A new folder arrives in an app snapshot (added another way), and the test waits 1.3 seconds.
+- Expected result: The setup guide is still closed.
+- Test: `packages/agent-app/tests/setup-clone-handoff-dom.tsx::a folder added later does not reopen the setup guide after an abandoned clone`
+- Environment: DOM suite on linkedom, built and run by scripts/test-renderer.mjs; the runtime is a fake; no network or git.
+- Known gaps: The 1.3 second wait covers the old one-second poll but not its 10-minute limit. It does not show a finished clone reopening the guide.
 - Evidence: UNVERIFIED
