@@ -102,6 +102,8 @@ export async function filesChanged(cwd: string, beforeTree: string | null): Prom
   } catch { return null; }
 }
 
+/** Emitted by the service only when an approval card is actually shown; Full-access auto-accepts and policy allows never emit it. */
+export const APPROVAL_SHOWN_EVENT = 'muster/approval/shown';
 export const TOOL_TYPES = new Set(['commandExecution', 'mcpToolCall', 'dynamicToolCall', 'fileChange', 'webSearch', 'imageView']);
 const MAX_OPEN_RUNS = 1000;
 interface Open { chatId: string; startedAt: number; cwd: string; usage: UsageTotals; /** A message's usage arrived before its final count (#663). */ partial?: true; cursor?: UsageCursor; tools: Map<string, number>; approvals: number; tests: number }
@@ -137,7 +139,7 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
     if (!turn) return;
     const step = usageStep(turn.cursor, event.method, event.params);
     if (step) { turn.cursor = step.cursor; turn.usage = addUsage(turn.usage, step.delta); if (step.partial) turn.partial = true; return; }
-    if (/requestApproval|approval\/request/i.test(event.method)) { turn.approvals++; return; }
+    if (event.method === APPROVAL_SHOWN_EVENT) { turn.approvals++; return; }
     if (event.method === 'item/started') {
       const item = (event.params.item ?? {}) as Record<string, unknown>, type = typeof item.type === 'string' ? item.type : '';
       if (!TOOL_TYPES.has(type)) return;

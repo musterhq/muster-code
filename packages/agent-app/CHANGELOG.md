@@ -5,6 +5,12 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- The browser tab an agent is working in now stays usable when you close the browser panel mid-run: it is no longer frozen or discarded while in use, live previews revive it, and browser tool calls retry safely after a dropped connection (never repeating a click or keystroke).
+- Project task runs now keep working while a build, test or deploy is running instead of stopping to wait, and only stop for decisions the user must make.
+- Agents post the task handoff comment themselves instead of drafting it and asking whether to post it.
+- Usage stats and Receipts now count only approvals that actually showed you a card; requests accepted automatically in Full access are no longer counted as prompts.
+- Agent mode no longer ends a turn with a promise like "I'll report back when the build finishes": the agent is told to wait for the work inside the turn, and a run that ends on such a promise is no longer counted as completed.
+- In Agent mode with Full access, the agent can start a long build, test run or deploy as a background process of the chat (shown in Commands as the agent's). If it is still running when the turn ends, its exit sends the chat one follow-up (exit code and the last 40 lines of output) through the message queue, so the agent picks up where it left off.
 - Configured Responses routers no longer reconnect and fail when a completed response omits cache or reasoning usage counters. Existing counts, authentication, and chat history are preserved; truncated streams still report a failure.
 - Claude Code cache writes are now priced at the provider's cache-write rate (1.25× the input price for Claude models unless you set one) in Ledger receipts, Settings usage and the Dashboard. Settings › Models prices and catalog prices can set a cache-write rate; a receipt whose cost rests on a guess (a message whose final count never arrived, or cache writes billed at the input rate for a model with no cache-write price) says "estimate", and the Dashboard counts those turns.
 - The Linux app's terminal works again on Ubuntu 24.04. Linux builds are made on Ubuntu 24.04, so the terminal module runs there and on newer releases.
