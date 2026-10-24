@@ -42,6 +42,7 @@ test('a hidden page is frozen, and showing it thaws it first',()=>{
   controller.dispose();
 });
 
+// Spec: MUS-SPEC-09-465D (docs/spec/clauses/09-browser-and-previews.md#mus-spec-09-465d)
 test('agent use thaws a hidden page; the sweeper refreezes it once idle',()=>{
   const {controller,views,show,hide,open,tick}=fixture();
   open('a');show('a');hide('a');
@@ -49,6 +50,8 @@ test('agent use thaws a hidden page; the sweeper refreezes it once idle',()=>{
   assert.equal(views[0].webContents.states(),'frozen,active');
   assert.equal(controller.freezeIdle(),0,'recently used pages stay awake');
   tick(15_000);
+  assert.equal(controller.freezeIdle(),0,'a tab an agent tool just drove is held awake past the idle window');
+  tick(3*60_000);
   assert.equal(controller.freezeIdle(),1);
   assert.equal(views[0].webContents.states(),'frozen,active,frozen');
   controller.dispose();

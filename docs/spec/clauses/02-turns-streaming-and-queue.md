@@ -18,6 +18,8 @@ Boundaries:
 |---|---|---|
 | [MUS-SPEC-02-469A](02-turns-streaming-and-queue.md#mus-spec-02-469a) | In the composer, the draft the runtime hands back after a stopped run appears in the empty input. | [`a run stopped before dispatch brings its text back into the composer`](../../../packages/agent-app/tests/composer-components.tsx) |
 | [MUS-SPEC-02-469B](02-turns-streaming-and-queue.md#mus-spec-02-469b) | With the queue paused, Enter sends at once with no confirm sheet and does not clear the held messages. | [`a paused queue no longer asks to confirm a send: the message sends and held items stay queued`](../../../packages/agent-app/tests/composer-components.tsx) |
+| [MUS-SPEC-02-473H](02-turns-streaming-and-queue.md#mus-spec-02-473h) | The no-promise rule is in Agent mode instructions and not in Ask or Plan. | [`agent-mode instructions forbid ending a turn on a promise`](../../../packages/agent-app/tests/process-continuations.test.ts) |
+| [MUS-SPEC-02-473J](02-turns-streaming-and-queue.md#mus-spec-02-473j) | A closing promise makes the run advanced or plan-only, never completed; ordinary endings stay completed. | [`liveness: a turn that ends promising to report back is not completed`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 
 ### After Stop
 
@@ -41,4 +43,28 @@ Boundaries:
 - Test: `packages/agent-app/tests/composer-components.tsx::a paused queue no longer asks to confirm a send: the message sends and held items stay queued`
 - Environment: Node script with a fake DOM (linkedom); the real composer and store; no Electron.
 - Known gaps: Does not show the held message running after the new one; the runtime test "Stop then send keeps the held queue" in codex-alignment.test.ts does, but it also passes without this change, so it is not linked here.
+- Evidence: UNVERIFIED
+
+### Turns that end on a promise
+
+<a id="mus-spec-02-473h"></a>
+#### MUS-SPEC-02-473H: Agent mode tells the agent never to end a turn on a promise
+
+- Precondition: Chats in Agent, Ask and Plan mode.
+- Action: Build the run instructions for each.
+- Expected result: Agent mode includes the rule "Never end a turn promising future work" that tells the agent to wait with a tool call, next to the keep-going rule. Ask and Plan do not.
+- Test: `packages/agent-app/tests/process-continuations.test.ts::agent-mode instructions forbid ending a turn on a promise`
+- Environment: Node test runner; no provider or network.
+- Known gaps: Checks the instruction text only. It does not show a model obeying it.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-473j"></a>
+#### MUS-SPEC-02-473J: A turn that ends on a promise is not counted as completed
+
+- Precondition: Turns whose last paragraph promises to report back later, and turns that end with a result.
+- Action: Classify each run, with some tool calls and then with none.
+- Expected result: A promise ending counts as advanced with work and plan-only with none. A turn that merely mentions reporting earlier, or says a CI job will report, still counts as completed.
+- Test: `packages/agent-app/tests/process-continuations.test.ts::liveness: a turn that ends promising to report back is not completed`
+- Environment: Node test runner; no provider or network.
+- Known gaps: A unit test of a text classifier, so wording it does not recognise is not caught.
 - Evidence: UNVERIFIED
