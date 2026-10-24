@@ -19,6 +19,10 @@ Boundaries:
 | [MUS-SPEC-12-683A](12-projects-orgs-and-tasks.md#mus-spec-12-683a) | When the hand-back countdown runs out, the timer callback finishes only once the hand-back has gone through, however long reading the chat takes. | [`#683 plain folder: the countdown's timer callback finishes only when the hand-back is done`](../../../packages/agent-app/tests/checkout-service.test.ts) |
 | [MUS-SPEC-12-462A](12-projects-orgs-and-tasks.md#mus-spec-12-462a) | The run carries a protocol that limits stopping to user-only decisions, tells the agent to poll running work and no longer says not to wait. | [`G40: task runs get the muster_tasks MCP server; the host refuses callers without the token`](../../../packages/agent-app/tests/wave4-task-tools.test.ts) |
 | [MUS-SPEC-12-462B](12-projects-orgs-and-tasks.md#mus-spec-12-462b) | The protocol and the end-of-run line tell the agent to post the handoff comment with task_comment instead of asking. | [`G40: task runs get the muster_tasks MCP server; the host refuses callers without the token`](../../../packages/agent-app/tests/wave4-task-tools.test.ts) |
+| [MUS-SPEC-12-157A](12-projects-orgs-and-tasks.md#mus-spec-12-157a) | A task with 2,000 messages still wakes: the run gets the newest messages that fit, the true count, and a logged packet size, and the protocol is never cut. | [`#157: a task with 2,000 messages still wakes; the packet is capped to the newest messages and the cap is logged in the activity`](../../../packages/agent-app/tests/wave1-fix-bounded-wake.test.ts) |
+| [MUS-SPEC-12-157B](12-projects-orgs-and-tasks.md#mus-spec-12-157b) | A prompt too big for one argument reaches Cursor, Gemini and OpenCode on stdin; a short one stays in argv. | [`#157: a prompt too big for one argument reaches Cursor, Gemini and OpenCode on stdin, never in argv`](../../../packages/agent-app/tests/wave1-fix-bounded-wake.test.ts) |
+| [MUS-SPEC-12-157C](12-projects-orgs-and-tasks.md#mus-spec-12-157c) | The same start error three times in a row raises one Inbox Problem and stops that task's retries until you resolve it. | [`#157: the same start error three times in a row raises one Problem and stops that task's retries until you act`](../../../packages/agent-app/tests/wave1-fix-bounded-wake.test.ts) |
+| [MUS-SPEC-12-157D](12-projects-orgs-and-tasks.md#mus-spec-12-157d) | Different errors, or errors that are not start errors, never add up to a start Problem. | [`#157: different errors, or a run that gets going in between, do not add up to a Problem`](../../../packages/agent-app/tests/wave1-fix-bounded-wake.test.ts) |
 
 ### Hand-back of a plain folder
 
@@ -55,4 +59,50 @@ Boundaries:
 - Test: `packages/agent-app/tests/wave4-task-tools.test.ts::G40: task runs get the muster_tasks MCP server; the host refuses callers without the token`
 - Environment: Node test runner; temp data folder; local tool host on a loopback port; no provider or network.
 - Known gaps: Checks the wording the run carries. There was no code path that drafts and asks, so no behaviour beyond the instructions is shown.
+- Evidence: UNVERIFIED
+
+### Bounded wake context and start failures
+
+<a id="mus-spec-12-157a"></a>
+#### MUS-SPEC-12-157A: A task with 2,000 messages still wakes with a bounded, logged packet
+
+- Precondition: A Project task owned by an agent has 2,000 notes in its thread, each about 700 characters.
+- Action: Wake the agent on demand.
+- Expected result: The run starts and finishes. Its packet says the thread has 2,000 messages and shows only the newest few that fit, oldest first, with a count of the older ones left out. The newest note is in it and the oldest is not. The packet stays near the 8 KB block limit, nothing is cut off from the task protocol, and the task activity has a line giving the packet size and how many of the 2,000 messages were included.
+- Test: `packages/agent-app/tests/wave1-fix-bounded-wake.test.ts::#157: a task with 2,000 messages still wakes; the packet is capped to the newest messages and the cap is logged in the activity`
+- Environment: Node test runner; the real agent service, real SQLite, a real git repo and a scripted provider.
+- Known gaps: The thread is clipped to the newest messages with a count, not summarised by a model. Hindsight recall is not used for the packet.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-12-157b"></a>
+#### MUS-SPEC-12-157B: A prompt too big for one argument goes to the CLI on stdin
+
+- Precondition: A Cursor, Gemini or OpenCode chat whose turn text is 300,000 bytes.
+- Action: Run the turn with a fake CLI process that records its arguments and stdin.
+- Expected result: No argument is larger than 1,000 bytes. The whole text arrives on stdin. A short prompt stays in argv and nothing is written to stdin.
+- Test: `packages/agent-app/tests/wave1-fix-bounded-wake.test.ts::#157: a prompt too big for one argument reaches Cursor, Gemini and OpenCode on stdin, never in argv`
+- Environment: Node test runner; fake child processes, no real CLI.
+- Known gaps: Only checks what Muster sends. It does not show the real CLIs accepting the prompt on stdin; Codex and Claude Code already use stdin and are unchanged.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-12-157c"></a>
+#### MUS-SPEC-12-157C: Three identical start errors stop a task and raise one Problem
+
+- Precondition: An agent-owned task whose run fails to start with the same error (a missing program) each time.
+- Action: Start the task three times, then start it again, wake its agent, and finally resolve the Problem.
+- Expected result: After the third start there is exactly one open Problem for the task in the Inbox, naming the error. A fourth start and a wake are refused with no run started, and no second Problem appears. Another task of the same agent still runs. After the Problem is resolved the task can start again.
+- Test: `packages/agent-app/tests/wave1-fix-bounded-wake.test.ts::#157: the same start error three times in a row raises one Problem and stops that task's retries until you act`
+- Environment: Node test runner; the real agent service and a scripted provider that fails to start.
+- Known gaps: Counts errors that look like a failed start (could not start, spawn errors, no usable runner or worktree). Other failures keep their existing retry rules.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-12-157d"></a>
+#### MUS-SPEC-12-157D: Errors that are not repeated start errors never raise the Problem
+
+- Precondition: Tasks that fail twice with a start error, or four times with an ordinary model refusal.
+- Action: Run each task to its failures.
+- Expected result: No start Problem is raised for either task.
+- Test: `packages/agent-app/tests/wave1-fix-bounded-wake.test.ts::#157: different errors, or a run that gets going in between, do not add up to a Problem`
+- Environment: Node test runner; the real agent service and a scripted provider.
+- Known gaps: Does not cover a different start error in between resetting the count beyond the two-then-different case shown.
 - Evidence: UNVERIFIED

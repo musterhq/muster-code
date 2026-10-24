@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- A task with a very long thread (thousands of messages) now still wakes its agent: the agent gets the newest messages and a count of the older ones, and the task activity shows how big the packet was. Long prompts also go to Cursor, Gemini and OpenCode through standard input instead of the command line. If a task fails to start with the same error three times in a row, it stops retrying and one Problem appears in the Inbox until you resolve it.
 - Installing a plugin or MCP connector while a chat is working now makes it usable right away: the chat restarts on a fresh session (keeping its conversation) and re-sends your last message, with a short notice saying so. Idle chats whose last message asked for that plugin get the same treatment; unrelated chats are left alone.
 - Memory: facts and preferences you told Muster once now carry into project and folder chats, and recall looks at your task and recent messages (not just "continue"), with a longer wait for the memory service.
 - Memory context is sent again on the next turn after a compaction or a model/provider change.

@@ -1,5 +1,5 @@
 import {basename} from 'node:path';
-import {cleanAgentEnv, jsonRunnable, num, obj, parseVersion, probeCli, stripAnsi, type AgentSpawn, type TurnApi} from './cli-common.ts';
+import {cleanAgentEnv, fitsArgv, jsonRunnable, num, obj, parseVersion, probeCli, stripAnsi, type AgentSpawn, type TurnApi} from './cli-common.ts';
 import {text} from './shared.ts';
 import type {AdapterRunInput, RunnableAdapter} from './types.ts';
 
@@ -16,11 +16,15 @@ export function cursorPermissionArgs(mode: AdapterRunInput['permissionMode']): s
   return mode === 'full' ? ['--force', '--sandbox', 'disabled'] : ['--force', '--sandbox', 'enabled'];
 }
 
+/** The turn's text: instructions then prompt. */
+export const cursorBody = (input: AdapterRunInput): string => input.instructions ? `${input.instructions}\n\n${input.prompt}` : input.prompt;
+
+/** A prompt too long for argv is left out here and goes to stdin instead (Cursor reads the prompt from stdin in print mode). */
 export function cursorArgs(input: AdapterRunInput): string[] {
-  const model = input.model.replace(/^cursor-agent\//, ''), body = input.instructions ? `${input.instructions}\n\n${input.prompt}` : input.prompt;
+  const model = input.model.replace(/^cursor-agent\//, ''), body = cursorBody(input);
   return ['-p', '--output-format', 'stream-json', '--stream-partial-output', '--trust', '--approve-mcps', ...cursorPermissionArgs(input.permissionMode),
     ...(model && model !== 'default' ? ['--model', model] : []), ...(input.resumeThreadId ? ['--resume', input.resumeThreadId] : []),
-    body.startsWith('-') ? ` ${body}` : body];
+    ...(!fitsArgv(body) ? [] : body.startsWith('-') ? [` ${body}`] : [body])];
 }
 
 /** `cursor-agent models` lists `id - Display name` lines (with ANSI and a header). */
@@ -84,7 +88,7 @@ export function cursorAdapter(options: {binary: string; env?: NodeJS.ProcessEnv;
     // Partial output: chunks carry `timestamp_ms`; the closing full message of a segment does not and is skipped once streamed.
     let streamed = false;
     const open = new Map<string, Record<string, unknown>>();
-    return {label: 'Cursor CLI', binary: options.binary, args: cursorArgs(input), env: cleanAgentEnv(options.env ?? process.env, CURSOR_ENV, input.env, options.binary), spawn: options.spawn, killGraceMs: options.killGraceMs,
+    return {label: 'Cursor CLI', binary: options.binary, args: cursorArgs(input), ...(fitsArgv(cursorBody(input)) ? {} : {stdin: cursorBody(input)}), env: cleanAgentEnv(options.env ?? process.env, CURSOR_ENV, input.env, options.binary), spawn: options.spawn, killGraceMs: options.killGraceMs,
       onEvent(event, api: TurnApi) {
         if (typeof event.session_id === 'string' && event.session_id) api.accept(event.session_id);
         if (event.type === 'assistant') {
