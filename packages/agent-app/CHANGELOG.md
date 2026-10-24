@@ -100,6 +100,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Moving a folder into itself from the Files pane now says "A folder cannot be moved into itself" instead of a raw system error.
 - Renaming a file or folder only by capitalisation (Readme.md to README.md) now works on macOS and Windows instead of saying the destination already exists.
 - A regular expression that backtracks without end no longer freezes Muster during file content search: the search stops at its 5 second limit and says results are partial.
+- Quick open now finds files you or the agent just created, moved or changed instead of showing a list up to 30 seconds old.
+- Building a project no longer makes the Files pane and Changes list refresh continuously: changes inside .next, .turbo and __pycache__ are ignored, and so are changes inside dist, target, build or out when git ignores that folder. A committed dist folder still refreshes.
 - The Dashboard follows the org you switched to. Before, a read of the previous org that was still running when you switched could answer for the new one, so the Dashboard showed the old org's spend, budget and tasks by day.
 - The Dashboard's Recent activity and the Activity list name the agent or person who acted instead of a short id such as "agent a8782383".
 - The Dashboard opens faster on a large org: it reuses the org's last read instead of reading every task page again.

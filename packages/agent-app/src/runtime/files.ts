@@ -315,6 +315,9 @@ const QUICK_OPEN_TTL_MS = 30_000;
 const QUICK_OPEN_MAX_FILES = 20_000;
 const quickOpenCache = new Map<string, {files: string[]; expires: number}>();
 
+/** Drop cached quick-open lists (a file was created, moved, removed or changed on disk). */
+export function forgetQuickOpen(): void { quickOpenCache.clear(); }
+
 async function listAllFiles(root: string): Promise<string[]> {
   const files: string[] = [];
   const pending = [''];
