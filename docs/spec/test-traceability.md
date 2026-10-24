@@ -12,4 +12,6 @@ One row per clause file that has at least one case. The checker reports a clause
 |---|---|
 | `MUS-SPEC-03` | [Providers, models and accounts](clauses/03-providers-models-and-accounts.md) |
 | `MUS-SPEC-04` | [Context window and compaction](clauses/04-context-window-and-compaction.md) |
+| `MUS-SPEC-14` | [Sub-agents, skills, plugins and automations](clauses/14-agents-skills-plugins-and-automations.md) |
+| `MUS-SPEC-17` | [Usage, cost and the ledger](clauses/17-usage-cost-and-ledger.md) |
 | `MUS-SPEC-22` | [Engineering standards](clauses/22-engineering-standards.md) |

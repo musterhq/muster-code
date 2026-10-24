@@ -256,6 +256,26 @@ test('S55/S23 board moves: Backlog is a real state the scheduler skips; Done ver
   assert.equal((await s.invoke('paperclip.task.update', { taskId: parked.id, status: 'todo' })).status, 'todo');
 });
 
+// Spec: MUS-SPEC-17-290A (docs/spec/clauses/17-usage-cost-and-ledger.md#mus-spec-17-290a)
+test('S63 a slow review snapshot still lists the changed file in the Receipt and in Outputs', async t => {
+  // A git wrapper that delays write-tree, as a slow runner's disk does: the pre-run snapshot takes ~1.4 s.
+  const bin = await mkdtemp(join(tmpdir(), 'muster-slow-git-'));
+  const real = execFileSync('which', ['git']).toString().trim();
+  await writeFile(join(bin, 'git'), `#!/bin/sh\ncase "$*" in *write-tree*) sleep 0.7;; esac\nexec "${real}" "$@"\n`, { mode: 0o755 });
+  const path = process.env.PATH; process.env.PATH = `${bin}:${path}`;
+  t.after(async () => { process.env.PATH = path; await rm(bin, { recursive: true, force: true }); });
+  const { s, project, member, state } = await service(t);
+  const cto = await member('CTO');
+  const task = await s.invoke('paperclip.task.create', { title: 'Write a note', description: 'Write it', projectId: project.id, assigneeId: `member:${cto.id}`, start: true });
+  assert.ok(task.started, task.startError ?? 'not started');
+  await until(async () => await state(task.id) !== 'running' && (await s.invoke('paperclip.ledger', {})).entries.some(e => e.chatId === task.started!.chatId && e.files?.length), 'receipt with files');
+  const entry = (await s.invoke('paperclip.ledger', {})).entries.find(e => e.chatId === task.started!.chatId)!;
+  assert.deepEqual(entry.files?.map(f => `${f.path}:${f.status}`), ['E2E-NOTE.md:added'], 'the Receipt lists the file the run wrote');
+  assert.equal(entry.agent, 'CTO'); assert.equal(entry.taskId, task.id);
+  const rows = (await s.invoke('paperclip.list', { kind: 'artifacts' })).rows.filter(r => r.projectId === project.id);
+  assert.ok(rows.some(r => r.title === 'E2E-NOTE.md' && r.status === 'added'), 'Outputs lists the file');
+});
+
 test('S63 Outputs lists what the agents produced: files their runs changed, canvases and attachments', async t => {
   const { s, project, member, state, folder } = await service(t);
   const cto = await member('CTO');
