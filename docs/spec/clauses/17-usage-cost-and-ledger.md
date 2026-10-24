@@ -30,6 +30,3 @@ Boundaries:
 - Environment: Node test runner; in-memory SQLite database; no provider or network.
 - Known gaps: Drives the ledger's run hooks with hand-made events, not the agent service. It does not show the service sending the shown-card event when it creates a card.
 - Evidence: UNVERIFIED
-A PR that changes this area adds its cases here first: one row in this table, then the case block below it (see [acceptance-cases.md](../acceptance-cases.md)).
-
-|---|---|---|
