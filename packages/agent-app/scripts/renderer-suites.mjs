@@ -80,6 +80,10 @@ export const suites = [
   'my-work-retry-dom',
   'receipt-token-format',
   'org-avatar-emoji',
+  'project-confirm-retry-dom',
+  'memory-settings-rollback-dom',
+  'inbox-group-stale-dom',
+  'checkout-settings-reject-dom',
 ];
 
 /** Suites that open Base UI menus/portals get a split build: their `await import()` of UI code stays a separate
