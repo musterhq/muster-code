@@ -630,8 +630,8 @@ async function openCodeIds(dir: string, kind: 'file' | 'dir'): Promise<string[]>
   } catch { return []; }
 }
 const openCodeTime = (value: unknown, fallback: string): string => { const time = record(value); return isoAt(time?.updated ?? time?.completed ?? time?.created, fallback); };
-async function openCodeMessages(storage: string, sessionId: string): Promise<Array<{ id: string; role: string; createdAt: string; model?: string }>> {
-  const dir = join(storage, 'message', sessionId), rows: Array<{ id: string; role: string; createdAt: string; at: number; model?: string }> = [];
+async function openCodeMessages(storage: string, sessionId: string): Promise<Array<{ id: string; role: string; createdAt: string; model?: string; provider?: string }>> {
+  const dir = join(storage, 'message', sessionId), rows: Array<{ id: string; role: string; createdAt: string; at: number; model?: string; provider?: string }> = [];
   for (const id of await openCodeIds(dir, 'file')) {
     if (rows.length >= MAX_ITEMS_PER_SESSION) break;
     const message = await openCodeRecord(join(dir, `${id}.json`), OPENCODE_RECORD_BYTES);
