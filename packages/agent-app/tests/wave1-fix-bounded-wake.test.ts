@@ -59,7 +59,7 @@ test('#157: Gemini (whose docs say piped stdin joins --prompt) gets a prompt too
   const shortRun = fakeChild(); let shortArgs: string[] = [];
   const shortRunning = geminiAdapter({ binary: '/bin/gemini', flags: () => ({ plan: true, resume: true, approvalMode: true }), env: { PATH: '/usr/bin' }, spawn: ((_c: string, a: string[]) => { shortArgs = a; return shortRun.child as unknown as ChildProcess; }) as never }).run(turn(small));
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(shortArgs.at(-1), small); assert.equal(shortRun.stdin(), '');
+  assert.equal(shortArgs.at(-1), `--prompt=${small}`); assert.equal(shortRun.stdin(), '');
   shortRun.finish(); await shortRunning;
   // Cursor and OpenCode have no documented stdin prompt: the prompt stays in argv for both, whatever its size.
   for (const [name, start] of [
