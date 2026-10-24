@@ -19,7 +19,7 @@ export async function mutablePath(root: string, relative: string, existing = fal
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || existing || i !== parts.length - 1) throw error;
     }
   }
-  if (!current.startsWith(realRoot + sep)) throw new Error('Cannot change the workspace root.');
+  if (!current.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep)) throw new Error('Cannot change the workspace root.');
   return current;
 }
 
