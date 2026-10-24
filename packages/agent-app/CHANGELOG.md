@@ -52,6 +52,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Stopping a turn settles unfinished tool rows as Stopped, retaining partial output after reopening; denied, rule-blocked and timed-out commands say Did not run instead of Ran or failed, and activity summaries count them the same way.
 - A chat started in a new worktree from an existing chat now keeps that chat's access mode, and its model and reasoning effort while that model is still available, instead of the app defaults
 - Back and Forward (⌘[ / ⌘]) work like a browser: they return through Settings sections, Inbox, Projects, Automations and Memory as well as chats, instead of skipping everything but chats. A two-finger trackpad swipe (or three-finger, if macOS is set that way) does the same; code blocks, diffs and tables that scroll sideways keep their swipe.
+- When the selected provider has used up its limit, the composer says so before you send, with when it resets and a Dismiss button; the model picker marks that provider "Limit reached".
 - The diff tab header keeps the file name readable in narrow panes and wraps the compare picker and file actions onto their own row instead of cutting them off.
 - The dark theme is darker and less grey: near-black surfaces and a deeper sidebar glass tint, with the blur kept.
 - Chats show a quiet "Today 0:52" divider where a conversation starts or resumes after a 30-minute pause or on a new day.
