@@ -136,6 +136,12 @@ timeline=[];revision++;await store.selectChat('chat');await delay(40);
 const pill=byTest('composer-terminals')!;assert.ok(pill,'pill while terminals run');
 assert.equal(pill.textContent,'2 Terminals');
 assert.ok(pill.closest('.composer-options'),'in the composer footer');
+// Terminals open in the bottom panel by default (shells), so the pill opens the dock; with the dock placed in the pane it opens this chat's Terminal tab.
+const {terminalDock,setTerminalDock}=await import('../src/renderer/processSummary');
+assert.equal(terminalDock().placement,'panel','the default placement is the bottom panel');
+pill.click();await delay(30);
+assert.equal(terminalDock().open,true,'the pill opens the bottom terminal panel');
+setTerminalDock({placement:'pane',open:false},false);
 pill.click();await delay(30);
 assert.equal(store.getState().activeTabId,'processes:chat','opens this chat\'s Terminal pane');
 terminals=[];listeners.forEach(listener=>listener({type:'terminalExit',id:'t1',code:0}));await delay(40);
