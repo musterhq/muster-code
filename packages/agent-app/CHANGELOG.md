@@ -93,6 +93,9 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - The Dashboard follows the org you switched to. Before, a read of the previous org that was still running when you switched could answer for the new one, so the Dashboard showed the old org's spend, budget and tasks by day.
 - The Dashboard's Recent activity and the Activity list name the agent or person who acted instead of a short id such as "agent a8782383".
 - The Dashboard opens faster on a large org: it reuses the org's last read instead of reading every task page again.
+- Token totals no longer read as 1000K, very large ones show in billions, and a negative cost shows a dash
+- A turn's receipt no longer shows 1000.0k tokens, and counts in the billions show a B
+- An organisation whose name starts with an emoji shows the whole emoji in its avatar instead of a broken character
 
 - Stop now ends the commands a Claude Code or OpenCode chat started (a dev server, a test watcher), and the run settles right away. Before, the command kept running and the chat stayed "stopping" until it exited on its own.
 - A message that starts with "-" (a list bullet, or "--version is wrong…") now reaches Gemini CLI and OpenCode as the message. Before, the CLI read it as options and the message was lost.

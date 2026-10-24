@@ -32,6 +32,7 @@ Boundaries:
 | [MUS-SPEC-12-556B](12-projects-orgs-and-tasks.md#mus-spec-12-556b) | After two overlapping My work reads, a mounted component still shows the newer data. | [`a slower My work read from before an org switch does not overwrite the newer one`](../../../packages/agent-app/tests/hub-store-race.tsx) |
 | [MUS-SPEC-12-556C](12-projects-orgs-and-tasks.md#mus-spec-12-556c) | Opening a task and a project in another org does not reject, leaves the route unchanged and raises an error notice with the reason. | [`a failed org switch is reported and the page stays where it was`](../../../packages/agent-app/tests/org-open-failure.tsx) |
 | [MUS-SPEC-12-556D](12-projects-orgs-and-tasks.md#mus-spec-12-556d) | A failed My work read shows a Retry button; clicking it reads again and clears the error. | [`My work offers Retry after a failed read, and Retry reads again`](../../../packages/agent-app/tests/my-work-retry-dom.tsx) |
+| [MUS-SPEC-12-557A](12-projects-orgs-and-tasks.md#mus-spec-12-557a) | An emoji or a rare character is shown whole, leading spaces are skipped, and an empty name shows a question mark. | [`an org avatar shows the whole first emoji or character of the name`](../../../packages/agent-app/tests/org-avatar-emoji.tsx) |
 
 <a id="mus-spec-12-573a"></a>
 #### MUS-SPEC-12-573A: Two wakes in one moment join into one waiting wake
@@ -213,4 +214,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/my-work-retry-dom.tsx::My work offers Retry after a failed read, and Retry reads again`
 - Environment: Node and linkedom: a DOM suite with the real page and a fake bridge; no server.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### Org avatars
+
+<a id="mus-spec-12-557a"></a>
+#### MUS-SPEC-12-557A: An org avatar shows the whole first character of the name
+
+- Precondition: Orgs named "🚀 Launch", "  ragnar", "𝔸lpha" and "   " (spaces only).
+- Action: Render the org avatar for each name.
+- Expected result: The avatar shows 🚀, R, 𝔸 and ?. An emoji is never cut in half into a broken character.
+- Test: `packages/agent-app/tests/org-avatar-emoji.tsx::an org avatar shows the whole first emoji or character of the name`
+- Environment: Node and react-dom/server: the real OrgAvatar component rendered to markup; no server.
+- Known gaps: Renders to static markup, so colour and size are not checked.
 - Evidence: UNVERIFIED

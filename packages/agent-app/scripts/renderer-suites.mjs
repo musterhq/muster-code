@@ -78,6 +78,8 @@ export const suites = [
   'hub-store-race',
   'org-open-failure',
   'my-work-retry-dom',
+  'receipt-token-format',
+  'org-avatar-emoji',
 ];
 
 /** Suites that open Base UI menus/portals get a split build: their `await import()` of UI code stays a separate
