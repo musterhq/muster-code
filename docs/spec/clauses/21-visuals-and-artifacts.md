@@ -17,8 +17,8 @@ A PR that changes this area adds its cases here first: one row in this table, th
 
 | Case | What the assertions check | Test |
 |---|---|---|
-| [MUS-SPEC-21-43A](21-visuals-and-artifacts.md#mus-spec-21-43a) | "Back to chat" on a side chat opens its parent conversation and keeps the side chat tab open. | not written yet (#43) |
-| [MUS-SPEC-21-43B](21-visuals-and-artifacts.md#mus-spec-21-43b) | A side chat with no parent, or whose parent chat is gone, shows no "Back to chat" control. | not written yet (#43) |
+| [MUS-SPEC-21-43A](21-visuals-and-artifacts.md#mus-spec-21-43a) | "Back to chat" on a side chat opens its parent conversation and keeps the side chat tab open. | [`Back to chat opens the parent conversation and keeps the side chat tab`](../../../packages/agent-app/tests/side-chat-back-dom.tsx) |
+| [MUS-SPEC-21-43B](21-visuals-and-artifacts.md#mus-spec-21-43b) | A side chat with no parent, or whose parent chat is gone, shows no "Back to chat" control. | [`No Back to chat control without a parent conversation`](../../../packages/agent-app/tests/side-chat-back-dom.tsx) |
 
 ### Side chats
 
@@ -28,7 +28,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Precondition: A side chat was opened from a main chat and its tab is showing in the right pane, while another chat is on screen.
 - Action: Click "Back to chat" in the side chat's header.
 - Expected result: The main chat the side chat was opened from becomes the active conversation, and the side chat tab stays open with its messages.
-- Test: not written yet (#43)
+- Test: `packages/agent-app/tests/side-chat-back-dom.tsx::Back to chat opens the parent conversation and keeps the side chat tab`
 - Environment: DOM suite (linkedom) with a stubbed bridge; no provider or network.
 - Known gaps: Does not show which chat is the parent when the side chat is created (the runtime stores `parentChatId`); the test supplies it.
 - Evidence: UNVERIFIED
@@ -39,7 +39,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Precondition: A side chat that was created with no main chat open, and one whose parent chat has since been deleted.
 - Action: Show each side chat's tab.
 - Expected result: The header has no "Back to chat" control for either, and still has Open the resource, Promote and Discard.
-- Test: not written yet (#43)
+- Test: `packages/agent-app/tests/side-chat-back-dom.tsx::No Back to chat control without a parent conversation`
 - Environment: DOM suite (linkedom) with a stubbed bridge; no provider or network.
 - Known gaps: None known.
 - Evidence: UNVERIFIED
