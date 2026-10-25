@@ -39,19 +39,29 @@ export const DOMAIN_FACTORIES: Record<DomainName, DomainFactory> = {models: crea
 export function createDomains(context: DomainContext, extra: readonly DomainFactory[] = []) {
   const modules: DomainModule[] = [];
   const handlers = new Map<string, DomainHandler>();
-  for (const factory of [...Object.values(DOMAIN_FACTORIES), ...extra]) {
-    const module = factory(context);
-    modules.push(module);
-    for (const [command, handler] of Object.entries(module.handlers)) {
-      if (handlers.has(command)) throw new Error(`Domain command ${command} is registered twice.`);
-      handlers.set(command, handler);
+  try {
+    for (const factory of [...Object.values(DOMAIN_FACTORIES), ...extra]) {
+      const module = factory(context);
+      modules.push(module);
+      for (const [command, handler] of Object.entries(module.handlers)) {
+        if (handlers.has(command)) throw new Error(`Domain command ${command} is registered twice.`);
+        handlers.set(command, handler);
+      }
     }
+  } catch (error) {
+    // #290: a start-up that fails part-way disposes the domains it already built, so none keeps a timer (the
+    // automations scheduler) running against a database the caller is about to close.
+    for (const module of modules) { try { void Promise.resolve(module.dispose?.()).catch(() => undefined); } catch { /* best effort */ } }
+    throw error;
   }
+  let disposed = false;
   return {
     handlers,
-    async dispose(): Promise<void> { await Promise.allSettled(modules.map(module => module.dispose?.())); },
-    /** SBX-13: one domain failing its sleep/wake hook never blocks the others. */
+    async dispose(): Promise<void> { disposed = true; await Promise.allSettled(modules.map(module => module.dispose?.())); },
+    /** SBX-13: one domain failing its sleep/wake hook never blocks the others. A wake after dispose (#290) does nothing:
+     *  the domains' databases may already be closed. */
     async power(event: DomainPowerEvent): Promise<void> {
+      if (disposed) return;
       const results = await Promise.allSettled(modules.map(async module => module.power?.(event)));
       const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
       if (failed) throw failed.reason;
