@@ -441,3 +441,50 @@ test('a long Codex session imports whole: 25,000 messages, well past the old 20,
   assert.ok(all.some(item=>item.text==='answer 12500'),'the last message is there');
   assert.ok(!all.some(item=>/Import stopped after/.test(item.text)),'no truncation notice');
 });
+
+/** A Codex rollout in the layout that names the model only on its turn_context lines (no model in the session header). */
+function turnContextOnlyRollout(cwd:string,id:string):unknown[]{
+  const at=(second:number)=>new Date(Date.UTC(2026,8,22,9,0,second)).toISOString();
+  const wrap=(type:string,payload:unknown,second:number)=>({timestamp:at(second),ordinal:second,type,payload});
+  return [
+    wrap('session_meta',{session_id:id,id,timestamp:at(0),cwd,originator:'codex_cli_rs',source:'cli',model_provider:'chatgpt'},0),
+    wrap('turn_context',{turn_id:'t1',cwd,model:'gpt-6.1-sol',approval_policy:'never'},1),
+    wrap('response_item',{type:'message',role:'user',content:[{type:'input_text',text:'Summarise the changelog'}]},2),
+    wrap('response_item',{type:'message',role:'assistant',content:[{type:'output_text',text:'Done.'}]},3),
+  ];
+}
+
+// Spec: MUS-SPEC-01-95A (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-95a)
+test('an imported chat records the model and provider its own session ran',async t=>{
+  const f=await fixtures(t);useEnv(t,f.codexHome,f.claudeDir);
+  const TURN_ID='019a0000-0000-7000-8000-000000000005';
+  await writeLines(join(f.codexHome,'sessions','2026','09','22',`rollout-2026-09-22T09-00-00-${TURN_ID}.jsonl`),turnContextOnlyRollout(f.project,TURN_ID),new Date('2026-09-22T09:05:00Z'));
+  const service=createAgentService({dataDir:join(f.root,'data'),provider:codexProvider(),onEvent(){}});
+  t.after(()=>service.dispose());
+  await call(service,'import.list',{source:'codex',refresh:true});
+  const result=await call<ImportRunResult>(service,'import.run',{ids:[`codex:${CODEX_ID}`,`codex:${TURN_ID}`,`claude-code:${CLAUDE_ID}`],continueInMuster:false});
+  assert.deepEqual(result.failed,[]);
+  const note=async(id:string)=>{const rows=await items(service,result.chats.find(chat=>chat.id===id)!.chatId);return rows.find(row=>row.kind==='notice'&&row.data?.kind==='imported')!.data!;};
+  const header=await note(`codex:${CODEX_ID}`);
+  assert.deepEqual([header.model,header.provider],['gpt-6-codex','openai'],'a Codex session names its model and provider in its header');
+  const context=await note(`codex:${TURN_ID}`);
+  assert.deepEqual([context.model,context.provider],['gpt-6.1-sol','chatgpt'],'a model named only on a turn_context line is still recorded');
+  const claude=await note(`claude-code:${CLAUDE_ID}`);
+  assert.deepEqual([claude.model,claude.provider],['claude-fable-5-1','anthropic'],'a Claude Code transcript records the model its assistant turns ran');
+  const chat=(await service.invoke('app.snapshot',undefined)).chats.find(entry=>entry.id===result.chats[0]!.chatId)!;
+  assert.equal(chat.model,'claude/claude-fable-5','the chat itself keeps a model Muster can run');
+});
+
+// Spec: MUS-SPEC-17-95A (docs/spec/clauses/17-usage-cost-and-ledger.md#mus-spec-17-95a)
+test('ledger history attributes imported turns to the session model and provider',async t=>{
+  const f=await fixtures(t);useEnv(t,f.codexHome,f.claudeDir);
+  const service=createAgentService({dataDir:join(f.root,'data'),provider:codexProvider(),onEvent(){}});
+  t.after(()=>service.dispose());
+  const result=await call<ImportRunResult>(service,'import.run',{ids:[`codex:${CODEX_ID}`],continueInMuster:false});
+  const chatId=result.chats[0]!.chatId;
+  assert.equal((await service.invoke('app.snapshot',undefined)).chats.find(entry=>entry.id===chatId)!.model,'claude/claude-fable-5','the chat holds the app default');
+  await call(service,'paperclip.ledger.backfill',{});
+  const entries=(await call<{entries:Array<{chatId:string|null;model:string|null;provider:string|null;source:string}>}>(service,'paperclip.ledger',{})).entries.filter(entry=>entry.chatId===chatId);
+  assert.ok(entries.length>0,'the imported turn is in the ledger history');
+  assert.deepEqual(entries.map(entry=>[entry.source,entry.model,entry.provider]),entries.map(()=>['history','gpt-6-codex','openai']));
+});
