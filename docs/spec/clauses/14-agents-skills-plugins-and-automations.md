@@ -22,6 +22,10 @@ Boundaries:
 | [MUS-SPEC-14-480C](14-agents-skills-plugins-and-automations.md#mus-spec-14-480c) | Adding a second, unrelated server later sends nothing again and stops nothing. | [`an MCP server added mid-run restarts the running chat once and re-sends its prompt through the queue with the new tools`](../../../packages/agent-app/tests/plugin-reload.test.ts) |
 | [MUS-SPEC-14-480D](14-agents-skills-plugins-and-automations.md#mus-spec-14-480d) | Whole-word, case-insensitive matching with "google-drive" matching "Google Drive"; the last turn skips steering messages; an idle turn older than 30 minutes does not count; one install claims a chat once. | [`a turn is about a plugin only when it names it and ended recently`](../../../packages/agent-app/tests/plugin-reload.test.ts) |
 | [MUS-SPEC-14-480E](14-agents-skills-plugins-and-automations.md#mus-spec-14-480e) | A marketplace install and an enabled MCP server give a plugin; a disabled server, an uninstall and an empty result give nothing. | [`installedPlugin reads marketplace installs and added MCP servers, nothing else`](../../../packages/agent-app/tests/plugin-reload.test.ts) |
+| [MUS-SPEC-14-651A](14-agents-skills-plugins-and-automations.md#mus-spec-14-651a) | A sub-agent name skips a leading location or boilerplate clause and keeps the task; a provider name still wins; a thread id is never a name. | [`a sub-agent is named from its task, not from the location clause the prompt opens with`](../../../packages/agent-app/tests/subagent-names-651.test.ts) |
+| [MUS-SPEC-14-651B](14-agents-skills-plugins-and-automations.md#mus-spec-14-651b) | Two agents asked the same thing get "(2)" and "(3)"; a prompt with no readable task falls back to "Agent N". | [`names stay unique within a chat, and an unreadable prompt falls back to Agent N plus its first distinctive words`](../../../packages/agent-app/tests/subagent-names-651.test.ts) |
+| [MUS-SPEC-14-651C](14-agents-skills-plugins-and-automations.md#mus-spec-14-651c) | The transcript announces three differently named sub-agents started together and each finished once, even though every prompt opens the same way. | [`three parallel sub-agents with the same location clause show three distinct rows in the transcript`](../../../packages/agent-app/tests/subagent-names-651.test.ts) |
+| [MUS-SPEC-14-651E](14-agents-skills-plugins-and-automations.md#mus-spec-14-651e) | With three finished agents the panel lists three different names and its header reads "0 running 3 completed", not "0 completed 3 reported back". | [`three finished sub-agents with one location clause list three distinct names and read three completed`](../../../packages/agent-app/tests/subagent-components.tsx) |
 
 <a id="mus-spec-14-290a"></a>
 #### MUS-SPEC-14-290A: No scheduler tick or wake after start-up fails or the app is disposed
@@ -89,4 +93,50 @@ Boundaries:
 - Test: `packages/agent-app/tests/plugin-reload.test.ts::installedPlugin reads marketplace installs and added MCP servers, nothing else`
 - Environment: Node test runner; pure function, no service or network.
 - Known gaps: Unit test of the parser. The service-level test drives only the MCP command.
+- Evidence: UNVERIFIED
+
+### Sub-agent names and counts (#651)
+
+<a id="mus-spec-14-651a"></a>
+#### MUS-SPEC-14-651A: A sub-agent is named from its task, not from the location clause
+
+- Precondition: Three prompts that all start "In the repository at /private/tmp/…," and then ask for different jobs (count lines, list files, summarize a README), plus prompts that open with "You are …", "Please", "Task:" or a Windows path.
+- Action: Work out the display name of each sub-agent from its prompt, role and provider name.
+- Expected result: The three names are "Count the lines in data/lines.txt", "List the files in assets/" and "Summarize README.md in 5 words". Boilerplate is skipped, long tasks are cut at a word with an ellipsis, a prompt that is only a location or a path gives no task name, a provider name wins over the prompt, the task wins over a generic role, and a thread id becomes "Agent N".
+- Test: `packages/agent-app/tests/subagent-names-651.test.ts::a sub-agent is named from its task, not from the location clause the prompt opens with`
+- Environment: Node test runner; pure functions, no service or network.
+- Known gaps: Prompt shapes are the ones seen in QA plus a few common openings; other phrasings fall back to the first clause of the prompt.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-651b"></a>
+#### MUS-SPEC-14-651B: Sub-agent names are unique within a chat
+
+- Precondition: Three sub-agents in one chat whose prompts give the same task, and agents with no prompt or only a path.
+- Action: Work out the display names of the whole chat together.
+- Expected result: Repeats get " (2)" and " (3)" in order, case ignored. An agent with no readable task is "Agent N", numbered by its place in the chat.
+- Test: `packages/agent-app/tests/subagent-names-651.test.ts::names stay unique within a chat, and an unreadable prompt falls back to Agent N plus its first distinctive words`
+- Environment: Node test runner; pure functions, no service or network.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-651c"></a>
+#### MUS-SPEC-14-651C: Three parallel sub-agents show three distinct rows in the transcript
+
+- Precondition: A chat whose timeline holds three spawn reports and one wait report that finishes all three; every prompt starts "In the repository at /private/tmp/…,".
+- Action: Build the transcript rows for that timeline.
+- Expected result: One "started working" row names all three agents by their tasks. Three separate "finished" rows follow, one per agent, each with its own task name.
+- Test: `packages/agent-app/tests/subagent-names-651.test.ts::three parallel sub-agents with the same location clause show three distinct rows in the transcript`
+- Environment: Node test runner; the real transcript grouping code on a timeline of tool reports; no service or network.
+- Known gaps: Uses timeline reports in the shape the Codex provider sends. The Claude Code adapter names its children from the task description it gives.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-651e"></a>
+#### MUS-SPEC-14-651E: The Subagents panel reads finished agents as completed
+
+- Precondition: A chat whose three sub-agents all finished, each with a reported result, and whose prompts all open with the same location clause. The Subagents panel is open.
+- Action: Read the card names and the count line in the panel header.
+- Expected result: The three cards show the three task names. The header count line reads "0 running" and "3 completed" and shows no separate "reported back" count.
+- Test: `packages/agent-app/tests/subagent-components.tsx::three finished sub-agents with one location clause list three distinct names and read three completed`
+- Environment: DOM suite built with esbuild and run with Node and linkedom; the real panel component and store; the bridge is a fixture.
+- Known gaps: The card still tells "Reported back" from "Completed" on its own badge; only the header folds them.
 - Evidence: UNVERIFIED

@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - A task with a very long thread (thousands of messages) now still wakes its agent: the agent gets the newest messages and a count of the older ones, and the task activity shows how big the packet was. A long prompt now goes to Gemini through standard input instead of the command line. If a task fails to start with the same error three times in a row, it stops retrying and one Problem appears in the Inbox until you resolve it.
+- Sub-agents are now named after what they were asked to do ("Count the lines in data/lines.txt") instead of the first words of their prompt, so three agents started in the same folder no longer show three identical rows. Names are unique within a chat, and the Subagents panel counts finished agents as completed.
 - If Muster fails part-way through starting, or wakes from sleep after shutting down, the automations scheduler no longer runs against a closed database.
 - The agent's rule about not stopping processes it did not start now applies to local processes only. Remote hosts, systemd or launchd services, and anything you explicitly ask it to stop or restart are no longer refused.
 - In Full access the agent no longer ends a turn asking whether to push, commit, install or continue; it just does it.
