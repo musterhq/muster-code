@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - The OpenAI (ChatGPT sign-in) model list no longer hides newer models when a profile sets an older `model_catalog_json`: models your account gained since, from Codex's own model cache, are listed after the catalog's. Hidden models and other providers' ids stay out.
+- If Muster fails part-way through starting, or wakes from sleep after shutting down, the automations scheduler no longer runs against a closed database.
 - The agent's rule about not stopping processes it did not start now applies to local processes only. Remote hosts, systemd or launchd services, and anything you explicitly ask it to stop or restart are no longer refused.
 - In Full access the agent no longer ends a turn asking whether to push, commit, install or continue; it just does it.
 - Chats on API-key routes only ask before irreversibly deleting user data, not before push, install or restart.
