@@ -48,7 +48,9 @@ async function service(t: TestContext) {
         return { status: 'completed', finalMessage: `Decision: ${JSON.stringify(decision)}` };
       }
       input.onEvent('thread/tokenUsage/updated', { tokenUsage: { total: { inputTokens: 1200, cachedInputTokens: 100, outputTokens: 300, reasoningOutputTokens: 20 }, last: { inputTokens: 1200, cachedInputTokens: 100, outputTokens: 300, reasoningOutputTokens: 20 } } });
-      await wait(400); // a real turn takes a moment; the review baseline is captured as it starts
+      // A real model round trip outlasts the review snapshot; on a slow runner a fixed sleep did not (#290). Wait for the
+      // run's baseline itself (review.baselines awaits the capture in flight), then write, as a real agent would.
+      await s.invoke('review.baselines', { chatId: input.chat.id });
       await writeFile(join(input.cwd, 'E2E-NOTE.md'), 'edited\n');
       return { status: 'completed', finalMessage: 'Wrote E2E-NOTE.md' };
     },

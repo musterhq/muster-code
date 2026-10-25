@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - Claude models on a router you configured (for example `cc/claude-opus-5-5`, or the router's planner and advisor agents when they run Claude) no longer fail with "thinking blocks cannot be modified" errors in Full access chats. These turns now talk to the router's Messages API with Muster's own shell, file and browser tools, and every thinking block goes back exactly as received. Workspace and Read-only chats, chats in a sandbox, and turns that use Project, mailbox, terminal, SSH or your own tool servers still run through the Codex client. The in-app browser works on this route; canvases, background commands and computer use are not offered on it. Moving a chat between the two ways of running continues from a summary of the earlier messages.
+- If Muster fails part-way through starting, or wakes from sleep after shutting down, the automations scheduler no longer runs against a closed database.
 - The agent's rule about not stopping processes it did not start now applies to local processes only. Remote hosts, systemd or launchd services, and anything you explicitly ask it to stop or restart are no longer refused.
 - In Full access the agent no longer ends a turn asking whether to push, commit, install or continue; it just does it.
 - Chats on API-key routes only ask before irreversibly deleting user data, not before push, install or restart.
