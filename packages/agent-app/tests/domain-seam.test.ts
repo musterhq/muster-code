@@ -11,6 +11,7 @@ import type {Commands} from '../src/shared/protocol.ts';
 import {DOMAIN_COMMANDS,DOMAIN_NAMES} from '../src/shared/domains/index.ts';
 import {DOMAIN_FACTORIES,createDomains} from '../src/runtime/domains/index.ts';
 import {bounded,createDomainHooks} from '../src/runtime/domains/hooks.ts';
+import {automationTiming} from '../src/runtime/domains/automations.ts';
 import type {DomainContext,DomainFactory} from '../src/runtime/domains/types.ts';
 
 const info:ProviderAdapter['info']=()=>[{id:'hybrow',name:'Fixture',available:true,identityMasked:'fixture',models:[{id:'claude/claude-fable-5',name:'Fixture'}]}];
@@ -24,6 +25,26 @@ test('every named domain has a runtime module; duplicate commands fail at startu
   assert.equal(createDomains(context).handlers.size,Object.keys(DOMAIN_COMMANDS).length);
   const twice:DomainFactory=()=>({handlers:{'x.y':()=>1}});
   assert.throws(()=>createDomains(context,[twice,twice]),/registered twice/);
+});
+
+// Spec: MUS-SPEC-14-290A (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-290a)
+test('a domain set that fails to start or is disposed leaves no scheduler tick or wake behind',async t=>{
+  // Mocked timers: the scheduler's tick is driven by the test, not by the wall clock.
+  t.mock.timers.enable({apis:['setTimeout']});
+  const errors:unknown[][]=[];t.mock.method(console,'error',(...args:unknown[])=>{errors.push(args);});
+  const make=()=>{const db=new DatabaseSync(':memory:');const dataDir=mkdtempSync(join(tmpdir(),'muster-domain-'));t.after(()=>rmSync(dataDir,{recursive:true,force:true}));return {db,context:{dataDir,db:()=>db,hooks:createDomainHooks().hooks} as unknown as DomainContext};};
+  // A start-up that fails part-way: the domains already built must not keep their scheduler timer.
+  const failed=make();
+  const twice:DomainFactory=()=>({handlers:{'x.y':()=>1}});
+  assert.throws(()=>createDomains(failed.context,[twice,twice]),/registered twice/);
+  failed.db.close();
+  // A normal dispose, then the machine wakes: the wake-up does nothing.
+  const disposed=make();
+  const domains=createDomains(disposed.context);
+  await domains.dispose();disposed.db.close();
+  await domains.power({state:'resume',at:Date.now(),sleptMs:1000,suspendedAt:Date.now()-1000});
+  t.mock.timers.tick(10*automationTiming.tickMs+automationTiming.firstTickMs);
+  assert.deepEqual(errors.map(args=>String(args[0])),[],'no scheduler tick ran against a closed database');
 });
 
 test('a domain handler is reachable and contributors shape the provider run',async t=>{

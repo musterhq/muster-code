@@ -29,18 +29,78 @@ export function isIdLike(value: string): boolean {
   return v.includes('…') || /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(v) || /^(?:thread|agent|call|toolu)?[-_]?[0-9a-f-]{12,}$/i.test(v) || (/\d/.test(v) && /^[0-9a-z_-]{20,}$/i.test(v));
 }
 const titleCase = (value: string) => value.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/^\w/, c => c.toUpperCase());
+
+// What a prompt opens with before it says what to do: where the agent runs ("In the repository at /tmp/x,"),
+// who it is ("You are a reviewer."), and filler ("Please", "Task:"). None of it tells two agents apart (#651).
+const PATH = String.raw`[\`'"]?(?:[~/]|[A-Za-z]:[\\/]|\.{1,2}[\\/])\S*?[\`'"]?`;
+const LOCATION = new RegExp(String.raw`^(?:in|inside|within|under|from|at|working\s+(?:in|from|inside))\s+(?:the\s+)?(?:(?:git\s+)?(?:repo(?:sitory)?|project|workspace|folder|directory|dir|codebase|checkout|worktree)\s+)?(?:(?:at|in|located\s+at|called|named|rooted\s+at)\s+)?${PATH}(?:\s*\([^)]*\))?(?:[,:;.\-\u2013\u2014]\s+|\s+(?=[A-Za-z])|$)`, 'i');
+const LEADERS = [
+  LOCATION,
+  /^(?:you\s+are|you're|act\s+as|you\s+will\s+act\s+as)\b[^\n.!?:]*[.!?:]\s+/i,
+  /^(?:please|kindly)[,:]?\s+/i,
+  /^(?:now|first|ok(?:ay)?)[,:]\s+/i,
+  /^(?:(?:task|job|goal|assignment)\s*:|your\s+(?:task|job|goal)\s+is(?:\s+to)?[:,]?)\s*/i,
+  /^(?:[-*\u2022]|\d+[.)])\s+/,
+];
+function skipLeaders(text: string): string {
+  for (let pass = 0; pass < 6; pass++) {
+    let hit = false;
+    for (const leader of LEADERS) {
+      const match = leader.exec(text);
+      if (match && match[0].length < text.length) { text = text.slice(match[0].length); hit = true; }
+    }
+    if (!hit) break;
+  }
+  return text;
+}
+// "…, and report the number": what the agent should hand back is not what it was asked to do.
+const WRAP_UP = /(?:,\s*(?:and\s+)?(?:then\s+)?|\s+(?:and|then)\s+(?:then\s+)?)(?:report|return|reply|respond|tell|write\s+back|summari[sz]e\s+(?:it|the\s+(?:result|findings)))\b.*$/i;
+const TASK_LIMIT = 40;
+const PATH_ONLY = new RegExp(`^${PATH}$`);
+/** What the agent was asked to do: the first clause of its prompt after the location and boilerplate, short. A prompt that is only a location or a path says nothing. */
+export function agentTaskName(prompt?: string): string | undefined {
+  const text = skipLeaders(prompt?.trim() ?? '');
+  if (!text || LOCATION.test(text) || PATH_ONLY.test(text)) return undefined;
+  const clause = text.split(/\n|[.!?;](?=\s|$)|:(?=\s|$)/)[0]?.replace(WRAP_UP, '').trim().replace(/^[`'"]+|[`'",:;.\s]+$/g, '');
+  if (!clause) return undefined;
+  const task = clause[0].toUpperCase() + clause.slice(1);
+  if (task.length <= TASK_LIMIT) return task;
+  const head = task.slice(0, TASK_LIMIT - 2), space = head.lastIndexOf(' ');
+  return `${(space >= 16 ? head.slice(0, space) : head).trimEnd()}…`;
+}
+const FILLER = /^(?:in|the|at|a|an|to|of|and|or|is|are|you|your|repository|repo|project|workspace|folder|directory|codebase|checkout|working|task|please|then|with|for|on|from|it|this|that|will|must|should|be)$/i;
+/** The first few words of a prompt that say something: no paths, no filler. */
+function distinctiveWords(prompt?: string): string {
+  const words = (prompt ?? '').split(/\s+/).filter(word => word && !/[\\/]/.test(word)).flatMap(word => word.match(/^[A-Za-z][A-Za-z0-9'-]*/) ?? []).filter(word => !FILLER.test(word));
+  return words.slice(0, 3).join(' ').toLowerCase();
+}
 /**
- * What the transcript calls a subagent: its name, else its role, else the gist of its task,
- * else "Agent N". Raw thread ids are never shown as names (QA: "01a0c823-1…0a9 started working").
+ * What the transcript calls a subagent: its name, else the task it was given (leading location and boilerplate
+ * skipped), else its role, else "Agent N" plus the first distinctive words of the prompt. Raw thread ids are never
+ * shown as names (QA: "01a0c823-1…0a9 started working").
  */
 export function agentDisplayName(agent: {name?: string; role?: string; prompt?: string}, ordinal?: number): string {
   const name = agent.name?.trim();
   if (name && !isIdLike(name)) return name;
+  const task = agentTaskName(agent.prompt);
+  if (task) return task;
   const role = agent.role?.trim();
   if (role && !isIdLike(role)) return titleCase(role);
-  const gist = agent.prompt?.trim().split(/[\n.:;!?]/)[0]?.trim();
-  if (gist) return gist.length > 40 ? `${gist.slice(0, 38).trimEnd()}…` : gist;
-  return ordinal ? `Agent ${ordinal}` : 'Agent';
+  const label = ordinal ? `Agent ${ordinal}` : 'Agent';
+  const words = distinctiveWords(agent.prompt);
+  return words ? `${label} · ${words}` : label;
+}
+/** Display names for every sub-agent of a chat, keyed by id and unique within it: a repeat gets " (2)", " (3)". */
+export function agentDisplayNames(agents: readonly {id: string; name?: string; role?: string; prompt?: string}[]): Map<string, string> {
+  const used = new Set<string>(), names = new Map<string, string>();
+  agents.forEach((agent, index) => {
+    const base = agentDisplayName(agent, index + 1);
+    let name = base;
+    for (let n = 2; used.has(name.toLowerCase()); n++) name = `${base} (${n})`;
+    used.add(name.toLowerCase());
+    names.set(agent.id, name);
+  });
+  return names;
 }
 
 /** Semantic colour for composer tokens and context chips, shared with subagent identity (UX-X4). Grey = saturation 0. */
