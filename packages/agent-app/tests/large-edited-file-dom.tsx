@@ -59,7 +59,7 @@ const before = baseLines.join('\n');
 const trimmed = current.split('\n');
 trimmed.splice(17_500, 1);
 const text = trimmed.join('\n');
-const hunks = (await import('../src/shared/review-hunks')).computeHunks(before.replace('\n', '\n'), text, 5000)!;
+const hunks = (await import('../src/shared/review-hunks')).computeHunks(before, text, 5000)!;
 assert.ok(hunks.length >= 3, `the fixture has several hunks (${hunks.length})`);
 
 const chat = {id: 'chat', title: 'Chat', folderId: 'f', pinned: false, archived: false, draft: '', status: 'completed', updatedAt: '', model: 'm', mode: 'agent'};
