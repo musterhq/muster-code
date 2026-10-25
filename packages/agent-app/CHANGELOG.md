@@ -6,6 +6,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - After a crash, a message you had queued is no longer sent twice when you choose Continue anyway and then Steer: it goes once, and the saved copy Codex kept for it is deleted.
+- Sub-agents are now named after what they were asked to do ("Count the lines in data/lines.txt") instead of the first words of their prompt, so three agents started in the same folder no longer show three identical rows. Names are unique within a chat, and the Subagents panel counts finished agents as completed.
+- If Muster fails part-way through starting, or wakes from sleep after shutting down, the automations scheduler no longer runs against a closed database.
 - The agent's rule about not stopping processes it did not start now applies to local processes only. Remote hosts, systemd or launchd services, and anything you explicitly ask it to stop or restart are no longer refused.
 - In Full access the agent no longer ends a turn asking whether to push, commit, install or continue; it just does it.
 - Chats on API-key routes only ask before irreversibly deleting user data, not before push, install or restart.
