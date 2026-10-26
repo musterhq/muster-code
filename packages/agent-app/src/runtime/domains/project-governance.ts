@@ -129,6 +129,8 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   const heldMessage = (h: NonNullable<ReturnType<typeof holdFor>>) => `Held: ${h.mode === 'cancel' ? 'cancelled' : 'paused'} with ${h.rootKey || 'its parent task'}${h.rootTitle ? ` “${clip(h.rootTitle, 60)}”` : ''}${h.reason ? ` (${clip(h.reason, 80)})` : ''}. Release the hold first.`;
   /** The reason a task may not start now, or null. Called by dispatch, the wake queue and the scheduler. */
   function gate(t: Pick<ProjectTaskRecord, 'id' | 'projectId'> & { owner?: TaskOwner }): string | null {
+    const stopped = gov().openBreaker(t.projectId, 'start_failure', t.id);
+    if (stopped) return `Stopped: ${stopped.summary} Resolve it in the Inbox first.`;
     const h = holdFor(t);
     if (h) return heldMessage(h);
     const full = t.owner ? t : tasks().getTask(t.id), mid = full?.owner ? ownerMemberId(full as ProjectTask) : null;
@@ -174,6 +176,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   /** The scheduler asks once per candidate task: the index is shared for a second instead of rebuilt each time. */
   const heldMemo = new Map<string, { at: number; fn: (id: string) => HoldInfo | null }>();
   const held = (t: ProjectTask): boolean => {
+    if (gov().openBreaker(t.projectId, 'start_failure', t.id)) return true;
     let m = heldMemo.get(t.projectId);
     if (!m || now() - m.at > 1000) { m = { at: now(), fn: holdIndex(t.projectId) }; heldMemo.set(t.projectId, m); }
     return Boolean(m.fn(t.id));
@@ -207,6 +210,32 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     }
     const last = [...run].reverse().find(i => i.kind === 'assistant' && i.text.trim());
     return { status, error: chat.error, assistantText: last?.text ?? '', toolCalls, fileChanges, tools, files, askedYou: run.some(i => i.kind === 'question') };
+  }
+
+  // #157: the same start error three times in a row for one task stops its retries and puts one Problem in the Inbox.
+  const START_FAILURE_LIMIT = 3;
+  const START_FAILURE = /could not start|failed to start|could not be (made|dispatched)|isn.t available|^Choose a model|\bspawn\b|\bENOENT\b|\bEACCES\b/i;
+  const startFailures = new Map<string, { message: string; count: number }>();
+  /** The text of an error that means "the run never got going" (a missing binary, an unusable runner, no worktree), or null for any other failure. */
+  const startFailureOf = (error: string | null | undefined): string | null => { const m = (error ?? '').replace(/\s+/g, ' ').trim(); return m && START_FAILURE.test(m) ? m : null; };
+  /** Counts one start failure of a task; true when this one reached the limit and the task is now stopped. */
+  function noteStartFailure(task: ProjectTask, message: string): boolean {
+    const cur = startFailures.get(task.id), count = cur && cur.message === message ? cur.count + 1 : 1;
+    startFailures.set(task.id, { message, count });
+    if (count < START_FAILURE_LIMIT) return false;
+    if (gov().openBreaker(task.projectId, 'start_failure', task.id)) return true;
+    const why = clip(redactSecrets(message), 200), key = keyOf(task);
+    gov().addBreaker({ projectId: task.projectId, kind: 'start_failure', subject: task.id, memberId: ownerMemberId(task), summary: `${key} “${clip(task.title, 50)}” could not start ${count} times in a row with the same error: ${why}`, evidence: [`Error: ${why}`, `Attempts: ${count}`] });
+    record(task.projectId, 'task.breaker', `${key} could not start ${count} times in a row (${clip(why, 120)}). Retries for it are stopped until you resolve the Problem in the Inbox.`, task.id, 'system');
+    wakeQueue().cancelFor(task.projectId, new Set([task.id]), 'Dropped: this task keeps failing to start.');
+    const retry = task.runChatId ? retryTimers.get(task.runChatId) : undefined; if (retry) { timers.clear(retry); retryTimers.delete(task.runChatId!); }
+    deps.changed(task.projectId, task.id, true);
+    return true;
+  }
+  /** A dispatch that threw before any run existed (no worktree, no usable runner, the provider refused to launch): counted like a run that failed to start. */
+  function dispatchFailed(taskId: string, error: unknown): void {
+    const task = tasks().getTask(taskId), message = startFailureOf(error instanceof Error ? error.message : String(error));
+    if (task && message && !message.startsWith('Stopped:')) noteStartFailure(task, message);
   }
 
   const pendingMeta = new Map<string, WakeInfo & { taskId: string; memberId: string | null }>();
@@ -945,11 +974,14 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       const liveness: Liveness = classifyRun(facts);
       gov().upsertRunMeta(projectId, chat.id, { liveness });
       if (status === 'failed') {
-        const kind = failureKind(chat.error);
-        if (kind === 'transient' && m.retries < s.maxRetries && !gate(task)) { scheduleRetry(tasks().getTask(task.id) ?? task, chat, m.retries + 1, chat.error ?? 'failed'); return; }
+        const kind = failureKind(chat.error), startError = startFailureOf(chat.error);
+        // The run never got going: the same error three times in a row stops this task's retries and raises one Problem.
+        const stopped = startError !== null && noteStartFailure(tasks().getTask(task.id) ?? task, startError);
+        if (kind === 'transient' && !stopped && m.retries < s.maxRetries && !gate(task)) { scheduleRetry(tasks().getTask(task.id) ?? task, chat, m.retries + 1, chat.error ?? 'failed'); return; }
         if (kind === 'limit') { record(projectId, 'task.run-limit', `“${clip(task.title, 60)}” stopped on a usage limit. It will not retry by itself: run it again after the limit resets.`, task.id, 'system'); }
         return;
       }
+      if (status === 'completed') startFailures.delete(task.id);
       if (status === 'completed' && m.comment === 'asked') { await commentBackstop(tasks().getTask(task.id) ?? task, chat, facts); }
       else if (status === 'completed' && (liveness === 'empty_response' || liveness === 'plan_only') && !facts.askedYou) {
         if (m.continuations < s.maxContinuations && !gate(task)) {
@@ -1185,7 +1217,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     expireProposals(projectId);
     const items: { id: string; kind: 'review' | 'blocked' | 'approval' | 'question' | 'other'; title: string; why: string; severity: 'high' | 'medium' | 'low'; at: string; taskId: string | null; agentId: string | null; area: string }[] = [];
     for (const w of gov().watchdogs(projectId, true)) { const t = tasks().getTask(w.taskId); items.push({ id: `watchdog:${w.id}`, kind: 'blocked', title: `${t ? keyOf(t) : 'A task'} · subtree stopped`, why: w.summary, severity: 'medium', at: w.createdAt, taskId: w.taskId, agentId: null, area: 'governance' }); }
-    for (const b of gov().breakers(projectId)) items.push({ id: `breaker:${b.id}`, kind: 'other', title: b.kind === 'wake_storm' ? 'Wake storm stopped' : b.kind === 'review_loop' ? 'Review loop' : 'Circuit breaker', why: b.summary, severity: 'high', at: b.createdAt, taskId: b.kind === 'review_loop' ? b.subject : null, agentId: b.memberId ? `member:${b.memberId}` : null, area: 'governance' });
+    for (const b of gov().breakers(projectId)) items.push({ id: `breaker:${b.id}`, kind: b.kind === 'start_failure' ? 'blocked' : 'other', title: b.kind === 'wake_storm' ? 'Wake storm stopped' : b.kind === 'review_loop' ? 'Review loop' : b.kind === 'start_failure' ? `${tasks().getTask(b.subject) ? keyOf(tasks().getTask(b.subject)!) : 'A task'} · cannot start` : 'Circuit breaker', why: b.summary, severity: 'high', at: b.createdAt, taskId: b.kind === 'review_loop' || b.kind === 'start_failure' ? b.subject : null, agentId: b.memberId ? `member:${b.memberId}` : null, area: 'governance' });
     for (const p of gov().proposals(projectId, true)) items.push({ id: `secret:${p.id}`, kind: 'approval', title: `${p.memberName} asks for the secret ${p.name}`, why: p.purpose, severity: 'high', at: p.createdAt, taskId: p.taskId, agentId: `member:${p.memberId}`, area: 'secrets' });
     for (const m of gov().monitors(projectId)) if (m.state === 'escalated') { const t = tasks().getTask(m.taskId); items.push({ id: `monitor:${m.id}`, kind: 'blocked', title: `${t ? keyOf(t) : 'A task'} · follow-up check`, why: m.note || `The follow-up check on “${t?.title ?? 'a task'}” found it unfinished after ${m.attempts} ${m.attempts === 1 ? 'attempt' : 'attempts'}.`, severity: 'medium', at: m.lastFiredAt ?? m.createdAt, taskId: m.taskId, agentId: null, area: 'governance' }); }
     for (const s of gov().stages(projectId)) if ((s.status === 'awaiting' || s.status === 'escalated') && tasks().getTask(s.taskId)) { const t = tasks().getTask(s.taskId)!; items.push({ id: `stage:${s.taskId}`, kind: 'review', title: `${keyOf(t)} · ${s.kind === 'review' ? 'review' : 'approval'} ${s.stage + 1} of ${s.stages}`, why: s.status === 'escalated' ? s.feedback ?? 'Waiting for your decision.' : `Waiting for ${s.approverName === 'You' ? 'your' : `${s.approverName}'s`} ${s.kind === 'review' ? 'review' : 'approval'}.`, severity: 'high', at: s.updatedAt, taskId: s.taskId, agentId: null, area: 'governance' }); }
@@ -1333,6 +1365,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       const projectId = project(input), b = gov().getBreaker(id(input.id, 'event id'));
       if (!b || b.projectId !== projectId) throw new Error('That event no longer exists.');
       if (b.state !== 'open') return b;
+      if (b.kind === 'start_failure') startFailures.delete(b.subject);
       if (input.action === 'resume' && b.kind === 'wake_storm' && b.memberId) { try { await deps.team.handlers['project.members.pause']!({ projectId, id: b.memberId, paused: false }); } catch { /* already resumed */ } arm(projectId, b.memberId); }
       gov().setBreakerState(b.id, input.action === 'resume' ? 'resumed' : 'dismissed');
       record(projectId, 'task.breaker', input.action === 'resume' ? `Resumed after: ${b.summary}` : `Dismissed: ${b.summary}`, b.subject, 'user'); deps.changed(projectId, '', true);
@@ -1394,7 +1427,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
   return {
     handlers: commands() as unknown as Record<string, DomainHandler>,
-    gate, preflight, release, held, identityForFolder, noteWorktree, clampAccess, beforeSend, prepareDispatch, taskLines, taskSections, runOptions, decideTool, started, settled, idle, purgeTask, purgeProject, memberGone, taskView, holdFor, evaluate: scheduleEval, armAll, dispose,
+    gate, preflight, release, held, dispatchFailed, identityForFolder, noteWorktree, clampAccess, beforeSend, prepareDispatch, taskLines, taskSections, runOptions, decideTool, started, settled, idle, purgeTask, purgeProject, memberGone, taskView, holdFor, evaluate: scheduleEval, armAll, dispose,
     /** For tests: the stores and queues behind the commands. */
     internals: { gov, wakeQueue, heartbeatTimers, retryTimers, tick, fireMonitors, evaluateWatchdogs, evaluateChildren, readyTaskFor, recoveryItems, effectivePolicy, startStage },
   };

@@ -15,6 +15,8 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-01-95A](01-chat-and-composer.md#mus-spec-01-95a) | An imported Codex chat and an imported Claude Code chat each record the model and provider their own session ran, in the import note. | [`an imported chat records the model and provider its own session ran`](../../../packages/agent-app/tests/conversation-import.test.ts) |
+| [MUS-SPEC-01-95B](01-chat-and-composer.md#mus-spec-01-95b) | The imported-chat note shows the session model and provider as plain text, with no control to change them. | [`the imported chat note shows the session model and provider read-only`](../../../packages/agent-app/tests/import-origin-dom.tsx) |
 | [MUS-SPEC-01-554A](01-chat-and-composer.md#mus-spec-01-554a) | The message box has `dir="auto"`, so it follows the direction of what is typed (the draft here is Arabic). | [`the message field follows the direction of what is typed`](../../../packages/agent-app/tests/composer-rtl-dom.tsx) |
 | [MUS-SPEC-01-554B](01-chat-and-composer.md#mus-spec-01-554b) | Every chat title in the sidebar has `dir="auto"`, including an Arabic title. | [`sidebar chat titles follow their own text direction`](../../../packages/agent-app/tests/composer-rtl-dom.tsx) |
 | [MUS-SPEC-01-554C](01-chat-and-composer.md#mus-spec-01-554c) | Each of your messages in the transcript has `dir="auto"`, for an Arabic message and an English one. | [`each user message takes its text direction from its own first strong character`](../../../packages/agent-app/tests/chat-rtl-dom.tsx) |
@@ -29,6 +31,30 @@ Boundaries:
 | [MUS-SPEC-01-569A](01-chat-and-composer.md#mus-spec-01-569a) | Searching "checklist" in a message holding "İzmir" returns a highlight range that covers "checklist". | [`the index returns a correct highlight for such a message`](../../../packages/agent-app/tests/chat-search-casefold.test.ts) |
 | [MUS-SPEC-01-569B](01-chat-and-composer.md#mus-spec-01-569b) | In "İİİİ İstanbul deploy notes" the one highlight covers "deploy". | [`a snippet after a dotted capital I highlights the matched word itself`](../../../packages/agent-app/tests/chat-search-casefold.test.ts) |
 | [MUS-SPEC-01-569C](01-chat-and-composer.md#mus-spec-01-569c) | In a 200-"İ" message the snippet window holds "needle" and the highlight covers it. | [`a long message: the window is centred on the match, not shifted by earlier dotted capitals`](../../../packages/agent-app/tests/chat-search-casefold.test.ts) |
+
+### Imported chats keep their own model
+
+<a id="mus-spec-01-95a"></a>
+#### MUS-SPEC-01-95A: An imported chat records the model and provider its session ran
+
+- Precondition: A Codex rollout whose session ran `gpt-6-codex` on provider `openai`, and a Claude Code transcript whose assistant turns ran `claude-fable-5-1`. The app's default model is a different one.
+- Action: Import both sessions.
+- Expected result: Each chat's import note holds the session's own model and provider (`gpt-6-codex` on `openai`, `claude-fable-5-1` on `anthropic`), not the app default.
+- Test: `packages/agent-app/tests/conversation-import.test.ts::an imported chat records the model and provider its own session ran`
+- Environment: Node test runner; the agent service with a fake provider; fixture sessions in a temp folder.
+- Known gaps: ChatGPT export sessions are not covered (the export names no model). The chat's own model field stays a model Muster can run, so the next message runs on that, not on the imported model.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-95b"></a>
+#### MUS-SPEC-01-95B: The imported-chat note shows the session model read-only
+
+- Precondition: An imported chat whose import note holds the model `gpt-6-codex` and the provider `openai`.
+- Action: Open the chat, and look at the note at the top.
+- Expected result: The note names the model and the provider as plain text. It has no button, input or menu for either. A note with no model records shows no model text.
+- Test: `packages/agent-app/tests/import-origin-dom.tsx::the imported chat note shows the session model and provider read-only`
+- Environment: DOM suite in linkedom; the real ImportOrigin component.
+- Known gaps: Does not render the whole chat screen.
+- Evidence: UNVERIFIED
 
 ### Text direction
 
