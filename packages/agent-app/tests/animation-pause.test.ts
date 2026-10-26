@@ -10,11 +10,22 @@ import {fileURLToPath} from 'node:url';
 const renderer = fileURLToPath(new URL('../src/renderer/', import.meta.url));
 const files = (dir: string): string[] => readdirSync(dir, {withFileTypes: true}).flatMap(entry => entry.isDirectory() ? files(join(dir, entry.name)) : entry.name.endsWith('.css') ? [join(dir, entry.name)] : []);
 const styles = readFileSync(join(renderer, 'styles.css'), 'utf8');
-const exemption = /:root\[data-window-active='false'\] :is\(([^)]*(?:\([^)]*\)[^)]*)*)\)\s*\{\s*animation-play-state: running !important;/.exec(styles);
+/** The selector list inside `:root[data-window-active='false'] :is(…)` of the rule that resumes animations, read by paren depth. */
+function resumedList(css: string): string | null {
+  const opener = ":root[data-window-active='false'] :is(";
+  for (let at = css.indexOf(opener); at >= 0; at = css.indexOf(opener, at + 1)) {
+    let depth = 1, end = at + opener.length;
+    for (; end < css.length && depth; end++) depth += css[end] === '(' ? 1 : css[end] === ')' ? -1 : 0;
+    if (depth) return null;
+    if (/^\s*\{\s*animation-play-state: running !important;/.test(css.slice(end, end + 80))) return css.slice(at + opener.length, end - 1);
+  }
+  return null;
+}
+const exemption = resumedList(styles);
 
 test('the inactive-window rule pauses everything, then resumes every entrance', () => {
   assert.ok(exemption, 'styles.css resumes entrance animations in an inactive window');
-  const resumed = exemption![1]!.split(',').map(part => part.trim());
+  const resumed = exemption!.split(',').map(part => part.trim());
   const entrances: string[] = [];
   for (const file of files(renderer)) {
     const source = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
