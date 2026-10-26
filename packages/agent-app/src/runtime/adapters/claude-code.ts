@@ -153,24 +153,24 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       // reported once, when its usage is final (message_delta) or its tool results, the next message, the result or the
       // exit end it, and a result only adds what its turn's messages under-reported. Cache reads are cached input; cache
       // writes are input. Counts the CLI did not report stay unknown; a message without its final count is flagged `partial`.
-      type Tokens = {input?: number; cached?: number; output?: number};
+      type Tokens = {input?: number; cached?: number; cacheWrite?: number; output?: number};
       const count = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
       const tokensOf = (raw: unknown): Tokens | null => {
         if (!raw || typeof raw !== 'object') return null;
         const usage = raw as Record<string, unknown>, fresh = count(usage.input_tokens), output = count(usage.output_tokens);
         const read = count(usage.cache_read_input_tokens) ?? 0, written = count(usage.cache_creation_input_tokens) ?? 0;
-        const tokens: Tokens = {...(fresh !== undefined ? {input: fresh + read + written, cached: read} : {}), ...(output !== undefined ? {output} : {})};
+        const tokens: Tokens = {...(fresh !== undefined ? {input: fresh + read + written, cached: read, cacheWrite: written} : {}), ...(output !== undefined ? {output} : {})};
         return tokens.input === undefined && tokens.output === undefined ? null : tokens;
       };
-      const fields = ['input', 'cached', 'output'] as const;
+      const fields = ['input', 'cached', 'cacheWrite', 'output'] as const;
       let openMessage: {id: string; tokens: Tokens; final: boolean} | undefined, streamId: string | undefined;
       /** Messages already reported this turn: a late event for one adds nothing (the result reconciles). */
       const reportedIds = new Set<string>();
-      let turnTokens = {input: 0, cached: 0, output: 0};
+      let turnTokens = {input: 0, cached: 0, cacheWrite: 0, output: 0};
       const emitUsage = (tokens: Tokens, flags: {partial?: true; reconciliation?: true}) => {
         if (!fields.some(key => (tokens[key] ?? 0) > 0)) return;
         for (const key of fields) turnTokens[key] += tokens[key] ?? 0;
-        const last = {...(tokens.input !== undefined ? {inputTokens: tokens.input, cachedInputTokens: tokens.cached ?? 0} : {}), ...(tokens.output !== undefined ? {outputTokens: tokens.output} : {})};
+        const last = {...(tokens.input !== undefined ? {inputTokens: tokens.input, cachedInputTokens: tokens.cached ?? 0, ...(tokens.cacheWrite ? {cacheWriteTokens: tokens.cacheWrite} : {})} : {}), ...(tokens.output !== undefined ? {outputTokens: tokens.output} : {})};
         // A reconciliation is spend, not one request's context, so the context meter ignores it.
         input.onEvent('thread/tokenUsage/updated', {threadId: sessionId, turnId, tokenUsage: {last, ...flags}});
       };
@@ -193,7 +193,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
           for (const key of fields) if (totals[key] !== undefined) shortfall[key] = Math.max(0, totals[key] - reported[key]);
           emitUsage(shortfall, {reconciliation: true});
         }
-        turnTokens = {input: 0, cached: 0, output: 0}; reportedIds.clear(); streamId = undefined;
+        turnTokens = {input: 0, cached: 0, cacheWrite: 0, output: 0}; reportedIds.clear(); streamId = undefined;
       };
       const tools = new Map<string, Record<string, unknown>>();
       // Task/Agent children run inside the CLI. Each is a child thread `<session>:<tool_use id>`; its events carry that

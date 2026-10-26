@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import {
-  effectivePricing, estimateCostUsd, isModelKey, normalizeModelPolicy, summarizeUsage, validatePricing, validateContextWindow, modelKey,
+  addUsage, effectivePricing, estimateCostUsd, isModelKey, normalizeModelPolicy, summarizeUsage, validatePricing, validateContextWindow, modelKey,
   type ModelPolicy, type ModelPricing, type UsageReport, type UsageRow, type UsageTotals,
 } from '../../shared/model-catalog.ts';
 import type { BoundedList, ProjectTask } from '../../shared/protocol.ts';
@@ -12,7 +12,7 @@ import type { DomainContext, DomainModule } from './types.ts';
 export const MODEL_USAGE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS model_usage (
   chat_id TEXT NOT NULL, task_id TEXT NOT NULL DEFAULT '', project_id TEXT, provider_id TEXT NOT NULL, model TEXT NOT NULL,
-  input_tokens INTEGER NOT NULL DEFAULT 0, cached_input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
+  input_tokens INTEGER NOT NULL DEFAULT 0, cached_input_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
   reasoning_output_tokens INTEGER NOT NULL DEFAULT 0, requests INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL,
   PRIMARY KEY (chat_id, task_id, provider_id, model));
 CREATE INDEX IF NOT EXISTS model_usage_project ON model_usage (project_id);
@@ -20,9 +20,8 @@ CREATE TABLE IF NOT EXISTS model_usage_cursor (chat_id TEXT PRIMARY KEY, cursor 
 `;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const id = (value: unknown, what: string): string => { if (typeof value !== 'string' || !ID.test(value)) throw new Error(`Choose a ${what}.`); return value; };
-interface UsageRowDb { chat_id: string; task_id: string; project_id: string | null; provider_id: string; model: string; input_tokens: number; cached_input_tokens: number; output_tokens: number; reasoning_output_tokens: number; requests: number; updated_at: string }
-const totalsOf = (row: UsageRowDb): UsageTotals => ({ inputTokens: Number(row.input_tokens), cachedInputTokens: Number(row.cached_input_tokens), outputTokens: Number(row.output_tokens), reasoningOutputTokens: Number(row.reasoning_output_tokens), requests: Number(row.requests) });
-const sum = (a: UsageTotals, b: UsageTotals): UsageTotals => ({ inputTokens: a.inputTokens + b.inputTokens, cachedInputTokens: a.cachedInputTokens + b.cachedInputTokens, outputTokens: a.outputTokens + b.outputTokens, reasoningOutputTokens: a.reasoningOutputTokens + b.reasoningOutputTokens, requests: a.requests + b.requests });
+interface UsageRowDb { chat_id: string; task_id: string; project_id: string | null; provider_id: string; model: string; input_tokens: number; cached_input_tokens: number; cache_write_tokens: number; output_tokens: number; reasoning_output_tokens: number; requests: number; updated_at: string }
+const totalsOf = (row: UsageRowDb): UsageTotals => ({ inputTokens: Number(row.input_tokens), cachedInputTokens: Number(row.cached_input_tokens), cacheWriteTokens: Number(row.cache_write_tokens ?? 0), outputTokens: Number(row.output_tokens), reasoningOutputTokens: Number(row.reasoning_output_tokens), requests: Number(row.requests) });
 const taskItems = (value: unknown): ProjectTask[] => Array.isArray(value) ? value as ProjectTask[] : Array.isArray((value as BoundedList<ProjectTask> | undefined)?.items) ? (value as BoundedList<ProjectTask>).items : [];
 
 /** Models domain: the user's model visibility/price policy (PRO-04) and per-chat/Project token usage and cost (PRO-06, PRJ-14). */
@@ -48,7 +47,12 @@ export function createModelsDomain(ctx: DomainContext): DomainModule {
   let ready: DatabaseSync | undefined;
   const db = (): DatabaseSync | undefined => {
     if (ready) return ready;
-    try { const handle = ctx.db(); handle.exec(MODEL_USAGE_SCHEMA); return ready = handle; } catch { return undefined; }
+    try {
+      const handle = ctx.db(); handle.exec(MODEL_USAGE_SCHEMA);
+      // A table made before cache writes were counted gets the column; its old rows count none.
+      if (!(handle.prepare("SELECT name FROM pragma_table_info('model_usage')").all() as { name: string }[]).some(column => column.name === 'cache_write_tokens')) handle.exec('ALTER TABLE model_usage ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0');
+      return ready = handle;
+    } catch { return undefined; }
   };
   /** The Project task each running chat works for, resolved once per run. */
   const runTasks = new Map<string, { taskId: string; projectId: string }>();
@@ -69,12 +73,12 @@ export function createModelsDomain(ctx: DomainContext): DomainModule {
     handle.exec('BEGIN');
     try {
       handle.prepare('INSERT INTO model_usage_cursor (chat_id, cursor) VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET cursor = excluded.cursor').run(input.chatId, JSON.stringify(step.cursor));
-      if (d.requests) handle.prepare(`INSERT INTO model_usage (chat_id, task_id, project_id, provider_id, model, input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, requests, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(chat_id, task_id, provider_id, model) DO UPDATE SET
-          input_tokens = input_tokens + excluded.input_tokens, cached_input_tokens = cached_input_tokens + excluded.cached_input_tokens,
+      if (d.requests) handle.prepare(`INSERT INTO model_usage (chat_id, task_id, project_id, provider_id, model, input_tokens, cached_input_tokens, cache_write_tokens, output_tokens, reasoning_output_tokens, requests, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(chat_id, task_id, provider_id, model) DO UPDATE SET
+          input_tokens = input_tokens + excluded.input_tokens, cached_input_tokens = cached_input_tokens + excluded.cached_input_tokens, cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
           output_tokens = output_tokens + excluded.output_tokens, reasoning_output_tokens = reasoning_output_tokens + excluded.reasoning_output_tokens,
           requests = requests + excluded.requests, updated_at = excluded.updated_at, project_id = COALESCE(excluded.project_id, project_id)`)
-        .run(input.chatId, task?.taskId ?? '', task?.projectId ?? input.projectId ?? null, input.providerId, input.model, d.inputTokens, d.cachedInputTokens, d.outputTokens, d.reasoningOutputTokens, d.requests, new Date().toISOString());
+        .run(input.chatId, task?.taskId ?? '', task?.projectId ?? input.projectId ?? null, input.providerId, input.model, d.inputTokens, d.cachedInputTokens, d.cacheWriteTokens, d.outputTokens, d.reasoningOutputTokens, d.requests, new Date().toISOString());
       handle.exec('COMMIT');
     } catch (error) { handle.exec('ROLLBACK'); throw error; }
     return d.requests > 0;
@@ -110,7 +114,7 @@ export function createModelsDomain(ctx: DomainContext): DomainModule {
     for (const row of rows) {
       const key = `${row.providerId}\u0000${row.model}`, prev = out.get(key);
       if (!prev) { out.set(key, { providerId: row.providerId, model: row.model, totals: row.totals, pricing: row.pricing, costUsd: row.costUsd }); continue; }
-      const totals = sum(prev.totals, row.totals);
+      const totals = addUsage(prev.totals, row.totals);
       out.set(key, { ...prev, totals, costUsd: estimateCostUsd(totals, prev.pricing) });
     }
     return [...out.values()];
