@@ -6,12 +6,14 @@ on:
     branches: [main, 'release/**']
     paths:
       - "packages/agent-app/**"
+      - "packages/server/**"
       - ".github/workflows/agent-app-ci.yml"
       - "docs/spec/**"
       - "scripts/check-spec.mjs"
   pull_request:
     paths:
       - "packages/agent-app/**"
+      - "packages/server/**"
       - ".github/workflows/agent-app-ci.yml"
       - "docs/spec/**"
       - "scripts/check-spec.mjs"
@@ -82,6 +84,12 @@ jobs:
           npm run typecheck:tsc
           (cd ../server && npm ci --no-audit --no-fund --ignore-scripts)
           node scripts/typecheck-parity.mjs
+
+      # Muster Server imports the agent runtime, so a change here can break its typecheck. The release builds the server
+      # with `npx tsc --noEmit`; the same check here fails the PR instead of the release (#712).
+      - name: Typecheck Muster Server
+        working-directory: packages/server
+        run: npx tsc --noEmit
 
       # Some runtime tests load the bundled core from dist/, so build before testing.
       - name: Build
