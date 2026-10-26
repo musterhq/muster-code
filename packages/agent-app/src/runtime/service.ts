@@ -807,7 +807,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             const items = store.timeline(chatId);
             let last = items.length - 1;
             while (last >= 0 && items[last]!.kind !== 'user') last--;
-            store.appendItem(chatId, 'notice', reason === 'lane' ? 'This message runs a different way than the earlier ones (models that need it run over the router’s Messages API), so a fresh conversation started with a summary of the earlier messages. The displayed chat history is retained.' : 'The saved provider conversation could not be resumed, so a fresh one started with a summary of the earlier messages. The displayed chat history is retained.', 'completed', {kind: 'thread-reset'});
+            store.appendItem(chatId, 'notice', reason === 'lane' ? 'This message runs a different way than the earlier ones (models that need it run over the router’s Messages API), so a fresh conversation started with a summary of the earlier messages. The displayed chat history is retained.' : reason === 'expired' ? 'The provider could no longer continue the earlier conversation (it kept no saved state for it), so a fresh one started with a summary of the earlier messages. The displayed chat history is retained.' : 'The saved provider conversation could not be resumed, so a fresh one started with a summary of the earlier messages. The displayed chat history is retained.', 'completed', {kind: 'thread-reset'});
             scheduleTimeline(chatId);
             return [transcriptDigest(items.slice(0, Math.max(0, last)), cwd), ...staticBlocks.filter(block => !pendingBlocks.has(block)).map(block => block.text)].filter(Boolean).join('\n\n') || undefined;
           },
