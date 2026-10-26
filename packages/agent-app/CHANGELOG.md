@@ -3,6 +3,10 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Claude chats on your own router no longer reset to a summary when the router has lost the saved thinking for an earlier tool call. Muster resends that part of the history as plain text, so the chat keeps its full history and thread and carries on. Starting fresh is now a last resort.
+
 ## 0.3.15
 
 Claude chats on your own router recover on their own when an older conversation can no longer be continued, and notification toasts move to the bottom-right corner, clear of your messages.
