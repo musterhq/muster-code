@@ -24,7 +24,8 @@ const at='2026-09-19T10:00:00Z';
 const item=(id:string,kind:string,text:string):any=>({id,chatId:'one',kind,text,createdAt:at});
 const errors:unknown[]=[];const root=createRoot(document.getElementById('root')!,{onUncaughtError:error=>errors.push(error)});
 const until=async(ok:()=>unknown,ms=2000)=>{for(let t=0;t<ms&&!ok();t+=10)await delay(10);};
-root.render(<Timeline chatId="one" items={[item('u1','user','Go'),item('a1','assistant','First'),item('a2','assistant','Second'),item('a3','assistant','Third'),item('u2','user','Again'),item('a4','assistant','Fourth')]}/>);
+// One running turn (a settled turn folds its earlier replies behind "Worked for"), with a steer in the middle.
+root.render(<Timeline chatId="one" running items={[item('u1','user','Go'),item('a1','assistant','First'),item('a2','assistant','Second'),item('a3','assistant','Third'),{...item('u2','user','Again'),data:{steered:true}},item('a4','assistant','Fourth')]}/>);
 await until(()=>document.querySelector('[data-item-id="a4"]'));
 assert.deepEqual(errors,[]);
 const cont=(id:string)=>document.querySelector(`[data-item-id="${id}"]`)!.classList.contains('is-reply-continuation');
@@ -38,4 +39,6 @@ assert.equal(above('a1'),true,'the reply above a continuation gives up its botto
 assert.equal(above('a2'),true);
 assert.equal(above('a3'),false,'the last reply of the run keeps its bottom spacing');
 assert.equal(above('u1'),false);assert.equal(above('a4'),false);
+assert.equal(document.querySelectorAll('.day-divider').length,1,'the chat-opening message gets one day divider; a steer within the gap gets none');
+assert.ok(document.querySelector('[data-item-id="u1"] .day-divider'));
 process.exit(0);

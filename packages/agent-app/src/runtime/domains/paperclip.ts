@@ -525,7 +525,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     // A run waiting on you: its real pending question or approval, answered in place so that run continues.
     let waiting = false;
     for (const run of detail.runs.filter(r => r.status === 'running' && r.chatId)) {
-      const items = await context.invoke('chat.timeline', { id: run.chatId! }).then(t => t.items, () => []);
+      const items = await context.invoke('chat.timeline', { id: run.chatId!, full: true }).then(t => t.items, () => []);
       for (const item of items) {
         if ((item.kind !== 'question' && item.kind !== 'approval') || item.status !== 'pending') continue;
         waiting = true;
@@ -540,7 +540,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const comments = [...detail.comments];
     for (const run of detail.runs) {
       if (!run.chatId) continue;
-      const items = await context.invoke('chat.timeline', { id: run.chatId }).then(t => t.items, () => []);
+      const items = await context.invoke('chat.timeline', { id: run.chatId, full: true }).then(t => t.items, () => []);
       const last = [...items].reverse().find(i => i.kind === 'assistant' && i.text.trim());
       if (!last) continue;
       const receipt = receipts.filter(r => r.chatId === run.chatId).sort((a, b) => b.endedAt.localeCompare(a.endedAt))[0];

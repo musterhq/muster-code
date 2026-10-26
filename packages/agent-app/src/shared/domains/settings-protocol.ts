@@ -77,7 +77,7 @@ export const SETTING_DEFAULTS: AppSettings = {
   'appearance.chatTextSize': 14,
   'appearance.reducedMotion': 'system',
   'appearance.reducedTransparency': 'system',
-  'chat.inlineDiffs': true,
+  'chat.inlineDiffs': false,
   'chat.responseStyle': 'auto',
   'general.defaultModel': null,
   'chats.autoArchiveDays': 0,

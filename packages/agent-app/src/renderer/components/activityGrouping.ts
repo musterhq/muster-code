@@ -110,7 +110,7 @@ export function summarizeActivity(items:readonly TimelineItem[]):string {
     if(p.images?.length) {for(const path of p.images)viewed.add(path);}
     else if(p.kind==='read') {for(const path of p.paths??[p.subject]) if(path)read.add(path);}
     else if(p.kind==='edit') {for(const path of p.paths??[p.subject]) if(path)edited.add(path);}
-    else if(p.kind==='search') searches++;
+    else if(p.kind==='search'||p.kind==='web') searches++;
     else if(p.kind==='command') commands++;
     else if(p.kind==='subagent') agents++;
     else if(p.kind==='computer'&&p.computer) used.add(p.computer.target==='browser'?'the browser':p.computer.app||'the computer');
@@ -134,7 +134,7 @@ export function activityKind(items:readonly TimelineItem[]):{kind:ReturnType<typ
   const running=items.findLast(item=>item.status==='running');
   if(running){const p=classifyTool(running.data);return {kind:p.kind,image:!!p.images?.length};}
   const kinds=items.map(item=>classifyTool(item.data));
-  for(const kind of ['edit','read','search','command','subagent','mcp','computer','list'] as const){const hit=kinds.find(p=>p.kind===kind&&!(kind==='read'&&p.images?.length));if(hit)return {kind,image:false};}
+  for(const kind of ['edit','read','search','web','command','subagent','mcp','computer','list'] as const){const hit=kinds.find(p=>p.kind===kind&&!(kind==='read'&&p.images?.length));if(hit)return {kind,image:false};}
   if(kinds.some(p=>p.images?.length))return {kind:'read',image:true};
   return {kind:kinds[0]?.kind??'generic',image:false};
 }

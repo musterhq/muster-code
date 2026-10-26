@@ -351,7 +351,7 @@ export function PreferencesScreen():React.ReactElement {
               <Row setting="chat.responseStyle" title="Response style" scope="New runs · Codex-based models" description={settings['chat.responseStyle']==='pragmatic'?'Short, direct answers that stick to the result.':settings['chat.responseStyle']==='friendly'?'Explains what it did and why, in a warmer tone.':'Uses the personality set in your Codex config, otherwise Friendly.'}>
                 <Segmented label="Response style" value={settings['chat.responseStyle']} options={[{value:'auto',label:'Automatic'},{value:'friendly',label:'Friendly'},{value:'pragmatic',label:'Pragmatic'}]} onChange={value=>set('chat.responseStyle',value)}/>
               </Row>
-              <Row setting="chat.inlineDiffs" title="Show file diffs inline" scope="All chats" description="Show syntax-coloured code additions and removals in the conversation. The files-changed pill and the Changes tab stay available either way.">
+              <Row setting="chat.inlineDiffs" title="Show file diffs inline" scope="All chats" description="Off by default: each reply lists the files it changed, and a file opens its diff in the side panel. Turn this on to also show the full syntax-coloured diffs in the conversation.">
                 <Switch label="Show file diffs inline" checked={settings['chat.inlineDiffs']} onChange={value=>set('chat.inlineDiffs',value)}/>
               </Row>
               <Row setting="chats.autoArchiveDays" title="Archive idle chats" scope="All chats · off by default" description="Archive chats with no activity for this long. Pinned, snoozed, unread and working chats, and chats waiting for your input, are never archived. Archived chats stay searchable and can be restored.">

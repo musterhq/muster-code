@@ -1,14 +1,14 @@
 /* Codex transcript activity rows: quiet one-liners on the canvas.
    [thin glyph] Verb object +a -d ›   — no card, no border, no fill.
    The glyph sits on the prose's left edge; details indent under the text. */
-.tool-row-card { --row-inset: 8px; --row-glyph: 16px; --row-gap: 8px; min-width: 0; }
+.tool-row-card { --row-inset: 6px; --row-glyph: 20px; --row-gap: 6px; min-width: 0; }
 .tool-row-head {
   position: relative; display: flex; align-items: center; gap: var(--row-gap);
-  width: 100%; min-height: 30px; padding: 4px 8px 4px var(--row-inset);
-  color: var(--text-dim); font-size: var(--fs-14); line-height: 1.4; text-align: left;
+  width: 100%; min-height: 26px; padding: 3px 8px 3px var(--row-inset);
+  color: var(--text-faint); font-size: var(--fs-13); line-height: 20px; text-align: left;
   transition: color 130ms ease;
 }
-.tool-row-head:hover, .tool-row-head:has(.tool-row-hit:focus-visible), .tool-row-card[data-open] > .tool-row-head { color: var(--text); }
+.tool-row-head:hover, .tool-row-head:has(.tool-row-hit:focus-visible), .tool-row-card[data-open] > .tool-row-head { color: var(--text-dim); }
 /* Whole-row disclosure hit area; content is inert except real file links layered above it. */
 .tool-row-hit { position: absolute; inset: 0; z-index: 0; border-radius: var(--radius-6); color: inherit; }
 .tool-row-hit:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: -1px; }
@@ -16,9 +16,9 @@
 .tool-row-head > :not(.tool-row-hit) { position: relative; pointer-events: none; }
 .tool-row-head .tool-file-link { position: relative; pointer-events: auto; z-index: 1; }
 
-.tool-glyph { display: inline-flex; flex: none; align-items: center; justify-content: center; width: var(--row-glyph); height: var(--row-glyph); color: var(--text-faint); transition: color 130ms ease; }
+.tool-glyph { display: inline-flex; flex: none; align-items: center; justify-content: center; width: var(--row-glyph); height: var(--row-glyph); color: var(--text-dim); transition: color var(--dur-1) var(--ease-out); }
 .tool-glyph svg { display: block; }
-.tool-row-head:hover .tool-glyph, .tool-row-card[data-open] > .tool-row-head .tool-glyph { color: var(--text-dim); }
+.tool-row-head:hover .tool-glyph, .tool-row-card[data-open] > .tool-row-head .tool-glyph, .tool-glyph.is-active { color: var(--text); }
 .tool-row-card.is-failed .tool-glyph { color: color-mix(in srgb, var(--danger) 75%, var(--text-faint)); }
 
 .tool-row-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -26,7 +26,7 @@
 .tool-row-subject, .tool-row-files { color: inherit; font: inherit; }
 .tool-row-sep { color: var(--text-faint); }
 .tool-file-link, .tool-file-name { font: inherit; color: inherit; padding: 0; }
-.tool-file-link { text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 34%, transparent); text-decoration-thickness: 1px; text-underline-offset: 3px; border-radius: var(--radius-4); cursor: pointer; }
+.tool-file-link { text-decoration: underline dotted; text-decoration-color: color-mix(in srgb, currentColor 55%, transparent); text-decoration-thickness: 1px; text-underline-offset: 3px; border-radius: var(--radius-4); cursor: pointer; }
 .tool-file-link:hover { color: var(--text); text-decoration-color: currentColor; }
 .tool-file-link:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 
@@ -79,9 +79,6 @@
 .tool-row-body .tool-plan { margin-left: 0; }
 .tool-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-.tool-run-glyph { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: tool-run-pulse 1.2s ease-in-out infinite; }
-@keyframes tool-run-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: no-preference) { .tool-glyph.is-active { animation: tool-run-pulse 1.4s ease-in-out infinite; } }
 @media (prefers-reduced-motion: reduce) { .tool-run-glyph { animation: none; opacity: .7; } }
 
 .tool-metadata { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; font: var(--fs-12)/1.55 var(--mono); color: var(--text-faint); user-select: text; }
@@ -102,7 +99,9 @@
 .activity-disclosure > * { min-height: 0; overflow: hidden; }
 .activity-disclosure[data-starting-style], .activity-disclosure[data-ending-style] { grid-template-rows: 0fr; }
 .activity-disclosure[data-open][data-ending-style] { grid-template-rows: 1fr; }
-@media (prefers-reduced-motion: no-preference) { .activity-disclosure { transition: grid-template-rows 200ms cubic-bezier(.2,.8,.2,1); } }
+@media (prefers-reduced-motion: no-preference) { .activity-disclosure { transition: grid-template-rows var(--dur-2) var(--ease-out); } }
+/* Inside the virtualised transcript a row opens at once: an animated height would re-measure every frame. */
+.timeline .activity-disclosure { transition: none; }
 
 /* Command output and tool results: one soft surface, same family as the diff block. */
 .tool-result { min-width: 0; overflow: hidden; margin: 4px 0 6px; border: 1px solid color-mix(in srgb, var(--text) 5.5%, transparent); border-radius: var(--radius-10); background: color-mix(in srgb, var(--text) 2.2%, var(--bg)); }
@@ -123,3 +122,9 @@
 .tool-plan-link span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-plan-link button { flex: none; }
 .tool-plan-full { margin: 0 0 6px; }
+
+/* Steps inside an opened group sit tighter than standalone rows. */
+.tx-work-items .tool-row-head { min-height: 22px; padding-block: 1px; }
+.tool-action-glyph { display: inline-flex; flex: none; color: var(--text-faint); }
+/* Icons that cannot be tinted (site, app and plugin icons) carry a failure mark instead. */
+.tool-fail-mark { flex: none; color: var(--danger); }

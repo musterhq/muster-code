@@ -44,6 +44,9 @@ test('runtime streams changed rows and the renderer replica matches durable hist
   assert.equal(replica.needsSnapshot, false);
   assert.deepEqual(replica.value, authoritative);
   assert.equal(events.some(event => event.type === 'timeline'), false);
-  assert.ok(patches.slice(1).every(event => !event.patch.items.some(item => item.kind === 'user')));
+  // While the answer streams the prompt row is never re-sent; it travels once more when the turn ends, carrying its digest.
+  const resent = patches.slice(1).filter(event => event.patch.items.some(item => item.kind === 'user'));
+  assert.ok(resent.length <= 1 && resent.every(event => event === patches.at(-1)));
+  assert.equal(authoritative.items.find(item => item.kind === 'user')?.data?.turnDigest, 'Ran 1 command');
   assert.equal(authoritative.items.find(item => item.kind === 'tool')?.data?.output, 'first\nlast\n');
 });

@@ -57,7 +57,10 @@ test('per-extension icons and tones', async () => {
   assert.equal(kind('dist.zip'), 'archive');
   assert.equal(kind('pnpm-lock.yaml'), 'lock');
   assert.equal(kind('Cargo.lock'), 'lock');
-  assert.equal(kind('LICENSE'), 'file');
+  assert.equal(kind('LICENSE'), 'license');
+  // Every common language and project file has its own icon, never the generic file.
+  for (const [path, expected] of [['app.py', 'python'], ['main.go', 'go'], ['lib.rs', 'rust'], ['App.java', 'jvm'], ['View.swift', 'swift'], ['x.cpp', 'c'], ['P.cs', 'csharp'], ['i.php', 'php'], ['run.sh', 'shell'], ['q.sql', 'sql'], ['ci.yml', 'config'], ['.env.local', 'env'], ['Dockerfile', 'docker'], ['Makefile', 'build'], ['.gitignore', 'git'], ['nb.ipynb', 'notebook'], ['Gemfile', 'build'], ['x.rb', 'ruby']] as const) assert.equal(kind(path), expected, path);
+  assert.equal(kind('unknown.qqq'), 'file');
   assert.equal(fileIcon('doc.pdf').tone, 'danger');
 });
 

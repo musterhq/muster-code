@@ -5,6 +5,7 @@ import {killTree} from './cli-common.ts';
 import {launcherSpec} from '../launcher-script.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
 import {CLAUDE_CODE_ALIASES, CLAUDE_CODE_DEFAULT} from './claude-models.ts';
+import {MESSAGE_BOUNDARY_EVENT} from '../transcript-wire.ts';
 
 export type Spawn = (command: string, args: string[], options: {cwd: string; env: NodeJS.ProcessEnv; stdio: ['pipe', 'pipe', 'pipe']; windowsHide?: boolean; detached?: boolean}) => ChildProcess;
 /** Claude Code's default and family aliases only; the versioned list comes from claude-models.ts. */
@@ -264,7 +265,8 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
         if (type === 'system' && (event.subtype === 'compact_boundary' || event.subtype === 'compaction')) { input.onEvent('thread/compacted', {threadId: sessionId, turnId}); return; }
         if (type === 'stream_event') {
           const inner = event.event as {type?: string; delta?: {type?: string; text?: unknown; thinking?: unknown}; message?: {id?: unknown; usage?: unknown}; usage?: unknown} | undefined;
-          if (!event.parent_tool_use_id && inner?.type === 'message_start') { streamId = typeof inner.message?.id === 'string' ? inner.message.id : undefined; observeUsage(streamId, inner.message?.usage); return; }
+          // Each assistant message is its own reply segment, even when no tool call sits between two of them.
+          if (!event.parent_tool_use_id && inner?.type === 'message_start') { input.onEvent(MESSAGE_BOUNDARY_EVENT, {}); streamId = typeof inner.message?.id === 'string' ? inner.message.id : undefined; observeUsage(streamId, inner.message?.usage); return; }
           if (!event.parent_tool_use_id && inner?.type === 'message_delta') { observeUsage(streamId ?? openMessage?.id, inner.usage, true); return; }
           if (event.parent_tool_use_id || inner?.type !== 'content_block_delta') return;
           if (inner.delta?.type === 'text_delta' && typeof inner.delta.text === 'string') { streamedText = true; input.onDelta(inner.delta.text); }

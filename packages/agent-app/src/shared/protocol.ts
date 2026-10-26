@@ -68,6 +68,9 @@ export interface ApprovalData { method: string; kind: 'command' | 'fileChange' |
 /** `acceptForSession` maps to the codex app-server decision of the same name: later identical requests in this session are not asked again. */
 export type ApprovalDecision = 'accept' | 'acceptForSession' | 'decline';
 export interface TimelineSnapshot { items: TimelineItem[]; revision: number }
+/** `chat.itemDetail`: the full output and diffs of one row, which the stream carries only as a capped preview.
+ *  `output.truncated` means even the detail cap cut it (the durable log keeps the rest). */
+export interface ItemDetail { itemId: string; output?: { text: string; truncated: boolean; totalBytes: number }; changes?: Record<string, unknown>[] }
 export interface TimelinePatch extends TimelineSnapshot { after: number }
 export interface Project { id: string; name: string; goal: string; folderIds: string[]; primaryFolderId?: string | null; archived?: boolean }
 export type TaskStatus = 'todo' | 'running' | 'blocked' | 'implemented' | 'verified';
@@ -135,6 +138,8 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'hindsight.recall': {input: {folderId?: string; query: string; budget?: 'low' | 'mid' | 'high'; maxTokens?: number; types?: Array<'world' | 'experience' | 'observation'>; tags?: string[]}; output: {bankId: string; results: readonly {id?: string; text: string; type?: string; score?: number}[]}};
  'hindsight.reflect': {input: {folderId?: string; query: string; context?: string; budget?: 'low' | 'mid' | 'high'; maxTokens?: number}; output: {bankId: string; text: string}};
  'clipboard.write': {input:{text:string};output:void};
+ /** A site's icon as a data URL (https only, size-capped, cached); null when there is none. */
+ 'favicon.get': {input:{url:string};output:{dataUrl:string|null}};
  'link.open': {input:{url:string};output:void};
  /** Opens the server's own sign-in page in an app window with a cookie jar of its own per server origin (desktop only), so a hosted server can give this Mac the session its live socket accepts. `close` closes it. */
  'musterServer.signInWindow': {input:{url?:string;baseUrl:string;close?:boolean};output:{opened:boolean}};
@@ -159,7 +164,10 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'chat.export': {input:{id:string;format:'markdown'|'html'|'json';redact?:boolean};output:ChatExport};
  /** Share sheet: saves an export through a save dialog (main process). */
  'chat.export.file': {input:{id:string;format:'markdown'|'html'|'json';redact?:boolean};output:{saved:boolean;fileName?:string}};
- 'chat.timeline': { input: {id: string; select?: boolean}; output: TimelineSnapshot };
+ /** `full` keeps every row whole (runtime domains); the window gets capped previews and fetches the rest with chat.itemDetail. */
+ 'chat.timeline': { input: {id: string; select?: boolean; full?: boolean}; output: TimelineSnapshot };
+ /** Full output (newest part, up to 1 MiB) and diffs (up to 2 MiB) of one row whose preview was cut. */
+ 'chat.itemDetail': { input: {chatId: string; itemId: string}; output: ItemDetail };
  /** NAV-11 global search over message content (runtime full-text index of every non-archived chat's user and
   *  assistant messages). Every whitespace-separated term must appear in one message; one hit per chat (its best
   *  message), phrase matches first, then recency. Paged by `offset`/`limit` (default 20, max 50): a full page means

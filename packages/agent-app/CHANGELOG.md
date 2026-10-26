@@ -5,6 +5,20 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Finished turns now fold to one line, "Worked for 1m 38s", with a short summary such as "Edited 2 files, ran tests (3 passed)", and leave only the final answer visible. Click the line (or press e) to see the work. A turn that failed never folds, and a turn you stopped says "You stopped after 12s".
+- While the agent works, one live line at the end shows its latest thought, a "Working for 42s" clock and the current step. The step changes to past tense when it finishes instead of disappearing.
+- A run of tool steps reads as one sentence, such as "Changed 3 files and ran 2 commands", with small icons of the sites and files it touched. Each step has its own icon: a page for reads, a pen for edits, a terminal for commands, a magnifier for code search, a globe for web search, the site's icon for browser steps and the plugin's icon for its tools. Browser command-line tools show as "Opened pytest.org" instead of a raw shell command.
+- Thoughts show as one line with a brain icon. Several thoughts in a row merge into one line instead of repeating "Thought briefly".
+- Sub-agents started in one turn show as one card with their avatars, how many are working or done, and a clock. Click an agent to open its own transcript.
+- Files a turn changed now show as a card under the reply, with +/- counts. Click a file to open its diff in the side panel, or keep or undo it right there for the latest turn. Full diffs no longer fill the conversation; turn on "Show file diffs inline" in Settings to get them back.
+- File references in replies show the file's icon and its line ("store.py · L4"), and web links show the site's icon. Site icons are fetched over HTTPS only, kept small and cached.
+- Reply text is a little tighter (line height 1.45) and step rows are smaller and quieter.
+- Each chat remembers which turns you opened and where you were reading. Opening or closing a turn no longer moves what you are reading. Press j and k to move between turns.
+- A message you send stays near the top of the conversation while its reply arrives.
+- A reply that streams while Muster is visible but not focused is no longer left invisible.
+- Two messages from the agent are no longer run together ("back.The") when no tool call sits between them.
+- Long replies stream with far fewer database writes (about 9 instead of about 2,000 for a 2,000-token answer), and long command output or very large diffs are loaded only when you open the step.
+
 - A task with a very long thread (thousands of messages) now still wakes its agent: the agent gets the newest messages and a count of the older ones, and the task activity shows how big the packet was. A long prompt now goes to Gemini through standard input instead of the command line. If a task fails to start with the same error three times in a row, it stops retrying and one Problem appears in the Inbox until you resolve it.
 - Sub-agents are now named after what they were asked to do ("Count the lines in data/lines.txt") instead of the first words of their prompt, so three agents started in the same folder no longer show three identical rows. Names are unique within a chat, and the Subagents panel counts finished agents as completed.
 - If Muster fails part-way through starting, or wakes from sleep after shutting down, the automations scheduler no longer runs against a closed database.

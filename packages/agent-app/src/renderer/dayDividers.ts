@@ -1,4 +1,5 @@
 import type {TranscriptEntry} from './components/activityGrouping';
+import type {TranscriptRow} from './transcriptRows';
 
 /** A conversation resumed after this long gets a fresh "Today 0:52" divider above the message that resumes it. */
 export const DIVIDER_GAP_MS = 30 * 60_000;
@@ -11,17 +12,24 @@ const timeOf = (item: {createdAt?: string} | undefined): number => {
   if (t === undefined) { t = item.createdAt ? Date.parse(item.createdAt) : NaN; parsed.set(item, t); }
   return t;
 };
-const lastItem = (row: TranscriptEntry): {createdAt?: string} | undefined => row.kind === 'activity' ? row.items[row.items.length - 1] : row;
+type Stamped = {createdAt?: string};
+/** The newest timeline item a row shows: a grouped row's last item, a single-item row's item, or the row itself. */
+const lastItem = (row: TranscriptEntry | TranscriptRow): Stamped | undefined => {
+  if ('items' in row) return row.items[row.items.length - 1];
+  if ('item' in row) return row.item;
+  if ('createdAt' in row) return row;
+  return undefined;
+};
 const dayStart = (t: number) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
 
 /** Row index -> the user message's timestamp, for every user message that opens the chat, follows a 30-minute gap or starts a new day. */
-export function dividerRows(rows: readonly TranscriptEntry[], gapMs = DIVIDER_GAP_MS): Map<number, number> {
+export function dividerRows(rows: readonly (TranscriptEntry | TranscriptRow)[], gapMs = DIVIDER_GAP_MS): Map<number, number> {
   const out = new Map<number, number>();
   let previous = NaN;
   for (let index = 0; index < rows.length; index++) {
     const row = rows[index];
     if (row.kind === 'user') {
-      const at = timeOf(row);
+      const at = timeOf(lastItem(row));
       if (Number.isFinite(at) && (!Number.isFinite(previous) || at - previous >= gapMs || dayStart(at) !== dayStart(previous))) out.set(index, at);
     }
     const end = timeOf(lastItem(row));

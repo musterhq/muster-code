@@ -35,10 +35,10 @@ export function findTextReferences(text: string): Array<FileMention & {start: nu
   return found;
 }
 
-/** What a code-form reference reads as: the file name, plus "(line N)". */
+/** What a code-form reference reads as: the file name, plus "· L4" for a line. */
 export function mentionLabel(mention: FileMention): string {
   const name = mention.path.split('/').filter(Boolean).pop() ?? mention.path;
-  return mention.line ? `${name} (line ${mention.line})` : name;
+  return mention.line ? `${name} · L${mention.line}` : name;
 }
 
 const hrefOf = (mention: FileMention) => `${mention.path}${mention.line ? `:${mention.line}` : ''}`;
