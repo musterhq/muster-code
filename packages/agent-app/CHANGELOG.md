@@ -7,6 +7,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 - Claude chats on your own router no longer reset to a summary when the router has lost the saved thinking for an earlier tool call. Muster resends that part of the history as plain text, so the chat keeps its full history and thread and carries on. Starting fresh is now a last resort.
 - Switching a chat to a model on another provider or account no longer loses the conversation. The first message on the new model now carries a summary of the earlier messages, as forks and compaction already do, and the chat says so.
+- Computer use no longer needs another desktop app installed. Muster ships its own computer-use helper for macOS: every agent chat, on Codex, Claude Code or your own router, can read an app's controls, click, type, press keys and scroll. Each step answers with only what changed on screen, so runs are quicker and use less context; read-only chats can look but not act. An orange Muster cursor shows where the agent is working, in the browser and in desktop apps, and fades out when it stops.
 
 ## 0.3.15
 

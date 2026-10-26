@@ -21,6 +21,7 @@ import { resolveInside } from '../runtime/paths.ts';
 import {archiveNames,zipStore} from './zip.ts';
 import {BrowserWorkspaceController} from './browser-workspace.ts';
 import {BrowserBridge,BROWSER_BRIDGE_START_KEY} from './agent-tools/browser-bridge.ts';
+import {COMPUTER_MCP_LAUNCHER_ENV,writeComputerLauncher} from './agent-tools/computer-launcher.ts';
 import {TERMINAL_MCP_LAUNCHER_ENV,TERMINAL_READ_MAX_BYTES,TerminalToolHost} from '../runtime/terminal-agent-tools.ts';
 import {BACKGROUND_MCP_LAUNCHER_ENV,BackgroundToolHost} from '../runtime/background-agent-tools.ts';
 import {accessibilityText,captureSource,captureSources,computerPermissions} from './computer-capture.ts';
@@ -365,6 +366,9 @@ async function main(): Promise<void> {
   (globalThis as Record<symbol,unknown>)[BROWSER_BRIDGE_START_KEY]=startBrowserBridge;
   const unregisterBrowserCaller=browserBridge.register();
   void startBrowserBridge().catch(error=>console.warn(`Agent browser bridge unavailable: ${error instanceof Error?error.message:String(error)}`));
+  // #721: Muster's own computer use (macOS), so desktop apps work without another app's plugin installed.
+  try { const launcher=writeComputerLauncher({dir:path.join(dataDir,'agent-tools'),execPath:process.execPath,script:unpackedPath(path.join(__dirname,'computer-mcp.cjs')),helper:unpackedPath(path.join(__dirname,'muster-computer'))}); if (launcher) process.env[COMPUTER_MCP_LAUNCHER_ENV]=launcher; }
+  catch (error) { console.warn(`Muster computer use unavailable: ${error instanceof Error?error.message:String(error)}`); }
   window.on('hide',()=>nativePreview.hide());
   window.on('closed',()=>nativePreview.hide());
   window.webContents.on('did-start-loading',()=>{nativePreview.hide();processes.detachAll();});
