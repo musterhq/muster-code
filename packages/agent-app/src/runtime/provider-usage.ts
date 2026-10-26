@@ -5,8 +5,8 @@
  *  - session-log: the newest `rate_limits` line in a Codex rollout file under sessionsRoot.
  * Percentages are clamped to 0-100; anything malformed is ignored, never shown as 0%.
  */
-import { closeSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { closeSync, openSync, readSync, readdirSync, readlinkSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { ProviderUsage, ProviderUsageWindow } from '../shared/domains/providers-protocol.ts';
 
 const record = (value: unknown): Record<string, unknown> | undefined => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -73,6 +73,24 @@ export function recentRollouts(sessionsRoot: string, limit = 12): string[] {
 }
 /** The newest rate-limit snapshot per model provider id (`session_meta.model_provider`) across recent rollouts. */
 export function sessionRateLimits(sessionsRoot: string): Map<string, ProviderUsage> {
+  const found = rootRateLimits(sessionsRoot);
+  // #720: Muster's own home links its sign-in to the person's home; other apps' recent rollouts there carry the same
+  // account's limits, so the newest reading from either side wins.
+  const source = linkedSourceHome(dirname(sessionsRoot));
+  if (source) for (const [provider, usage] of rootRateLimits(join(source, 'sessions'))) {
+    const mine = found.get(provider);
+    if (!mine || usage.updatedAt > mine.updatedAt) found.set(provider, usage);
+  }
+  return found;
+}
+/** The person's home behind Muster's own home, read from the link Muster keeps for its sign-in or configuration. */
+function linkedSourceHome(home: string): string | undefined {
+  for (const name of ['auth.json', 'config.toml']) {
+    try { const target = readlinkSync(join(home, name)); const path = isAbsolute(target) ? target : resolve(home, target); return dirname(path); } catch { /* not a link */ }
+  }
+  return undefined;
+}
+function rootRateLimits(sessionsRoot: string): Map<string, ProviderUsage> {
   const found = new Map<string, ProviderUsage>();
   for (const file of recentRollouts(sessionsRoot)) {
     let head = '', tail = '';

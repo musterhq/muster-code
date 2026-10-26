@@ -55,6 +55,9 @@ Boundaries:
 | [MUS-SPEC-03-722B](03-providers-models-and-accounts.md#mus-spec-03-722b) | Only the replay refusal is retried, and only once; any other 409 reaches the coding client unchanged with its request sent as is. | [`the bridge retries only the replay refusal, only once, and passes every other 409 through unchanged`](../../../packages/agent-app/tests/router-replay-722.test.ts) |
 | [MUS-SPEC-03-724A](03-providers-models-and-accounts.md#mus-spec-03-724a) | The first message on the new provider carries a summary of the earlier conversation ahead of the new text and says so in a notice; later messages continue the new provider conversation without it. | [`switching a chat to a model on another provider keeps the conversation: the first message there carries the earlier one`](../../../packages/agent-app/tests/provider-switch-context-724.test.ts) |
 | [MUS-SPEC-03-724B](03-providers-models-and-accounts.md#mus-spec-03-724b) | The next message continues the same provider thread with no summary added. | [`another model on the same provider account continues the same provider conversation without a summary`](../../../packages/agent-app/tests/provider-switch-context-724.test.ts) |
+| [MUS-SPEC-03-720A](03-providers-models-and-accounts.md#mus-spec-03-720a) | The chat runs in Muster's own coding-client home under its data folder: no thread or thread index is written to the person's home, the person's profile is untouched, and follow-ups continue the same thread. | [`a new chat runs in Muster’s own coding-client home: nothing is written to the person’s home, which keeps its configuration`](../../../packages/agent-app/tests/own-codex-home-720.test.ts) |
+| [MUS-SPEC-03-720B](03-providers-models-and-accounts.md#mus-spec-03-720b) | A chat started before the change continues on its own thread with its earlier messages, and the person's copy of that thread is not written to again. | [`a chat started before the change continues its own thread with its history, without writing to the person’s home again`](../../../packages/agent-app/tests/own-codex-home-720.test.ts) |
+| [MUS-SPEC-03-720C](03-providers-models-and-accounts.md#mus-spec-03-720c) | Usage limits recorded in the person's home by their other coding apps still show for that account, the newest reading winning. | [`usage limits recorded by the person’s other coding apps still show for a chat that runs in Muster’s own home`](../../../packages/agent-app/tests/own-codex-home-720.test.ts) |
 
 ### Configured routers
 
@@ -499,4 +502,39 @@ Boundaries:
 - Test: `packages/agent-app/tests/provider-switch-context-724.test.ts::another model on the same provider account continues the same provider conversation without a summary`
 - Environment: Node test runner; the real service with a fake provider adapter; no network.
 - Known gaps: Guard for existing behaviour, so it passes on main by design; it keeps the fix from adding a summary where none is needed.
+- Evidence: UNVERIFIED
+
+### Muster's own coding-client home
+
+<a id="mus-spec-03-720a"></a>
+#### MUS-SPEC-03-720A: A new chat runs in Muster's own home
+
+- Precondition: The person has a coding-client home with a sign-in or profile (here a router profile with an auth helper).
+- Action: Start a chat on that profile, send a message, then a follow-up.
+- Expected result: The run reaches the router through the person's profile; the thread is stored under `<dataDir>/codex-home/<id>/sessions`, the person's home gets no rollout and no thread index, the profile file is unchanged, and the follow-up continues the same thread.
+- Test: `packages/agent-app/tests/own-codex-home-720.test.ts::a new chat runs in Muster’s own coding-client home: nothing is written to the person’s home, which keeps its configuration`
+- Environment: Node test runner; the real service, provider adapter and installed coding client against a local mock router; temporary home and data folders.
+- Known gaps: A ChatGPT sign-in kept only in the Keychain is tied to the home's path, so that route keeps the person's home; Windows without symlink rights copies shared files instead of linking them.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-720b"></a>
+#### MUS-SPEC-03-720B: A chat from before the change keeps its thread
+
+- Precondition: A chat ran on an earlier build, so its thread is in the person's home.
+- Action: Open it on this build and send a message that depends on the earlier one.
+- Expected result: The chat keeps its provider thread, the model sees the earlier message, the person's copy of the thread does not grow, and no new thread appears there.
+- Test: `packages/agent-app/tests/own-codex-home-720.test.ts::a chat started before the change continues its own thread with its history, without writing to the person’s home again`
+- Environment: Node test runner; the real service, provider adapter and installed coding client against a local mock router; temporary home and data folders.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-720c"></a>
+#### MUS-SPEC-03-720C: Usage limits still show
+
+- Precondition: A chat has run in Muster's own home, and another coding app has since recorded a newer rate-limit reading for the same account in the person's home.
+- Action: Read the usage for that account.
+- Expected result: The newer reading from the person's home is shown.
+- Test: `packages/agent-app/tests/own-codex-home-720.test.ts::usage limits recorded by the person’s other coding apps still show for a chat that runs in Muster’s own home`
+- Environment: Node test runner; the real service, provider adapter and installed coding client against a local mock router; temporary home and data folders.
+- Known gaps: None known.
 - Evidence: UNVERIFIED
