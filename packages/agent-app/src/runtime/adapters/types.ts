@@ -30,6 +30,8 @@ export interface AdapterRunInput {
   askUser?(args: Record<string, unknown>): Promise<string>;
   /** The saved conversation to continue; only set when it belongs to this route and binding. */
   resumeThreadId?: string;
+  /** Asked when `resumeThreadId` names a conversation the adapter no longer holds: returns a summary of the earlier messages to send ahead of the prompt. */
+  onThreadReset?(previousThreadId: string): string | undefined;
   signal: AbortSignal;
   onThreadReady(threadId: string): void;
   onTurnAccepted(identity: {threadId: string; turnId: string}): void;
