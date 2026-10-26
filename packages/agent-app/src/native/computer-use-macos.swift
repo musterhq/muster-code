@@ -472,8 +472,12 @@ final class AgentCursor {
     var landed = false
     let timer = Timer(timeInterval: 1 / 120, repeats: true) { [weak self] timer in
       guard let self else { timer.invalidate(); return }
-      let t = min(1, Date().timeIntervalSince(start) / seconds), e = bezier(t, 0.3, 0.7, 0.2, 1), u = 1 - e
-      self.placeTip(CGPoint(x: u * u * from.x + 2 * u * e * mid.x + e * e * target.x, y: u * u * from.y + 2 * u * e * mid.y + e * e * target.y))
+      let t: Double = min(1, Date().timeIntervalSince(start) / seconds)
+      let e = CGFloat(bezier(t, 0.3, 0.7, 0.2, 1)), u: CGFloat = 1 - e
+      let a: CGFloat = u * u, b: CGFloat = 2 * u * e, c: CGFloat = e * e
+      let x: CGFloat = a * from.x + b * mid.x + c * target.x
+      let y: CGFloat = a * from.y + b * mid.y + c * target.y
+      self.placeTip(CGPoint(x: x, y: y))
       if t >= 1 { timer.invalidate(); landed = true }
     }
     RunLoop.current.add(timer, forMode: .common); glideTimer = timer
