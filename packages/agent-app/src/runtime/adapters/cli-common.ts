@@ -83,8 +83,14 @@ export interface TurnApi {
   answer(): string;
 }
 
+/** #157: a prompt this long goes to the CLI on stdin instead of argv (one argument is capped near 128 KB on Linux and 32 KB on Windows). Only for a CLI whose own docs say it reads stdin; the others keep argv. */
+export const ARGV_PROMPT_MAX_BYTES = 24_000;
+export const fitsArgv = (body: string): boolean => Buffer.byteLength(body) <= ARGV_PROMPT_MAX_BYTES;
+
 export interface CliTurnSpec {
   label: string; binary: string; args: string[]; env: NodeJS.ProcessEnv; spawn?: AgentSpawn; killGraceMs?: number;
+  /** The prompt, when it did not fit in argv: written to the CLI's stdin before it is closed. */
+  stdin?: string;
   onEvent(event: Record<string, unknown>, api: TurnApi): void;
   /** Called when the process closes, for items still open. */
   onClose?(api: TurnApi): void;
@@ -129,7 +135,7 @@ export function runJsonLinesTurn(spec: CliTurnSpec, input: AdapterRunInput): Pro
       const reason = failure || (verdict && !verdict.ok ? verdict.message : '') || stderr.trim().split('\n').slice(-3).join(' ') || `${spec.label} exited with code ${code}.`;
       finish({status: 'failed', finalMessage: '', dispatchState: accepted ? 'dispatched' : 'not-dispatched', ...identity, errorMessage: stripAnsi(reason).replace(/[\x00-\x1f]+/g, ' ').slice(0, 400)});
     });
-    child.stdin?.on('error', () => {}); child.stdin?.end();
+    child.stdin?.on('error', () => {}); child.stdin?.end(spec.stdin);
   });
 }
 
