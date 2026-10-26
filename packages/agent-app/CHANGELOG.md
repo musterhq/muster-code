@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - Claude chats on your own router that continue an older conversation no longer fail with "replay state expired or is unavailable". When the router has dropped the earlier conversation, Muster says so, starts a fresh one with a summary of the earlier messages and sends your message once more.
+- Notification toasts now stack in the bottom-right corner of the window, just above the status row, instead of the top-right where they sat over your messages. They stay clear of the message box and the chat summary card; in a narrow window they lift above the message box, and with the right pane open they stay in the window corner and follow the status row when it moves.
 
 ## 0.3.14
 

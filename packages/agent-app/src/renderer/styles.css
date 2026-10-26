@@ -593,30 +593,25 @@ textarea:focus-visible {
 
 .notices {
   position: fixed;
-  top: 52px;
   right: 16px;
+  bottom: 16px;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
-  width: min(380px, calc(100vw - 32px));
+  width: calc(min(380px, 100vw - 32px) + 28px);
+  max-height: calc(100vh - 68px);
   z-index: 30;
   pointer-events: none;
-}
-/* The stack keeps its corner (16px in, up to 380px wide) unless the chat summary card (anchor
-   --chat-summary, summary-card.css) reaches into it: then it ends 10px left of the card, following
-   the card as the right pane opens, resizes or the card folds. The --notice-shift-* flags are 1 when
-   the card reaches in, else 0. A hidden or absent card resolves the anchor() fallbacks to a card far
-   outside the window. In left, anchor() is measured from the window's left edge; in right, from its
-   right edge. Without anchor positioning or sign() the corner placement above applies. */
-@supports (anchor-name: --a) and (width: calc(1px * sign(1px))) {
-  .notices {
-    width: auto;
-    --notice-shift-left: clamp(0, sign(anchor(--chat-summary right, -100000px) - (100vw - 396px)), 1);
-    --notice-shift-right: clamp(0, sign(396px - anchor(--chat-summary right, 100000px)), 1);
-    left: max(16px, calc(100vw - 396px - var(--notice-shift-left) * (100vw - 6px - anchor(--chat-summary left, 0px))));
-    right: calc(16px + var(--notice-shift-right) * (anchor(--chat-summary left, 0px) - 6px));
-  }
+  /* The stack sits in the window's bottom-right corner (#627). useNoticePlacement (noticePlacement.ts) sets `bottom`
+     so the lowest toast ends 8px above the status row (lifted above the composer when it reaches under the corner)
+     and `max-height` so the stack stops 8px below the summary card; the values here apply until it is measured.
+     A tall stack scrolls inside that room. The padding keeps the toasts' shadows inside the scroll clip and the
+     negative margins hand it back, so the toasts themselves sit 16px from the right edge and at `bottom`. */
+  overflow-y: auto;
+  padding: 6px 14px 18px;
+  margin: 0 -14px -18px 0;
+  scrollbar-width: none;
 }
 .notice {
   display: flex;
@@ -646,7 +641,7 @@ textarea:focus-visible {
 @media (prefers-reduced-motion: no-preference) {
   .notice { animation: notice-in 160ms cubic-bezier(.2,.75,.25,1) both; }
 }
-@keyframes notice-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes notice-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* App preferences that override the OS (html data attributes set from Settings). */
