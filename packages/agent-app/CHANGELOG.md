@@ -5,6 +5,9 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- A task with a very long thread (thousands of messages) now still wakes its agent: the agent gets the newest messages and a count of the older ones, and the task activity shows how big the packet was. A long prompt now goes to Gemini through standard input instead of the command line. If a task fails to start with the same error three times in a row, it stops retrying and one Problem appears in the Inbox until you resolve it.
+- Sub-agents are now named after what they were asked to do ("Count the lines in data/lines.txt") instead of the first words of their prompt, so three agents started in the same folder no longer show three identical rows. Names are unique within a chat, and the Subagents panel counts finished agents as completed.
+- If Muster fails part-way through starting, or wakes from sleep after shutting down, the automations scheduler no longer runs against a closed database.
 - The agent's rule about not stopping processes it did not start now applies to local processes only. Remote hosts, systemd or launchd services, and anything you explicitly ask it to stop or restart are no longer refused.
 - In Full access the agent no longer ends a turn asking whether to push, commit, install or continue; it just does it.
 - Chats on API-key routes only ask before irreversibly deleting user data, not before push, install or restart.
@@ -39,6 +42,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Agent mode no longer ends a turn with a promise like "I'll report back when the build finishes": the agent is told to wait for the work inside the turn, and a run that ends on such a promise is no longer counted as completed.
 - In Agent mode with Full access, the agent can start a long build, test run or deploy as a background process of the chat (shown in Commands as the agent's). If it is still running when the turn ends, its exit sends the chat one follow-up (exit code and the last 40 lines of output) through the message queue, so the agent picks up where it left off.
 - Configured Responses routers no longer reconnect and fail when a completed response omits cache or reasoning usage counters. Existing counts, authentication, and chat history are preserved; truncated streams still report a failure.
+- Imported chats keep the model and provider their own session ran (for example a Codex session on GPT, or a Claude Code session on Claude). The note at the top of the chat names them as read-only text, and the Ledger attributes the imported turns to that model instead of the app default.
 - The Linux app's terminal works again on Ubuntu 24.04. Linux builds are made on Ubuntu 24.04, so the terminal module runs there and on newer releases.
 - Claude Code chats in Workspace access can now run shell commands and other tools Claude Code does not allow on its own: Muster shows the usual approval card and passes your answer back. A background sub-agent is no longer marked interrupted 30 minutes after its turn ends; it runs until it reports back, and Stop ends it.
 - Long replies stay smooth while they stream: the message box and every link in the transcript no longer redraw on each new word
