@@ -3,6 +3,10 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Switching a chat to a model on another provider or account no longer loses the conversation. The first message on the new model now carries a summary of the earlier messages, as forks and compaction already do, and the chat says so.
+
 ## 0.3.15
 
 Claude chats on your own router recover on their own when an older conversation can no longer be continued, and notification toasts move to the bottom-right corner, clear of your messages.
