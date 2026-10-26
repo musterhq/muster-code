@@ -6,15 +6,15 @@ import {useStore} from '../../useStore';
 import {resetModelPolicy, setModelContextWindow, setModelHidden, setModelPricing, useModelPolicy} from '../../modelPolicy';
 import './models-panel.css';
 
-const priceText = (pricing: PricingInput) => `${formatUsd(pricing.inputPerMTok)} in · ${formatUsd(pricing.outputPerMTok)} out${pricing.cachedInputPerMTok !== undefined ? ` · ${formatUsd(pricing.cachedInputPerMTok)} cached` : ''} per 1M tokens`;
+const priceText = (pricing: PricingInput) => `${formatUsd(pricing.inputPerMTok)} in · ${formatUsd(pricing.outputPerMTok)} out${pricing.cachedInputPerMTok !== undefined ? ` · ${formatUsd(pricing.cachedInputPerMTok)} cached` : ''}${pricing.cacheWritePerMTok !== undefined ? ` · ${formatUsd(pricing.cacheWritePerMTok)} cache write` : ''} per 1M tokens`;
 
 function PriceEditor({label, initial, onSave, onCancel}: {label: string; initial?: PricingInput; onSave: (value: PricingInput) => Promise<void>; onCancel: () => void}): React.ReactElement {
-  const [input, setInput] = useState(initial ? String(initial.inputPerMTok) : ''), [output, setOutput] = useState(initial ? String(initial.outputPerMTok) : ''), [cached, setCached] = useState(initial?.cachedInputPerMTok !== undefined ? String(initial.cachedInputPerMTok) : '');
+  const [input, setInput] = useState(initial ? String(initial.inputPerMTok) : ''), [output, setOutput] = useState(initial ? String(initial.outputPerMTok) : ''), [cached, setCached] = useState(initial?.cachedInputPerMTok !== undefined ? String(initial.cachedInputPerMTok) : ''), [cacheWrite, setCacheWrite] = useState(initial?.cacheWritePerMTok !== undefined ? String(initial.cacheWritePerMTok) : '');
   const [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const save = async () => {
     const parse = (text: string) => text.trim() === '' ? NaN : Number(text);
     setBusy(true); setError('');
-    try { await onSave({inputPerMTok: parse(input), outputPerMTok: parse(output), ...(cached.trim() ? {cachedInputPerMTok: parse(cached)} : {})}); }
+    try { await onSave({inputPerMTok: parse(input), outputPerMTok: parse(output), ...(cached.trim() ? {cachedInputPerMTok: parse(cached)} : {}), ...(cacheWrite.trim() ? {cacheWritePerMTok: parse(cacheWrite)} : {})}); }
     catch (cause) { setError(cause instanceof Error ? cause.message.replace(/^.*?: /, '') : String(cause)); }
     finally { setBusy(false); }
   };
@@ -22,6 +22,7 @@ function PriceEditor({label, initial, onSave, onCancel}: {label: string; initial
     <label>Input $/1M<input inputMode="decimal" value={input} onChange={event => setInput(event.target.value)} autoFocus /></label>
     <label>Output $/1M<input inputMode="decimal" value={output} onChange={event => setOutput(event.target.value)} /></label>
     <label>Cached input $/1M<input inputMode="decimal" placeholder="Same as input" value={cached} onChange={event => setCached(event.target.value)} /></label>
+    <label>Cache write $/1M<input inputMode="decimal" placeholder="Claude: 1.25× input · others: same as input" value={cacheWrite} onChange={event => setCacheWrite(event.target.value)} /></label>
     <span className="models-price-actions"><button type="submit" className="settings-button" disabled={busy}>Save price</button><button type="button" className="settings-button secondary" onClick={onCancel}>Cancel</button></span>
     {error && <p className="models-error" role="alert">{error}</p>}
   </form>;

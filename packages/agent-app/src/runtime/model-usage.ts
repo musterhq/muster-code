@@ -17,15 +17,19 @@ export function usageTotals(raw: unknown): Omit<UsageTotals, 'requests'> | null 
   if (!usage) return null;
   const input = tokenCount(usage.inputTokens ?? usage.input_tokens), output = tokenCount(usage.outputTokens ?? usage.output_tokens);
   if (input === null && output === null) return null;
-  const cached = tokenCount(usage.cachedInputTokens ?? usage.cached_input_tokens) ?? 0, reasoning = tokenCount(usage.reasoningOutputTokens ?? usage.reasoning_output_tokens) ?? 0;
-  return { inputTokens: input ?? 0, cachedInputTokens: Math.min(cached, input ?? 0), outputTokens: output ?? 0, reasoningOutputTokens: Math.min(reasoning, output ?? 0) };
+  const cached = Math.min(tokenCount(usage.cachedInputTokens ?? usage.cached_input_tokens) ?? 0, input ?? 0), reasoning = tokenCount(usage.reasoningOutputTokens ?? usage.reasoning_output_tokens) ?? 0;
+  const written = Math.min(tokenCount(usage.cacheWriteTokens ?? usage.cache_write_tokens) ?? 0, (input ?? 0) - cached);
+  return { inputTokens: input ?? 0, cachedInputTokens: cached, cacheWriteTokens: written, outputTokens: output ?? 0, reasoningOutputTokens: Math.min(reasoning, output ?? 0) };
 }
 export interface UsageCursor { threadId: string | null; total: Omit<UsageTotals, 'requests'> }
-export interface UsageStep { delta: UsageTotals; cursor: UsageCursor }
-const minus = (a: Omit<UsageTotals, 'requests'>, b: Omit<UsageTotals, 'requests'>) => ({ inputTokens: a.inputTokens - b.inputTokens, cachedInputTokens: Math.max(0, a.cachedInputTokens - b.cachedInputTokens), outputTokens: a.outputTokens - b.outputTokens, reasoningOutputTokens: Math.max(0, a.reasoningOutputTokens - b.reasoningOutputTokens) });
+/** `partial`: the provider reported this request's usage before its final count arrived, so the delta may be low. */
+export interface UsageStep { delta: UsageTotals; cursor: UsageCursor; partial?: true }
+const minus = (a: Omit<UsageTotals, 'requests'>, b: Omit<UsageTotals, 'requests'>) => ({ inputTokens: a.inputTokens - b.inputTokens, cachedInputTokens: Math.max(0, a.cachedInputTokens - b.cachedInputTokens), cacheWriteTokens: Math.max(0, a.cacheWriteTokens - b.cacheWriteTokens), outputTokens: a.outputTokens - b.outputTokens, reasoningOutputTokens: Math.max(0, a.reasoningOutputTokens - b.reasoningOutputTokens) });
 /** Folds one provider event into a chat's cursor. Null when the event is not a usage report or adds nothing. */
-export function usageStep(cursor: UsageCursor | undefined, method: string, params: unknown, fallbackThreadId?: string | null): UsageStep | null {
+export function usageStep(stored: UsageCursor | undefined, method: string, params: unknown, fallbackThreadId?: string | null): UsageStep | null {
   if (method !== 'thread/tokenUsage/updated') return null;
+  // A cursor saved before cache writes were counted has no `cacheWriteTokens`.
+  const cursor = stored && { ...stored, total: { ...stored.total, cacheWriteTokens: stored.total.cacheWriteTokens ?? 0 } };
   const p = record(params), usage = record(p?.tokenUsage);
   if (!p || !usage) return null;
   const total = usageTotals(usage.total), last = usageTotals(usage.last);
@@ -34,9 +38,9 @@ export function usageStep(cursor: UsageCursor | undefined, method: string, param
   const sameThread = cursor !== undefined && cursor.threadId === threadId;
   if (total && sameThread && total.inputTokens >= cursor.total.inputTokens && total.outputTokens >= cursor.total.outputTokens) delta = minus(total, cursor.total);
   else delta = last ?? (total && !cursor ? total : null);
-  const nextTotal = total ?? (sameThread && last ? { inputTokens: cursor.total.inputTokens + last.inputTokens, cachedInputTokens: cursor.total.cachedInputTokens + last.cachedInputTokens, outputTokens: cursor.total.outputTokens + last.outputTokens, reasoningOutputTokens: cursor.total.reasoningOutputTokens + last.reasoningOutputTokens } : last);
+  const nextTotal = total ?? (sameThread && last ? { inputTokens: cursor.total.inputTokens + last.inputTokens, cachedInputTokens: cursor.total.cachedInputTokens + last.cachedInputTokens, cacheWriteTokens: cursor.total.cacheWriteTokens + last.cacheWriteTokens, outputTokens: cursor.total.outputTokens + last.outputTokens, reasoningOutputTokens: cursor.total.reasoningOutputTokens + last.reasoningOutputTokens } : last);
   if (!delta || !nextTotal) return null;
   const nextCursor = { threadId, total: nextTotal };
   if (delta.inputTokens + delta.outputTokens <= 0) return { delta: { ...ZERO_USAGE }, cursor: nextCursor };
-  return { delta: { ...delta, requests: 1 }, cursor: nextCursor };
+  return { delta: { ...delta, requests: 1 }, cursor: nextCursor, ...(usage.partial === true ? { partial: true as const } : {}) };
 }
