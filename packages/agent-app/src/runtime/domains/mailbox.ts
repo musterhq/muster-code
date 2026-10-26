@@ -22,6 +22,7 @@ import { MAILBOX_MCP, MailboxToolHost, type MailboxToolRunner } from '../mailbox
 import { textResult } from '../sandbox-agent-tools.ts';
 import type { McpToolResult } from '../sandbox-registry.ts';
 import { canSpawnSubagents } from '../subagent-routes.ts';
+import { effectiveDriver } from '../../shared/provider-lanes.ts';
 import { reportedChildIds } from './subagents.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
@@ -346,7 +347,7 @@ export function createMailbox(ctx: DomainContext, deps: MailboxDeps = {}) {
     const peers = chat.projectId ? ctx.store.projectChats(chat.projectId).filter(peer => peer.id !== chat.id && !peer.archived).slice(0, 20) : [];
     const lines = [unacked.length ? `Unacknowledged mail (${unacked.length}):` : 'No unacknowledged mail.', ...unacked.map(r => describe(r).replace(/\s+/g, ' ').slice(0, 220))];
     if (waiting.length) lines.push('Your open requests:', ...waiting.map(r => `#${r.seq} to ${r.recipient_label ?? r.recipient_id}: ${toMessage(r).reply}${r.reply_by ? `, reply by ${r.reply_by.slice(0, 16)}Z` : ''}`));
-    const driver = ctx.modelCatalog?.().providers.find(provider => provider.id === chat.providerId)?.driver;
+    const driver = effectiveDriver(ctx.modelCatalog?.().providers.find(provider => provider.id === chat.providerId)?.driver, chat);
     const subagents = driver === undefined || canSpawnSubagents(driver);
     lines.push('You can mail: user' + (chat.projectId ? ', project' : '') + (peers.length ? `, ${peers.map(peer => `chat:${peer.id} "${chatLabel(peer)}" (${peer.status})`).join(', ')}` : '') + (subagents ? ', agent:<your subagent thread id>' : '') + (chat.projectId ? ', task:<project task id>' : '') + '.');
     return lines.join('\n');

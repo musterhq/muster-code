@@ -21,6 +21,9 @@ import {unpackedPath} from './unpacked-path.ts';
 import {BROWSER_MCP, BROWSER_NOTE, browserToolStyle, routeBrowserNote} from '../shared/computer-use.ts';
 import {ASK_USER_METHOD, ASK_USER_RULE} from './ask-user.ts';
 import type {McpServerSpec} from './adapters/types.ts';
+import type {RunnableAdapter} from './adapters/types.ts';
+import {CLAUDE_LANE_DRIVER} from '../shared/provider-lanes.ts';
+import {claudeLaneAllowed, LANE_DROPPED_SERVERS, withoutUnavailableToolNotes} from './claude-lane.ts';
 import {SANDBOX_MCP_SERVER} from '../shared/sandbox-routes.ts';
 import {routeSandboxNote} from './sandbox-note.ts';
 
@@ -49,17 +52,18 @@ export interface ProviderInput {
   developerInstructions?: string;
   /** The user's request names a ChatGPT connector; Codex apps stay loaded for this chat from then on. */
   connectorsRequested?: boolean;
-  onThreadReady?(threadId: string): void;
-  onTurnAccepted?(identity: {threadId: string; turnId: string; dispatchState: 'dispatched'}): void;
+  /** `driver` names the lane when the thread was not made by the route's own driver (the Messages lane, #688). */
+  onThreadReady?(threadId: string, driver?: string): void;
+  onTurnAccepted?(identity: {threadId: string; turnId: string; dispatchState: 'dispatched'; driver?: string}): void;
   onDelta(text: string): void;
   onReasoning(text: string): void;
   onEvent(method: string, params: Record<string, unknown>): void;
   onRequest(method: string, params: Record<string, unknown>): Promise<Record<string, unknown> | undefined>;
   /** The saved provider thread could not be resumed and a fresh one starts. Returns text (a digest of the earlier
    *  conversation) to send ahead of this turn's prompt. */
-  onThreadReset?(previousThreadId: string): string | undefined;
+  onThreadReset?(previousThreadId: string, reason?: 'lane'): string | undefined;
 }
-export interface ProviderResult { status: 'completed' | 'failed'; finalMessage: string; threadId?: string; errorMessage?: string; dispatchState?: 'not-dispatched' | 'dispatched' | 'unknown'; turnId?: string; recovery?: ProviderRecovery; threadReset?: boolean; failure?: {kind: 'rpc-rejected' | 'request-timeout' | 'aborted'; method?: string; statusCode?: number; retryAfterMs?: number; requestId?: string} }
+export interface ProviderResult { status: 'completed' | 'failed'; finalMessage: string; threadId?: string; errorMessage?: string; dispatchState?: 'not-dispatched' | 'dispatched' | 'unknown'; turnId?: string; recovery?: ProviderRecovery; threadReset?: boolean; /** The lane that ran the turn when it was not the route's own driver (#688). */ driver?: string; failure?: {kind: 'rpc-rejected' | 'request-timeout' | 'aborted'; method?: string; statusCode?: number; retryAfterMs?: number; requestId?: string} }
 export interface ProviderAdapter {
   run(input: ProviderInput): Promise<ProviderResult>;
   /** True means an owned stop request settled locally; inspect recovery for remote certainty. */
@@ -159,7 +163,8 @@ export function adapterBrowser(driver: string | undefined, mode: Chat['mode'], d
   const style = browserToolStyle(driver), offered = !!developerInstructions?.includes(BROWSER_NOTE);
   const servers = mcpServersFromOverrides(overrides);
   if (style === 'native' || style === 'none') delete servers[BROWSER_MCP];
-  const instructions = runInstructions(mode, routeSandboxNote(routeBrowserNote(developerInstructions, style), driver), subagents, permissionMode);
+  if (driver === CLAUDE_LANE_DRIVER) for (const name of LANE_DROPPED_SERVERS) delete servers[name];
+  const instructions = runInstructions(mode, routeSandboxNote(routeBrowserNote(driver === CLAUDE_LANE_DRIVER ? withoutUnavailableToolNotes(developerInstructions) : developerInstructions, style), driver), subagents, permissionMode);
   return {...(instructions ? {instructions} : {}), ...(Object.keys(servers).length ? {mcpServers: servers} : {}), ...(offered && style === 'native' ? {browserTools: true as const} : {})};
 }
 /** #653: a run carries the muster_sandbox server only while its chat is sandboxed (domains/sandbox.ts adds it). */
@@ -226,7 +231,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     return session.stop;
   };
   /** Claude Code, OpenCode and HTTP routes: one owned local attempt per chat, no app-server session. */
-  async function runAdapter(route: ProviderInstance, input: ProviderInput, resumeThreadId: string | undefined): Promise<ProviderResult> {
+  async function runAdapter(route: ProviderInstance, adapter: RunnableAdapter, input: ProviderInput, resumeThreadId: string | undefined, lane?: {driver: string; seed?: string}): Promise<ProviderResult> {
     const access = beforeDispatch(() => runAccessPolicy(input.chat, input.configOverrides));
     const model = input.chat.model || route.info.models[0]?.id;
     if (!model) throw new ProviderPreDispatchError('The selected provider reports no models.');
@@ -236,12 +241,12 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     const live = () => !owned.controller.signal.aborted && !disposed;
     let activity = false;
     try {
-      const result = await route.adapter!.run({
-        chat: input.chat, cwd: input.cwd, prompt: input.prompt, model, permissionMode: access.permissionMode, signal: owned.controller.signal,
+      const result = await adapter.run({
+        chat: input.chat, cwd: input.cwd, prompt: lane?.seed?.trim() ? `${lane.seed.trim()}\n\nCurrent user request:\n${input.prompt}` : input.prompt, model, permissionMode: access.permissionMode, signal: owned.controller.signal,
         ...(sandboxedRun(input.configOverrides) ? {sandboxed: true} : {}),
         ...(input.images?.length ? {images: input.images} : {}), ...(route.info.models.find(entry => entry.id === model)?.images === true ? {vision: true} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),
         ...(resumeThreadId ? {resumeThreadId} : {}),
-        ...adapterBrowser(route.info.driver, input.chat.mode, input.developerInstructions, input.configOverrides, subagentSupport(route.info.driver) !== 'none', access.permissionMode),
+        ...adapterBrowser(lane?.driver ?? route.info.driver, input.chat.mode, input.developerInstructions, input.configOverrides, subagentSupport(lane?.driver ?? route.info.driver) !== 'none', access.permissionMode),
         ...(Object.keys(envFromOverrides(input.configOverrides)).length ? {env: envFromOverrides(input.configOverrides)} : {}),
         // The adapter runs its own tools (HTTP routes): they meet the same Project tool rules, user-process guard and approval cards as Codex's.
         authorize: async (method, params) => {
@@ -256,8 +261,10 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           const answer = live() ? await input.onRequest(ASK_USER_METHOD, args).catch(() => undefined) : undefined;
           return typeof answer?.text === 'string' ? answer.text : 'The question could not be shown. Continue with your default.';
         },
-        onThreadReady: threadId => { if (live()) input.onThreadReady?.(threadId); },
-        onTurnAccepted: identity => { activity = true; if (live()) input.onTurnAccepted?.({...identity, dispatchState: 'dispatched'}); },
+        onThreadReady: threadId => { if (live()) input.onThreadReady?.(threadId, lane?.driver); },
+        onTurnAccepted: identity => { activity = true; if (live()) input.onTurnAccepted?.({...identity, dispatchState: 'dispatched', ...(lane ? {driver: lane.driver} : {})}); },
+        // A saved conversation this lane cannot find (a restart that lost it, a first turn that failed before saving): the earlier messages go again as a summary.
+        onThreadReset: previousThreadId => live() ? input.onThreadReset?.(previousThreadId) : undefined,
         onDelta: text => { activity = true; if (live()) input.onDelta(text); },
         onReasoning: text => { activity = true; if (live()) input.onReasoning(text); },
         onEvent: (method, params) => { activity = true; if (live()) input.onEvent(method, params); },
@@ -272,7 +279,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         : notDispatched && (result.statusCode === 429 || result.statusCode === 503) ? {kind: 'admission-rejected', retryable: true, reason: `${asSentence(result.errorMessage ?? 'The provider is temporarily unavailable.')} The request was not accepted. Try again later.`}
         : authFailureStatus(result.statusCode, notDispatched ? result.errorMessage : '') ? authRecovery(route.info, authFailureStatus(result.statusCode, notDispatched ? result.errorMessage : '')!, result.errorMessage)
         : {kind: 'failed', retryable: notDispatched, reason: result.errorMessage ? `The provider attempt failed: ${result.errorMessage}` : 'The provider attempt failed.'};
-      return {status: cancelled ? 'failed' : result.status, finalMessage: result.finalMessage, dispatchState: result.dispatchState,
+      return {status: cancelled ? 'failed' : result.status, finalMessage: result.finalMessage, dispatchState: result.dispatchState, ...(lane ? {driver: lane.driver} : {}),
         ...(result.threadId ? {threadId: result.threadId} : {}), ...(result.turnId ? {turnId: result.turnId} : {}),
         ...(recovery ? {recovery, errorMessage: result.errorMessage ?? recovery.reason} : {}),
         ...(result.statusCode ? {failure: {kind: 'rpc-rejected' as const, statusCode: result.statusCode, retryAfterMs: result.retryAfterMs}} : {})};
@@ -283,6 +290,13 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       if (adapterRuns.get(input.chat.id) === owned) adapterRuns.delete(input.chat.id);
       finish();
     }
+  }
+  /** #688: does this turn of a Codex gateway route go over the Messages API? Full access, no tool server only Codex can run,
+   *  and a Claude model (by its id, or by asking the router once for a combo). Anything else keeps the Codex client. */
+  function claudeLaneModel(route: ProviderInstance, input: ProviderInput): string | undefined {
+    const model = input.chat.model || route.info.models[0]?.id;
+    if (!route.claudeLane || route.adapter || !model || input.connectorsRequested) return undefined;
+    try { return claudeLaneAllowed(providerAccessPolicy(input.chat).permissionMode, input.configOverrides) ? model : undefined; } catch { return undefined; }
   }
   return {
     info() { return instances().map(instance=>({...instance.info,available:!disposed&&instance.info.available})); },
@@ -306,17 +320,30 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       if (input.chat.model && !route.info.models.some(model=>model.id===input.chat.model)) throw new ProviderPreDispatchError('This model is unavailable through the selected provider.');
       const bindingId=route.info.bindingId??route.info.id;
       if (input.chat.providerBindingId && input.chat.providerBindingId!==bindingId) throw new ProviderPreDispatchError('The selected provider account or profile changed. Select it again before running.');
+      // #688: this turn runs over the router's Messages API instead of the Codex client (see claude-lane.ts for the rules).
+      const laneModel = claudeLaneModel(route, input);
+      // Only a turn that may use the lane waits (for the router's answer about a combo); every other turn dispatches in the same tick.
+      const useLane = laneModel !== undefined && await route.claudeLane!.isClaude(laneModel);
+      if (laneModel !== undefined) {
+        previous = sessions.get(input.chat.id);
+        if (previous?.active || previous?.stop || adapterRuns.has(input.chat.id)) throw new ProviderPreDispatchError('This chat already owns a provider attempt. Wait for it to settle before continuing.');
+      }
       if (previous && (previous.providerId!==route.info.id || previous.bindingId!==bindingId)) {
         if (busyWithBackground(previous)) throw new ProviderPreDispatchError('Background provider work must finish before switching providers.');
         previous.controller.abort();close(previous);sessions.delete(input.chat.id);previous=undefined;
       }
-      const resumeThread = input.chat.providerThreadProviderId===route.info.id && input.chat.providerThreadBindingId===bindingId ? input.chat.providerThreadId : undefined;
-      if (route.adapter) {
+      const sameThreadRoute = input.chat.providerThreadProviderId===route.info.id && input.chat.providerThreadBindingId===bindingId;
+      // A thread made by the other lane cannot be continued here: the earlier messages go again as a summary (the thread-reset path).
+      const laneMatches = useLane ? input.chat.providerThreadDriver===CLAUDE_LANE_DRIVER : !input.chat.providerThreadDriver;
+      const resumeThread = sameThreadRoute && laneMatches ? input.chat.providerThreadId : undefined;
+      const laneSeed = sameThreadRoute && !laneMatches && input.chat.providerThreadId ? input.onThreadReset?.(input.chat.providerThreadId, 'lane') : undefined;
+      const adapter = route.adapter ?? (useLane ? route.claudeLane!.adapter : undefined);
+      if (adapter) {
         if (previous) {
           if (busyWithBackground(previous)) throw new ProviderPreDispatchError('Background provider work must finish before switching providers.');
           previous.controller.abort();close(previous);sessions.delete(input.chat.id);
         }
-        return runAdapter(route, input, resumeThread);
+        return runAdapter(route, adapter, input, resumeThread, useLane ? {driver: CLAUDE_LANE_DRIVER, ...(laneSeed ? {seed: laneSeed} : {})} : undefined);
       }
       if(previous && input.chat.providerThreadId && !resumeThread) {
         if(busyWithBackground(previous)) throw new ProviderPreDispatchError('Background provider work must finish before replacing a stale continuation.');
@@ -448,7 +475,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         session.reopen = {...launch, ...observers};
         const result=await Promise.race([networkStopped, client().runCodexAppServer({
           ...launch, ...observers,
-          prompt: input.prompt,
+          prompt: laneSeed?.trim() ? `${laneSeed.trim()}\n\nCurrent user request:\n${input.prompt}` : input.prompt,
           ...(input.images?.length ? { images: input.images } : {}),
           ...budgetOptions,
           ...(lifecycleSupported ? {
