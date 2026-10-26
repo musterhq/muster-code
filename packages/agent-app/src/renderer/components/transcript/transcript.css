@@ -22,9 +22,8 @@ button.tx-row:hover .tx-row-icon, .tx-row[aria-expanded='true'] .tx-row-icon { c
 /* Fold line: "Worked for 1m 38s ›" with a hairline rule and the turn's digest. */
 .tx-fold { margin-top: var(--gap-5); }
 .tx-fold::after { content: ""; flex: 1; min-width: var(--gap-6); height: 1px; margin-left: var(--gap-4); background: var(--hairline); }
-.tx-fold .tx-row-trailing { order: 3; margin-left: 0; min-width: 0; overflow: hidden; }
+.tx-fold .tx-row-trailing { order: 3; margin-left: var(--gap-4); min-width: 0; overflow: hidden; }
 .tx-fold-digest { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.tx-fold-digest::before { content: "· "; }
 
 /* Icon stack: each icon overlaps the one before, ringed in the row background so edges stay crisp. */
 .tx-stack { display: inline-flex; flex: none; align-items: center; }
