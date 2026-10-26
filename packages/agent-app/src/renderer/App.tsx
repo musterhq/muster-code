@@ -1,3 +1,4 @@
+import {useNoticePlacement} from './noticePlacement';
 import {transitionLayout} from './layoutMotion';
 import {AlertCircle,ArrowLeft,ArrowRight,Check,CircleCheck,Info,PanelLeft,X} from 'lucide-react';
 import React, { useCallback, useRef,useEffect,useState } from 'react';
@@ -46,6 +47,7 @@ function saveNavWidth():void { try { persistNavWidth(); } catch {} }
 
 export function App(): React.ReactElement {
   const state = useStoreSlice('activeChatId','boot','memoryFolderId','navHidden','navWidth','notices','screen','settings');
+  const noticeStack=useNoticePlacement(state.notices.length);
   const draft = useNewChatDraft();
   const dragging = useRef(false);
   const history=useNavHistory();
@@ -164,7 +166,7 @@ export function App(): React.ReactElement {
       <AreaBoundary area="the right pane" scope="pane"><ResourcePane suspended={state.screen!=='work'} /></AreaBoundary>
       <MenuRename/>
       {state.notices.length > 0 && (
-        <div className="notices" role="log" aria-live="polite" aria-label="Notifications" onPointerEnter={()=>holdNotices(true)} onPointerLeave={()=>holdNotices(false)}>
+        <div ref={noticeStack.ref} style={noticeStack.style} className="notices" role="log" aria-live="polite" aria-label="Notifications" onPointerEnter={()=>holdNotices(true)} onPointerLeave={()=>holdNotices(false)}>
           {state.notices.map((n) => (
             <div key={n.id} className="notice" data-kind={n.kind}>
               <span className="notice-icon" aria-hidden="true">{n.kind==='error'?<AlertCircle size={14}/>:n.kind==='success'?<CircleCheck size={14}/>:<Info size={14}/>}</span>

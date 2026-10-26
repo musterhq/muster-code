@@ -47,7 +47,8 @@ const place=async(width:number,height:number,boxes:Partial<typeof layout>,count=
   const element=stack();assert.ok(element,'the stack is on screen');
   return {bottomEdge:height-px(element.style.bottom),topLimit:height-px(element.style.bottom)-px(element.style.maxHeight),right:element.style.right,left:width-16-Math.min(380,width-32)};
 };
-const css=readFileSync(new URL('../src/renderer/styles.css',import.meta.url),'utf8');
+// The suite runs from dist/tests/ (scripts/test-renderer.mjs bundles it there), so the source tree is two levels up.
+const css=readFileSync(new URL('../../src/renderer/styles.css',import.meta.url),'utf8');
 const base=css.slice(css.indexOf('\n.notices {'));const baseBody=base.slice(base.indexOf('{')+1,base.indexOf('}'));
 
 // Spec: MUS-SPEC-16-1A (docs/spec/clauses/16-notifications-and-attention.md#mus-spec-16-1a)
