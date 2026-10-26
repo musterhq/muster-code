@@ -97,8 +97,8 @@ const dev: UserProcessTarget = {pgid: 4100, label: 'npm run dev', pids: [4101, 4
 async function viaService(t: TestContext, policy: ((method: string, params: Record<string, unknown>) => {effect: 'allow' | 'ask' | 'deny'; message: string} | null) | undefined, requests: Array<[string, Record<string, unknown>]>, mode: 'workspace' | 'full' = 'workspace') {
   const dataDir = await mkdtemp(join(tmpdir(), 'muster-fu037-svc-')); t.after(() => rm(dataDir, {recursive: true, force: true}));
   const answers: unknown[] = []; let finish!: () => void; const done = new Promise<void>(resolve => { finish = resolve; });
-  // The HTTP adapters reach the service exactly like this: authorize(method, {…, itemId, policyOnly: true}) becomes onRequest.
-  const provider: ProviderAdapter = {info, run: async input => { for (const [method, params] of requests) answers.push(await input.onRequest(method, {...params, policyOnly: true})); finish(); return {status: 'completed', finalMessage: 'done'}; }, stop: async () => true, dispose() {}};
+  // The HTTP adapters reach the service exactly like this: authorize(method, {…, itemId}, {policyOnly: true}) becomes onRequest(method, params, options).
+  const provider: ProviderAdapter = {info, run: async input => { for (const [method, params] of requests) answers.push(await input.onRequest(method, params, {policyOnly: true})); finish(); return {status: 'completed', finalMessage: 'done'}; }, stop: async () => true, dispose() {}};
   const domains: DomainFactory[] = policy ? [context => { context.hooks.setToolPolicy?.((_chat, method, params) => policy(method, params)); return {handlers: {}}; }] : [];
   const service = createAgentService({dataDir, provider, onEvent() {}, domains, userProcesses: () => [{pgid: 4100, label: 'npm run dev', chatId: 'x'}], userProcessTargets: async () => [{...dev, chatId: 'x'} as UserProcessTarget]});
   t.after(() => service.dispose());
