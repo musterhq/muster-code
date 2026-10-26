@@ -1,3 +1,6 @@
+/// <reference path="./hindsight-core-entry.d.ts" />
+// The declaration of '#muster-core/hindsight' travels with this file, so a package that reaches it through imports
+// (Muster Server typechecks only its own src) sees it too.
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import type {
