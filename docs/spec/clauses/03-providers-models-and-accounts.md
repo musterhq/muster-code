@@ -51,6 +51,8 @@ Boundaries:
 | [MUS-SPEC-03-716A](03-providers-models-and-accounts.md#mus-spec-03-716a) | A resume refused with "replay state expired or is unavailable" before the turn starts is retried once on a fresh thread: the message reaches the provider twice at most, the retry resumes nothing and starts with a summary of the earlier messages, one notice says a fresh conversation started, and the chat ends completed on the new thread. | [`a resumed router thread whose replay state expired starts one fresh conversation with a summary`](../../../packages/agent-app/tests/replay-expired-716.test.ts) |
 | [MUS-SPEC-03-716B](03-providers-models-and-accounts.md#mus-spec-03-716b) | If the fresh conversation is refused with the same error there is no third attempt and the error is shown through the usual recovery notice. | [`when the fresh conversation is refused with the same 409 there is no third attempt and the error is shown`](../../../packages/agent-app/tests/replay-expired-716.test.ts) |
 | [MUS-SPEC-03-716C](03-providers-models-and-accounts.md#mus-spec-03-716c) | A 409 with other text, or the same text after the turn produced output, does not start a fresh conversation. | [`a 409 with other text, or after the turn produced output, does not start a fresh conversation`](../../../packages/agent-app/tests/replay-expired-716.test.ts) |
+| [MUS-SPEC-03-722A](03-providers-models-and-accounts.md#mus-spec-03-722a) | After the router loses an earlier tool call's replay state, the next message completes on the same thread with the earlier tool output still in the history: one refused request, one accepted retry, no fresh-conversation notice, and the turn after it is not refused. | [`a router that lost an old tool call's replay state does not reset the chat: same thread, full history, no fresh conversation`](../../../packages/agent-app/tests/router-replay-722.test.ts) |
+| [MUS-SPEC-03-722B](03-providers-models-and-accounts.md#mus-spec-03-722b) | Only the replay refusal is retried, and only once; any other 409 reaches the coding client unchanged with its request sent as is. | [`the bridge retries only the replay refusal, only once, and passes every other 409 through unchanged`](../../../packages/agent-app/tests/router-replay-722.test.ts) |
 | [MUS-SPEC-03-724A](03-providers-models-and-accounts.md#mus-spec-03-724a) | The first message on the new provider carries a summary of the earlier conversation ahead of the new text and says so in a notice; later messages continue the new provider conversation without it. | [`switching a chat to a model on another provider keeps the conversation: the first message there carries the earlier one`](../../../packages/agent-app/tests/provider-switch-context-724.test.ts) |
 | [MUS-SPEC-03-724B](03-providers-models-and-accounts.md#mus-spec-03-724b) | The next message continues the same provider thread with no summary added. | [`another model on the same provider account continues the same provider conversation without a summary`](../../../packages/agent-app/tests/provider-switch-context-724.test.ts) |
 
@@ -448,6 +450,30 @@ Boundaries:
 - Expected result: Each message reaches the provider once, no fresh conversation starts and no "fresh conversation" notice appears.
 - Test: `packages/agent-app/tests/replay-expired-716.test.ts::a 409 with other text, or after the turn produced output, does not start a fresh conversation`
 - Environment: Node test runner; the real service and provider adapter with a fake Codex client; no network.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### Claude tool history on a configured router
+
+<a id="mus-spec-03-722a"></a>
+#### MUS-SPEC-03-722A: A chat keeps its thread when the router lost an old tool call's replay state
+
+- Precondition: A chat on a Claude route of a configured Responses router (for example `intelligent-planner`) ran a tool in an earlier turn. The router keeps each tool call's signed thinking itself and has since dropped it (expiry, eviction or restart), so it refuses any request whose history contains that call with HTTP 409 "replay state expired or is unavailable".
+- Action: Send the next message in the chat, through Muster and the real coding client, then one more.
+- Expected result: Both messages complete on the chat's original thread. The router sees one refused request and one accepted retry in which the earlier tool exchange is plain text that still contains its output; the following turn is accepted on its first request. No "fresh conversation" notice appears.
+- Test: `packages/agent-app/tests/router-replay-722.test.ts::a router that lost an old tool call's replay state does not reset the chat: same thread, full history, no fresh conversation`
+- Environment: Node test runner; a local mock router that applies the live router's rule; the real coding client installed (CI sets MUSTER_REQUIRE_CODEX_E2E=1 so the test cannot skip).
+- Known gaps: Skips when the coding client is not installed and MUSTER_REQUIRE_CODEX_E2E is unset. Which ids are stale is remembered for the life of the coding client process; after a restart the first request is refused once more and retried.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-722b"></a>
+#### MUS-SPEC-03-722B: Only the replay refusal is retried, once
+
+- Precondition: The router bridge forwards a request that contains a tool exchange.
+- Action: The router answers a 409 with other text; then it answers the replay refusal to both the request and its retry.
+- Expected result: The other 409 reaches the client with its headers and body, after exactly one request sent unchanged. The replay refusal causes exactly one retry, with the tool exchange as plain messages that keep the output, and the second refusal is passed to the client.
+- Test: `packages/agent-app/tests/router-replay-722.test.ts::the bridge retries only the replay refusal, only once, and passes every other 409 through unchanged`
+- Environment: Node test runner; the bridge against a local fixture server; no network.
 - Known gaps: None known.
 - Evidence: UNVERIFIED
 
