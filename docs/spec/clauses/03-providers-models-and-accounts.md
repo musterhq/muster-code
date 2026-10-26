@@ -53,6 +53,8 @@ Boundaries:
 | [MUS-SPEC-03-716C](03-providers-models-and-accounts.md#mus-spec-03-716c) | A 409 with other text, or the same text after the turn produced output, does not start a fresh conversation. | [`a 409 with other text, or after the turn produced output, does not start a fresh conversation`](../../../packages/agent-app/tests/replay-expired-716.test.ts) |
 | [MUS-SPEC-03-722A](03-providers-models-and-accounts.md#mus-spec-03-722a) | After the router loses an earlier tool call's replay state, the next message completes on the same thread with the earlier tool output still in the history: one refused request, one accepted retry, no fresh-conversation notice, and the turn after it is not refused. | [`a router that lost an old tool call's replay state does not reset the chat: same thread, full history, no fresh conversation`](../../../packages/agent-app/tests/router-replay-722.test.ts) |
 | [MUS-SPEC-03-722B](03-providers-models-and-accounts.md#mus-spec-03-722b) | Only the replay refusal is retried, and only once; any other 409 reaches the coding client unchanged with its request sent as is. | [`the bridge retries only the replay refusal, only once, and passes every other 409 through unchanged`](../../../packages/agent-app/tests/router-replay-722.test.ts) |
+| [MUS-SPEC-03-724A](03-providers-models-and-accounts.md#mus-spec-03-724a) | The first message on the new provider carries a summary of the earlier conversation ahead of the new text and says so in a notice; later messages continue the new provider conversation without it. | [`switching a chat to a model on another provider keeps the conversation: the first message there carries the earlier one`](../../../packages/agent-app/tests/provider-switch-context-724.test.ts) |
+| [MUS-SPEC-03-724B](03-providers-models-and-accounts.md#mus-spec-03-724b) | The next message continues the same provider thread with no summary added. | [`another model on the same provider account continues the same provider conversation without a summary`](../../../packages/agent-app/tests/provider-switch-context-724.test.ts) |
 
 ### Configured routers
 
@@ -473,4 +475,28 @@ Boundaries:
 - Test: `packages/agent-app/tests/router-replay-722.test.ts::the bridge retries only the replay refusal, only once, and passes every other 409 through unchanged`
 - Environment: Node test runner; the bridge against a local fixture server; no network.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### Changing a chat's model
+
+<a id="mus-spec-03-724a"></a>
+#### MUS-SPEC-03-724A: A switch to another provider keeps the conversation
+
+- Precondition: A chat has exchanged messages on one provider account (for example a Codex sign-in model).
+- Action: Pick a model on a different provider or account (for example a router model) and send a message; then send one more.
+- Expected result: The first message on the new provider carries a summary of the earlier conversation ahead of the new text, and the chat says so in one notice. The next message continues the new provider's conversation with only its own text.
+- Test: `packages/agent-app/tests/provider-switch-context-724.test.ts::switching a chat to a model on another provider keeps the conversation: the first message there carries the earlier one`
+- Environment: Node test runner; the real service with a fake provider adapter that keeps its own conversations per provider; no network.
+- Known gaps: The summary is bounded (first request, recent messages, last reply, recent activity and workspace state), not the full transcript.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-724b"></a>
+#### MUS-SPEC-03-724B: Another model on the same account continues the thread
+
+- Precondition: A chat has exchanged messages on one provider account.
+- Action: Pick another model on the same account and send a message.
+- Expected result: The message continues the same provider thread, with no summary added (the provider still holds the conversation).
+- Test: `packages/agent-app/tests/provider-switch-context-724.test.ts::another model on the same provider account continues the same provider conversation without a summary`
+- Environment: Node test runner; the real service with a fake provider adapter; no network.
+- Known gaps: Guard for existing behaviour, so it passes on main by design; it keeps the fix from adding a summary where none is needed.
 - Evidence: UNVERIFIED
