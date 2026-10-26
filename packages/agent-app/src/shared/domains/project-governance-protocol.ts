@@ -174,7 +174,7 @@ export type MonitorPolicy = 'wake_owner' | 'create_recovery_task' | 'escalate';
 export const MONITOR_POLICY_LABEL: Record<MonitorPolicy, string> = { wake_owner: 'Wake the owner', create_recovery_task: 'Create a recovery task', escalate: 'Escalate to you' };
 export type MonitorState = 'scheduled' | 'triggered' | 'cleared' | 'escalated';
 export interface TaskMonitor { id: string; projectId: string; taskId: string; key: string; title: string; dueAt: string; policy: MonitorPolicy; attempts: number; maxAttempts: number; note: string; state: MonitorState; createdAt: string; lastFiredAt: string | null }
-export type BreakerKind = 'wake_storm' | 'no_progress' | 'review_loop' | 'budget';
+export type BreakerKind = 'wake_storm' | 'no_progress' | 'review_loop' | 'budget' | 'start_failure';
 export interface BreakerEvent { id: string; projectId: string; kind: BreakerKind; subject: string; summary: string; evidence: string[]; state: 'open' | 'resumed' | 'dismissed'; createdAt: string; memberId: string | null }
 
 // ── Secrets (G23) ────────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ import { notifyError, notifySuccess, retryTimeline } from '../store';
 import { useStoreSlice } from '../useStore';
 import { invoke } from '../bridge';
 import { copyText } from '../clipboard';
-import { AgentGlyph, agentDisplayName } from '../agentIdentity';
+import { AgentGlyph, agentDisplayNames } from '../agentIdentity';
 import {
   EMPTY_ACTIVITY_ITEMS, childTimelineItems, formatElapsed, getSubagentActivity, phaseCounts, phaseGlyph, selectSubagent, selectedSubagent,
   subagentPhase, subagentState, subscribeSubagentSelection, type SubagentActivity, type SubagentPhaseKind, type SubagentSummary,
@@ -255,8 +255,8 @@ export function SubagentsTab({tab}: {tab:WorkspaceTab}): React.ReactElement {
   const loadable = chatId ? state.timelines[chatId] : undefined;
   const parentItems = loadable?.value ?? EMPTY_ACTIVITY_ITEMS;
   const reported = getSubagentActivity(parentItems).agents;
-  // Never a raw thread id as a name: name, else role, else the task's gist, else "Agent N" (same as the timeline rows).
-  const agents = useMemo(() => reported.map((agent, index) => ({...agent, name: agentDisplayName(agent, index + 1)})), [reported]);
+  // Never a raw thread id as a name: the task it was given, else role, else "Agent N" plus the first distinctive words; unique within the chat.
+  const agents = useMemo(() => { const names = agentDisplayNames(reported); return reported.map(agent => ({...agent, name: names.get(agent.id)!})); }, [reported]);
   const loading = !!chatId && (!loadable || loadable.phase === 'idle' || loadable.phase === 'loading');
   const selectedId = useSyncExternalStore(subscribeSubagentSelection, () => chatId ? selectedSubagent(chatId) : null);
   const selected = selectedId ? agents.find(agent => agent.id === selectedId) : undefined;
@@ -270,7 +270,7 @@ export function SubagentsTab({tab}: {tab:WorkspaceTab}): React.ReactElement {
       <span className="subagents-count" aria-label={`${agents.length} subagents`}>{agents.length}</span>
     </header>
     {agents.length > 0 && <div className="subagent-counts" role="group" aria-label="Subagent states">
-      <span>{counts.running} running</span>{counts.waiting > 0 && <span>{counts.waiting} waiting</span>}<span>{counts.completed} completed</span><span>{counts.verified} reported back</span>
+      <span>{counts.running} running</span>{counts.waiting > 0 && <span>{counts.waiting} waiting</span>}<span>{counts.completed + counts.verified} completed</span>
       {counts.failed > 0 && <span className="is-failed">{counts.failed} failed or stopped</span>}
       {counts.unknown > 0 && <span>{counts.unknown} not reported</span>}
     </div>}
