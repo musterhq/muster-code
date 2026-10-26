@@ -125,7 +125,10 @@ async function body() {
   await until(() => host.querySelector('mark[data-current="true"]')?.closest('tr')?.getAttribute('data-line') === '21184');
   await new Promise(resolve => setTimeout(resolve, 60));
   observer.disconnect();
-  assert(longTasks.length === 0, `load/scroll/search/selection must have no >50ms tasks: ${longTasks}`);
+  // #707: shared CI runners stretch single tasks to 51–127 ms under load, while drawing the whole table took 286 ms on a fast
+  // Mac (over 600 ms on a runner). A 200 ms budget per task still catches that regression without failing on runner noise.
+  const LONG_TASK_BUDGET_MS = 200;
+  assert(longTasks.every(duration => duration < LONG_TASK_BUDGET_MS), `load/scroll/search/selection must have no task over ${LONG_TASK_BUDGET_MS}ms: ${longTasks}`);
   root.unmount();
   // The horizontal scroll range must not follow whichever rows are mounted: a long line near the top
   // keeps its scroll position while short lines further down are on screen.

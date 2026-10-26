@@ -31,6 +31,7 @@ Boundaries:
 | [MUS-SPEC-17-179B](17-usage-cost-and-ledger.md#mus-spec-17-179b) | After the whole chain is rewritten with valid hashes, the chain check fails because the head no longer matches the saved head. | [`a fully rewritten chain is reported by verify`](../../../packages/agent-app/tests/turn-ledger-anchor-179.test.ts) |
 | [MUS-SPEC-17-179C](17-usage-cost-and-ledger.md#mus-spec-17-179c) | A ledger written before the saved head existed adopts its current head, then reports a later truncation; a new receipt does not hide an earlier truncation. | [`an older ledger adopts its head and a later receipt cannot hide a truncation`](../../../packages/agent-app/tests/turn-ledger-anchor-179.test.ts) |
 | [MUS-SPEC-17-179D](17-usage-cost-and-ledger.md#mus-spec-17-179d) | A receipt whose save fails partway leaves nothing half-written: the check still passes and the next receipt chains on. | [`a receipt that fails to save leaves the ledger passing`](../../../packages/agent-app/tests/turn-ledger-anchor-179.test.ts) |
+| [MUS-SPEC-17-95A](17-usage-cost-and-ledger.md#mus-spec-17-95a) | Ledger history for an imported chat names the session's model and provider, not the app default. | [`ledger history attributes imported turns to the session model and provider`](../../../packages/agent-app/tests/conversation-import.test.ts) |
 
 ### Files in a Receipt
 
@@ -205,4 +206,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/turn-ledger-anchor-179.test.ts::a receipt that fails to save leaves the ledger passing`
 - Environment: Node with `node:sqlite`, in-memory database.
 - Known gaps: a real power loss is simulated by a database trigger that fails the update, not by killing the process.
+- Evidence: UNVERIFIED
+
+### Imported chats in the ledger
+
+<a id="mus-spec-17-95a"></a>
+#### MUS-SPEC-17-95A: Imported turns are attributed to the model that ran them
+
+- Precondition: A Codex session that ran `gpt-6-codex` on `openai` is imported into a chat that holds the app's default model.
+- Action: Build the ledger history.
+- Expected result: Every history entry for the imported turns has model `gpt-6-codex` and provider `openai`.
+- Test: `packages/agent-app/tests/conversation-import.test.ts::ledger history attributes imported turns to the session model and provider`
+- Environment: Node test runner; the agent service with a fake provider; fixture sessions in a temp folder.
+- Known gaps: Turns sent in Muster after the import keep the chat's own model; that is not shown here. Imported turns carry no token counts.
 - Evidence: UNVERIFIED
