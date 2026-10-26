@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import type { DatabaseSync } from 'node:sqlite';
 import type { LedgerEntry, LedgerFile } from '../shared/domains/paperclip-protocol.ts';
-import { effectivePricing, estimateCostUsd, ZERO_USAGE, type ModelPricing, type UsageTotals } from '../shared/model-catalog.ts';
+import { addUsage, assumesCacheWriteRate, effectivePricing, estimateCostUsd, ZERO_USAGE, type ModelPricing, type UsageTotals } from '../shared/model-catalog.ts';
 import { usageStep, type UsageCursor } from './model-usage.ts';
 import { ReviewBaselineStore, snapshotTree } from './review-baseline.ts';
 import type { DomainContext } from './domains/types.ts';
@@ -168,7 +168,7 @@ export async function filesChanged(cwd: string, beforeTree: string | null, head?
 export const APPROVAL_SHOWN_EVENT = 'muster/approval/shown';
 export const TOOL_TYPES = new Set(['commandExecution', 'mcpToolCall', 'dynamicToolCall', 'fileChange', 'webSearch', 'imageView']);
 const MAX_OPEN_RUNS = 1000;
-interface Open { chatId: string; startedAt: number; cwd: string; /** HEAD when the turn started, read without blocking the start (#387). */ head: Promise<string | null>; usage: UsageTotals; cursor?: UsageCursor; tools: Map<string, number>; approvals: number; tests: number }
+interface Open { chatId: string; startedAt: number; cwd: string; /** HEAD when the turn started, read without blocking the start (#387). */ head: Promise<string | null>; usage: UsageTotals; /** A message's usage arrived before its final count (#663). */ partial?: true; cursor?: UsageCursor; tools: Map<string, number>; approvals: number; tests: number }
 /** How a tool shows in a Receipt: `server/tool` for MCP, `shell` for commands, else the item type. */
 export const toolName = (type: string, server: unknown, tool: unknown) => type === 'mcpToolCall' ? `${server ?? 'mcp'}/${tool ?? 'tool'}` : type === 'commandExecution' ? 'shell' : type;
 export const TEST_COMMAND = /\b(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|\bpytest\b|\bgo\s+test\b|\bcargo\s+test\b|\bnode\s+--test\b|\bvitest\b|\bjest\b|\bmake\s+test\b/;
@@ -200,7 +200,7 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
     const runId = byChat.get(event.chat.id), turn = runId ? open.get(runId) : undefined;
     if (!turn) return;
     const step = usageStep(turn.cursor, event.method, event.params);
-    if (step) { turn.cursor = step.cursor; turn.usage = { inputTokens: turn.usage.inputTokens + step.delta.inputTokens, cachedInputTokens: turn.usage.cachedInputTokens + step.delta.cachedInputTokens, outputTokens: turn.usage.outputTokens + step.delta.outputTokens, reasoningOutputTokens: turn.usage.reasoningOutputTokens + step.delta.reasoningOutputTokens, requests: turn.usage.requests + step.delta.requests }; return; }
+    if (step) { turn.cursor = step.cursor; turn.usage = addUsage(turn.usage, step.delta); if (step.partial) turn.partial = true; return; }
     if (event.method === APPROVAL_SHOWN_EVENT) { turn.approvals++; return; }
     if (event.method === 'item/started') {
       const item = (event.params.item ?? {}) as Record<string, unknown>, type = typeof item.type === 'string' ? item.type : '';
@@ -238,8 +238,8 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
       const entry = ledger().append({
         id: `${run.chat.id}:${run.runId}`, chatId: run.chat.id, runId: run.runId, taskId: owner?.taskId ?? null, projectId: run.chat.projectId ?? null,
         trigger: owner ? 'task' : run.chat.projectId ? 'project chat' : 'chat', agent: owner?.agent || run.chat.title || 'Agent', provider: run.chat.providerId ?? null, model: run.chat.model ?? null,
-        tokens: { input: turn.usage.inputTokens, cached: turn.usage.cachedInputTokens, output: turn.usage.outputTokens, reasoning: turn.usage.reasoningOutputTokens },
-        costUsd: estimateCostUsd(turn.usage, pricing), tools: [...turn.tools].map(([name, count]) => ({ name, count })), approvals: turn.approvals, tests: turn.tests,
+        tokens: { input: turn.usage.inputTokens, cached: turn.usage.cachedInputTokens, output: turn.usage.outputTokens, reasoning: turn.usage.reasoningOutputTokens, ...(turn.usage.cacheWriteTokens ? { cacheWrite: turn.usage.cacheWriteTokens } : {}) },
+        costUsd: estimateCostUsd(turn.usage, pricing), ...(turn.partial || assumesCacheWriteRate(turn.usage, pricing) ? { estimated: true as const } : {}), tools: [...turn.tools].map(([name, count]) => ({ name, count })), approvals: turn.approvals, tests: turn.tests,
         files, startedAt: new Date(turn.startedAt).toISOString(), endedAt, durationMs: Date.now() - turn.startedAt, outcome: run.status,
       });
       onAppend?.(entry);

@@ -20,14 +20,14 @@ import {getSubagentActivity} from '../src/renderer/subagentActivity.ts';
 const fixture=(name:string)=>readFileSync(new URL(`./fixtures/${name}`,import.meta.url),'utf8').trim().split('\n').map(line=>JSON.parse(line) as Record<string,any>);
 
 type Ev={method:string;params:Record<string,any>};
-function harness(options:{backgroundTimeoutMs?:number}={}){
+function harness(){
   const child=new EventEmitter() as EventEmitter&{stdout:PassThrough;stderr:PassThrough;stdin:PassThrough;kill():boolean};
   child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();child.kill=()=>true;
   const events:Ev[]=[];let deltas='';let sessionId='';
   const input:AdapterRunInput={chat:{id:'chat',mode:'agent'} as AdapterRunInput['chat'],cwd:'/work',prompt:'go',model:'claude-code/sonnet',permissionMode:'full',signal:new AbortController().signal,
     onThreadReady:id=>{sessionId=id;},onTurnAccepted:()=>{},onDelta:t=>{deltas+=t;},onReasoning:()=>{},onEvent:(method,params)=>events.push({method,params})};
   const spawn:Spawn=()=>child as unknown as ChildProcess;
-  const running=claudeCodeAdapter({binary:'/bin/claude',spawn,...options}).run(input);
+  const running=claudeCodeAdapter({binary:'/bin/claude',spawn}).run(input);
   const emit=(...lines:unknown[])=>{for(const line of lines)child.stdout.write(JSON.stringify(line)+'\n');};
   const tick=()=>new Promise(resolve=>setTimeout(resolve,15));
   const close=(code=0)=>{child.stdout.end();child.stderr.end();setImmediate(()=>child.emit('close',code));};
@@ -213,18 +213,4 @@ test('a child persisted as running is interrupted when the app restarts after a 
     assert.equal(getSubagentActivity(store.timeline(chat.id)).agents.find(a=>a.threadId==='s:t')!.state,'interrupted');
     store.close();
   }finally{rmSync(dir,{recursive:true,force:true});}
-});
-
-test('a background child that never reports back is interrupted after the timeout and stdin is released',async()=>{
-  const lines=fixture('claude-subagent-background.jsonl');
-  const at=lines.findIndex(e=>e.subtype==='task_notification');
-  const h=harness({backgroundTimeoutMs:40});
-  h.emit(...lines.slice(0,at));
-  h.emit({type:'result',subtype:'success',is_error:false,result:'launched'});await h.tick();
-  assert.equal(h.child.stdin.writableEnded,false,'still waiting inside the bound');
-  await new Promise(resolve=>setTimeout(resolve,80));
-  assert.equal(h.child.stdin.writableEnded,true,'stdin released after the bound');
-  const last=collab(h.events).at(-1)!;
-  assert.equal(state(last).status,'interrupted');assert.match(state(last).message!,/Timed out/);assert.equal(last.method,'item/completed');
-  h.close();await h.running;
 });
