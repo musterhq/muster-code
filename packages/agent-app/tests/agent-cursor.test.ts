@@ -79,7 +79,7 @@ before(async () => {
   const pages = await (await fetch(`http://127.0.0.1:${new URL(endpoint).port}/json/list`)).json() as {type: string; webSocketDebuggerUrl: string}[];
   socket = new WebSocket(pages.find(page => page.type === 'page')!.webSocketDebuggerUrl);
   await new Promise(resolve => socket!.addEventListener('open', resolve, {once: true}));
-  socket.addEventListener('message', event => { const message = JSON.parse(String(event.data)); if (typeof message.id === 'number') { pending.get(message.id)?.(message); pending.delete(message.id); } });
+  socket.addEventListener('message', event => { const message = JSON.parse(String(event.data)); const reply = typeof message.id === 'number' && pending.has(message.id) ? pending.get(message.id) : undefined; if (typeof reply === 'function') { pending.delete(message.id); reply(message); } });
   await cdp('Page.enable');
 });
 after(async () => {
