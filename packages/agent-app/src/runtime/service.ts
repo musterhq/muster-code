@@ -914,7 +914,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               }
             }
           },
-          async onRequest(method, params) {
+          async onRequest(method, params, options) {
             // After this turn ended, the warm app-server still asks for approvals: background sub-agents (the provider
             // still reports active work) or a native goal continuation or queued turn (adopted as the chat's run). They
             // get a card like any other request. A stopped run, or a late callback with no work behind it, declines.
@@ -1003,8 +1003,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               return {decision: 'decline'};
             }
             if (toolPolicy?.effect === 'allow' && !threat) return {decision: 'accept'};
-            // policyOnly: an adapter that runs its own tools (HTTP routes) only wants the rules, the guard and a card for a threat or an ask; workspace edits inside the folder do not need a card.
-            if ((access.permissionMode === 'full' || params.policyOnly === true) && !threat && toolPolicy?.effect !== 'ask') return {decision: 'accept'};
+            // options.policyOnly (set by the adapter, never read from the provider's params): an adapter that runs its own tools (HTTP routes) only wants the rules, the guard and a card for a threat or an ask; workspace edits inside the folder do not need a card.
+            if ((access.permissionMode === 'full' || options?.policyOnly === true) && !threat && toolPolicy?.effect !== 'ask') return {decision: 'accept'};
             const change = typeof params.itemId === 'string' && toolIds.has(params.itemId) ? store.item(toolIds.get(params.itemId)!)?.data?.changes : params.changes;
             const data: ApprovalData = {...approvalData(method, params, change), ...(threat ? {reason: threat.message, protectsUserProcess: true} : {})};
             const toolItemId = typeof params.itemId === 'string' ? toolIds.get(params.itemId) : undefined;

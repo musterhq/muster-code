@@ -79,13 +79,13 @@ test('H3: the command environment is an allowlist without provider keys, tokens 
   }
 });
 test('H4: every command and file change asks `authorize` first; a refusal stops it and leaves a failed row',async t=>{
-  const {ws}=await sandbox(t);const asked:Array<[string,Record<string,unknown>]>=[];
-  const refuse=ctx(ws,'full',{authorize:async(method,params)=>{asked.push([method,params]);return false;}});
+  const {ws}=await sandbox(t);const asked:Array<[string,Record<string,unknown>,{policyOnly?:boolean}|undefined]>=[];
+  const refuse=ctx(ws,'full',{authorize:async(method,params,options)=>{asked.push([method,params,options]);return false;}});
   const shell=await executeTool(call('run_command',{command:'echo ran > ran.txt'},'c1'),refuse);
   const write=await executeTool(call('write_file',{path:'f.txt',content:'x'},'c2'),refuse);
   assert.deepEqual([shell.ok,write.ok],[false,false]);assert.equal(existsSync(join(ws,'ran.txt')),false);assert.equal(existsSync(join(ws,'f.txt')),false);
   assert.deepEqual(asked.map(([method])=>method),['item/commandExecution/requestApproval','item/fileChange/requestApproval']);
-  assert.equal(asked[0]![1].command,'echo ran > ran.txt');assert.equal(asked[0]![1].itemId,'c1');assert.equal(asked[0]![1].policyOnly,true);
+  assert.equal(asked[0]![1].command,'echo ran > ran.txt');assert.equal(asked[0]![1].itemId,'c1');assert.equal('policyOnly' in asked[0]![1],false);assert.deepEqual(asked[0]![2],{policyOnly:true});
   assert.deepEqual((asked[1]![1].changes as Array<{path:string}>).map(change=>change.path),[join(ws,'f.txt')]);
   const allow=ctx(ws,'workspace',{authorize:async()=>true});
   assert.equal((await executeTool(call('write_file',{path:'ok.txt',content:'y'}),allow)).ok,true);
@@ -95,7 +95,7 @@ test('H4: a Project tool rule reaches the HTTP route through the service (deny b
   const {createProviderAdapter}=await import('../src/runtime/provider.ts');
   const {ws}=await sandbox(t);const requests:Array<[string,Record<string,unknown>]>=[];
   let seen:AdapterRunInput|undefined;
-  const adapter={kind:'http' as const,run:async(input:AdapterRunInput)=>{seen=input;const ok=await input.authorize!('item/fileChange/requestApproval',{changes:[{path:join(ws,'.env')}],policyOnly:true});return {status:'completed' as const,finalMessage:String(ok),dispatchState:'dispatched' as const};}};
+  const adapter={kind:'http' as const,run:async(input:AdapterRunInput)=>{seen=input;const ok=await input.authorize!('item/fileChange/requestApproval',{changes:[{path:join(ws,'.env')}]},{policyOnly:true});return {status:'completed' as const,finalMessage:String(ok),dispatchState:'dispatched' as const};}};
   const provider=createProviderAdapter({instances:()=>[{info:{id:'local-x',name:'X',available:true,identityMasked:'x',models:[{id:'m',name:'M'}]},command:'',env:{},sessionsRoot:'',adapter}] as never});
   const noop=()=>{};
   const run=(decision:unknown)=>provider.run({chat:{id:'c',mode:'agent',providerId:'local-x',model:'m',permissionMode:'full'} as never,cwd:ws,prompt:'p',onDelta:noop,onReasoning:noop,onEvent:noop,onRequest:async(method:string,params:Record<string,unknown>)=>{requests.push([method,params]);return decision as never;}} as never);
