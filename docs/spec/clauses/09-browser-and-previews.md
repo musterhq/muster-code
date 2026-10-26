@@ -23,6 +23,10 @@ Boundaries:
 | [MUS-SPEC-09-465C](09-browser-and-previews.md#mus-spec-09-465c) | A lost connection retries read-only browser tools with backoff, never repeats a click, retries a refused connection for any tool, and gives up after three retries. | [`MCP server: connection resets retry read-only tools with backoff but never repeat a click`](../../../packages/agent-app/tests/browser-route-matrix.test.ts) |
 | [MUS-SPEC-09-465D](09-browser-and-previews.md#mus-spec-09-465d) | The idle sweep leaves a tab an agent tool just used awake for three minutes, then freezes it. | [`agent use thaws a hidden page; the sweeper refreezes it once idle`](../../../packages/agent-app/tests/browser-freeze.test.ts) |
 | [MUS-SPEC-09-564A](09-browser-and-previews.md#mus-spec-09-564a) | A download name with a right-to-left override keeps its real .exe extension and holds no direction control characters. | [`a downloaded file name cannot use text-direction controls to disguise its extension`](../../../packages/agent-app/tests/browser-download-name.test.ts) |
+| [MUS-SPEC-09-721A](09-browser-and-previews.md#mus-spec-09-721a) | When an agent clicks a button in a watched tab, an orange cursor glides there first and the click lands under its tip. | [`the agent cursor glides to a button and the press lands under it`](../../../packages/agent-app/tests/agent-cursor.test.ts) |
+| [MUS-SPEC-09-721B](09-browser-and-previews.md#mus-spec-09-721b) | Typing shows a ring around the field; after 1.6 s of quiet the cursor fades out and comes back from the same spot. | [`typing rings the field, and the cursor fades once the agent goes quiet, then returns where it was`](../../../packages/agent-app/tests/agent-cursor.test.ts) |
+| [MUS-SPEC-09-721C](09-browser-and-previews.md#mus-spec-09-721c) | Screenshots the agent takes never include the cursor, and a tab nobody can see gets no cursor at all. | [`the model never sees its own cursor, and a page nobody watches pays nothing`](../../../packages/agent-app/tests/agent-cursor.test.ts) |
+| [MUS-SPEC-09-721D](09-browser-and-previews.md#mus-spec-09-721d) | With Reduce motion on, the cursor moves to each target instantly. | [`with Reduce motion on, the cursor jumps instead of gliding`](../../../packages/agent-app/tests/agent-cursor.test.ts) |
 
 ### Page background
 
@@ -118,4 +122,50 @@ Boundaries:
 - Test: `packages/agent-app/tests/browser-download-name.test.ts::a downloaded file name cannot use text-direction controls to disguise its extension`
 - Environment: Node test runner; no network, no provider.
 - Known gaps: Calls the name function used by the download handler, not a real download in the browser tab.
+- Evidence: UNVERIFIED
+
+### Agent cursor
+
+<a id="mus-spec-09-721a"></a>
+#### MUS-SPEC-09-721A: The agent cursor glides to the control and the press lands under it
+
+- Precondition: An in-app browser tab is open and visible, showing a page with two buttons far apart.
+- Action: The agent clicks the near button, then the far button.
+- Expected result: An orange "Muster" cursor appears at the near button, then glides to the far button in 140–520 ms depending on distance, with a press ring on each click. Both clicks register on the page, and the cursor tip ends at the centre of the far button.
+- Test: `packages/agent-app/tests/agent-cursor.test.ts::the agent cursor glides to a button and the press lands under it`
+- Environment: Node test runner driving a real headless Chrome over the DevTools protocol; skipped locally when Chrome is not installed.
+- Known gaps: Drives the cursor script in a plain Chrome page, not inside the Electron browser pane.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-09-721b"></a>
+#### MUS-SPEC-09-721B: Typing rings the field; the cursor fades when the agent goes quiet
+
+- Precondition: A watched tab shows a text field.
+- Action: The agent types into the field, then does nothing for two seconds, then clicks again.
+- Expected result: A halo ring circles the field while text goes in. After about 1.6 s idle the cursor fades to transparent over about half a second and stops catching anything. The next action brings it back from where it faded.
+- Test: `packages/agent-app/tests/agent-cursor.test.ts::typing rings the field, and the cursor fades once the agent goes quiet, then returns where it was`
+- Environment: Node test runner driving a real headless Chrome over the DevTools protocol; skipped locally when Chrome is not installed.
+- Known gaps: Drives the cursor script in a plain Chrome page, not inside the Electron browser pane.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-09-721c"></a>
+#### MUS-SPEC-09-721C: The model never sees its own cursor, and unwatched pages pay nothing
+
+- Precondition: A watched tab with the cursor showing, and a second tab that is not on screen.
+- Action: The agent takes a screenshot of the watched tab, then clicks in the hidden tab.
+- Expected result: The screenshot has no cursor pixels, and the cursor reappears afterwards. The hidden tab never mounts a cursor element, and its click costs no extra time.
+- Test: `packages/agent-app/tests/agent-cursor.test.ts::the model never sees its own cursor, and a page nobody watches pays nothing`
+- Environment: Node test runner driving a real headless Chrome over the DevTools protocol; skipped locally when Chrome is not installed.
+- Known gaps: Drives the cursor script in a plain Chrome page, not inside the Electron browser pane.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-09-721d"></a>
+#### MUS-SPEC-09-721D: Reduce motion makes the cursor jump instead of glide
+
+- Precondition: The system asks for reduced motion.
+- Action: The agent clicks two buttons far apart.
+- Expected result: The cursor jumps straight to each target with no glide, and the click still lands under it.
+- Test: `packages/agent-app/tests/agent-cursor.test.ts::with Reduce motion on, the cursor jumps instead of gliding`
+- Environment: Node test runner driving a real headless Chrome over the DevTools protocol; skipped locally when Chrome is not installed.
+- Known gaps: Drives the cursor script in a plain Chrome page, not inside the Electron browser pane.
 - Evidence: UNVERIFIED
