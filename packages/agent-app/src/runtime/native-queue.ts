@@ -33,15 +33,23 @@ export function createNativeQueueMirror(host: NativeQueueHost) {
   const thread = (chatId: string) => host.native?.thread(chatId)?.threadId;
   /** Adds run one at a time per chat, so the app-server's order matches Muster's. */
   const chains = new Map<string, Promise<unknown>>();
-
   /** Puts every native row of the chat back under Muster's own dispatch (best-effort native delete). */
   async function unmirrorAll(chatId: string): Promise<void> {
     const rows = queue.nativeRows(chatId), threadId = thread(chatId);
     for (const row of rows) {
       queue.clearNative(row.queueId);
       if (threadId) await host.native?.call(chatId, 'thread/queue/delete', { threadId, queuedSubmissionId: row.submissionId }).catch(() => undefined);
+      else queue.strand(chatId, row.submissionId);
     }
     if (rows.length) host.changed(chatId);
+  }
+  /** Deletes the app-server copies of rows Muster sends itself (taken back with no live session, or left over from a previous
+   *  process: the app-server would send them again when the thread goes idle). Persisted in ChatQueue; run once the session is live. */
+  async function flushStranded(chatId: string): Promise<void> {
+    const ids = queue.stranded(chatId), threadId = thread(chatId);
+    if (!ids.length || !threadId) return;
+    queue.clearStranded(chatId);
+    for (const queuedSubmissionId of ids) await host.native?.call(chatId, 'thread/queue/delete', { threadId, queuedSubmissionId }).catch(() => undefined);
   }
 
   async function mirrorOne(chatId: string, item: QueuedMessage): Promise<boolean> {
@@ -151,5 +159,6 @@ export function createNativeQueueMirror(host: NativeQueueHost) {
       if (dropped) host.changed(chatId);
     },
     unmirrorAll,
+    flushStranded,
   };
 }

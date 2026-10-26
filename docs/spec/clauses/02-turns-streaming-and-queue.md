@@ -68,6 +68,7 @@ Boundaries:
 | [MUS-SPEC-02-608B](02-turns-streaming-and-queue.md#mus-spec-02-608b) | A reconnect that stalls after one failure is stopped when the reconnect time limit passes, with the proxy named. | [`stalled reconnect stops by deadline without further transport events`](../../../packages/agent-app/tests/network-reconnect.test.ts) |
 | [MUS-SPEC-02-608C](02-turns-streaming-and-queue.md#mus-spec-02-608c) | A failed web request to a model gives a plain cause for a proxy, DNS, certificate or refused connection, marks the turn as not sent, and never shows the user name or password in the address. | [`HTTP fetch failures explain nested proxy, DNS, TLS and refused causes without credentials`](../../../packages/agent-app/tests/network-reconnect.test.ts) |
 | [MUS-SPEC-02-608D](02-turns-streaming-and-queue.md#mus-spec-02-608d) | The failure banner for a network error shows Retry even with an empty draft, runs the turn retry once per click with a busy state, and never sends the text in the composer instead. | [`a failed network turn offers Retry, which re-runs the turn and never sends the draft in its place`](../../../packages/agent-app/tests/recovery-notice.tsx) |
+| [MUS-SPEC-02-579A](02-turns-streaming-and-queue.md#mus-spec-02-579a) | After a crash, Continue anyway and then Steer on a queued message send it once; the app-server's saved copy is deleted, so it does not send it again when the thread goes idle. | [`a message queued before a crash is sent once after Continue anyway and Steer`](../../../packages/agent-app/tests/queue-after-crash-579.test.ts) |
 
 ### Tool rows when a turn ends
 
@@ -665,4 +666,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/recovery-notice.tsx::a failed network turn offers Retry, which re-runs the turn and never sends the draft in its place`
 - Environment: DOM suite (`linkedom`), run with `tests/run-recovery-notice.mjs`; the app's calls are faked.
 - Known gaps: The retry handler is a stand-in that counts calls, so the test does not show the turn really starting again. It is not part of `test:renderer`; run it by hand.
+- Evidence: UNVERIFIED
+
+### A queued message after a crash
+
+<a id="mus-spec-02-579a"></a>
+#### MUS-SPEC-02-579A: A message queued during a turn that crashed is sent once after Continue anyway and Steer
+
+- Precondition: A Codex chat has a running turn and one follow-up queued while it ran; the follow-up is held by the app-server's own queue. Muster is killed without closing and relaunched over the same data folder, so the chat shows "May still be running at the provider" with the follow-up still queued.
+- Action: Click Continue anyway, then Steer on the queued message. Then the thread goes idle and the app-server starts whatever it still holds for it.
+- Expected result: The provider receives the queued text exactly once, the transcript has one copy of it, and the queue is empty. The app-server's saved copy was deleted as soon as the session came back, so it is not sent a second time.
+- Test: `packages/agent-app/tests/queue-after-crash-579.test.ts::a message queued before a crash is sent once after Continue anyway and Steer`
+- Environment: Node test runner; the agent service with a fake Codex-style provider that keeps its saved queue across a relaunch and sends it when the thread goes idle; no network.
+- Known gaps: The fake app-server models the real one's queue persistence and idle send from its documented methods, not from a live Codex. A provider that keeps no queue of its own never double-sends, and Continue anyway then Steer on it already sent once.
 - Evidence: UNVERIFIED

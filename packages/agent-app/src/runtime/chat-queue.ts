@@ -32,7 +32,8 @@ export class ChatQueue {
     store.database().exec(`CREATE TABLE IF NOT EXISTS chat_queue_chips (id TEXT PRIMARY KEY, skill_ids TEXT NOT NULL, plugin_ids TEXT NOT NULL, effort TEXT);
       CREATE TABLE IF NOT EXISTS chat_queue_state (chat_id TEXT PRIMARY KEY, paused TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS chat_queue_errors (id TEXT PRIMARY KEY, error TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS chat_queue_native (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, submission_id TEXT NOT NULL)`);
+      CREATE TABLE IF NOT EXISTS chat_queue_native (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, submission_id TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS chat_queue_stranded (submission_id TEXT PRIMARY KEY, chat_id TEXT NOT NULL)`);
   }
   private get db() { return this.store.database(); }
 
@@ -66,6 +67,14 @@ export class ChatQueue {
     const rows = new Map((this.db.prepare('SELECT id, submission_id FROM chat_queue_native WHERE chat_id = ?').all(chatId) as unknown as { id: string; submission_id: string }[]).map(row => [row.id, row.submission_id]));
     return this.store.queue(chatId).flatMap(item => rows.has(item.id) ? [{ queueId: item.id, submissionId: rows.get(item.id)! }] : []);
   }
+  /**
+   * Submissions the app-server may still hold for rows Muster now sends itself (taken back with no live session, or left
+   * over from the previous process). The app-server would send them again when the thread goes idle, so each is deleted
+   * once the chat's session is live. Persisted, so a restart before that session exists does not lose them.
+   */
+  strand(chatId: string, submissionId: string): void { this.db.prepare('INSERT OR REPLACE INTO chat_queue_stranded (submission_id, chat_id) VALUES (?, ?)').run(submissionId, chatId); }
+  stranded(chatId: string): string[] { return (this.db.prepare('SELECT submission_id FROM chat_queue_stranded WHERE chat_id = ?').all(chatId) as unknown as { submission_id: string }[]).map(row => row.submission_id); }
+  clearStranded(chatId: string): void { this.db.prepare('DELETE FROM chat_queue_stranded WHERE chat_id = ?').run(chatId); }
   /** Drops a row the app-server already dispatched (or deleted) natively; its turn shows the message. */
   dropSent(chatId: string, queueId: string): QueuedMessage | undefined {
     const removed = this.store.removeQueued(chatId, queueId);
@@ -154,6 +163,8 @@ export class ChatQueue {
    * and its in-memory queue ended with the app. Returns the chats whose queue changed.
    */
   recoverAtBoot(): string[] {
+    // The app-server's copies of every native row are stranded first (even for rows already sent): its process may outlive Muster's and would send them again.
+    for (const row of this.db.prepare('SELECT chat_id, submission_id FROM chat_queue_native').all() as unknown as { chat_id: string; submission_id: string }[]) this.strand(row.chat_id, row.submission_id);
     const sent = this.db.prepare('SELECT q.chat_id AS chat_id, q.id AS id FROM chat_queue q JOIN receipts r ON r.request_id = q.request_id').all() as unknown as { chat_id: string; id: string }[];
     for (const row of sent) { this.db.prepare('DELETE FROM chat_queue WHERE chat_id = ? AND id = ?').run(row.chat_id, row.id); this.dropChips(row.id); }
     const native = this.db.prepare('SELECT DISTINCT chat_id FROM chat_queue_native').all() as unknown as { chat_id: string }[];
