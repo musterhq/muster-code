@@ -65,6 +65,7 @@ import type { ChatGoal } from '../shared/domains/goals-protocol.ts';
 import { firstReadyModel } from '../shared/domains/settings-protocol.ts';
 import { attentionDeadline, pendingStatusAtRead } from '../shared/attention-expiry.ts';
 import { isAdapterProvider } from './adapters/index.ts';
+import { CLAUDE_LANE_DRIVER, effectiveDriver } from '../shared/provider-lanes.ts';
 import { createSkill } from './skill-authoring.ts';
 import { exportChat, isChatExportFormat } from './chat-export.ts';
 import { redactSecrets } from './secret-redaction.ts';
@@ -228,7 +229,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (store.timeline(chat.id).some(item => (item.kind === 'approval' || item.kind === 'question') && item.status === 'pending')) continue;
     restartCandidates.push(chat.id);
   }
-  const orphaned = store.recoverOrphanedRuns(chat => isAdapterProvider(chat.providerThreadProviderId ?? chat.providerId ?? ''));
+  // Adapter routes and the Messages lane (#688) run inside Muster: their work died with the process.
+  const orphaned = store.recoverOrphanedRuns(chat => chat.providerThreadDriver === CLAUDE_LANE_DRIVER || isAdapterProvider(chat.providerThreadProviderId ?? chat.providerId ?? ''));
   // #450: rows already sent are dropped and natively held rows come back; an orphaned chat's queue waits for it to continue.
   queue.recoverAtBoot();
   for (const chatId of orphaned) if (store.queue(chatId).length && !queue.paused(chatId)) queue.pause(chatId, 'interrupted');
@@ -540,7 +542,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   async function compactFromTranscript(chatId: string, rowId: string, text: string, data: Record<string, unknown>) {
     await provider.release?.(chatId).catch(() => undefined);
     store.requireDigest(chatId);
-    store.updateChat(chatId, {providerThreadId: null, providerTurnId: null, providerThreadProviderId: null, providerThreadBindingId: null});
+    store.updateChat(chatId, {providerThreadId: null, providerTurnId: null, providerThreadProviderId: null, providerThreadBindingId: null, providerThreadDriver: null});
     contextLedger.forget(chatId);
     const telemetry = {...store.contextTelemetry(chatId), compacted: true, updatedAt: new Date().toISOString()};
     store.setContextTelemetry(chatId, telemetry); emit({type: 'contextTelemetry', chatId, telemetry});
@@ -603,7 +605,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const telemetry = store.contextTelemetry(chat.id);
     if (telemetry.compacted || telemetry.usedTokens === null || compactions.has(chat.id)) return false;
     const model = withUserWindow(route.models.find(entry => entry.id === chat.model), domainHooks.contextWindowOverride(route.id, chat.model));
-    const {at, window} = musterCompactAt(route.driver, model, telemetry.windowTokens, telemetry.usedTokens);
+    const {at, window} = musterCompactAt(effectiveDriver(route.driver, chat), model, telemetry.windowTokens, telemetry.usedTokens);
     if (telemetry.usedTokens < at || !store.timeline(chat.id).some(item => item.kind === 'user')) return false;
     const used = `${Math.round(telemetry.usedTokens / 1000)}K of ${Math.round(window.tokens / 1000)}K tokens`;
     const row = store.appendItem(chat.id, 'notice', `Compacting context before this message (${used} in use)…`, 'running', {kind:'compaction', status:'running', auto:true});
@@ -688,7 +690,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       store.appendItem(chatId, 'notice', `${selectedProvider.models.find(entry => entry.id === chat.model)?.name ?? chat.model} can’t run commands or edit files through ${selectedProvider.name}, so this chat answers without tools. Use “Switch to…” in the composer to pick a model with tools.`, 'completed', {kind: 'tools-unavailable', model: chat.model, providerId: selectedProvider.id});
     }
     // #427: a route with no sub-agent tool says so once, in one plain line, when the request asks for sub-agents (every chat type).
-    if (subagentSupport(selectedProvider.driver) === 'none' && asksForSubagents(prompt) && !store.timeline(chatId).some(item => item.data?.kind === 'subagents-unavailable' && item.data?.providerId === selectedProvider.id)) {
+    if (subagentSupport(effectiveDriver(selectedProvider.driver, chat)) === 'none' && asksForSubagents(prompt) && !store.timeline(chatId).some(item => item.data?.kind === 'subagents-unavailable' && item.data?.providerId === selectedProvider.id)) {
       store.appendItem(chatId, 'notice', subagentsUnavailableText(selectedProvider.name), 'completed', {kind: 'subagents-unavailable', providerId: selectedProvider.id});
     }
     if (await autoCompactBeforeTurn(chat, selectedProvider)) chat = chatFor(chatId);
@@ -697,7 +699,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const nativeMatches=chat.providerThreadProviderId===selectedProvider.id && chat.providerThreadBindingId===bindingId;
     if (!chat.providerBindingId || (chat.providerThreadId && !nativeMatches)) {
       if (chat.providerThreadId && !nativeMatches) { store.appendItem(chatId,'notice','This provider will start a fresh conversation with a summary of the earlier messages. The displayed chat history is retained.','completed'); store.requireDigest(chatId); contextLedger.forget(chatId); }
-      chat=store.updateChat(chatId,{providerId:selectedProvider.id,providerBindingId:bindingId,...(!nativeMatches?{providerThreadId:null,providerTurnId:null,providerThreadProviderId:null,providerThreadBindingId:null}:{})});
+      chat=store.updateChat(chatId,{providerId:selectedProvider.id,providerBindingId:bindingId,...(!nativeMatches?{providerThreadId:null,providerTurnId:null,providerThreadProviderId:null,providerThreadBindingId:null,providerThreadDriver:null}:{})});
     }
     const access = providerAccessPolicy(chat);
     // A fork (or a replaced turn) starts a fresh provider conversation: carry the visible history once, bounded.
@@ -763,13 +765,13 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     run.seal = seal;
     run.promise = (async () => {
       try {
-        const persistIdentity = (threadId: string, turnId?: string) => {
+        const persistIdentity = (threadId: string, turnId?: string, driver?: string) => {
           if (disposed || runs.get(chatId) !== run) return;
           if (!threadId || threadId.length > 256 || /[\x00-\x1f]/.test(threadId) || (turnId !== undefined && (!turnId || turnId.length > 256 || /[\x00-\x1f]/.test(turnId)))) throw new Error('The provider returned an invalid attempt identity.');
           const current=store.chat(chatId);
           // The new provider thread now holds the digest; later sends continue it natively.
           if (digest) store.clearDigest(chatId);
-          store.updateChat(chatId,{providerThreadId:threadId,providerThreadProviderId:chat.providerId,providerThreadBindingId:chat.providerBindingId??null,...(turnId ? {providerTurnId:turnId} : current?.providerThreadId !== threadId ? {providerTurnId:null} : {})}); state();
+          store.updateChat(chatId,{providerThreadId:threadId,providerThreadProviderId:chat.providerId,providerThreadBindingId:chat.providerBindingId??null,providerThreadDriver:driver??null,...(turnId ? {providerTurnId:turnId} : current?.providerThreadId !== threadId ? {providerTurnId:null} : {})}); state();
         };
         // No registered hooks: dispatch in the same tick, exactly as before the seam existed.
         const hooked = domainHooks.hasRunHooks();
@@ -808,20 +810,20 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) || pluginReloads.wantsConnectors(chatId) ? {connectorsRequested: true} : {}),
           ...(runOptions.configOverrides ? {configOverrides: runOptions.configOverrides as Record<string, string | number | boolean | string[]>} : {}), ...(runOptions.developerInstructions ? {developerInstructions: runOptions.developerInstructions} : {}),
           onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
-          onThreadReady: threadId => persistIdentity(threadId),
+          onThreadReady: (threadId, driver) => { persistIdentity(threadId, undefined, driver); void nativeQueue.flushStranded(chatId); },
           // The saved provider thread is gone (pruned or deleted): the fresh one gets the earlier conversation and the
           // context blocks the old thread already held, and the user is told.
-          onThreadReset() {
+          onThreadReset(_previousThreadId, reason) {
             if (disposed || runs.get(chatId) !== run) return undefined;
             threadReset = true;
             const items = store.timeline(chatId);
             let last = items.length - 1;
             while (last >= 0 && items[last]!.kind !== 'user') last--;
-            store.appendItem(chatId, 'notice', 'The saved provider conversation could not be resumed, so a fresh one started with a summary of the earlier messages. The displayed chat history is retained.', 'completed', {kind: 'thread-reset'});
+            store.appendItem(chatId, 'notice', reason === 'lane' ? 'This message runs a different way than the earlier ones (models that need it run over the router’s Messages API), so a fresh conversation started with a summary of the earlier messages. The displayed chat history is retained.' : 'The saved provider conversation could not be resumed, so a fresh one started with a summary of the earlier messages. The displayed chat history is retained.', 'completed', {kind: 'thread-reset'});
             scheduleTimeline(chatId);
             return [transcriptDigest(items.slice(0, Math.max(0, last)), cwd), ...staticBlocks.filter(block => !pendingBlocks.has(block)).map(block => block.text)].filter(Boolean).join('\n\n') || undefined;
           },
-          onTurnAccepted: identity => persistIdentity(identity.threadId,identity.turnId),
+          onTurnAccepted: identity => persistIdentity(identity.threadId,identity.turnId,identity.driver),
           onEvent(method, params) {
             if (disposed) return;
             const telemetry = isForeignThreadEvent(params, store.chat(chatId)?.providerThreadId) ? null : applyProviderEvent(store.contextTelemetry(chatId), method, params);
@@ -931,7 +933,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               }
             }
           },
-          async onRequest(method, params) {
+          async onRequest(method, params, options) {
             // After this turn ended, the warm app-server still asks for approvals: background sub-agents (the provider
             // still reports active work) or a native goal continuation or queued turn (adopted as the chat's run). They
             // get a card like any other request. A stopped run, or a late callback with no work behind it, declines.
@@ -1020,8 +1022,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               return {decision: 'decline'};
             }
             if (toolPolicy?.effect === 'allow' && !threat) return {decision: 'accept'};
-            // policyOnly: an adapter that runs its own tools (HTTP routes) only wants the rules, the guard and a card for a threat or an ask; workspace edits inside the folder do not need a card.
-            if ((access.permissionMode === 'full' || params.policyOnly === true) && !threat && toolPolicy?.effect !== 'ask') return {decision: 'accept'};
+            // options.policyOnly (set by the adapter, never read from the provider's params): an adapter that runs its own tools (HTTP routes) only wants the rules, the guard and a card for a threat or an ask; workspace edits inside the folder do not need a card.
+            if ((access.permissionMode === 'full' || options?.policyOnly === true) && !threat && toolPolicy?.effect !== 'ask') return {decision: 'accept'};
             const change = typeof params.itemId === 'string' && toolIds.has(params.itemId) ? store.item(toolIds.get(params.itemId)!)?.data?.changes : params.changes;
             const data: ApprovalData = {...approvalData(method, params, change), ...(threat ? {reason: threat.message, protectsUserProcess: true} : {})};
             const toolItemId = typeof params.itemId === 'string' ? toolIds.get(params.itemId) : undefined;
@@ -1090,7 +1092,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           if (recovery.kind === 'recovery-needed') recovery = {kind:'failed', retryable:false, reason:`The provider attempt failed: ${said}`};
           run.limit = {text:`${said} ${recovery.reason}`, ...(result.failure?.retryAfterMs ? {retryAfterMs:result.failure.retryAfterMs} : {}), notDispatched: result.dispatchState === 'not-dispatched', prompt, attachmentIds};
         }
-        if (result.threadId) persistIdentity(result.threadId,result.turnId);
+        if (result.threadId) persistIdentity(result.threadId,result.turnId,result.driver);
         // Only a turn the provider actually took delivered its context blocks to the thread.
         if (result.status === 'completed' && result.dispatchState !== 'not-dispatched' && !compactedInRun) contextLedger.delivered(chatId, store.chat(chatId)?.providerThreadId, threadReset ? staticBlocks : [...pendingBlocks], retainedTurns);
         else if (result.dispatchState !== 'not-dispatched') contextLedger.forget(chatId);
@@ -1115,15 +1117,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // Background sub-agents can still be waiting on a card after the parent turn ended: keep it answerable.
         const settled = run.stopped || disposed || !provider.hasActiveWork?.(chatId);
         if (settled) { settleApprovals(chatId); settleQuestions(chatId); seal(); }
-        // Stop can close the provider before it sends item/completed. Persist the terminal
-        // state once, keeping completed tools and partial output intact.
-        if (run.stopped) for (const [providerId, localId] of toolIds) {
-          const item = store.item(localId);
-          if (item?.status === 'running') {
-            const startedAt = toolStarted.get(providerId);
-            store.updateItem(localId, item.text, 'interrupted', {...item.data, awaitingApproval:undefined,
-              ...(startedAt !== undefined ? {durationMs:Date.now() - startedAt} : {})});
-          }
+        // Stop can close the provider before it sends item/completed, and a completed or failed turn can end with a tool the
+        // provider never closed (#387). Persist the terminal state once, keeping completed tools and partial output intact.
+        // Background sub-agents still working after the turn keep their rows live until they report back.
+        if (settled) {
+          const startedById = new Map([...toolIds].map(([providerId, localId]) => [localId, toolStarted.get(providerId)]));
+          store.settleToolItems(chatId, item => startedById.get(item.id));
         }
         // #449: any tool row still running once the run's work has ended settles as interrupted.
         if (settled) store.settleRunningTools(chatId);
@@ -1712,7 +1711,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         try {
           if (changed) await provider.release?.(chatId);
           if (disposed || closing) throw new Error('Agent runtime is stopping. Provider selection was not changed.');
-          const updated=store.updateChat(chatId,{providerId,providerBindingId:bindingId,model,...(changed?{providerThreadId:null,providerTurnId:null,providerThreadProviderId:null,providerThreadBindingId:null,recovery:null,error:null}:{})});
+          const updated=store.updateChat(chatId,{providerId,providerBindingId:bindingId,model,...(changed?{providerThreadId:null,providerTurnId:null,providerThreadProviderId:null,providerThreadBindingId:null,providerThreadDriver:null,recovery:null,error:null}:{})});
           if(changed && chat.providerThreadId) {store.appendItem(chatId,'notice','Provider selection changed. The next run starts a fresh provider conversation; displayed history is retained.','completed');timeline(chatId);}
           state();return updated;
         } finally {providerSelections.delete(chatId);}
@@ -1999,7 +1998,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const cwd=chat.folderId ? folderFor(chat.folderId).path : join(options.dataDir,'scratch',chatId);
         reconciliations.add(chatId);
         try {
-          const result=await (options.reconcileProvider ?? reconcileProviderTurn)({threadId:chat.providerThreadId,turnId:chat.providerTurnId,cwd,providerId:chat.providerThreadProviderId??chat.providerId,providerBindingId:chat.providerThreadBindingId});
+          const result=await (options.reconcileProvider ?? reconcileProviderTurn)({threadId:chat.providerThreadId,turnId:chat.providerTurnId,cwd,providerId:chat.providerThreadProviderId??chat.providerId,providerBindingId:chat.providerThreadBindingId,...(chat.providerThreadDriver ? {providerThreadDriver:chat.providerThreadDriver} : {})});
           if (disposed) throw new Error('Agent runtime is closed.');
           const current=chatFor(chatId);
           if (runs.has(chatId) || current.providerThreadId !== chat.providerThreadId || current.providerTurnId !== chat.providerTurnId || current.recovery?.kind !== 'recovery-needed') return {chat:current,resolved:current.recovery?.kind !== 'recovery-needed',reason:'The attempt state changed while checking. Review its current status.'};

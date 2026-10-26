@@ -2,6 +2,7 @@
  * Ported from the Muster Code IDE (builtin/src/codex.ts HOST_COMPUTER_USE_MCP, agent-pane.ts
  * computerUseToolFromItem / elicitationText). Pure: shared by the runtime, main and renderer. */
 import type {ChatPermissionMode} from './protocol.ts';
+import {CLAUDE_LANE_DRIVER} from './provider-lanes.ts';
 
 /** Bundled Codex computer-use MCP names. Muster never disables these on a turn. */
 export const HOST_COMPUTER_USE_MCP = ['computer-use', 'unified-computer-use', 'visualize', 'cua_repl', 'node_repl'] as const;
@@ -21,7 +22,7 @@ export function browserToolStyle(driver: string | undefined): BrowserToolStyle {
     case 'claude-code-cli': return 'claude';
     case 'opencode-cli': return 'opencode';
     case 'grok-acp': return 'acp';
-    case 'openai-chat-completions': return 'native';
+    case 'openai-chat-completions': case CLAUDE_LANE_DRIVER: return 'native';
     default: return 'none';
   }
 }

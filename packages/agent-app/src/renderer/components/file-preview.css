@@ -272,3 +272,7 @@
 .virtual-file-source .virtual-file-spacer td { padding: 0; border: 0; line-height: 0; }
 .virtual-file-source mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--text); }
 .virtual-file-source mark[data-current='true'] { background: var(--accent); color: var(--bg); }
+
+/* Edited-file and blame views of large files: same windowing as .virtual-file-source. */
+.virtual-row-source { min-height: 100%; outline: none; }
+.virtual-row-source .virtual-row-spacer td { padding: 0; border: 0; line-height: 0; }

@@ -66,14 +66,15 @@ test('G24/G38: the commands read the real Ledger after real runs, priced once a 
   const cto = await h.member('CTO');
   const a = await h.addTask('Ship it', { kind: 'agent', id: cto.id });
   await h.start(a.id); await h.settled(a.id);
-  const unpriced = await h.s.invoke('insight.costs', { days: 7 });
+  // The receipt is written by the ledger's settle hook (a file snapshot), which can finish after the task state settles.
+  const unpriced = await until(async () => { const costs = await h.s.invoke('insight.costs', { days: 7 }); return costs.entries === 1 ? costs : null; }, 'the first receipt');
   assert.equal(unpriced.entries, 1); assert.equal(unpriced.totals.costUsd, null); assert.equal(unpriced.totals.unpricedTurns, 1);
   assert.equal(unpriced.byProject[0]!.label, 'OSSMANAGER'); assert.equal(unpriced.byAgent[0]!.label, 'CTO'); assert.ok(unpriced.totals.inputTokens > 0);
   assert.ok(Array.isArray(unpriced.windows) && unpriced.windows.every(w => w.reports && w.name), 'provider windows are listed for the providers that report them (none on a machine without Codex)');
   await h.s.invoke('models.policy.setPricing', { key: modelKey('scripted', 'scripted-model'), pricing: { inputPerMTok: 10, outputPerMTok: 20 } });
   const b = await h.addTask('Ship it again', { kind: 'agent', id: cto.id });
   await h.start(b.id); await h.settled(b.id);
-  const priced = await h.s.invoke('insight.costs', { days: 30, projectId: h.project.id });
+  const priced = await until(async () => { const costs = await h.s.invoke('insight.costs', { days: 30, projectId: h.project.id }); return costs.entries === 2 ? costs : null; }, 'the second receipt');
   assert.equal(priced.entries, 2); assert.equal(priced.totals.unpricedTurns, 0, 'your price also prices the earlier turn'); assert.ok((priced.totals.costUsd ?? 0) > 0);
   // 1200 in, 300 out per turn at $10 / $20 per million: 0.012 + 0.006 per turn (the scripted run reports 1200 / 300, then 2400 / 600 on a second turn of the same chat).
   assert.ok(priced.totals.costUsd! >= 0.036 - 1e-9, String(priced.totals.costUsd));

@@ -10,7 +10,8 @@ import type { ProviderInfo, ReasoningEffort } from './protocol.ts';
 
 export type CatalogModel = ProviderInfo['models'][number];
 /** Dollars per million tokens. `source` says who declared it: the provider catalog or the user. */
-export interface ModelPricing { inputPerMTok: number; outputPerMTok: number; cachedInputPerMTok?: number; source: 'catalog' | 'user' }
+/** `cacheWritePerMTok` is the price of tokens written to the provider's prompt cache; unset, a Claude model bills them at 1.25x input (`withCacheWriteDefault`) and any other model at the input rate. */
+export interface ModelPricing { inputPerMTok: number; outputPerMTok: number; cachedInputPerMTok?: number; cacheWritePerMTok?: number; source: 'catalog' | 'user' }
 export type PricingInput = Omit<ModelPricing, 'source'>;
 /** A catalog entry Muster will not offer, with the reason shown to the user. */
 export interface ExcludedModel { id: string; name: string; reason: string }
@@ -45,15 +46,17 @@ export const isModelKey = (value: unknown): value is string => typeof value === 
 
 const MAX_PRICE = 10_000;
 const price = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= MAX_PRICE ? value : undefined;
-/** Accepts {inputPerMTok, outputPerMTok, cachedInputPerMTok?}; throws a sentence naming the bad field. */
+/** Accepts {inputPerMTok, outputPerMTok, cachedInputPerMTok?, cacheWritePerMTok?}; throws a sentence naming the bad field. */
 export function validatePricing(raw: unknown): PricingInput {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Pricing must be an object with inputPerMTok and outputPerMTok.');
   const v = raw as Record<string, unknown>;
-  const input = price(v.inputPerMTok), output = price(v.outputPerMTok), cached = v.cachedInputPerMTok === undefined || v.cachedInputPerMTok === null ? undefined : price(v.cachedInputPerMTok);
+  const optional = (value: unknown) => value === undefined || value === null ? undefined : price(value);
+  const input = price(v.inputPerMTok), output = price(v.outputPerMTok), cached = optional(v.cachedInputPerMTok), cacheWrite = optional(v.cacheWritePerMTok);
   if (input === undefined) throw new Error(`inputPerMTok must be a dollar amount from 0 to ${MAX_PRICE}.`);
   if (output === undefined) throw new Error(`outputPerMTok must be a dollar amount from 0 to ${MAX_PRICE}.`);
   if (v.cachedInputPerMTok !== undefined && v.cachedInputPerMTok !== null && cached === undefined) throw new Error(`cachedInputPerMTok must be a dollar amount from 0 to ${MAX_PRICE}.`);
-  return { inputPerMTok: input, outputPerMTok: output, ...(cached !== undefined ? { cachedInputPerMTok: cached } : {}) };
+  if (v.cacheWritePerMTok !== undefined && v.cacheWritePerMTok !== null && cacheWrite === undefined) throw new Error(`cacheWritePerMTok must be a dollar amount from 0 to ${MAX_PRICE}.`);
+  return { inputPerMTok: input, outputPerMTok: output, ...(cached !== undefined ? { cachedInputPerMTok: cached } : {}), ...(cacheWrite !== undefined ? { cacheWritePerMTok: cacheWrite } : {}) };
 }
 /** Catalog pricing, when an entry declares it (`pricing: {input, output, cached_input}` per million tokens, a few spellings). */
 export function catalogPricing(entry: Record<string, unknown>): ModelPricing | undefined {
@@ -63,7 +66,8 @@ export function catalogPricing(entry: Record<string, unknown>): ModelPricing | u
   const input = price(p.inputPerMTok ?? p.input_per_million ?? p.input_per_mtok ?? p.input);
   const output = price(p.outputPerMTok ?? p.output_per_million ?? p.output_per_mtok ?? p.output);
   const cached = price(p.cachedInputPerMTok ?? p.cached_input_per_million ?? p.cached_input_per_mtok ?? p.cached_input);
-  return input !== undefined && output !== undefined ? { inputPerMTok: input, outputPerMTok: output, ...(cached !== undefined ? { cachedInputPerMTok: cached } : {}), source: 'catalog' } : undefined;
+  const cacheWrite = price(p.cacheWritePerMTok ?? p.cache_write_per_million ?? p.cache_write_per_mtok ?? p.cache_write ?? p.cache_creation);
+  return input !== undefined && output !== undefined ? { inputPerMTok: input, outputPerMTok: output, ...(cached !== undefined ? { cachedInputPerMTok: cached } : {}), ...(cacheWrite !== undefined ? { cacheWritePerMTok: cacheWrite } : {}), source: 'catalog' } : undefined;
 }
 /** Known keys with valid values survive; anything else in a stored file is dropped. */
 export function normalizeModelPolicy(raw: unknown): ModelPolicy {
@@ -91,10 +95,18 @@ export const isModelHidden = (policy: ModelPolicy, providerId: string, model: st
   const key = modelKey(providerId, model);
   return policy.hidden.includes(key) || (hiddenByDefault && !(policy.shown ?? []).includes(key));
 };
-/** The user's price wins over the catalog's; null when neither declares one. */
+/** Anthropic bills prompt-cache writes at 1.25x the input rate. */
+const CLAUDE_CACHE_WRITE_MULTIPLIER = 1.25;
+/** A Claude model (or the Claude Code and Anthropic routes) with no cache-write price gets 1.25x its input price; every other model is left unset. */
+export function withCacheWriteDefault<T extends ModelPricing | PricingInput>(pricing: T, providerId: string, model: string): T {
+  if (pricing.cacheWritePerMTok !== undefined || !/claude|anthropic/i.test(`${providerId} ${model}`)) return pricing;
+  return { ...pricing, cacheWritePerMTok: pricing.inputPerMTok * CLAUDE_CACHE_WRITE_MULTIPLIER };
+}
+/** The user's price wins over the catalog's; null when neither declares one. A Claude model's cache-write price defaults to 1.25x input. */
 export function effectivePricing(policy: ModelPolicy, providerId: string, model: string, catalog?: ModelPricing): ModelPricing | null {
   const user = policy.pricing[modelKey(providerId, model)];
-  return user ? { ...user, source: 'user' } : catalog ?? null;
+  const found: ModelPricing | undefined = user ? { ...user, source: 'user' } : catalog;
+  return found ? withCacheWriteDefault(found, providerId, model) : null;
 }
 
 /** Picker rows after the visibility policy. The chat's current model is never hidden from its own picker. */
@@ -135,18 +147,22 @@ export function modelBadges(model: Pick<CatalogModel, 'contextWindow' | 'images'
   return [context, images, toolSearch, reasoning];
 }
 
-/** Billing-style token totals. `cachedInputTokens` and `reasoningOutputTokens` are subsets of input and output. */
-export interface UsageTotals { inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningOutputTokens: number; requests: number }
-export const ZERO_USAGE: UsageTotals = Object.freeze({ inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, requests: 0 });
-export const addUsage = (a: UsageTotals, b: UsageTotals): UsageTotals => ({ inputTokens: a.inputTokens + b.inputTokens, cachedInputTokens: a.cachedInputTokens + b.cachedInputTokens, outputTokens: a.outputTokens + b.outputTokens, reasoningOutputTokens: a.reasoningOutputTokens + b.reasoningOutputTokens, requests: a.requests + b.requests });
+/** Billing-style token totals. `cachedInputTokens` (cache reads) and `cacheWriteTokens` are disjoint subsets of input; `reasoningOutputTokens` is a subset of output. */
+export interface UsageTotals { inputTokens: number; cachedInputTokens: number; cacheWriteTokens: number; outputTokens: number; reasoningOutputTokens: number; requests: number }
+export const ZERO_USAGE: UsageTotals = Object.freeze({ inputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, requests: 0 });
+export const addUsage = (a: UsageTotals, b: UsageTotals): UsageTotals => ({ inputTokens: a.inputTokens + b.inputTokens, cachedInputTokens: a.cachedInputTokens + b.cachedInputTokens, cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens, outputTokens: a.outputTokens + b.outputTokens, reasoningOutputTokens: a.reasoningOutputTokens + b.reasoningOutputTokens, requests: a.requests + b.requests });
 export const usageTokens = (u: UsageTotals): number => u.inputTokens + u.outputTokens;
-/** Dollars for these totals at this price; null when the price is unknown. Cached input uses its own rate when declared. */
+/** Dollars for these totals at this price; null when the price is unknown. Cached input and cache writes use their own rates when declared, else the input rate. */
 export function estimateCostUsd(totals: UsageTotals, pricing: ModelPricing | PricingInput | null | undefined): number | null {
   if (!pricing) return null;
   const cached = Math.min(totals.cachedInputTokens, totals.inputTokens);
-  const fresh = totals.inputTokens - cached;
-  return (fresh * pricing.inputPerMTok + cached * (pricing.cachedInputPerMTok ?? pricing.inputPerMTok) + totals.outputTokens * pricing.outputPerMTok) / 1_000_000;
+  const written = Math.min(totals.cacheWriteTokens, totals.inputTokens - cached);
+  const fresh = totals.inputTokens - cached - written;
+  return (fresh * pricing.inputPerMTok + cached * (pricing.cachedInputPerMTok ?? pricing.inputPerMTok) + written * (pricing.cacheWritePerMTok ?? pricing.inputPerMTok) + totals.outputTokens * pricing.outputPerMTok) / 1_000_000;
 }
+/** True when these totals include cache writes and the price has no cache-write rate, so they were billed at the input rate: the cost is an estimate. */
+export const assumesCacheWriteRate = (totals: Pick<UsageTotals, 'cacheWriteTokens'>, pricing: ModelPricing | PricingInput | null | undefined): boolean =>
+  !!pricing && totals.cacheWriteTokens > 0 && pricing.cacheWritePerMTok === undefined;
 export function formatUsd(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value) || value < 0) return '—';
   if (value === 0) return '$0.00';

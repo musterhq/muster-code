@@ -90,8 +90,10 @@ export const suites = [
   'markdown-breaks-dom',
   'setup-clone-handoff-dom',
   'sandbox-honesty-dom',
+  'large-edited-file-dom',
   'import-origin-dom',
   'transcript-dom',
+  'file-find-dom',
 ];
 
 /** Suites that open Base UI menus/portals get a split build: their `await import()` of UI code stays a separate
