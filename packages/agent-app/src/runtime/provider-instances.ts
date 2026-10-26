@@ -1,3 +1,4 @@
+import {musterCodexHome} from './codex-home.ts';
 import {createRequire} from 'node:module';
 import {createHash} from 'node:crypto';
 import * as nodeFs from 'node:fs';
@@ -511,12 +512,15 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
     const label=duplicate?`${names[index]} (${route.profile})`:names[index]!;
     const name=account?`${label} · ${account.label??email??`account ${suffix.slice(1,7)}`}`:label;
     const catalogPath=route.catalogPath&&isAbsolute(route.catalogPath)?route.catalogPath:undefined;
-    const childEnv:Record<string,string>={MUSTER_PROVIDER_NODE:node.node,...node.env,CODEX_HOME:codexHome,...(cli?{MUSTER_CODEX_COMMAND:cli}:{}),
+    // #720: chats run in Muster's own home (shared sign-in and configuration, private threads). A sign-in kept outside
+    // auth.json (the Keychain) is tied to the home's path, so that route keeps the person's home.
+    const ownHome=registeredDataDir&&env.MUSTER_SHARED_CODEX_HOME!=='1'&&(route.kind!=='chatgpt'||Boolean(auth))?musterCodexHome(registeredDataDir,codexHome):undefined;
+    const childEnv:Record<string,string>={MUSTER_PROVIDER_NODE:node.node,...node.env,CODEX_HOME:ownHome??codexHome,...(ownHome?{MUSTER_CODEX_SOURCE_HOME:codexHome}:{}),...(cli?{MUSTER_CODEX_COMMAND:cli}:{}),
       ...(route.profile?{MUSTER_CODEX_PROFILE:route.profile}:{MUSTER_CODEX_PROVIDER:route.modelProvider,...(catalogPath?{MUSTER_CODEX_CATALOG:catalogPath}:{})})};
     const codex={modelProvider:route.modelProvider,kind:route.kind,...(route.profile?{profile:route.profile}:{}),...(account?{account:suffix.slice(1)}:{})} satisfies NonNullable<ProviderInfo['codex']>;
     const source=route.profile?`Codex profile ${route.profile}.config.toml${account?` in ${account.codexHome}`:''}`:route.kind==='chatgpt'?`Codex sign-in${account?` at ${account.codexHome}`:''}`:`[model_providers.${route.modelProvider}] in Codex config.toml${account?` at ${account.codexHome}`:''}`;
     const base={id,name,driver:'codex-app-server',codex,identityMasked:route.kind==='gateway'?'Gateway · account hidden':email??'ChatGPT account · hidden',models:[],available:false,source,...(route.baseUrl?{endpoint:route.baseUrl}:{})} satisfies ProviderInfo;
-    const sessionsRoot=join(codexHome,'sessions');
+    const sessionsRoot=join(ownHome??codexHome,'sessions');
     const fail=(error:string,status:'configured'|'error'='configured'):ProviderInstance=>({info:{...base,status,error,detail:`${error} No provider fallback will be used. ${mcpDetail(mcp)}`},command,env:childEnv,sessionsRoot});
     if(route.invalid)return fail(`${route.profile}.config.toml did not validate: ${route.invalid}`,'error');
     try {fs.accessSync(command,constants.X_OK);} catch {return fail('Muster’s bundled Codex launcher is missing. Reinstall Muster.','error');}
@@ -598,5 +602,5 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
 /** The Codex route behind a provider id, from the current instance list; undefined for non-Codex routes. */
 export function codexRouteFor(id:string,options:ProviderInstanceOptions={}):{codex:NonNullable<ProviderInfo['codex']>;codexHome:string;sessionsRoot:string;instance:ProviderInstance}|undefined {
   const instance=configuredProviderInstances(options).find(row=>row.info.id===id&&row.info.codex);
-  return instance?{codex:instance.info.codex!,codexHome:instance.env.CODEX_HOME!,sessionsRoot:instance.sessionsRoot,instance}:undefined;
+  return instance?{codex:instance.info.codex!,codexHome:instance.env.MUSTER_CODEX_SOURCE_HOME??instance.env.CODEX_HOME!,sessionsRoot:instance.sessionsRoot,instance}:undefined;
 }

@@ -3,6 +3,10 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Chats on your coding-client sign-ins and profiles no longer show up in your other coding apps. Muster now keeps its own threads in its data folder while sharing your sign-in, profiles, skills and plugins; existing chats continue where they left off.
+
 ## 0.3.15
 
 Claude chats on your own router recover on their own when an older conversation can no longer be continued, and notification toasts move to the bottom-right corner, clear of your messages.
