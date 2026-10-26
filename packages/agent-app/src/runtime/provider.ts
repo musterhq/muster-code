@@ -423,6 +423,9 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           // #427: sub-agents on, defaulting to the chat's own model (which this provider serves) in every chat type.
           configOverrides: [...codexSubagentOverrides(model, reasoning), ...featureOverrides, ...windowOverrides, ...extraOverrides, `sandbox_workspace_write.network_access=${access.networkAccess}`],
         };
+        // What the model produced in the current attempt: reply or thinking text, or a request (an approval, a question).
+        // Accepting a turn, or the user message coming back as an item, is not output: the router refuses after both (#716).
+        let produced = false;
         const observers = {
           onEvent(method:string,params:Record<string,unknown>){
             const turn = params.turn as Record<string, unknown> | undefined;
@@ -469,7 +472,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
             }
           },
           onRequest(method: string, params: Record<string, unknown>) {
-            session.activity = true;
+            session.activity = true; produced = true;
             if (lateCancellation()) return Promise.resolve(undefined);
             return requestWhileOwned(session.controller.signal, () => input.onRequest(method, params));
           },
@@ -496,18 +499,19 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           // Plan mode and can only describe patches (F53).
           collaborationMode: input.chat.mode === 'plan' ? { mode: 'plan', settings: { model, reasoning_effort: reasoning } }
             : previous?.mode === 'plan' || (!previous && threadId) ? { mode: 'default', settings: { model, reasoning_effort: reasoning } } : undefined,
-          onDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onDelta(text); },
-          onReasoningDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onReasoning(text); },
+          onDelta(text: string) { session.activity = true; produced = true; if (!lateCancellation()) input.onDelta(text); },
+          onReasoningDelta(text: string) { session.activity = true; produced = true; if (!lateCancellation()) input.onReasoning(text); },
         });
-        // #716: a router keeps Claude replay state only for a while, so resuming a days-old thread can be refused before the
-        // turn starts ("replay state expired or is unavailable", HTTP 409). The thread cannot be continued and resuming it
-        // again would fail the same way every time: start one fresh thread, seeded with a summary, exactly once.
+        // #716: a router keeps Claude replay state only for a while, so resuming a days-old thread is refused ("replay state
+        // expired or is unavailable", HTTP 409). The turn is accepted and the user message recorded first, but no output
+        // comes. The thread cannot be continued and resuming it again would fail the same way every time: start one fresh
+        // thread, seeded with a summary, exactly once.
         const result=await Promise.race([networkStopped, dispatch(resumeThread, laneSeed).then(async first => {
-          if (!resumeThread || first.status !== 'failed' || first.turnId || session.turnId || session.activity || !input.onThreadReset
+          if (!resumeThread || first.status !== 'failed' || produced || commands.size || !input.onThreadReset
             || session.controller.signal.aborted || disposed || !REPLAY_STATE_EXPIRED.test(first.errorMessage ?? '')) return first;
           const seed = input.onThreadReset(resumeThread, 'expired');
           if (lateCancellation()) return first;
-          session.threadId = undefined;
+          session.threadId = undefined; session.turnId = undefined;
           return dispatch(undefined, seed);
         })]);
         if(commands.size&&result.threadId&&!session.controller.signal.aborted&&!disposed){

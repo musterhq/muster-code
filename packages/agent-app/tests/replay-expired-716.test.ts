@@ -13,7 +13,8 @@ import {createProviderAdapter, type CoreClient, type ProviderResult} from '../sr
 import type {ProviderInstance} from '../src/runtime/provider-instances.ts';
 
 const EXPIRED = 'unexpected status 409 Conflict: claude/claude-opus-5-5: model — Claude replay state expired or is unavailable. Start a new conversation. (HTTP 409); url: http://127.0.0.1:58419/token/responses, request id: req-1';
-const failed = (errorMessage: string, extra: Partial<ProviderResult> = {}): ProviderResult => ({status: 'failed', finalMessage: '', errorMessage, dispatchState: 'unknown', failure: {kind: 'rpc-rejected', method: 'turn/start', statusCode: 409}, ...extra});
+/** As the real router fails: the turn is accepted and the user message comes back as an item, then the 409 arrives (#716). */
+const failed = (errorMessage: string, extra: Partial<ProviderResult> = {}): ProviderResult => ({status: 'failed', finalMessage: '', errorMessage, dispatchState: 'dispatched', ...extra});
 const ok = (n: number): ProviderResult => ({status: 'completed', finalMessage: `answer ${n}`, threadId: `thread-${n}`, turnId: `turn-${n}`, dispatchState: 'dispatched'});
 
 type Call = {prompt: string; threadId: string | undefined};
@@ -26,8 +27,11 @@ async function harness(t: TestContext, script: (call: Call, n: number, input: Re
     async runCodexAppServer(input) {
       const call = {prompt: String(input.prompt), threadId: input.threadId as string | undefined};
       calls.push(call);
-      const result = script(call, calls.length, input);
-      if (result.turnId && result.threadId) (input.onTurnAccepted as ((id: unknown) => void) | undefined)?.({threadId: result.threadId, turnId: result.turnId, dispatchState: 'dispatched'});
+      const n = calls.length, threadId = call.threadId ?? `thread-${n}`, turnId = `turn-${n}`;
+      (input.onThreadReady as ((id: string) => void) | undefined)?.(threadId);
+      (input.onTurnAccepted as ((id: unknown) => void) | undefined)?.({threadId, turnId, dispatchState: 'dispatched'});
+      (input.onEvent as ((method: string, params: Record<string, unknown>) => void) | undefined)?.('item/completed', {threadId, turnId, item: {type: 'userMessage', id: `user-${n}`, content: [{type: 'text', text: call.prompt}]}});
+      const result = {...script(call, n, input), threadId, turnId};
       if (result.status === 'completed') (input.onDelta as (text: string) => void)(result.finalMessage);
       return result;
     },
@@ -75,7 +79,7 @@ test('a resumed router thread whose replay state expired starts one fresh conver
 
   const chat = await h.snapshot();
   assert.equal(chat.status, 'completed');
-  assert.equal(chat.providerThreadId, 'thread-2', 'the chat now continues on the new thread');
+  assert.equal(chat.providerThreadId, 'thread-3', 'the chat now continues on the fresh thread');
   const items = await h.items();
   const notices = items.filter(item => item.data?.kind === 'thread-reset');
   assert.equal(notices.length, 1);
@@ -110,7 +114,7 @@ test('a 409 with other text, or after the turn produced output, does not start a
   const produced = await harness(t, (_call, n, input) => {
     if (n === 1) return ok(1);
     (input.onDelta as (text: string) => void)('partial');
-    return failed(EXPIRED, {threadId: 'thread-1', turnId: 'turn-2', dispatchState: 'dispatched'});
+    return failed(EXPIRED);
   });
   await produced.send('Capital of France?');
   await produced.send('Population?');
