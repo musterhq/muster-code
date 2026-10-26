@@ -23,6 +23,7 @@ import {ASK_USER_METHOD, ASK_USER_RULE} from './ask-user.ts';
 import type {McpServerSpec} from './adapters/types.ts';
 import type {RunnableAdapter} from './adapters/types.ts';
 import {CLAUDE_LANE_DRIVER} from '../shared/provider-lanes.ts';
+import {adoptCodexThread, prepareMusterCodexHome} from './codex-home.ts';
 import {claudeLaneAllowed, LANE_DROPPED_SERVERS, withoutUnavailableToolNotes} from './claude-lane.ts';
 import {SANDBOX_MCP_SERVER} from '../shared/sandbox-routes.ts';
 import {routeSandboxNote} from './sandbox-note.ts';
@@ -415,6 +416,8 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         const developerInstructions = runInstructions(input.chat.mode, input.developerInstructions, true, providerAccessPolicy(input.chat).permissionMode);
         const split = splitSecretOverrides(input.configOverrides);
         const extraOverrides = Object.entries(split.args).filter(([name]) => /^[A-Za-z0-9_.-]{1,128}$/.test(name) && !/^(sandbox|approval_policy)/.test(name)).map(([name, value]) => `${name}=${JSON.stringify(value)}`);
+        // #720: link the person's shared configuration into Muster's own home, and bring over a thread from before.
+        if (route.env.MUSTER_CODEX_SOURCE_HOME && route.env.CODEX_HOME) { prepareMusterCodexHome(route.env.MUSTER_CODEX_SOURCE_HOME, route.env.CODEX_HOME); adoptCodexThread(route.env.MUSTER_CODEX_SOURCE_HOME, route.env.CODEX_HOME, resumeThread); }
         const launch = {
           cwd: input.cwd, command: route.command, model, reasoning,
           env: { MUSTER_PROVIDER_NODE: node.node, ...node.env, ...route.env }, transportOwner: session.owner, cacheKey: session.key,
