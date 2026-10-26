@@ -67,7 +67,7 @@ test('PRO-05: capability badges state context, images, tool search and reasoning
 });
 
 test('PRO-06: cost is estimated only with a known price; unknown shows —', () => {
-  const totals = {inputTokens: 1_000_000, cachedInputTokens: 400_000, outputTokens: 100_000, reasoningOutputTokens: 50_000, requests: 3};
+  const totals = {inputTokens: 1_000_000, cachedInputTokens: 400_000, cacheWriteTokens: 0, outputTokens: 100_000, reasoningOutputTokens: 50_000, requests: 3};
   assert.equal(estimateCostUsd(totals, {inputPerMTok: 2, outputPerMTok: 8, cachedInputPerMTok: 0.5}), (600_000 * 2 + 400_000 * 0.5 + 100_000 * 8) / 1_000_000);
   assert.equal(estimateCostUsd(totals, {inputPerMTok: 2, outputPerMTok: 8}), (1_000_000 * 2 + 100_000 * 8) / 1_000_000, 'cached input falls back to the input rate');
   assert.equal(estimateCostUsd(totals, null), null);

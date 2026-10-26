@@ -4,6 +4,7 @@
  * never double-dispatches a requestId.
  */
 import {hasLiterals, redactLiterals, redactLiteralsDeep} from './literal-redaction.ts';
+import {hasKnownSecrets, redactKnownSecrets, redactKnownSecretsDeep} from './secret-registry.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -59,7 +60,7 @@ ${SUBAGENT_ITEMS_SQL}
 interface ChatRow {
   id: string; folder_id: string | null; project_id: string | null; title: string;
   pinned: number; pin_order: number | null; archived: number; draft: string; status: string; updated_at: string;
-  provider_id: string; provider_binding_id: string | null; provider_thread_provider_id: string | null; provider_thread_binding_id: string | null; provider_thread_id: string | null; provider_turn_id: string | null; recovery: string | null; model: string; mode: string; permission_mode: string | null; error: string | null;
+  provider_id: string; provider_binding_id: string | null; provider_thread_provider_id: string | null; provider_thread_binding_id: string | null; provider_thread_driver?: string | null; provider_thread_id: string | null; provider_turn_id: string | null; recovery: string | null; model: string; mode: string; permission_mode: string | null; error: string | null;
   unread?: number | null; last_viewed_at?: string | null;
   title_source?: string | null; origin_chat_id?: string | null; origin_item_id?: string | null;
   snoozed_until?: string | null; snooze_activity?: number | null;
@@ -85,6 +86,7 @@ function rowToChat(row: ChatRow): Chat {
     ...(row.provider_binding_id ? {providerBindingId:row.provider_binding_id} : {}),
     ...(row.provider_thread_provider_id ? {providerThreadProviderId:row.provider_thread_provider_id} : {}),
     ...(row.provider_thread_binding_id ? {providerThreadBindingId:row.provider_thread_binding_id} : {}),
+    ...(row.provider_thread_driver ? {providerThreadDriver:row.provider_thread_driver} : {}),
     ...(row.provider_thread_id ? { providerThreadId: row.provider_thread_id } : {}),
     ...(row.provider_turn_id ? { providerTurnId: row.provider_turn_id } : {}),
     ...(row.recovery ? { recovery: readRecovery(row.recovery) } : {}),
@@ -177,7 +179,8 @@ export class AgentStore {
     if (!chatColumns.some((c) => c.name === 'recovery')) this.db.exec('ALTER TABLE chats ADD COLUMN recovery TEXT');
     if (!chatColumns.some((c) => c.name === 'permission_mode')) this.db.exec('ALTER TABLE chats ADD COLUMN permission_mode TEXT');
     if (!chatColumns.some((c) => c.name === 'provider_id')) this.db.exec("ALTER TABLE chats ADD COLUMN provider_id TEXT NOT NULL DEFAULT ''");
-    for (const column of ['provider_binding_id','provider_thread_provider_id','provider_thread_binding_id','last_viewed_at']) if (!chatColumns.some(c=>c.name===column)) this.db.exec(`ALTER TABLE chats ADD COLUMN ${column} TEXT`);
+    // #688: the lane that made the provider thread (NULL = the route's own driver, e.g. Codex).
+    for (const column of ['provider_binding_id','provider_thread_provider_id','provider_thread_binding_id','provider_thread_driver','last_viewed_at']) if (!chatColumns.some(c=>c.name===column)) this.db.exec(`ALTER TABLE chats ADD COLUMN ${column} TEXT`);
     if (!chatColumns.some(c=>c.name==='unread')) this.db.exec('ALTER TABLE chats ADD COLUMN unread INTEGER NOT NULL DEFAULT 0');
     for (const column of ['title_source','origin_chat_id','origin_item_id']) if (!chatColumns.some(c=>c.name===column)) this.db.exec(`ALTER TABLE chats ADD COLUMN ${column} TEXT`);
     // 1 while the next send must seed a fresh provider conversation with the visible history (a fork, or an edit that replaced turns).
@@ -403,7 +406,7 @@ export class AgentStore {
     return row ? rowToChat(row) : undefined;
   }
 
-  updateChat(id: string, patch: Partial<Pick<Chat, 'title' | 'titleSource' | 'pinned' | 'archived' | 'draft' | 'model' | 'mode' | 'permissionMode' | 'status' | 'providerId' | 'providerBindingId'>> & {providerThreadId?:string|null; providerThreadProviderId?:string|null; providerThreadBindingId?:string|null; providerTurnId?: string | null; recovery?: ChatRecovery | null; error?: string | null}): Chat {
+  updateChat(id: string, patch: Partial<Pick<Chat, 'title' | 'titleSource' | 'pinned' | 'archived' | 'draft' | 'model' | 'mode' | 'permissionMode' | 'status' | 'providerId' | 'providerBindingId'>> & {providerThreadId?:string|null; providerThreadProviderId?:string|null; providerThreadBindingId?:string|null; providerThreadDriver?:string|null; providerTurnId?: string | null; recovery?: ChatRecovery | null; error?: string | null}): Chat {
     return this.tx(() => {
       const current = this.chat(id);
       if (!current) throw new Error(`Unknown chat: ${id}`);
@@ -413,7 +416,7 @@ export class AgentStore {
       const sets: string[] = activity ? ['updated_at = ?'] : [];
       const values: (string | number | null)[] = activity ? [now()] : [];
       const map: Record<string, string> = {
-        title: 'title', draft: 'draft', model: 'model', mode: 'mode', permissionMode: 'permission_mode', status: 'status', error: 'error', providerId:'provider_id', providerBindingId:'provider_binding_id', providerThreadProviderId:'provider_thread_provider_id', providerThreadBindingId:'provider_thread_binding_id', providerThreadId: 'provider_thread_id', providerTurnId: 'provider_turn_id',
+        title: 'title', draft: 'draft', model: 'model', mode: 'mode', permissionMode: 'permission_mode', status: 'status', error: 'error', providerId:'provider_id', providerBindingId:'provider_binding_id', providerThreadProviderId:'provider_thread_provider_id', providerThreadBindingId:'provider_thread_binding_id', providerThreadDriver:'provider_thread_driver', providerThreadId: 'provider_thread_id', providerTurnId: 'provider_turn_id',
       };
       for (const [key, column] of Object.entries(map)) {
         const value = (patch as Record<string, unknown>)[key];
@@ -564,7 +567,7 @@ export class AgentStore {
       const sets: string[] = [], values: (string | null)[] = [];
       if (patch.folderId !== undefined) {
         if (patch.folderId && !this.folder(patch.folderId)) throw new Error('Folder does not exist.');
-        sets.push('folder_id = ?', 'provider_thread_id = NULL', 'provider_turn_id = NULL', 'provider_thread_provider_id = NULL', 'provider_thread_binding_id = NULL'); values.push(patch.folderId);
+        sets.push('folder_id = ?', 'provider_thread_id = NULL', 'provider_turn_id = NULL', 'provider_thread_provider_id = NULL', 'provider_thread_binding_id = NULL', 'provider_thread_driver = NULL'); values.push(patch.folderId);
       }
       if (patch.projectId !== undefined) { sets.push('project_id = ?'); values.push(patch.projectId); }
       if (!this.chat(id)) throw new Error(`Unknown chat: ${id}`);
@@ -658,6 +661,7 @@ export class AgentStore {
 
   appendItem(chatId: string, kind: TimelineItem['kind'], text: string, status?: string, data?: Record<string, unknown>): TimelineItem {
     if (hasLiterals()) { text = redactLiterals(chatId, text); if (data) data = redactLiteralsDeep(chatId, data); }
+    if (hasKnownSecrets()) { text = redactKnownSecrets(text); if (data) data = redactKnownSecretsDeep(data); }
     const item: TimelineItem = {
       id: randomUUID(), chatId, kind, text, ...(status ? { status } : {}), createdAt: now(), ...(data ? { data } : {}),
     };
@@ -668,6 +672,7 @@ export class AgentStore {
 
   updateItem(id: string, text: string, status?: string, data?: Record<string, unknown>): void {
     if (hasLiterals()) { const chatId = (this.db.prepare('SELECT chat_id FROM timeline WHERE id = ?').get(id) as { chat_id: string } | undefined)?.chat_id; if (chatId) { text = redactLiterals(chatId, text); if (data) data = redactLiteralsDeep(chatId, data); } }
+    if (hasKnownSecrets()) { text = redactKnownSecrets(text); if (data) data = redactKnownSecretsDeep(data); }
     this.db.prepare('UPDATE timeline SET text = ?, status = ?, data = COALESCE(?, data) WHERE id = ?').run(text, status ?? null, data ? JSON.stringify(data) : null, id);
   }
 
@@ -685,6 +690,15 @@ export class AgentStore {
   /** A run that ended (or the app restarted) leaves no child row running. */
   settleSubagentItems(chatId: string, status = 'interrupted'): void {
     this.db.prepare("UPDATE subagent_items SET status = ? WHERE chat_id = ? AND status = 'running'").run(status, chatId);
+  }
+  /** #387: a settled run (or a restart) leaves no tool row running. Rows the provider never closed become interrupted
+   *  (shown as Stopped), keeping their output; `startedAt` gives a duration when the caller knows when each started. */
+  settleToolItems(chatId: string, startedAt?: (item: TimelineItem) => number | undefined): void {
+    for (const item of this.timeline(chatId)) {
+      if (item.kind !== 'tool' || item.status !== 'running') continue;
+      const started = startedAt?.(item) ?? Date.parse(item.createdAt);
+      this.updateItem(item.id, item.text, 'interrupted', {...item.data, awaitingApproval: undefined, ...(Number.isFinite(started) && item.data?.durationMs === undefined ? {durationMs: Math.max(0, Date.now() - started)} : {})});
+    }
   }
 
   /** A spawn report that still says a child is running, in a run that no longer exists, is settled as interrupted. */
@@ -705,6 +719,15 @@ export class AgentStore {
       }
       if (changed) this.updateItem(item.id, item.text, item.status === 'running' ? 'interrupted' : item.status, {...data, agentsStates: wasText ? JSON.stringify(next) : next});
     }
+  }
+
+  /** Tool rows still 'running' after their run ended (a stop, a crash, a quit) are settled as interrupted, never left spinning.
+   *  With no chat id: every chat that is not running (used at launch, when nothing runs yet). Returns how many rows changed. */
+  settleRunningTools(chatId?: string): number {
+    const result = chatId
+      ? this.db.prepare("UPDATE timeline SET status = 'interrupted' WHERE chat_id = ? AND kind = 'tool' AND status = 'running'").run(chatId)
+      : this.db.prepare("UPDATE timeline SET status = 'interrupted' WHERE kind = 'tool' AND status = 'running' AND chat_id IN (SELECT id FROM chats WHERE status NOT IN ('running', 'stopping'))").run();
+    return Number(result.changes);
   }
 
   item(id: string): TimelineItem | undefined {
@@ -741,7 +764,7 @@ export class AgentStore {
       options.within?.();
       const sets: Record<string, unknown> = { status: 'running', draft: '', error: null, providerTurnId: null, recovery: null };
       // Provisional name while the first turn runs; settleTitle() makes it final. Renamed chats keep their name, even 'New chat'.
-      if (chat.titleSource === 'default') { const title = generateChatTitle(text); if (title) sets.title = title; }
+      if (chat.titleSource === 'default') { const title = generateChatTitle(redactKnownSecrets(text)); if (title) sets.title = title; }
       this.updateChatRaw(chatId, sets);
       this.bumpVersion();
       return { runId, replay: false };
@@ -756,7 +779,7 @@ export class AgentStore {
       const first = (kind: string) => (this.db.prepare("SELECT text FROM timeline WHERE chat_id = ? AND kind = ? AND (data IS NULL OR json_extract(data, '$.forked') IS NULL) ORDER BY seq LIMIT 1").get(chatId, kind) as { text: string } | undefined)?.text ?? '';
       const prompt = first('user');
       if (!prompt) return false;
-      const title = generateChatTitle(prompt, first('assistant')) ?? chat.title;
+      const title = generateChatTitle(redactKnownSecrets(prompt), redactKnownSecrets(first('assistant'))) ?? chat.title;
       this.db.prepare("UPDATE chats SET title = ?, title_source = 'generated' WHERE id = ?").run(title, chatId);
       this.bumpVersion();
       return true;
@@ -802,7 +825,7 @@ export class AgentStore {
       this.db.prepare('DELETE FROM timeline WHERE chat_id = ? AND seq >= ?').run(chatId, row.seq);
       // Deletions never travel as patches; the bump makes every replica take the next snapshot.
       this.db.prepare('INSERT INTO timeline_cursors (chat_id, revision) VALUES (?, 1) ON CONFLICT(chat_id) DO UPDATE SET revision = revision + 1').run(chatId);
-      this.db.prepare('UPDATE chats SET provider_thread_id = NULL, provider_turn_id = NULL, provider_thread_provider_id = NULL, provider_thread_binding_id = NULL, recovery = NULL, error = NULL, resume_digest = 1, updated_at = ? WHERE id = ?').run(now(), chatId);
+      this.db.prepare('UPDATE chats SET provider_thread_id = NULL, provider_turn_id = NULL, provider_thread_provider_id = NULL, provider_thread_binding_id = NULL, provider_thread_driver = NULL, recovery = NULL, error = NULL, resume_digest = 1, updated_at = ? WHERE id = ?').run(now(), chatId);
       this.bumpVersion();
     });
   }
@@ -903,9 +926,12 @@ export class AgentStore {
           this.appendItem(id, 'notice', recovery.reason, 'recovery-needed', {recovery});
         }
         this.settleSubagentItems(id);
+        this.settleToolItems(id);
         this.interruptRunningChildren(id);
       }
-      if (rows.length > 0) this.bumpVersion();
+      // Every run ended with the previous process: tool rows it left running (in these chats or any other) settle now.
+      const settled = this.settleRunningTools();
+      if (rows.length > 0 || settled > 0) this.bumpVersion();
       return rows.map((row) => row.id);
     });
   }

@@ -29,7 +29,14 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-export const RECALL_TIMEOUT_MS = 1_800;
+const gitText = (cwd: string, args: string[]) => new Promise<string | null>(resolve => execFile('git', ['-c', 'core.fsmonitor=false', ...args], { cwd, timeout: 1_500, windowsHide: true }, (error, out) => resolve(error ? null : String(out).trim() || null)));
+/** HEAD and branch of a folder. `symbolic-ref` names the branch even when a tag shares its name (`rev-parse --abbrev-ref` answers `heads/<name>`, and so does `--short`, so the full ref is trimmed); a detached HEAD has no branch. */
+export const readRepoEvidence = (path: string): Promise<RunContextRepo | null> => Promise.all([gitText(path, ['rev-parse', 'HEAD']), gitText(path, ['symbolic-ref', '-q', 'HEAD'])])
+  .then(([head, branch]) => head && /^[0-9a-f]{40,64}$/.test(head) ? { head, ...(branch ? { branch: branch.replace(/^refs\/heads\//, '') } : {}) } : null);
+
+export const RECALL_TIMEOUT_MS = 4_000;
+/** Recall query bounds: the task (first request) plus the last few user messages, so "continue" still recalls what matters. */
+export const RECALL_QUERY_MAX_CHARS = 1_600, RECALL_RECENT_MESSAGES = 3;
 const TEST_TIMEOUT_MS = 5_000;
 type HindsightEntry = { id?: string; text: string; type?: string; score?: number; occurredAt?: string; mentionedAt?: string; documentId?: string; context?: string; tags?: readonly string[] };
 
@@ -98,6 +105,19 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
   db.exec('CREATE TABLE IF NOT EXISTS memory_deleted_documents (document_id TEXT NOT NULL, scope TEXT NOT NULL, bank_id TEXT, engine TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, next_at TEXT, job_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (scope, document_id))');
   db.exec('CREATE TABLE IF NOT EXISTS memory_offer_history (chat_id TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL)');
   db.exec('CREATE INDEX IF NOT EXISTS memory_offer_history_chat ON memory_offer_history (chat_id)');
+  // One surfaced offer per chat per local day; kept durably so a restart does not reset the throttle.
+  db.exec('CREATE TABLE IF NOT EXISTS memory_offer_days (chat_id TEXT PRIMARY KEY, day TEXT NOT NULL)');
+  const dayKey = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const offerDays = {
+    /** True (and records today) when this chat has not had an offer yet today. */
+    take(chatId: string): boolean {
+      const today = dayKey();
+      const row = db.prepare('SELECT day FROM memory_offer_days WHERE chat_id = ?').get(chatId) as { day: string } | undefined;
+      if (row?.day === today) return false;
+      db.prepare('INSERT INTO memory_offer_days (chat_id, day) VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET day = excluded.day').run(chatId, today);
+      return true;
+    },
+  };
   /** Recent run-summary offers per chat, so an active session iterating on the same task doesn't
    *  re-suggest remembering it after every turn. Kept in a small table so a restart doesn't re-offer what
    *  was just offered; rows past the dedupe window, beyond the per-chat cap, or for deleted chats are pruned. */
@@ -114,6 +134,8 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
       db.prepare('DELETE FROM memory_offer_history WHERE at < ?').run(now - OFFER_DEDUPE_WINDOW_MS);
       const chats = db.prepare('SELECT DISTINCT chat_id FROM memory_offer_history').all() as { chat_id: string }[];
       for (const { chat_id } of chats) if (!context.store.chat(chat_id)) db.prepare('DELETE FROM memory_offer_history WHERE chat_id = ?').run(chat_id);
+      // A throttle row only matters on its own day.
+      db.prepare('DELETE FROM memory_offer_days WHERE day <> ?').run(dayKey(new Date(now)));
     },
   };
   const archiveDir = join(context.dataDir, 'memory-archives');
@@ -492,13 +514,11 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
   const RECALL_MAX_RECORDS = 6, RECALL_MAX_CHARS = 3200;
   // Repository evidence (MEM-07): HEAD and branch from git, cached briefly so a burst of turns never waits on git twice.
   const repoCache = new Map<string, { at: number; value: Promise<RunContextRepo | null> }>();
-  const git = (cwd: string, args: string[]) => new Promise<string | null>(resolve => execFile('git', args, { cwd, timeout: 1_500, windowsHide: true }, (error, out) => resolve(error ? null : String(out).trim() || null)));
   const repoEvidence = (path: string | undefined): Promise<RunContextRepo | null> => {
     if (!path) return Promise.resolve(null);
     const hit = repoCache.get(path);
     if (hit && Date.now() - hit.at < 5_000) return hit.value;
-    const value = Promise.all([git(path, ['rev-parse', 'HEAD']), git(path, ['rev-parse', '--abbrev-ref', 'HEAD'])])
-      .then(([head, branch]) => head && /^[0-9a-f]{40,64}$/.test(head) ? { head, ...(branch && branch !== 'HEAD' ? { branch } : {}) } : null);
+    const value = readRepoEvidence(path);
     repoCache.set(path, { at: Date.now(), value });
     return value;
   };
@@ -517,16 +537,35 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
   const withoutExcluded = (chatId: string, lists: MemoryRecord[][]) => { const skip = excludedFor(chatId); return skip?.size ? lists.map(list => list.filter(record => !skip.has(record.id))) : lists; };
   // Recall joins runs only when it has something to offer; otherwise runs keep dispatching in the same tick.
   let removeContributor: (() => void) | undefined;
+  /** The task (first user message) plus the last few user messages and this one, newest last, deduplicated and bounded. */
+  const recallQuery = (chatId: string, prompt: string): string => {
+    const current = prompt.trim();
+    let first: string | undefined, recent: string[] = [];
+    try {
+      const rows = context.db();
+      first = (rows.prepare("SELECT text FROM timeline WHERE chat_id = ? AND kind = 'user' ORDER BY seq ASC LIMIT 1").get(chatId) as { text?: string } | undefined)?.text;
+      recent = (rows.prepare("SELECT text FROM timeline WHERE chat_id = ? AND kind = 'user' ORDER BY seq DESC LIMIT ?").all(chatId, RECALL_RECENT_MESSAGES) as { text?: string }[]).map(row => row.text ?? '').reverse();
+    } catch { /* no history: the current message alone */ }
+    const parts: string[] = [];
+    // Earlier messages give at most 600 chars each; the current message may use the whole budget.
+    for (const raw of [first ?? '', ...recent]) { const text = raw.trim().slice(0, 600); if (text && !parts.includes(text) && text !== current.slice(0, 600)) parts.push(text); }
+    if (current) parts.push(current.slice(0, RECALL_QUERY_MAX_CHARS));
+    // A long current message keeps priority: it is placed last and the oldest context is trimmed first.
+    let joined = parts.join('\n');
+    if (joined.length > RECALL_QUERY_MAX_CHARS) joined = joined.slice(joined.length - RECALL_QUERY_MAX_CHARS);
+    return joined || current.slice(0, RECALL_QUERY_MAX_CHARS);
+  };
   const contributor: PromptContributor = async ({ chat, folder, prompt, signal }) => {
-    const query = prompt.trim().slice(0, 4000);
+    const query = recallQuery(chat.id, prompt);
     const folderId = chat.folderId && context.store.folder(chat.folderId) ? chat.folderId : undefined;
     // A Project chat recalls from its own folder bank and its Project's shared bank together (PRJ-X5).
     const projectFolderId = chat.projectId && context.store.project(chat.projectId) ? `project:${chat.projectId}` : undefined;
-    const directives = config.settings().autoRecall ? [...listDirectives(scopeOf(folderId)), ...(projectFolderId ? listDirectives(scopeOf(projectFolderId)) : [])] : [];
+    // Personal directives and facts about the user apply in every chat, folder and Project chats included.
+    const directives = config.settings().autoRecall ? [...listDirectives(scopeOf(folderId)), ...(folderId ? listDirectives(scopeOf(undefined)) : []), ...(projectFolderId ? listDirectives(scopeOf(projectFolderId)) : [])] : [];
     const directiveText = directivesBlock(directives);
     const directiveLabel = `${directives.filter(d => d.enabled).length} directive${directives.filter(d => d.enabled).length === 1 ? '' : 's'}`;
     if (!config.settings().autoRecall || !query) return directiveText ? { label: directiveLabel, text: directiveText } : null;
-    const scopes = [folderId, ...(projectFolderId ? [projectFolderId] : [])];
+    const scopes = [folderId, ...(folderId ? [undefined] : []), ...(projectFolderId ? [projectFolderId] : [])];
     const [localByScope, remoteByScope] = await Promise.all([
       Promise.all(scopes.map(id => rankedLocalFor(id, query).catch(() => [] as MemoryRecord[]))),
       Promise.all(scopes.map(id => hindsightReady(id)
@@ -593,8 +632,11 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
     offerHistory.set(chat.id, recordOffer(history, summary));
     const folderId = chat.folderId && context.store.folder(chat.folderId) ? chat.folderId : undefined;
     if (autoRetain === 'ask') {
+      // The Memory inbox reads these rows; the transcript hides them. Only the first candidate of the day is
+      // listed as an offer, later ones are kept as held rows (status 'held') so nothing is lost.
+      const listed = offerDays.take(chat.id);
       const before = revision(chat.id);
-      context.store.appendItem(chat.id, 'notice', 'Suggested a note about this run for memory. Review it in Memory to remember or dismiss it.', 'offer', { kind: 'memory-offer', chatId: chat.id, runId, summary });
+      context.store.appendItem(chat.id, 'notice', listed ? 'Suggested a note about this run for memory. Review it in Memory to remember or dismiss it.' : 'Held a note about this run for memory.', listed ? 'offer' : 'held', { kind: 'memory-offer', chatId: chat.id, runId, summary, ...(listed ? {} : { held: true }) });
       publish(chat.id, before);
       return;
     }
@@ -722,7 +764,7 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
       const query = typeof input.prompt === 'string' ? input.prompt.trim().slice(0, 4000) : '';
       const folderId = chat.folderId && context.store.folder(chat.folderId) ? chat.folderId : undefined;
       const projectFolderId = chat.projectId && context.store.project(chat.projectId) ? `project:${chat.projectId}` : undefined;
-      const scopes = [folderId, ...(projectFolderId ? [projectFolderId] : [])];
+      const scopes = [folderId, ...(folderId ? [undefined] : []), ...(projectFolderId ? [projectFolderId] : [])];
       const enabled = config.settings().autoRecall, engine = enabled && scopes.some(scope => hindsightReady(scope));
       if (!enabled || !query) return { enabled, engine, records: [], excluded };
       const lists = withoutExcluded(chat.id, await Promise.all(scopes.map(scope => rankedLocalFor(scope, query).catch(() => [] as MemoryRecord[]))));

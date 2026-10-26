@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
 import type {ChildProcess} from 'node:child_process';
-import {claudeCodeAdapter,type Spawn} from '../src/runtime/adapters/claude-code.ts';
+import {claudeCodeAdapter,claudeSteerText,type Spawn} from '../src/runtime/adapters/claude-code.ts';
 import {createProviderAdapter,type ProviderInput,type CoreClient} from '../src/runtime/provider.ts';
 import {openAICompatibleAdapter} from '../src/runtime/adapters/http-chat.ts';
 import {ConversationMemory} from '../src/runtime/adapters/shared.ts';
@@ -39,7 +39,7 @@ test('Claude Code: three rapid steers arrive in order; one shared result still e
   const running=adapter.run({chat:{id:'c'} as any,cwd:'/w',prompt:'start',model:'claude-code/opus',permissionMode:'workspace',signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){},onSteerable:fn=>{send=fn;}});
   await tick();fake.emit({type:'system',subtype:'init',session_id:'s'},{type:'assistant',message:{content:[{type:'text',text:'working'}]}});
   assert.deepEqual(['one','two','three'].map(send),[true,true,true]);
-  assert.deepEqual(fake.stdin().trim().split('\n').map(line=>JSON.parse(line).message.content[0].text),['start','one','two','three']);
+  assert.deepEqual(fake.stdin().trim().split('\n').map(line=>JSON.parse(line).message.content[0].text),['start',...['one','two','three'].map(claudeSteerText)]);
   fake.emit({type:'result',subtype:'success',result:'ONE two three'});await tick();
   assert.equal(ended,false,'stdin stays open right after the result: a steer may still start another turn');
   assert.equal(send('four'),true,'a steer inside the grace window still goes through');

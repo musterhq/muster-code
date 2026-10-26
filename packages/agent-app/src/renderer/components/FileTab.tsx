@@ -25,6 +25,8 @@ import {FileAnnotations} from './FileAnnotations';
 import {HighlightedSourceTable} from './HighlightedCode';
 import {codeLanguageFromPath} from './codeLanguage';
 import {InlineFileSource, type InlineFileReview} from './InlineFileSource';
+import {VirtualFileSource, LARGE_FILE_THRESHOLD, virtualFileSelection} from './VirtualFileSource';
+import {virtualRowSelection} from './VirtualRowTable';
 import {friendlyFileError, parseDelimited, delimitedCellType} from './filePresentation';
 import {ResourceState} from './ResourceState';
 import {FileExitActions, FileFallback, HtmlPreview, MediaFile, QuickLookFile} from './FilePreviews';
@@ -141,9 +143,14 @@ function useTurnReview({folderId, path, text, enabled}: {folderId?: string; path
 }
 
 /** Selected source lines → an "Add to chat" chip (DIF-10). */
-function selectedLines(container: HTMLElement | null): {start: number; end: number; text: string; rect: DOMRect} | undefined {
+function selectedLines(container: HTMLElement | null, source: string): {start: number; end: number; text: string; rect: DOMRect} | undefined {
   const selection = window.getSelection();
   if (!container || !selection || selection.isCollapsed || !selection.rangeCount) return undefined;
+  const virtual = container.querySelector<HTMLElement>('.virtual-file-source');
+  const rows = virtualRowSelection(container.querySelector('.virtual-row-source'));
+  if (rows?.text.trim() && rows.start !== undefined && rows.end !== undefined) return {start: rows.start, end: rows.end, text: rows.text.slice(0, 8000), rect: selection.getRangeAt(0).getBoundingClientRect()};
+  const original = virtual && virtualFileSelection(virtual, source);
+  if (original?.text.trim()) return {...original, text: original.text.slice(0, 8000), rect: selection.getRangeAt(0).getBoundingClientRect()};
   const text = selection.toString();
   if (!text.trim()) return undefined;
   const lineOf = (node: Node | null) => { const element = node instanceof Element ? node : node?.parentElement; const row = element?.closest?.('tr[data-line]'); return row && container.contains(row) ? Number(row.getAttribute('data-line')) : undefined; };
@@ -156,7 +163,7 @@ function selectedLines(container: HTMLElement | null): {start: number; end: numb
 // Editing (WRK-08): a textarea editor with line numbers, Cmd+S to save, and a
 // conflict prompt when the file changed on disk since it was loaded.
 
-function FileEditor({folderId, path, tabId, onSaved}: {folderId: string; path: string; tabId: string; onSaved: () => void}): React.ReactElement {
+export function FileEditor({folderId, path, tabId, onSaved}: {folderId: string; path: string; tabId: string; onSaved: () => void}): React.ReactElement {
   const [state, setState] = useState<{phase: 'loading'} | {phase: 'ready'; original: string; draft: string; revision: string} | {phase: 'error'; message: string}>({phase: 'loading'});
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
@@ -167,7 +174,13 @@ function FileEditor({folderId, path, tabId, onSaved}: {folderId: string; path: s
     let live = true;
     setState({phase: 'loading'});
     void invoke('files.readFull', {folderId, path}).then(
-      value => { if (live) setState({phase: 'ready', original: value.text, draft: value.text, revision: value.revision}); },
+      value => {
+        if (!live) return;
+        // Saving writes the whole buffer back, so a file that was not read faithfully must never be editable.
+        if (value.truncated) setState({phase: 'error', message: 'This file is too large to edit here, so it was not opened for editing. Open it in an editor instead.'});
+        else if (value.encodingWarning) setState({phase: 'error', message: 'This file has bytes that are not valid UTF-8, so editing it here would replace them. Open it in an editor instead.'});
+        else setState({phase: 'ready', original: value.text, draft: value.text, revision: value.revision});
+      },
       cause => { if (live) setState({phase: 'error', message: friendlyFileError(cause)}); },
     );
     return () => { live = false; };
@@ -179,16 +192,18 @@ function FileEditor({folderId, path, tabId, onSaved}: {folderId: string; path: s
     if (state.phase !== 'ready' || saving) return;
     setSaving(true); setSaveError('');
     try {
-      const result = await invoke('files.write', {folderId, path, text: state.draft, ...(force ? {} : {expectedRevision: state.revision})});
+      const saved = state.draft;
+      const result = await invoke('files.write', {folderId, path, text: saved, ...(force ? {} : {expectedRevision: state.revision})});
       if (result.conflict) { setConflict(true); return; }
-      setState({phase: 'ready', original: state.draft, draft: state.draft, revision: result.revision});
+      // Keep whatever was typed while the write was in flight; only the saved baseline moves.
+      setState(prior => prior.phase === 'ready' ? {phase: 'ready', original: saved, draft: prior.draft, revision: result.revision} : prior);
       setConflict(false);
       void refreshFileBody(folderId, path);
       onSaved();
     } catch (cause) { setSaveError(friendlyFileError(cause)); }
     finally { setSaving(false); }
   }, [state, saving, folderId, path, onSaved]);
-  const discardAndReload = () => { setConflict(false); void invoke('files.readFull', {folderId, path}).then(value => setState({phase: 'ready', original: value.text, draft: value.text, revision: value.revision})); };
+  const discardAndReload = () => { setSaveError(''); void invoke('files.readFull', {folderId, path}).then(value => { setConflict(false); setState({phase: 'ready', original: value.text, draft: value.text, revision: value.revision}); }, cause => setSaveError(friendlyFileError(cause))); };
   if (state.phase === 'loading') return <ResourceState kind="loading" label={`Loading ${path}`} rows={6}/>;
   if (state.phase === 'error') return <ResourceState kind="error" message={state.message}/>;
   const lineCount = state.draft.split('\n').length;
@@ -429,7 +444,7 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
     content = <>
       {ready!.native ? <NativeDocument key={tab.id} folderId={tab.folderId!} path={tab.path!} revision={ready!} onToggleResourceMaximize={onToggleResourceMaximize} resourceMaximized={resourceMaximized}/> : document ? <PdfFile document={document} onLocation={setLocation}/> : workbook || (delimited.workbook && preview) ? <WorkbookFile key={`workbook:${tab.id}`} delimited={isDelimited} workbook={workbook ?? delimited.workbook!} onLocation={locateCell} onToggleFullPage={onToggleResourceMaximize} fullPage={resourceMaximized}/> : asset ? <ImageFile asset={asset} name={tab.title}/> : preview && delimited.error ? <div className="pane-error" role="alert"><p>Cannot preview this table: {delimited.error}</p><button onClick={() => setMode('source')}>View source</button></div> : preview && kind === 'html' ? <HtmlPreview html={text} name={tab.title}/> : preview ? <div className="file-markdown" data-kind={kind} role="region" aria-label={`Preview of ${tab.path}`} tabIndex={0}>
         {kind === 'markdown' && text && <DocumentCopyButton text={text}/>}
-        {kind === 'markdown' ? <MessageBody text={text} resourceContext={{folderId: tab.folderId!, path: tab.path!}}/> : <StructuredFile text={text} kind={kind as 'json'|'csv'|'tsv'}/>}
+        {kind === 'markdown' ? <MessageBody text={text} resourceContext={{folderId: tab.folderId!, path: tab.path!}} asDocument/> : <StructuredFile text={text} kind={kind as 'json'|'csv'|'tsv'}/>}
         {!text && <p className="file-empty">This document is empty.</p>}
       </div> : <div className="code-scroll" role="region" aria-label={`Source of ${tab.path}`} tabIndex={0}>
         {staleReason && <div className="inline-file-diff-stale" role="status">
@@ -437,7 +452,7 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
           <span>{staleReason}</span>
           <button type="button" onClick={reload}>Refresh</button>
         </div>}
-        {blaming && tab.folderId && tab.path ? <BlameView folderId={tab.folderId} path={tab.path} source={text} targetLine={tab.line}/> : turnReview && turnReview.model.state !== 'clean' ? <InlineFileSource source={text} path={tab.path??''} review={turnReview}/> : latestEdit && !turnReview ? <InlineFileSource source={text} path={tab.path??''} patch={latestEdit.patch} status={latestEdit.status} unavailableReason={latestEdit.unavailableReason}/> : <HighlightedSourceTable source={text} language={codeLanguageFromPath(tab.path ?? '')} targetLine={tab.line}/ >}
+        {blaming && tab.folderId && tab.path ? <BlameView folderId={tab.folderId} path={tab.path} source={text} targetLine={tab.line}/> : turnReview && turnReview.model.state !== 'clean' ? <InlineFileSource source={text} path={tab.path??''} review={turnReview} targetLine={tab.line}/> : latestEdit && !turnReview ? <InlineFileSource source={text} path={tab.path??''} patch={latestEdit.patch} status={latestEdit.status} unavailableReason={latestEdit.unavailableReason} targetLine={tab.line}/> : text.length >= LARGE_FILE_THRESHOLD ? <VirtualFileSource source={text} targetLine={tab.line}/> : <HighlightedSourceTable source={text} language={codeLanguageFromPath(tab.path ?? '')} targetLine={tab.line}/ >}
         {!text && <p className="file-empty">This file is empty.</p>}
       </div>}
       {richText && kind !== 'html' && !previewAllowed && !truncated && <div className="pane-truncated">Showing source: Document preview is limited to 65,536 characters.</div>}
@@ -473,8 +488,9 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
     </div>
     {find.open && !editing && <FindBar find={find} matchCount={fileFindMatches.length}/>}
     <div className="file-content-layout">
-    <div className="file-document" onScrollCapture={event=>{onScrollCapture(event);if(picked)setPicked(undefined);}} onMouseDown={event=>{if(!(event.target as Element).closest?.('.file-selection-context'))setPicked(undefined);}} onMouseUp={()=>{const selection=window.getSelection();if(selection && code.current?.contains(selection.anchorNode))setQuote(selection.toString().slice(0,2000));if(!preview)setPicked(selectedLines(code.current?.querySelector('.code-scroll') ?? null));}}>
+    <div className="file-document" onScrollCapture={event=>{onScrollCapture(event);if(picked)setPicked(undefined);}} onMouseDown={event=>{if(!(event.target as Element).closest?.('.file-selection-context'))setPicked(undefined);}} onMouseUp={()=>{const selection=window.getSelection();if(selection && code.current?.contains(selection.anchorNode)){const virtual=code.current.querySelector<HTMLElement>('.virtual-file-source');setQuote(((virtual&&virtualFileSelection(virtual,text))?.text??virtualRowSelection(code.current.querySelector('.virtual-row-source'))?.text??selection.toString()).slice(0,2000));}if(!preview)setPicked(selectedLines(code.current?.querySelector('.code-scroll') ?? null, text));}}>
       {editing && tab.folderId && tab.path ? <FileEditor folderId={tab.folderId} path={tab.path} tabId={tab.id} onSaved={() => {}}/>
+        : find.open && text.length >= LARGE_FILE_THRESHOLD ? <div className="code-scroll" role="region" aria-label={`Source of ${tab.path}`} tabIndex={0}><VirtualFileSource source={text} query={find.query} matches={fileFindMatches} current={find.index}/></div>
         : find.open ? <FindHighlightedText text={text} query={find.query} matches={fileFindMatches} current={find.index}/>
         : content}
       {picked && <button type="button" className="file-selection-context" style={{position:'fixed',top:Math.min(picked.rect.bottom+6,window.innerHeight-32),left:Math.max(8,Math.min(picked.rect.left,window.innerWidth-140))}} onClick={()=>{const range=picked.start===picked.end?`L${picked.start}`:`L${picked.start}-${picked.end}`;void addReviewContext({label:`${tab.path}:${range}`,text:picked.text,source:{kind:'file',folderId:tab.folderId,path:tab.path,startLine:picked.start,endLine:picked.end}}).then(result=>setSelectionStatus(result==='added'?'Added to chat':result==='copied'?'Copied selection — paste it into the chat':'Could not add the selection'));setPicked(undefined);window.getSelection()?.removeAllRanges();}}><MessageSquarePlus size={12} aria-hidden="true"/>Add to chat</button>}

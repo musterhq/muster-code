@@ -210,11 +210,11 @@ export function createImportDomain(context: DomainContext): DomainModule {
     const update = database.prepare('UPDATE timeline SET text = ?, status = ?, data = ? WHERE id = ?');
     const redacted = { value: 0 };
     const pending = new Map<string, { id: string; name: string; data: Record<string, unknown> }>();
-    let batch: Array<() => void> = [], items = 0, messages = 0, toolItems = 0, truncated = false, meta: { cwd?: string; model?: string; title?: string } = {};
+    let batch: Array<() => void> = [], items = 0, messages = 0, toolItems = 0, truncated = false, meta: { cwd?: string; model?: string; provider?: string; title?: string } = {};
     const flush = () => { if (!batch.length) return; const work = batch; batch = []; store.tx(() => { for (const step of work) step(); }); };
     const importedAt = new Date().toISOString();
     const noticeId = randomUUID();
-    const noticeData = () => ({ kind: 'imported', source: session.source, sessionId: session.sessionId, path: session.path, ...(session.cwd ? { cwd: session.cwd } : {}), importedAt, messageCount: messages, redacted: redacted.value, ...(meta.model ? { model: meta.model } : {}), ...(truncated ? { truncated: true } : {}) });
+    const noticeData = () => ({ kind: 'imported', source: session.source, sessionId: session.sessionId, path: session.path, ...(session.cwd ? { cwd: session.cwd } : {}), importedAt, messageCount: messages, redacted: redacted.value, ...(meta.model ? { model: meta.model } : {}), ...(meta.provider ? { provider: meta.provider } : {}), ...(truncated ? { truncated: true } : {}) });
     const noticeText = () => `Imported from ${sourceLabel(session.source)} · ${plural(messages, 'message')}${session.cwd ? ` · originally in ${homeRelative(session.cwd)}` : ''}${redacted.value ? ` · ${plural(redacted.value, 'secret')} redacted` : ''}${truncated ? ' · stopped at the import limit' : ''}`;
     batch.push(() => insert.run(noticeId, chatId, 'notice', noticeText(), 'completed', importedAt, JSON.stringify(noticeData())));
     const write = (item: ImportedItem) => {
@@ -238,7 +238,7 @@ export function createImportDomain(context: DomainContext): DomainModule {
       batch.push(() => update.run(text, status ?? 'completed', JSON.stringify(data), row.id));
     };
     for await (const event of events) {
-      if (event.type === 'meta') { meta = { ...meta, ...(event.meta.cwd ? { cwd: event.meta.cwd } : {}), ...(event.meta.model ? { model: event.meta.model } : {}), ...(event.meta.title ? { title: event.meta.title } : {}) }; continue; }
+      if (event.type === 'meta') { meta = { ...meta, ...(event.meta.cwd ? { cwd: event.meta.cwd } : {}), ...(event.meta.model ? { model: event.meta.model } : {}), ...(event.meta.provider ? { provider: event.meta.provider } : {}), ...(event.meta.title ? { title: event.meta.title } : {}) }; continue; }
       if (event.type === 'item') { if (!write(event.item)) break; }
       else settle(event.ref, event.output, event.status, event.data);
       if (batch.length >= MAX_IMPORT_BATCH) flush();
@@ -271,7 +271,7 @@ export function createImportDomain(context: DomainContext): DomainModule {
       continued = 'native';
     } else {
       // No native thread to resume: the first send seeds a fresh provider conversation with a bounded digest of what was imported.
-      database.prepare('UPDATE chats SET provider_thread_id = NULL, provider_turn_id = NULL, provider_thread_provider_id = NULL, provider_thread_binding_id = NULL, resume_digest = 1 WHERE id = ?').run(chatId);
+      database.prepare('UPDATE chats SET provider_thread_id = NULL, provider_turn_id = NULL, provider_thread_provider_id = NULL, provider_thread_binding_id = NULL, provider_thread_driver = NULL, resume_digest = 1 WHERE id = ?').run(chatId);
     }
     database.prepare('INSERT INTO imported_chats (source, session_id, chat_id, path, updated_at, imported_at, message_count) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source, session_id) DO UPDATE SET chat_id = excluded.chat_id, path = excluded.path, updated_at = excluded.updated_at, imported_at = excluded.imported_at, message_count = excluded.message_count')
       .run(session.source, session.sessionId, chatId, session.path, session.updatedAt, importedAt, messages);

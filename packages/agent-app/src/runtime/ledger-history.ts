@@ -30,7 +30,7 @@ export interface HistoryOptions {
 }
 export interface HistoryResult { chats: number; turns: number }
 
-interface ChatRow { id: string; project_id: string | null; title: string; status: string; provider_id: string | null; model: string | null }
+interface ChatRow { id: string; project_id: string | null; title: string; status: string; provider_id: string | null; model: string | null; imported_model: string | null; imported_provider: string | null; imported_at: string | null }
 interface ItemRow { id: string; kind: string; created_at: string; type: string | null; server: string | null; tool: string | null; command: string | null }
 export interface Turn { userId: string; startedAt: string; endedAt: string; tools: Map<string, number>; approvals: number; tests: number }
 
@@ -97,17 +97,20 @@ function chatEntries(db: DatabaseSync, chat: ChatRow, tables: { receipts: boolea
   // Usage is stored per chat, not per turn: it is shown only where it belongs to exactly one imported turn.
   let usage: UsageTotals | null = null;
   if (tables.usage && kept.length === 1 && turns.length === 1 && !live.size) {
-    const row = db.prepare(`SELECT SUM(input_tokens) AS i, SUM(cached_input_tokens) AS c, SUM(output_tokens) AS o, SUM(reasoning_output_tokens) AS r, SUM(requests) AS n FROM model_usage WHERE chat_id = ?`).get(chat.id) as { i: number | null; c: number | null; o: number | null; r: number | null; n: number | null } | undefined;
-    if (row?.n) usage = { inputTokens: Number(row.i ?? 0), cachedInputTokens: Number(row.c ?? 0), outputTokens: Number(row.o ?? 0), reasoningOutputTokens: Number(row.r ?? 0), requests: Number(row.n) };
+    const row = db.prepare(`SELECT SUM(input_tokens) AS i, SUM(cached_input_tokens) AS c, SUM(cache_write_tokens) AS w, SUM(output_tokens) AS o, SUM(reasoning_output_tokens) AS r, SUM(requests) AS n FROM model_usage WHERE chat_id = ?`).get(chat.id) as { i: number | null; c: number | null; w: number | null; o: number | null; r: number | null; n: number | null } | undefined;
+    if (row?.n) usage = { inputTokens: Number(row.i ?? 0), cachedInputTokens: Number(row.c ?? 0), outputTokens: Number(row.o ?? 0), reasoningOutputTokens: Number(row.r ?? 0), cacheWriteTokens: Number(row.w ?? 0), requests: Number(row.n) };
   }
   const provider = chat.provider_id || null, model = chat.model || null;
   const pricing = usage && provider && model ? options.pricing?.(provider, model) ?? null : null;
+  // An imported chat's earlier turns ran on the model its source session names, not the model the chat holds now.
+  const importedAt = chat.imported_at ? ms(chat.imported_at) : null;
   return kept.map(({ turn, runId, last }) => {
     const start = ms(turn.startedAt), end = ms(turn.endedAt);
+    const fromImport = (chat.imported_model || chat.imported_provider) && importedAt !== null && start !== null && start <= importedAt;
     return {
       id: `history:${chat.id}:${turn.userId}`, chatId: chat.id, runId: runId ?? `history:${turn.userId}`, taskId: null, projectId: chat.project_id ?? null,
-      trigger: chat.project_id ? 'project chat' : 'chat', agent: chat.title || 'Agent', provider, model,
-      tokens: usage ? { input: usage.inputTokens, cached: usage.cachedInputTokens, output: usage.outputTokens, reasoning: usage.reasoningOutputTokens } : null,
+      trigger: chat.project_id ? 'project chat' : 'chat', agent: chat.title || 'Agent', provider: fromImport ? chat.imported_provider || null : provider, model: fromImport ? chat.imported_model || null : model,
+      tokens: usage ? { input: usage.inputTokens, cached: usage.cachedInputTokens, output: usage.outputTokens, reasoning: usage.reasoningOutputTokens, ...(usage.cacheWriteTokens ? { cacheWrite: usage.cacheWriteTokens } : {}) } : null,
       costUsd: usage ? estimateCostUsd(usage, pricing) : null,
       tools: [...turn.tools].map(([name, count]) => ({ name, count })), approvals: turn.approvals, tests: turn.tests, files: null,
       startedAt: turn.startedAt, endedAt: turn.endedAt, durationMs: start !== null && end !== null ? Math.max(0, end - start) : null,
@@ -140,7 +143,11 @@ export async function importLedgerHistory(db: DatabaseSync, ledger: TurnLedger, 
   if (hasTable(db, 'chats') && hasTable(db, 'timeline')) {
     db.exec('CREATE TABLE IF NOT EXISTS turn_ledger_backfill (chat_id TEXT PRIMARY KEY, turns INTEGER NOT NULL, done_at TEXT NOT NULL)');
     const tables = { receipts: hasTable(db, 'receipts'), usage: hasTable(db, 'model_usage') };
-    const next = db.prepare(`SELECT c.id, c.project_id, c.title, c.status, c.provider_id, c.model FROM chats c
+    // A usage table from before cache writes were counted has no such column; its rows count none.
+    if (tables.usage && !(db.prepare("SELECT name FROM pragma_table_info('model_usage')").all() as { name: string }[]).some(column => column.name === 'cache_write_tokens')) db.exec('ALTER TABLE model_usage ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0');
+    // The import note (#95) holds the model and provider the source session ran; the chat's own model is only what Muster continues with.
+    const note = (field: string) => `(SELECT CASE WHEN json_valid(t.data) THEN json_extract(t.data, '$.${field}') END FROM timeline t WHERE t.chat_id = c.id AND t.kind = 'notice' AND CASE WHEN json_valid(t.data) THEN json_extract(t.data, '$.kind') END = 'imported' ORDER BY t.seq LIMIT 1)`;
+    const next = db.prepare(`SELECT c.id, c.project_id, c.title, c.status, c.provider_id, c.model, ${note('model')} AS imported_model, ${note('provider')} AS imported_provider, ${note('importedAt')} AS imported_at FROM chats c
       WHERE c.id > ? AND c.status NOT IN (${BUSY.map(() => '?').join(',')}) AND NOT EXISTS (SELECT 1 FROM turn_ledger_backfill b WHERE b.chat_id = c.id) ORDER BY c.id LIMIT ?`);
     const done = db.prepare('INSERT OR IGNORE INTO turn_ledger_backfill (chat_id, turns, done_at) VALUES (?, ?, ?)');
     let after = '';
