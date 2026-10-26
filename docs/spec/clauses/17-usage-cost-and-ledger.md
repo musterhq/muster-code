@@ -16,8 +16,9 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
-| [MUS-SPEC-17-573A](17-usage-cost-and-ledger.md#mus-spec-17-573a) | Rows removed from the end of the ledger are reported as a break. | [`verify() notices entries deleted from the end of the chain`](../../../packages/agent-app/tests/turn-ledger-bughunt.test.ts) |
+| [MUS-SPEC-17-95A](17-usage-cost-and-ledger.md#mus-spec-17-95a) | Ledger history for an imported chat names the session's model and provider, not the app default. | [`ledger history attributes imported turns to the session model and provider`](../../../packages/agent-app/tests/conversation-import.test.ts) |
 | [MUS-SPEC-17-458A](17-usage-cost-and-ledger.md#mus-spec-17-458a) | With two approval requests accepted automatically a turn records 0 approvals; a turn that also shows a card records 1. | [`ledger approvals count only cards shown to the user, never Full-access auto-accepts`](../../../packages/agent-app/tests/ledger-history.test.ts) |
+| [MUS-SPEC-17-573A](17-usage-cost-and-ledger.md#mus-spec-17-573a) | Rows removed from the end of the ledger are reported as a break. | [`verify() notices entries deleted from the end of the chain`](../../../packages/agent-app/tests/turn-ledger-bughunt.test.ts) |
 | [MUS-SPEC-17-631A](17-usage-cost-and-ledger.md#mus-spec-17-631a) | In the model picker's All view, a provider whose limit is used up is labelled "Limit reached", the others are not, and every provider stays listed. | [`the model picker flags a provider whose usage limit is reached and keeps the others available`](../../../packages/agent-app/tests/model-picker-dom.tsx) |
 | [MUS-SPEC-17-631B](17-usage-cost-and-ledger.md#mus-spec-17-631b) | The composer shows "<provider> has reached its usage limit" with the reset time, still shows it after a remount without a new read, clears when usage drops, and also warns for the short window with no reset time; no extra reads. | [`a provider that hit its usage limit shows a warning in the composer, once per limit window, with no polling`](../../../packages/agent-app/tests/model-picker-dom.tsx) |
 | [MUS-SPEC-17-631C](17-usage-cost-and-ledger.md#mus-spec-17-631c) | Dismiss hides the warning in every composer for that limit window, a new window warns again, another provider's chat shows nothing, and a reset time already in the past is not treated as exhausted. | [`dismissing the usage warning hides it for that limit window in every composer; a new window warns again`](../../../packages/agent-app/tests/model-picker-dom.tsx) |
@@ -29,6 +30,32 @@ Boundaries:
 | [MUS-SPEC-17-179B](17-usage-cost-and-ledger.md#mus-spec-17-179b) | After the whole chain is rewritten with valid hashes, the chain check fails because the head no longer matches the saved head. | [`a fully rewritten chain is reported by verify`](../../../packages/agent-app/tests/turn-ledger-anchor-179.test.ts) |
 | [MUS-SPEC-17-179C](17-usage-cost-and-ledger.md#mus-spec-17-179c) | A ledger written before the saved head existed adopts its current head, then reports a later truncation; a new receipt does not hide an earlier truncation. | [`an older ledger adopts its head and a later receipt cannot hide a truncation`](../../../packages/agent-app/tests/turn-ledger-anchor-179.test.ts) |
 | [MUS-SPEC-17-179D](17-usage-cost-and-ledger.md#mus-spec-17-179d) | A receipt whose save fails partway leaves nothing half-written: the check still passes and the next receipt chains on. | [`a receipt that fails to save leaves the ledger passing`](../../../packages/agent-app/tests/turn-ledger-anchor-179.test.ts) |
+
+### Imported chats in the ledger
+
+<a id="mus-spec-17-95a"></a>
+#### MUS-SPEC-17-95A: Imported turns are attributed to the model that ran them
+
+- Precondition: A Codex session that ran `gpt-6-codex` on `openai` is imported into a chat that holds the app's default model.
+- Action: Build the ledger history.
+- Expected result: Every history entry for the imported turns has model `gpt-6-codex` and provider `openai`.
+- Test: `packages/agent-app/tests/conversation-import.test.ts::ledger history attributes imported turns to the session model and provider`
+- Environment: Node test runner; the agent service with a fake provider; fixture sessions in a temp folder.
+- Known gaps: Turns sent in Muster after the import keep the chat's own model; that is not shown here. Imported turns carry no token counts.
+- Evidence: UNVERIFIED
+
+### Approvals in the ledger
+
+<a id="mus-spec-17-458a"></a>
+#### MUS-SPEC-17-458A: Approvals in a turn receipt count only cards shown to the user
+
+- Precondition: A chat in Full access, where the provider asks for approval and Muster accepts at once with no card. A second turn where an approval card is shown.
+- Action: Run both turns through the ledger's run hooks and settle each one.
+- Expected result: The first turn's receipt records 0 approvals. The second turn's receipt records 1.
+- Test: `packages/agent-app/tests/ledger-history.test.ts::ledger approvals count only cards shown to the user, never Full-access auto-accepts`
+- Environment: Node test runner; in-memory SQLite database; no provider or network.
+- Known gaps: Drives the ledger's run hooks with hand-made events, not the agent service. It does not show the service sending the shown-card event when it creates a card.
+- Evidence: UNVERIFIED
 
 <a id="mus-spec-17-573a"></a>
 #### MUS-SPEC-17-573A: The ledger check notices entries cut from the end
@@ -74,19 +101,6 @@ Boundaries:
 - Test: `packages/agent-app/tests/model-picker-dom.tsx::dismissing the usage warning hides it for that limit window in every composer; a new window warns again`
 - Environment: DOM suite (`linkedom`); fake usage answers and events.
 - Known gaps: One check covers several steps, so a failure does not say which step broke, and it starts from the state MUS-SPEC-17-631B leaves. The dismissal lives in memory only, so it is gone after a restart.
-- Evidence: UNVERIFIED
-
-### Approvals in the ledger
-
-<a id="mus-spec-17-458a"></a>
-#### MUS-SPEC-17-458A: Approvals in a turn receipt count only cards shown to the user
-
-- Precondition: A chat in Full access, where the provider asks for approval and Muster accepts at once with no card. A second turn where an approval card is shown.
-- Action: Run both turns through the ledger's run hooks and settle each one.
-- Expected result: The first turn's receipt records 0 approvals. The second turn's receipt records 1.
-- Test: `packages/agent-app/tests/ledger-history.test.ts::ledger approvals count only cards shown to the user, never Full-access auto-accepts`
-- Environment: Node test runner; in-memory SQLite database; no provider or network.
-- Known gaps: Drives the ledger's run hooks with hand-made events, not the agent service. It does not show the service sending the shown-card event when it creates a card.
 - Evidence: UNVERIFIED
 
 ### Showing token counts and cost

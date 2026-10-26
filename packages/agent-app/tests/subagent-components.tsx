@@ -2,6 +2,7 @@
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require = createRequire(import.meta.url);
 const {parseHTML} = require('linkedom');
 const {window} = parseHTML('<html><body><div id="root"></div></body></html>');
@@ -14,11 +15,15 @@ Object.assign(globalThis, {
 });
 window.HTMLElement.prototype.getBoundingClientRect = () => ({height:120,width:600,top:0,left:0,bottom:120,right:600});
 const chat = {id:'chat',title:'Background review',projectId:'project',pinned:false,archived:false,draft:'',status:'completed',updatedAt:'',model:'test',mode:'agent'};
-let snapshot = {chats:[chat,{...chat,id:'error',title:'Unavailable conversation'},{...chat,id:'claude',title:'Claude Code run',status:'running'}],folders:[{id:'a',name:'One',path:'/one'},{id:'b',name:'Two',path:'/two'}],projects:[{id:'project',name:'Project',goal:'',folderIds:['a','b']}],version:1,activeChatId:'chat'};
+let snapshot = {chats:[chat,{...chat,id:'error',title:'Unavailable conversation'},{...chat,id:'claude',title:'Claude Code run',status:'running'},{...chat,id:'trio',title:'Three helpers'}],folders:[{id:'a',name:'One',path:'/one'},{id:'b',name:'Two',path:'/two'}],projects:[{id:'project',name:'Project',goal:'',folderIds:['a','b']}],version:1,activeChatId:'chat'};
 const items = [{id:'child-report',chatId:'chat',kind:'tool',text:'',createdAt:'2026-01-01T00:00:00Z',data:{type:'collabAgentToolCall',receiverAgents:[{threadId:'alpha',name:'Reviewer',prompt:'Review the changes',result:'Earlier review result'},{threadId:'beta',name:'Researcher'},{threadId:'gamma',name:'Tester'},{threadId:'delta',name:'Planner'},{threadId:'unknown',name:'Unnamed status'}],agentsStates:{alpha:'running',beta:'pendingInit',gamma:'failed',delta:{status:'completed',message:'All checks passed'}}}}];
 // A Claude Code Task, as the adapter reports it: child id `<session>:<tool_use id>`, launched in the background, still running.
 const claudeItems = [{id:'c1',chatId:'claude',kind:'tool',text:'',status:'completed',createdAt:'2026-01-01T00:00:00Z',data:{type:'collabAgentToolCall',tool:'spawnAgent',background:true,prompt:'Map the repo',receiverThreadIds:['sess:toolu_1'],
   receiverAgents:JSON.stringify([{threadId:'sess:toolu_1',name:'Map the repo',role:'Explore',prompt:'Map the repo'}]),agentsStates:JSON.stringify({'sess:toolu_1':{status:'running'}})}}];
+// #651: three parallel agents whose prompts all open with the same location clause, all finished and reported back.
+const trioPrompts = ['count the lines in data/lines.txt','list the files in assets/','summarize README.md in 5 words'].map(task => `In the repository at /private/tmp/claude-501/w-qa/scratch, ${task} and report the result.`);
+const trioIds = [1,2,3].map(n => `019a1b2c-000${n}-7000-8000-00000000000${n}`);
+const trioItems = [{id:'trio-report',chatId:'trio',kind:'tool',text:'',status:'completed',createdAt:'2026-01-01T00:00:00Z',data:{type:'collabAgentToolCall',tool:'wait',receiverAgents:trioPrompts.map((prompt,i)=>({threadId:trioIds[i],prompt,result:`Result ${i}`})),agentsStates:Object.fromEntries(trioIds.map(id=>[id,'completed']))}}];
 const transcriptReads:string[] = [];
 let transcriptFails = false;
 const eventListeners = new Set<(event:any)=>void>();
@@ -32,7 +37,7 @@ const controls:any[] = [];
     if(command==='app.snapshot') return snapshot;
     if(command==='chat.timeline') {
       if(input.id==='error' && failTimeline) throw new Error('Saved activity cannot be loaded');
-      return {items:input.id==='chat'?items:input.id==='claude'?claudeItems:[],revision:1};
+      return {items:input.id==='chat'?items:input.id==='claude'?claudeItems:input.id==='trio'?trioItems:[],revision:1};
     }
     if(command==='subagents.transcript') {
       transcriptReads.push(input.threadId);
@@ -75,7 +80,7 @@ const folderLaunchers = () => [...document.querySelectorAll('.workspace-launcher
 assert.equal(folderLaunchers(),4,'two file/change actions per folder, no duplicate child sections');
 assert.match(document.querySelector('.workspace-chat-activity')!.textContent!,/1 working1 waiting1 done1 failed or stopped1 other or unreported/);
 assert.equal(document.querySelectorAll('.subagent-card').length,5);
-assert.match(document.querySelector('.subagents-tab .subagent-counts')!.textContent!,/1 running1 waiting0 completed1 reported back1 failed or stopped1 not reported/);
+assert.match(document.querySelector('.subagents-tab .subagent-counts')!.textContent!,/^1 running1 waiting1 completed1 failed or stopped1 not reported$/);
 assert.ok(!document.body.textContent!.includes('Thread'),'raw thread ids are not list content');
 assert.ok(document.querySelector('.subagent-card.is-verified .subagent-phase.is-verified'),'a completed child with a reported result is verified');
 assert.ok(document.querySelector('.subagent-card .subagent-avatar .agent-glyph'),'identity glyph, not a generic bot icon');
@@ -182,7 +187,7 @@ assert.ok(document.querySelector('.workspace-empty'));
 // A retained tab continues displaying its own conversation after chat selection.
 await store.selectChat('error'); await delay(40);
 assert.equal(document.querySelectorAll('.subagent-card').length,5);
-assert.match(document.querySelector('.subagents-tab .subagent-counts')!.textContent!,/1 running1 waiting0 completed1 reported back1 failed or stopped1 not reported/);
+assert.match(document.querySelector('.subagents-tab .subagent-counts')!.textContent!,/^1 running1 waiting1 completed1 failed or stopped1 not reported$/);
 assert.ok(!document.body.textContent!.includes('Thread'),'raw thread ids are not list content');
 assert.ok(document.querySelector('.subagent-card.is-verified .subagent-phase.is-verified'),'a completed child with a reported result is verified');
 assert.ok(document.querySelector('.subagent-card .subagent-avatar .agent-glyph'),'identity glyph, not a generic bot icon');
@@ -209,6 +214,15 @@ assert.ok(document.querySelector('.subagent-card .subagent-phase.is-running'),'l
 await delay(60);
 assert.ok(transcriptReads.includes('sess:toolu_1'),'opening it reads that child\'s transcript');
 assert.match(document.querySelector('.subagent-view-head')!.textContent!,/Background/);
+await store.selectChat('trio'); await delay(40);
+root.render(<SubagentsTab tab={{id:'subagents:trio',kind:'subagents',chatId:'trio',title:'Trio'}}/>);
+await delay(80);
+// Spec: MUS-SPEC-14-651E (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-651e)
+await check('three finished sub-agents with one location clause list three distinct names and read three completed', async () => {
+  const names = [...document.querySelectorAll('.subagent-card .subagent-open-text strong')].map(node => node.textContent);
+  assert.deepEqual(names, ['Count the lines in data/lines.txt','List the files in assets/','Summarize README.md in 5 words']);
+  assert.equal(document.querySelector('.subagents-tab .subagent-counts')!.textContent,'0 running3 completed');
+});
 assert.deepEqual(errors,[]);
 root.unmount();
 console.log('Subagent component checks passed: restore, counts, identity hue, child transcript detail with back, polling, retry, timeline row opens child, folderless navigation, disclosure, saved-tab identity, error and retry.');
