@@ -271,7 +271,7 @@ export function createImportDomain(context: DomainContext): DomainModule {
       continued = 'native';
     } else {
       // No native thread to resume: the first send seeds a fresh provider conversation with a bounded digest of what was imported.
-      database.prepare('UPDATE chats SET provider_thread_id = NULL, provider_turn_id = NULL, provider_thread_provider_id = NULL, provider_thread_binding_id = NULL, resume_digest = 1 WHERE id = ?').run(chatId);
+      database.prepare('UPDATE chats SET provider_thread_id = NULL, provider_turn_id = NULL, provider_thread_provider_id = NULL, provider_thread_binding_id = NULL, provider_thread_driver = NULL, resume_digest = 1 WHERE id = ?').run(chatId);
     }
     database.prepare('INSERT INTO imported_chats (source, session_id, chat_id, path, updated_at, imported_at, message_count) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source, session_id) DO UPDATE SET chat_id = excluded.chat_id, path = excluded.path, updated_at = excluded.updated_at, imported_at = excluded.imported_at, message_count = excluded.message_count')
       .run(session.source, session.sessionId, chatId, session.path, session.updatedAt, importedAt, messages);
