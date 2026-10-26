@@ -90,6 +90,7 @@ export const suites = [
   'markdown-breaks-dom',
   'setup-clone-handoff-dom',
   'sandbox-honesty-dom',
+  'file-find-dom',
   'import-origin-dom',
 ];
 
