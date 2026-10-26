@@ -11,7 +11,7 @@ import {EMPTY_ACTIVITY_ITEMS, getSubagentActivity, subagentState} from '../subag
 import {portURL, useListeningPorts, useProcessSummary} from '../processSummary';
 import {isActiveProcess} from '../../shared/process-protocol';
 import {classifyTool} from './toolPresentation';
-import {AgentGlyph, agentDisplayName} from '../agentIdentity';
+import {AgentGlyph, agentDisplayNames} from '../agentIdentity';
 import './activity-group.css';
 import {commitAction, hasUncommittedChanges} from '../gitSummary';
 import {collectFileChanges} from '../turnFileChanges';
@@ -352,6 +352,7 @@ export function SummaryCard() {
   const timeline = chat ? state.timelines[chat.id] : undefined;
   const items = timeline?.value ?? EMPTY_ACTIVITY_ITEMS;
   const {agents, counts} = useMemo(() => getSubagentActivity(items), [items]);
+  const agentNames = useMemo(() => agentDisplayNames(agents), [agents]);
   const sources = useMemo(() => sourceList(items), [items]);
   // This chat's own edits (F23), with lockfiles/generated output counted apart like every other pill (F59).
   const totals = useMemo(() => items.length ? splitChangeTotals(collectFileChanges(items)) : undefined, [items]);
@@ -452,8 +453,8 @@ export function SummaryCard() {
     </section>}
     {agents.length > 0 && <section className="summary-section" aria-label="Subagents">
       <header className="summary-section-head"><span>Subagents</span></header>
-      <button type="button" className="summary-row summary-agents" onClick={openAgents} title={agents.map((a, index) => `${agentDisplayName(a, index + 1)}: ${subagentState(a.state).label}`).join('\n')}>
-        <span className="summary-agent-dots" aria-hidden="true">{agents.slice(0, 5).map((agent, index) => { const kind = subagentState(agent.state).kind; return <AgentGlyph key={agent.id} name={agentDisplayName(agent, index + 1)} state={kind === 'working' ? 'working' : kind === 'failed' ? 'failed' : kind === 'done' ? 'done' : 'idle'}/>; })}</span>
+      <button type="button" className="summary-row summary-agents" onClick={openAgents} title={agents.map(a => `${agentNames.get(a.id)}: ${subagentState(a.state).label}`).join('\n')}>
+        <span className="summary-agent-dots" aria-hidden="true">{agents.slice(0, 5).map(agent => { const kind = subagentState(agent.state).kind; return <AgentGlyph key={agent.id} name={agentNames.get(agent.id)!} state={kind === 'working' ? 'working' : kind === 'failed' ? 'failed' : kind === 'done' ? 'done' : 'idle'}/>; })}</span>
         <span className="summary-row-label">{agentSummary || `${agents.length} reported`}</span>
       </button>
     </section>}

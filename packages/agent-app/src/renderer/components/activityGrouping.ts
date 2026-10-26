@@ -1,6 +1,6 @@
 import type {TimelineItem} from '../../shared/protocol';
 import {APPROVAL_WAIT_LABEL,awaitingApproval,classifyTool,executionDenied} from './toolPresentation.ts';
-import {agentDisplayName} from '../agentIdentity.ts';
+import {agentDisplayName,agentDisplayNames} from '../agentIdentity.ts';
 import {projectSubagentActivity,subagentLifecycle,subagentState,type SubagentActivity,type SubagentLifecycleEvent} from '../subagentActivity.ts';
 
 export interface ActivityEntry {kind:'activity';id:string;items:TimelineItem[];
@@ -73,16 +73,15 @@ export function segmentActivity(items:TimelineItem[],prior?:ReadonlyMap<string,S
   // Events this group showed, over what earlier groups showed (read through, never copied: this runs per render).
   const own=new Map<string,SubagentLifecycleEvent>(),last={get:(id:string)=>own.get(id)??prior?.get(id)};
   const out:ActivitySegment[]=[];
-  let agents:Map<string,SubagentActivity>|undefined,ids:string[]|undefined;
+  let agents:Map<string,SubagentActivity>|undefined,names:Map<string,string>|undefined;
   for(const item of items){
     const events=newLifecycle(item,last);
     if(!events.length){const previous=out.at(-1);if(previous?.kind==='tools')previous.items.push(item);else out.push({kind:'tools',id:item.id,items:[item]});continue;}
     for(const {id,event,name,reason} of events){
       own.set(id,event);
-      agents??=new Map((roster??projectSubagentActivity(items.filter(isCollab))).map(agent=>[agent.id,agent]));
+      if(!agents){const all=roster??projectSubagentActivity(items.filter(isCollab));agents=new Map(all.map(agent=>[agent.id,agent]));names=agentDisplayNames(all);}
       const known=agents.get(id),kind=subagentState(known?.state).kind;
-      const ordinal=(ids??=[...agents.keys()]).indexOf(id)+1;
-      const agent:SubagentRowAgent={id,name:agentDisplayName({name:name??known?.name,role:known?.role,prompt:known?.prompt},ordinal||undefined),state:event==='failed'?'failed':event==='finished'?'done':kind==='working'||kind==='waiting'||item.status==='running'&&kind==='unknown'?'working':'idle'};
+      const agent:SubagentRowAgent={id,name:names!.get(id)??agentDisplayName({name}),state:event==='failed'?'failed':event==='finished'?'done':kind==='working'||kind==='waiting'||item.status==='running'&&kind==='unknown'?'working':'idle'};
       const why=event==='failed'?reason??known?.error:undefined;if(why)agent.reason=why;
       const previous=out.at(-1);
       if(event==='started'&&previous?.kind==='subagents'&&previous.event==='started'){if(!previous.agents.some(a=>a.id===id))previous.agents.push(agent);}
