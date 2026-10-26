@@ -641,7 +641,7 @@ textarea:focus-visible {
 @media (prefers-reduced-motion: no-preference) {
   .notice { animation: notice-in 160ms cubic-bezier(.2,.75,.25,1) both; }
 }
-@keyframes notice-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes notice-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* App preferences that override the OS (html data attributes set from Settings). */
