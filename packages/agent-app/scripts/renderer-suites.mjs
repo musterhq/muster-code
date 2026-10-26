@@ -94,6 +94,7 @@ export const suites = [
   'import-origin-dom',
   'file-find-dom',
   'large-edited-file-dom',
+  'notice-placement-dom',
 ];
 
 /** Suites that open Base UI menus/portals get a split build: their `await import()` of UI code stays a separate

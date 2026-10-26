@@ -3,6 +3,10 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Notification toasts now stack in the bottom-right corner of the window, just above the status row, instead of the top-right where they sat over your messages. They stay clear of the message box and the chat summary card; in a narrow window they lift above the message box, and with the right pane open they stay in the window corner and follow the status row when it moves.
+
 ## 0.3.14
 
 Chats keep working through quits, crashes and usage limits; Claude on your own router works in Full access; secrets are masked everywhere a chat is saved; and many fixes to queues, receipts, files, git and right-to-left text.
