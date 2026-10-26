@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {test, type TestContext} from 'node:test';
 import {mkdtemp, mkdir, readdir, readFile, rename, rm, symlink, unlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join, relative} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {executeTool, type ToolContext} from '../src/runtime/adapters/http-tools.ts';
 import {createAgentService} from '../src/runtime/service.ts';
@@ -30,7 +30,7 @@ test('a folder swapped for a link while a write waits for approval creates nothi
 });
 
 // Spec: MUS-SPEC-05-347B (docs/spec/clauses/05-access-modes-and-approvals.md#mus-spec-05-347b)
-test('a racer swapping a folder and a link under repeated writes leaves nothing outside', async t => {
+test('a racer swapping a folder and a link under repeated writes puts no content outside', async t => {
   const {root, ws, outside} = await sandbox(t); if (!await canLink(root)) return t.skip('no link privilege');
   const victim = join(outside, 'victim.txt'); await writeFile(victim, 'keep');
   await mkdir(join(ws, 'd')); await writeFile(join(ws, 'top.txt'), 'mine');
@@ -55,7 +55,16 @@ test('a racer swapping a folder and a link under repeated writes leaves nothing 
     await executeTool(call('write_file', {path: 'top.txt', content: 'PWNED'}), ctx(ws));
   }
   racing = false; await racer;
-  assert.deepEqual(await readdir(outside), ['victim.txt'], 'nothing new appeared outside');
+  // A swap that lands between the folder check and the open, and is undone before cleanup, can leave an empty file or
+  // folder outside (#710: Node has no open relative to the checked folder). The content is written only after the open
+  // file is proven to be inside, so nothing the writes sent may be found outside, and the existing file stays as it was.
+  const leaked: string[] = [];
+  for (const entry of await readdir(outside, {recursive: true, withFileTypes: true})) {
+    if (!entry.isFile()) continue;
+    const path = join(entry.parentPath, entry.name);
+    if (path !== victim && (await readFile(path, 'utf8')).length) leaked.push(relative(outside, path));
+  }
+  assert.deepEqual(leaked, [], 'no file outside holds anything a write sent');
   assert.equal(await readFile(victim, 'utf8'), 'keep', 'the file outside is unchanged');
 });
 

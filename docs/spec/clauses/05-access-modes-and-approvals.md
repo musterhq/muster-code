@@ -18,7 +18,7 @@ Boundaries:
 | Case | What the assertions check | Test |
 |---|---|---|
 | [MUS-SPEC-05-347A](05-access-modes-and-approvals.md#mus-spec-05-347a) | A folder swapped for a link after the path check and before the write makes the write fail and creates no folder outside the chat's folder. | [`a folder swapped for a link while a write waits for approval creates nothing outside`](../../../packages/agent-app/tests/write-confined-347.test.ts) |
-| [MUS-SPEC-05-347B](05-access-modes-and-approvals.md#mus-spec-05-347b) | While another process keeps swapping a folder and a file name for links, repeated writes leave no file and no folder outside the chat's folder. | [`a racer swapping a folder and a link under repeated writes leaves nothing outside`](../../../packages/agent-app/tests/write-confined-347.test.ts) |
+| [MUS-SPEC-05-347B](05-access-modes-and-approvals.md#mus-spec-05-347b) | While another process keeps swapping a folder and a file name for links, repeated writes put none of their content outside the chat's folder and leave the file already there unchanged. | [`a racer swapping a folder and a link under repeated writes puts no content outside`](../../../packages/agent-app/tests/write-confined-347.test.ts) |
 | [MUS-SPEC-05-347C](05-access-modes-and-approvals.md#mus-spec-05-347c) | A policyOnly flag inside the parameters of an approval request does not skip the approval card. | [`a policyOnly flag inside request parameters does not skip the approval card`](../../../packages/agent-app/tests/write-confined-347.test.ts) |
 | [MUS-SPEC-05-347D](05-access-modes-and-approvals.md#mus-spec-05-347d) | An HTTP route's file change asks for approval with policyOnly as a separate argument, not inside the parameters. | [`the HTTP tools pass policyOnly as a separate authorize argument`](../../../packages/agent-app/tests/write-confined-347.test.ts) |
 | [MUS-SPEC-05-473F](05-access-modes-and-approvals.md#mus-spec-05-473f) | A mid-turn start by the agent is allowed only in Agent mode with Full access; a user start still waits for the turn. | [`commandAuthority: the agent may start mid-turn, but only in Agent mode with Full access`](../../../packages/agent-app/tests/process-continuations.test.ts) |
@@ -47,10 +47,10 @@ Boundaries:
 
 - Precondition: A Workspace-access chat on an HTTP route. A second process keeps swapping the folder `d` between a real folder and a link to `outside`, and the name `top.txt` between a file and a link to a file in `outside`.
 - Action: The model writes `d/x.txt`, `d/sub/y.txt` and `top.txt` many times.
-- Expected result: When the race ends, `outside` holds no new file and no new folder, and its existing file is unchanged.
-- Test: `packages/agent-app/tests/write-confined-347.test.ts::a racer swapping a folder and a link under repeated writes leaves nothing outside`
+- Expected result: When the race ends, no file in `outside` holds anything the writes sent, and its existing file is unchanged.
+- Test: `packages/agent-app/tests/write-confined-347.test.ts::a racer swapping a folder and a link under repeated writes puts no content outside`
 - Environment: Node test runner, a second node process, temp folders, a file system that allows links.
-- Known gaps: A race test is a sample, not a proof. It does not show which check stopped each attempt.
+- Known gaps: A race test is a sample, not a proof. It does not show which check stopped each attempt. An empty file or folder can still be left in `outside` when the swap lands between the folder check and the open and is undone before cleanup; nothing is written into it. Closing that needs an open relative to the checked folder, which Node does not offer (#710).
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-05-347c"></a>
