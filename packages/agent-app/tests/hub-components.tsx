@@ -5,6 +5,7 @@
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url);
 const {parseHTML}=require('linkedom');
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
@@ -263,6 +264,21 @@ assert.deepEqual(text('.ws-ledger .ws-source-history'),['Imported history'],'imp
 assert.match(text('.ws-chain')[0],/1 imported from history \(not chained\)/);
 assert.match(text('.ws-receipt-summary')[0],/tokens not stored per turn/);
 root4.unmount();
+
+// Spec: MUS-SPEC-17-663G (docs/spec/clauses/17-usage-cost-and-ledger.md#mus-spec-17-663g)
+await check('#663 a Receipt says estimate when its cost is partial', async () => {
+  ledgerEntries=[{...receipt,id:'whole',runId:'whole',costUsd:1.5},{...receipt,id:'cut',runId:'cut',costUsd:2.5,estimated:true}];
+  const rootEstimate=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
+  rootEstimate.render(<LedgerPage key="estimate" snapshot={snapshot as any} nav={{onOpenTask(){},onOpenAgent(){},onOpenChat(){}}}/>);
+  await delay(150);
+  const summaries=text('.ws-receipt-summary');
+  assert.equal(summaries.length,2);
+  const cut=summaries.find(t=>t.includes('$2.50')),whole=summaries.find(t=>t.includes('$1.50'));
+  assert.match(cut!,/\$2\.50 estimate/,'the cut-off turn says estimate beside its cost');
+  assert.doesNotMatch(whole!,/estimate/,'a complete turn does not');
+  rootEstimate.unmount();
+  ledgerEntries=[];
+});
 
 // #189: Inbox rows say an interrupted turn can be continued, and Dismiss hides a row (saved by id and time).
 await (await import('../src/renderer/store')).boot();

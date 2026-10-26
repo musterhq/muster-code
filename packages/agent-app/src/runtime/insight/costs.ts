@@ -9,11 +9,11 @@ import type { LedgerEntry } from '../../shared/domains/paperclip-protocol.ts';
 import type { CostBucket, CostDay, CostsReport, ProfileStats, ProviderWindow } from '../../shared/domains/insight-protocol.ts';
 
 /** One turn, as the pure tests build them. The runtime never builds these: it reads groups. */
-export interface TurnRow { projectId: string | null; agent: string; provider: string | null; model: string | null; input: number; output: number; cached?: number; costUsd: number | null; endedAt: string; outcome: string; trigger?: string }
+export interface TurnRow { projectId: string | null; agent: string; provider: string | null; model: string | null; input: number; output: number; cached?: number; cacheWrite?: number; costUsd: number | null; endedAt: string; outcome: string; trigger?: string }
 /** What the SQL returns: the turns of one day, project, agent, provider, model and outcome, summed. `cost` is the sum over the priced turns; `u*` are the tokens of the unpriced ones. */
 export interface TurnGroup {
   day: string; projectId: string | null; agent: string; provider: string | null; model: string | null; outcome: string;
-  n: number; input: number; output: number; cached: number; cost: number; pricedN: number; uInput: number; uOutput: number; uCached: number;
+  n: number; input: number; output: number; cached: number; cost: number; pricedN: number; uInput: number; uOutput: number; uCached: number; uCacheWrite: number;
 }
 
 /** More groups than this are not read; the report then says it is truncated instead of quietly undercounting. */
@@ -34,7 +34,8 @@ const FIELDS = `project_id AS pid,
   SUM(COALESCE(${J('costUsd')},0)) AS cost, SUM(CASE WHEN ${J('costUsd')} IS NULL THEN 0 ELSE 1 END) AS pricedN,
   SUM(CASE WHEN ${J('costUsd')} IS NULL THEN COALESCE(${J('tokens.input')},0) ELSE 0 END) AS uin,
   SUM(CASE WHEN ${J('costUsd')} IS NULL THEN COALESCE(${J('tokens.output')},0) ELSE 0 END) AS uout,
-  SUM(CASE WHEN ${J('costUsd')} IS NULL THEN COALESCE(${J('tokens.cached')},0) ELSE 0 END) AS uc`;
+  SUM(CASE WHEN ${J('costUsd')} IS NULL THEN COALESCE(${J('tokens.cached')},0) ELSE 0 END) AS uc,
+  SUM(CASE WHEN ${J('costUsd')} IS NULL THEN COALESCE(${J('tokens.cacheWrite')},0) ELSE 0 END) AS ucw`;
 const offsetModifier = (offsetMin: number) => `${offsetMin >= 0 ? '+' : '-'}${Math.abs(offsetMin)} minutes`;
 
 /** Ledger turns (live receipts and imported history) that ended at or after `since`, summed per group, newest days first. */
@@ -46,7 +47,7 @@ export function readGroups(db: DatabaseSync, since: string, offsetMin: number, p
     try {
       const rows = db.prepare(sql).all({ mod: offsetModifier(offsetMin), since, chats: CHATS, limit: limit + 1, ...(projectId ? { project: projectId } : {}) }) as Record<string, unknown>[];
       if (rows.length > limit) { truncated = true; rows.length = limit; }
-      for (const r of rows) out.push({ day: String(r.day), projectId: typeof r.pid === 'string' && r.pid ? r.pid : null, agent: String(r.agent), provider: typeof r.provider === 'string' ? r.provider : null, model: typeof r.model === 'string' ? r.model : null, outcome: String(r.outcome), n: Number(r.n), input: Number(r.tin), output: Number(r.tout), cached: Number(r.tc), cost: Number(r.cost), pricedN: Number(r.pricedN), uInput: Number(r.uin), uOutput: Number(r.uout), uCached: Number(r.uc) });
+      for (const r of rows) out.push({ day: String(r.day), projectId: typeof r.pid === 'string' && r.pid ? r.pid : null, agent: String(r.agent), provider: typeof r.provider === 'string' ? r.provider : null, model: typeof r.model === 'string' ? r.model : null, outcome: String(r.outcome), n: Number(r.n), input: Number(r.tin), output: Number(r.tout), cached: Number(r.tc), cost: Number(r.cost), pricedN: Number(r.pricedN), uInput: Number(r.uin), uOutput: Number(r.uout), uCached: Number(r.uc), uCacheWrite: Number(r.ucw) });
     } catch { /* no ledger yet */ }
   }
   return { groups: out, truncated };
@@ -66,9 +67,9 @@ export function groupTurns(turns: readonly TurnRow[], offsetMin: number): TurnGr
   for (const t of turns) {
     const day = dayOf(t.endedAt, offsetMin), agent = t.trigger === 'chat' || t.trigger === 'project chat' ? CHATS : t.agent;
     const key = [day, t.projectId ?? '', agent, t.provider ?? '', t.model ?? '', t.outcome].join('\u0000');
-    const g = map.get(key) ?? { day, projectId: t.projectId, agent, provider: t.provider, model: t.model, outcome: t.outcome, n: 0, input: 0, output: 0, cached: 0, cost: 0, pricedN: 0, uInput: 0, uOutput: 0, uCached: 0 };
+    const g = map.get(key) ?? { day, projectId: t.projectId, agent, provider: t.provider, model: t.model, outcome: t.outcome, n: 0, input: 0, output: 0, cached: 0, cost: 0, pricedN: 0, uInput: 0, uOutput: 0, uCached: 0, uCacheWrite: 0 };
     g.n++; g.input += t.input; g.output += t.output; g.cached += t.cached ?? 0;
-    if (t.costUsd === null) { g.uInput += t.input; g.uOutput += t.output; g.uCached += t.cached ?? 0; } else { g.cost += t.costUsd; g.pricedN++; }
+    if (t.costUsd === null) { g.uInput += t.input; g.uOutput += t.output; g.uCached += t.cached ?? 0; g.uCacheWrite += t.cacheWrite ?? 0; } else { g.cost += t.costUsd; g.pricedN++; }
     map.set(key, g);
   }
   return [...map.values()];
@@ -81,8 +82,8 @@ export function repriceGroups(groups: readonly TurnGroup[], policy: ModelPolicy,
     if (!unpriced || !g.provider || !g.model || (!g.uInput && !g.uOutput)) return g;
     const pricing = effectivePricing(policy, g.provider, g.model, catalogPrice(g.provider, g.model));
     if (!pricing) return g;
-    const cost = estimateCostUsd({ inputTokens: g.uInput, cachedInputTokens: g.uCached, outputTokens: g.uOutput, reasoningOutputTokens: 0, requests: unpriced }, pricing);
-    return cost === null ? g : { ...g, cost: g.cost + cost, pricedN: g.n, uInput: 0, uOutput: 0, uCached: 0 };
+    const cost = estimateCostUsd({ inputTokens: g.uInput, cachedInputTokens: g.uCached, cacheWriteTokens: g.uCacheWrite, outputTokens: g.uOutput, reasoningOutputTokens: 0, requests: unpriced }, pricing);
+    return cost === null ? g : { ...g, cost: g.cost + cost, pricedN: g.n, uInput: 0, uOutput: 0, uCached: 0, uCacheWrite: 0 };
   });
 }
 
@@ -94,10 +95,10 @@ export function groupsFromReceipts(receipts: readonly Pick<LedgerEntry, 'project
   const groups = new Map<string, TurnGroup>();
   for (const r of receipts) {
     const pid = projectId ?? r.projectId, day = dayOf(r.endedAt, offsetMin), key = [day, pid, r.agent, r.provider, r.model, r.outcome].join('\u0000');
-    const g = groups.get(key) ?? { day, projectId: pid, agent: r.agent, provider: r.provider, model: r.model, outcome: r.outcome, n: 0, input: 0, output: 0, cached: 0, cost: 0, pricedN: 0, uInput: 0, uOutput: 0, uCached: 0 };
+    const g = groups.get(key) ?? { day, projectId: pid, agent: r.agent, provider: r.provider, model: r.model, outcome: r.outcome, n: 0, input: 0, output: 0, cached: 0, cost: 0, pricedN: 0, uInput: 0, uOutput: 0, uCached: 0, uCacheWrite: 0 };
     const input = r.tokens?.input ?? 0, output = r.tokens?.output ?? 0, cached = r.tokens?.cached ?? 0;
     g.n++; g.input += input; g.output += output; g.cached += cached;
-    if (r.costUsd !== null) { g.cost += r.costUsd; g.pricedN++; } else { g.uInput += input; g.uOutput += output; g.uCached += cached; }
+    if (r.costUsd !== null) { g.cost += r.costUsd; g.pricedN++; } else { g.uInput += input; g.uOutput += output; g.uCached += cached; g.uCacheWrite += r.tokens?.cacheWrite ?? 0; }
     groups.set(key, g);
   }
   return [...groups.values()];
