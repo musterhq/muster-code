@@ -12,8 +12,13 @@ interface Entry { cipher: string; updatedAt: string }
 interface File { version: 1; secrets: Record<string, Entry> }
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const live: SecretStore[] = [];
+let generation = 0;
 /** The runtime's open store, so connection routing can resolve keys without another handle. */
 export const activeSecretStore = (): SecretStore | undefined => live.at(-1);
+/** Every open store, for the redactor that masks stored values wherever a chat is saved (#154). */
+export const openSecretStores = (): readonly SecretStore[] => live;
+/** Bumped whenever a store opens, closes or changes a value, so cached value lists know to refresh. */
+export const secretStoreGeneration = (): number => generation;
 
 export function validSecret(value: unknown): string {
   if (typeof value !== 'string') throw new Error('Enter an API key.');
@@ -29,7 +34,7 @@ export class SecretStore {
   private readonly plain = new Map<string, string>();
   constructor(dataDir: string, private readonly box: () => SecretBox | undefined = electronSecretBox) {
     this.path = join(dataDir, 'secrets.json');
-    live.push(this);
+    live.push(this); generation++;
   }
   private read(): File {
     if (this.file) return this.file;
@@ -63,12 +68,12 @@ export class SecretStore {
     if (!box) throw new Error('Secure storage is unavailable on this computer, so the key was not saved. On Linux, install and unlock a keyring (gnome-keyring, KWallet or KeePassXC), or use an environment variable instead.');
     const current = this.read();
     this.write({version: 1, secrets: {...current.secrets, [id]: {cipher: box.encryptString(key).toString('base64'), updatedAt: new Date().toISOString()}}});
-    this.plain.set(id, key);
+    this.plain.set(id, key); generation++;
     return this.status(id);
   }
   clear(id: string): ProviderSecretStatus {
     const current = this.read();
-    this.plain.delete(id);
+    this.plain.delete(id); generation++;
     if (current.secrets[id]) { const {[id]: _gone, ...rest} = current.secrets; this.write({version: 1, secrets: rest}); }
     return this.status(id);
   }
@@ -80,5 +85,9 @@ export class SecretStore {
     if (!entry || !box) return undefined;
     try { const value = box.decryptString(Buffer.from(entry.cipher, 'base64')); this.plain.set(id, value); return value; } catch { return undefined; }
   }
-  close(): void { const at = live.indexOf(this); if (at >= 0) live.splice(at, 1); this.plain.clear(); }
+  /** Every stored name with its value (decrypted once, then cached); names whose value cannot be read are left out. */
+  entries(): [string, string][] {
+    return Object.keys(this.read().secrets).flatMap(id => { const value = this.get(id); return value === undefined ? [] : [[id, value] as [string, string]]; });
+  }
+  close(): void { const at = live.indexOf(this); if (at >= 0) live.splice(at, 1); this.plain.clear(); generation++; }
 }
