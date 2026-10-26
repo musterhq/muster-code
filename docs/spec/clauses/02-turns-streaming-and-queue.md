@@ -16,9 +16,11 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-02-387A](02-turns-streaming-and-queue.md#mus-spec-02-387a) | A tool row the provider started and never finished is interrupted, with its output kept, when the turn completes. | [`#387 a tool the provider never closed is shown as Stopped once a completed turn settles`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
+| [MUS-SPEC-02-387B](02-turns-streaming-and-queue.md#mus-spec-02-387b) | The same row is interrupted when the turn fails. | [`#387 a tool the provider never closed is shown as Stopped once a failed turn settles`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
+| [MUS-SPEC-02-387C](02-turns-streaming-and-queue.md#mus-spec-02-387c) | A tool row left running when the app closed mid-turn is interrupted when Muster restarts. | [`#387 a tool row left running when Muster closed is Stopped after restart`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
 | [MUS-SPEC-02-473H](02-turns-streaming-and-queue.md#mus-spec-02-473h) | The no-promise rule is in Agent mode instructions and not in Ask or Plan. | [`agent-mode instructions forbid ending a turn on a promise`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 | [MUS-SPEC-02-473J](02-turns-streaming-and-queue.md#mus-spec-02-473j) | A closing promise makes the run advanced or plan-only, never completed; ordinary endings stay completed. | [`liveness: a turn that ends promising to report back is not completed`](../../../packages/agent-app/tests/process-continuations.test.ts) |
-| [MUS-SPEC-02-579A](02-turns-streaming-and-queue.md#mus-spec-02-579a) | After a crash, Continue anyway and then Steer on a queued message send it once; the app-server's saved copy is deleted, so it does not send it again when the thread goes idle. | [`a message queued before a crash is sent once after Continue anyway and Steer`](../../../packages/agent-app/tests/queue-after-crash-579.test.ts) |
 | [MUS-SPEC-02-469A](02-turns-streaming-and-queue.md#mus-spec-02-469a) | In the composer, the draft the runtime hands back after a stopped run appears in the empty input. | [`a run stopped before dispatch brings its text back into the composer`](../../../packages/agent-app/tests/composer-components.tsx) |
 | [MUS-SPEC-02-469B](02-turns-streaming-and-queue.md#mus-spec-02-469b) | With the queue paused, Enter sends at once with no confirm sheet and does not clear the held messages. | [`a paused queue no longer asks to confirm a send: the message sends and held items stay queued`](../../../packages/agent-app/tests/composer-components.tsx) |
 | [MUS-SPEC-02-479A](02-turns-streaming-and-queue.md#mus-spec-02-479a) | Muster tells a usage limit or a rate limit from other errors and finds when it resets: from the usage windows, then the provider's own words, then a backoff. | [`limits are classified and the reset time is read from usage windows, the provider’s words, or a backoff`](../../../packages/agent-app/tests/auto-resume.test.ts) |
@@ -66,6 +68,42 @@ Boundaries:
 | [MUS-SPEC-02-608B](02-turns-streaming-and-queue.md#mus-spec-02-608b) | A reconnect that stalls after one failure is stopped when the reconnect time limit passes, with the proxy named. | [`stalled reconnect stops by deadline without further transport events`](../../../packages/agent-app/tests/network-reconnect.test.ts) |
 | [MUS-SPEC-02-608C](02-turns-streaming-and-queue.md#mus-spec-02-608c) | A failed web request to a model gives a plain cause for a proxy, DNS, certificate or refused connection, marks the turn as not sent, and never shows the user name or password in the address. | [`HTTP fetch failures explain nested proxy, DNS, TLS and refused causes without credentials`](../../../packages/agent-app/tests/network-reconnect.test.ts) |
 | [MUS-SPEC-02-608D](02-turns-streaming-and-queue.md#mus-spec-02-608d) | The failure banner for a network error shows Retry even with an empty draft, runs the turn retry once per click with a busy state, and never sends the text in the composer instead. | [`a failed network turn offers Retry, which re-runs the turn and never sends the draft in its place`](../../../packages/agent-app/tests/recovery-notice.tsx) |
+| [MUS-SPEC-02-579A](02-turns-streaming-and-queue.md#mus-spec-02-579a) | After a crash, Continue anyway and then Steer on a queued message send it once; the app-server's saved copy is deleted, so it does not send it again when the thread goes idle. | [`a message queued before a crash is sent once after Continue anyway and Steer`](../../../packages/agent-app/tests/queue-after-crash-579.test.ts) |
+
+### Tool rows when a turn ends
+
+<a id="mus-spec-02-387a"></a>
+#### MUS-SPEC-02-387A: A completed turn leaves no tool row running
+
+- Precondition: A chat whose provider reports one command finished and one command started but never finished, then ends the turn as completed.
+- Action: Send a message and wait for the turn to settle.
+- Expected result: The finished command stays completed. The unfinished one is interrupted, reads Stopped, keeps its output and has a duration.
+- Test: `packages/agent-app/tests/tool-rows-settle-387.test.ts::#387 a tool the provider never closed is shown as Stopped once a completed turn settles`
+- Environment: Node test runner; the agent service with a fake provider and a temp data folder.
+- Known gaps: A row of a provider that still has background work for the chat is left alone and not tested here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-387b"></a>
+#### MUS-SPEC-02-387B: A failed turn leaves no tool row running
+
+- Precondition: A chat whose provider starts a command, never finishes it, and ends the turn as failed.
+- Action: Send a message and wait for the turn to settle.
+- Expected result: The unfinished command is interrupted and reads Stopped; the chat shows failed.
+- Test: `packages/agent-app/tests/tool-rows-settle-387.test.ts::#387 a tool the provider never closed is shown as Stopped once a failed turn settles`
+- Environment: Node test runner; the agent service with a fake provider and a temp data folder.
+- Known gaps: A provider that throws instead of returning a result is not covered.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-387c"></a>
+#### MUS-SPEC-02-387C: A tool row left running by a closed app is stopped on restart
+
+- Precondition: The app closed while a turn was running a command; the chat and the command row are saved as running, next to a finished command.
+- Action: Start the agent service on the same data folder.
+- Expected result: The chat is interrupted. The running command row is interrupted and reads Stopped; the finished one stays completed.
+- Test: `packages/agent-app/tests/tool-rows-settle-387.test.ts::#387 a tool row left running when Muster closed is Stopped after restart`
+- Environment: Node test runner; the agent service and the store on a temp data folder.
+- Known gaps: Does not check a provider that is still working in the background after the app restarts; nothing survives a restart.
+- Evidence: UNVERIFIED
 
 ### Turns that end on a promise
 
@@ -89,19 +127,6 @@ Boundaries:
 - Test: `packages/agent-app/tests/process-continuations.test.ts::liveness: a turn that ends promising to report back is not completed`
 - Environment: Node test runner; no provider or network.
 - Known gaps: A unit test of a text classifier, so wording it does not recognise is not caught.
-- Evidence: UNVERIFIED
-
-### A queued message after a crash
-
-<a id="mus-spec-02-579a"></a>
-#### MUS-SPEC-02-579A: A message queued during a turn that crashed is sent once after Continue anyway and Steer
-
-- Precondition: A Codex chat has a running turn and one follow-up queued while it ran; the follow-up is held by the app-server's own queue. Muster is killed without closing and relaunched over the same data folder, so the chat shows "May still be running at the provider" with the follow-up still queued.
-- Action: Click Continue anyway, then Steer on the queued message. Then the thread goes idle and the app-server starts whatever it still holds for it.
-- Expected result: The provider receives the queued text exactly once, the transcript has one copy of it, and the queue is empty. The app-server's saved copy was deleted as soon as the session came back, so it is not sent a second time.
-- Test: `packages/agent-app/tests/queue-after-crash-579.test.ts::a message queued before a crash is sent once after Continue anyway and Steer`
-- Environment: Node test runner; the agent service with a fake Codex-style provider that keeps its saved queue across a relaunch and sends it when the thread goes idle; no network.
-- Known gaps: The fake app-server models the real one's queue persistence and idle send from its documented methods, not from a live Codex. A provider that keeps no queue of its own never double-sends, and Continue anyway then Steer on it already sent once.
 - Evidence: UNVERIFIED
 
 ### After Stop
@@ -641,4 +666,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/recovery-notice.tsx::a failed network turn offers Retry, which re-runs the turn and never sends the draft in its place`
 - Environment: DOM suite (`linkedom`), run with `tests/run-recovery-notice.mjs`; the app's calls are faked.
 - Known gaps: The retry handler is a stand-in that counts calls, so the test does not show the turn really starting again. It is not part of `test:renderer`; run it by hand.
+- Evidence: UNVERIFIED
+
+### A queued message after a crash
+
+<a id="mus-spec-02-579a"></a>
+#### MUS-SPEC-02-579A: A message queued during a turn that crashed is sent once after Continue anyway and Steer
+
+- Precondition: A Codex chat has a running turn and one follow-up queued while it ran; the follow-up is held by the app-server's own queue. Muster is killed without closing and relaunched over the same data folder, so the chat shows "May still be running at the provider" with the follow-up still queued.
+- Action: Click Continue anyway, then Steer on the queued message. Then the thread goes idle and the app-server starts whatever it still holds for it.
+- Expected result: The provider receives the queued text exactly once, the transcript has one copy of it, and the queue is empty. The app-server's saved copy was deleted as soon as the session came back, so it is not sent a second time.
+- Test: `packages/agent-app/tests/queue-after-crash-579.test.ts::a message queued before a crash is sent once after Continue anyway and Steer`
+- Environment: Node test runner; the agent service with a fake Codex-style provider that keeps its saved queue across a relaunch and sends it when the thread goes idle; no network.
+- Known gaps: The fake app-server models the real one's queue persistence and idle send from its documented methods, not from a live Codex. A provider that keeps no queue of its own never double-sends, and Continue anyway then Steer on it already sent once.
 - Evidence: UNVERIFIED

@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Receipts no longer count files a checkout, merge or rebase brought in as the turn's own edits: when the branch moves during a turn, only files the agent changed or committed are listed. A tool the provider never closed is shown as Stopped once its turn ends, and after Muster restarts, instead of running forever.
 - Secrets you saved in Muster, and environment variables named like credentials (`*_TOKEN`, `*_API_KEY`, `*_SECRET`, `*_PASSWORD`…), are masked as `••••(NAME)` wherever a chat is saved: the thread, tool output logs, chat titles and exports, including chats exported after the secret was saved.
 - After a crash, a message you had queued is no longer sent twice when you choose Continue anyway and then Steer: it goes once, and the saved copy Codex kept for it is deleted.
 - Files written by an API-key or router chat in Workspace access can no longer be pushed outside the chat's folder by a folder or link swapped during the write, and a swapped folder no longer leaves empty folders outside.
