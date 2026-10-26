@@ -30,4 +30,5 @@ One row per clause file that has at least one case. The checker reports a clause
 | `MUS-SPEC-18` | [Updates, release and packaging](clauses/18-updates-release-and-packaging.md) |
 | `MUS-SPEC-19` | [Security and redaction](clauses/19-security-and-redaction.md) |
 | `MUS-SPEC-20` | [Performance](clauses/20-performance.md) |
+| `MUS-SPEC-21` | [Visuals and artifacts](clauses/21-visuals-and-artifacts.md) |
 | `MUS-SPEC-22` | [Engineering standards](clauses/22-engineering-standards.md) |
