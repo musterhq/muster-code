@@ -3,7 +3,9 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
-## Unreleased
+## 0.3.14
+
+Chats keep working through quits, crashes and usage limits; Claude on your own router works in Full access; secrets are masked everywhere a chat is saved; and many fixes to queues, receipts, files, git and right-to-left text.
 
 - A side chat now has a Back to chat button in its header that returns to the conversation it was opened from, restores a maximized resource pane and focuses the message box. The button is hidden when the side chat has no parent conversation.
 - Large files stay quick to open when the last turn edited them or when you turn on Blame: only the lines near the view are drawn, and the change markers, Keep/Undo, Next/Previous change, copy and find keep working.
@@ -68,7 +70,6 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - The Dashboard prices turns the provider reported no cost for from the model catalog or your Settings › Models prices; turns with no known price still count as unpriced.
 - Sandboxes now have a disk limit (10 GB by default, set under Resources next to memory and CPUs). A file write that would go past it is refused with a plain message, and a command or service that keeps filling the disk is stopped with a notice, so a runaway command can no longer fill your Mac's disk. A sandbox also no longer gets swap on top of its memory limit, so a 512 MB sandbox really stops at 512 MB. Deleting a chat now removes its sandbox container and files; archiving a chat stops its sandbox and keeps its files. A Project's shared sandbox keeps running while other chats in the Project still use it.
 - Claude Code token counts match what Claude Code reports: each model response is counted once with its final output, cache reads count as cached input, and a turn's result fills in anything missing. Earlier usage rows are unchanged.
-
 - Ledger receipts use your Settings › Models prices: a custom provider model now shows a cost, and a price you set wins over the catalog price, matching Settings usage. A price change applies to new turns only.
 - Release settled and superseded turn-ledger state and bound retained runs when settlement never arrives.
 - A sub-agent that finished is announced once in the transcript, and one /compact leaves a single compaction row instead of two.
@@ -84,29 +85,20 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - The diff tab header keeps the file name readable in narrow panes and wraps the compare picker and file actions onto their own row instead of cutting them off.
 - The dark theme is darker and less grey: near-black surfaces and a deeper sidebar glass tint, with the blur kept.
 - Chats show a quiet "Today 0:52" divider where a conversation starts or resumes after a 30-minute pause or on a new day.
-- Stopping a turn settles unfinished tool rows as Stopped, retaining partial output after reopening; denied commands say Did not run.
-
 - 19 more built-in themes in Settings › Appearance (13 dark, 6 light), each holding WCAG AA contrast on every text pair.
 - Codex offers GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna when its model cache is unavailable; a readable provider catalog keeps precedence.
 - Preserve single line breaks in assistant prose while keeping code blocks and tables unchanged; Markdown file previews still reflow hard-wrapped paragraphs.
 - Untracked files can be discarded to Trash with confirmation from Changes or a diff, file actions stay visible, and opening a diff preserves the Changes compare mode.
 - Sandbox chats say what runs where: commands and edits made with the sandbox tools run in the container, and the agent can still read files on this Mac. The Sandbox environment is offered only on models whose tools can use it. While a chat is sandboxed, the agent's own shell and edit tools on this Mac are turned off on every model, and choosing Ask for approval or Full access first asks "Leave the sandbox?".
-
 - Commands stopped during startup now remain stopped when a launch error arrives, avoiding failure follow-ups.
 - Retrying suggested task creation after a failure reuses each suggestion’s tasks, and failed task batches roll back together.
-
 - Trim default model names in settings and reject unknown or inherited permission pane names.
 - Plugin pages and files now allow names beginning with two dots while still blocking path traversal and symlinks outside the plugin folder.
 - Notification toasts stay clear of the summary card, including when the right pane is open.
-- Rate limit retries respect Retry-After on every attempt, show the provider’s explanation and retry time, and no longer claim an unsent message is in the composer.
-
 - Rate limit retries respect Retry-After on every attempt, show the provider’s explanation and retry time, and no longer claim an unsent message is in the composer. When the provider asks to wait more than five minutes, Muster stops and says when to try again instead of retrying early.
 - Terminal panes retry failed loads twice and offer a Retry action if loading still fails.
-- A chat started in a new worktree from an existing chat now keeps that chat's model, reasoning effort and access mode instead of the app defaults
 - The window loads less code before it first paints: the new-task form and the project task page now load when first opened, cutting the startup JavaScript by about 87 KB (1.90 MB to 1.81 MB).
 - Large text files use a bounded source view, keeping full-file search and selection responsive when loading the full file.
-
-- Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 - Files downloaded in the in-app browser no longer keep invisible text-direction characters in their names, so a name can't disguise its real extension.
 - On Windows, a link to a network share in a reply is no longer inspected or opened, which could contact an untrusted server.
 - Pending approvals and questions badge the Dock (or taskbar) again when you switch away from Muster, instead of staying unbadged until the count changes.
@@ -135,25 +127,18 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Token totals no longer read as 1000K, very large ones show in billions, and a negative cost shows a dash
 - A turn's receipt no longer shows 1000.0k tokens, and counts in the billions show a B
 - An organisation whose name starts with an emoji shows the whole emoji in its avatar instead of a broken character
-
 - Stop now ends the commands a Claude Code or OpenCode chat started (a dev server, a test watcher), and the run settles right away. Before, the command kept running and the chat stayed "stopping" until it exited on its own.
 - A message that starts with "-" (a list bullet, or "--version is wrong…") now reaches Gemini CLI and OpenCode as the message. Before, the CLI read it as options and the message was lost.
 - On router and API routes, command output and files read by the agent keep every character: accented and other multi-byte characters no longer turn into "�" where the output was split.
 - edit_file on router and API routes now refuses a file that is not UTF-8 text instead of quietly changing bytes elsewhere in it.
 - Long chats on the Anthropic API route no longer break after a message sent mid-reply or a reply with no text: the history sent to the model always starts with your message and never holds an empty reply.
-## Unreleased
-
 - The branch list and repository info name your branch correctly when a tag has the same name (it showed "heads/<name>").
 - Blame, history and "mark resolved" work for files whose names start with "-".
 - A GitHub remote written with capital letters in the host name (GitHub.com) is recognised for pull requests and compare links.
 - Comparing two refs where a submodule moved shows the "Subproject commit" change instead of a commit log or an error.
-## Unreleased
-
 - Two wakes for the same agent arriving together now merge into one instead of leaving a stuck "throttled" wake and a stray timer, and the minimum gap between wakes counts from when the last wake actually ran.
 - A Project tool rule with many "*" no longer freezes the app when the agent runs a long command.
 - The Ledger's integrity check now reports entries removed from the end of the chain.
-## Unreleased
-
 - Double-clicking Check out, or Hand back, on a Muster Server task no longer runs it twice (two worktrees and chats, or two pushes and two posts).
 - A device name containing "-->" is shown correctly in check-out markers.
 - The Inbox no longer shows an empty list when the group you filtered by has no items left
@@ -161,30 +146,17 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - In Settings > Memory, a failed save no longer undoes a later toggle that went through
 - In Settings, a quiet-hours or device-name value the app rejects is put back to the saved one instead of staying on screen as if saved
 - The file editor no longer lets you save over a file it could not read faithfully (not valid UTF-8, or larger than the full-read limit), and text typed while a save is finishing is no longer thrown away
-- Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 - In the file editor, "Discard your edit and reload" now keeps the conflict notice and shows the error if the file cannot be re-read
 - Pressing Enter to confirm a Japanese, Chinese or Korean composition in search, quick open, renaming and the branch and owner pickers no longer also runs the highlighted row or saves a half-typed name
 - Searching with an emoji in the command palette and chat search highlights the whole emoji instead of showing a broken character
 - The single-key shortcuts (c, g then i, j, k and the rest) now work on Russian, Greek and other non-Latin keyboard layouts
-
-## Unreleased
-
 - Review marks a renamed binary file as binary.
 - Undo on a deleted or changed symbolic link restores the link, not a text file holding its target.
 - A binary file named like `x.constructor` no longer gets a broken image preview in review.
 - Git error messages hide the whole password of a remote URL even when the password contains "@".
-
-## Unreleased
-
 - Task priorities, search prefixes and custom theme settings are checked strictly: words like "constructor" are treated as plain text, and a custom theme with extra fields is rejected instead of being saved as given.
-
-## Unreleased
-
 - Very long text from Muster Server (task descriptions, comments) no longer stalls the app while secrets are removed from it.
 - A server status or kind named like "constructor" falls back to the default label instead of breaking the display.
-
-## Unreleased
-
 - Long streamed replies cost much less: the reply is saved about 30 times a second instead of on every token. With 20 chats streaming 600 KB replies at once, the runtime finishes in about a third of the time.
 - Search highlights in messages containing the Turkish "İ" now mark the matched words instead of text shifted beside them.
 
