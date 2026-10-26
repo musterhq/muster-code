@@ -32,6 +32,8 @@ export const FIXTURE_PROVIDER = {id: 'fixture', bindingId: 'fixture-binding', mo
 /** The legacy-core turn ceiling is logged once, so a killed long turn is never a silent failure. */
 let lifecycleWarned = false;
 
+/** A router answers a resumed Claude thread with this (HTTP 409) once its replay state is gone. */
+const REPLAY_STATE_EXPIRED = /replay state expired or is unavailable/i;
 /** No in-memory provider session holds the chat's thread (new process, switched provider, retired after a stopped or failed turn). */
 export const NO_LIVE_SESSION = 'No live provider session holds this thread. Send a message first, then compact.';
 export class ProviderPreDispatchError extends Error {
@@ -62,7 +64,7 @@ export interface ProviderInput {
   onRequest(method: string, params: Record<string, unknown>, options?: {policyOnly?: boolean}): Promise<Record<string, unknown> | undefined>;
   /** The saved provider thread could not be resumed and a fresh one starts. Returns text (a digest of the earlier
    *  conversation) to send ahead of this turn's prompt. */
-  onThreadReset?(previousThreadId: string, reason?: 'lane'): string | undefined;
+  onThreadReset?(previousThreadId: string, reason?: 'lane' | 'expired'): string | undefined;
 }
 export interface ProviderResult { status: 'completed' | 'failed'; finalMessage: string; threadId?: string; errorMessage?: string; dispatchState?: 'not-dispatched' | 'dispatched' | 'unknown'; turnId?: string; recovery?: ProviderRecovery; threadReset?: boolean; /** The lane that ran the turn when it was not the route's own driver (#688). */ driver?: string; failure?: {kind: 'rpc-rejected' | 'request-timeout' | 'aborted'; method?: string; statusCode?: number; retryAfterMs?: number; requestId?: string} }
 export interface ProviderAdapter {
@@ -474,9 +476,9 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         };
         // The same app-server launch and observers re-open this thread when /compact finds the idle timer closed it.
         session.reopen = {...launch, ...observers};
-        const result=await Promise.race([networkStopped, client().runCodexAppServer({
+        const dispatch = (threadId: string | undefined, seed: string | undefined) => client().runCodexAppServer({
           ...launch, ...observers,
-          prompt: laneSeed?.trim() ? `${laneSeed.trim()}\n\nCurrent user request:\n${input.prompt}` : input.prompt,
+          prompt: seed?.trim() ? `${seed.trim()}\n\nCurrent user request:\n${input.prompt}` : input.prompt,
           ...(input.images?.length ? { images: input.images } : {}),
           ...budgetOptions,
           ...(lifecycleSupported ? {
@@ -488,14 +490,25 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
             },
           } : {}),
           ...(input.onThreadReset ? { onThreadReset: (previousThreadId: string) => lateCancellation() ? undefined : input.onThreadReset?.(previousThreadId) } : {}),
-          keepAlive: true, threadId: resumeThread,
+          keepAlive: true, threadId,
           // Codex keeps a turn's collaboration mode for later turns and for sub-agents spawned
           // in them. Leaving Plan must reset it explicitly, or "Execute plan" workers stay in
           // Plan mode and can only describe patches (F53).
           collaborationMode: input.chat.mode === 'plan' ? { mode: 'plan', settings: { model, reasoning_effort: reasoning } }
-            : previous?.mode === 'plan' || (!previous && resumeThread) ? { mode: 'default', settings: { model, reasoning_effort: reasoning } } : undefined,
+            : previous?.mode === 'plan' || (!previous && threadId) ? { mode: 'default', settings: { model, reasoning_effort: reasoning } } : undefined,
           onDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onDelta(text); },
           onReasoningDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onReasoning(text); },
+        });
+        // #716: a router keeps Claude replay state only for a while, so resuming a days-old thread can be refused before the
+        // turn starts ("replay state expired or is unavailable", HTTP 409). The thread cannot be continued and resuming it
+        // again would fail the same way every time: start one fresh thread, seeded with a summary, exactly once.
+        const result=await Promise.race([networkStopped, dispatch(resumeThread, laneSeed).then(async first => {
+          if (!resumeThread || first.status !== 'failed' || first.turnId || session.turnId || session.activity || !input.onThreadReset
+            || session.controller.signal.aborted || disposed || !REPLAY_STATE_EXPIRED.test(first.errorMessage ?? '')) return first;
+          const seed = input.onThreadReset(resumeThread, 'expired');
+          if (lateCancellation()) return first;
+          session.threadId = undefined;
+          return dispatch(undefined, seed);
         })]);
         if(commands.size&&result.threadId&&!session.controller.signal.aborted&&!disposed){
           try{

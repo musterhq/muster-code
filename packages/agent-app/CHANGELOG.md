@@ -3,6 +3,10 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Claude chats on your own router that continue an older conversation no longer fail with "replay state expired or is unavailable". When the router has dropped the earlier conversation, Muster says so, starts a fresh one with a summary of the earlier messages and sends your message once more.
+
 ## 0.3.14
 
 Chats keep working through quits, crashes and usage limits; Claude on your own router works in Full access; secrets are masked everywhere a chat is saved; and many fixes to queues, receipts, files, git and right-to-left text.
