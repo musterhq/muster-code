@@ -1099,15 +1099,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const settled = run.stopped || disposed || !provider.hasActiveWork?.(chatId);
         if (settled) { settleApprovals(chatId); settleQuestions(chatId); seal(); }
         flushSegment(); if (segmentFlushes.get(chatId) === flushSegment) segmentFlushes.delete(chatId);
-        // Stop can close the provider before it sends item/completed. Persist the terminal
-        // state once, keeping completed tools and partial output intact.
-        if (run.stopped) for (const [providerId, localId] of toolIds) {
-          const item = store.item(localId);
-          if (item?.status === 'running') {
-            const startedAt = toolStarted.get(providerId);
-            store.updateItem(localId, item.text, 'interrupted', {...item.data, awaitingApproval:undefined,
-              ...(startedAt !== undefined ? {durationMs:Date.now() - startedAt} : {})});
-          }
+        // Stop can close the provider before it sends item/completed, and a completed or failed turn can end with a tool the
+        // provider never closed (#387). Persist the terminal state once, keeping completed tools and partial output intact.
+        // Background sub-agents still working after the turn keep their rows live until they report back.
+        if (settled) {
+          const startedById = new Map([...toolIds].map(([providerId, localId]) => [localId, toolStarted.get(providerId)]));
+          store.settleToolItems(chatId, item => startedById.get(item.id));
         }
         // #449: any tool row still running once the run's work has ended settles as interrupted.
         if (settled) store.settleRunningTools(chatId);

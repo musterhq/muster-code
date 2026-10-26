@@ -126,18 +126,38 @@ export class TurnLedger {
 }
 
 const git = (cwd: string, args: string[]) => new Promise<string>((resolve, reject) => execFile('git', args, { cwd, timeout: 5000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (error, stdout) => error ? reject(error) : resolve(stdout)));
-/** Files a turn changed: its review baseline tree against the working tree now, with both blob hashes. */
-export async function filesChanged(cwd: string, beforeTree: string | null): Promise<LedgerFile[] | null> {
+/** HEAD's commit, or null outside a Git work tree (or on an unborn branch). */
+export const headCommit = (cwd: string) => git(cwd, ['rev-parse', '--verify', '-q', 'HEAD']).then(out => out.trim() || null, () => null);
+/** #387: when HEAD moved during a turn (checkout, merge, rebase, pull), the files that came in with commits made before the
+ *  turn are not the turn's edits. The turn's own work is what differs from HEAD now plus what its own commits (made since it
+ *  started) touched; null when that cannot be read. */
+async function ownPaths(cwd: string, startedAt: number): Promise<Set<string> | null> {
+  try {
+    const [uncommitted, staged, untracked, committed] = await Promise.all([
+      git(cwd, ['diff', '--name-only', '--no-renames', '-z', 'HEAD']),
+      git(cwd, ['diff', '--cached', '--name-only', '--no-renames', '-z', 'HEAD']),
+      git(cwd, ['ls-files', '--others', '--exclude-standard', '-z']),
+      git(cwd, ['log', `--since=@${Math.floor(startedAt / 1000)}`, '--no-renames', '--format=', '--name-only', '-z', 'HEAD']),
+    ]);
+    return new Set([uncommitted, staged, untracked, committed].flatMap(out => out.split(/[\0\n]/)).filter(Boolean));
+  } catch { return null; }
+}
+/** Files a turn changed: its review baseline tree against the working tree now, with both blob hashes. When HEAD moved since
+ *  `head.before`, only paths the turn itself touched are kept (#387). */
+export async function filesChanged(cwd: string, beforeTree: string | null, head?: { before: string | null; startedAt: number }): Promise<LedgerFile[] | null> {
   if (!beforeTree) return null;
   try {
-    const after = await snapshotTree(cwd);
+    // HEAD is read alongside the snapshot so the Receipt is not written any later than before (#387).
+    const [after, headNow] = await Promise.all([snapshotTree(cwd), head ? headCommit(cwd) : Promise.resolve(null)]);
     if (after === beforeTree) return [];
     const [out, numstat] = await Promise.all([git(cwd, ['diff-tree', '-r', '--no-renames', '-z', beforeTree, after]), git(cwd, ['diff-tree', '-r', '--no-renames', '--numstat', '-z', beforeTree, after]).catch(() => '')]);
     const counts = new Map<string, { added: number | null; removed: number | null }>();
     for (const row of numstat.split('\0').filter(Boolean)) { const [a, r, ...path] = row.split('\t'); counts.set(path.join('\t'), { added: a === '-' ? null : Number(a), removed: r === '-' ? null : Number(r) }); }
     const parts = out.split('\0').filter(Boolean), files: LedgerFile[] = [];
+    const own = head && head.before && headNow && headNow !== head.before ? await ownPaths(cwd, head.startedAt) : undefined;
     for (let i = 0; i + 1 < parts.length && files.length < 200; i += 2) {
       const [, , before, afterHash, status] = parts[i].slice(1).split(' '), path = parts[i + 1], n = counts.get(path);
+      if (own && !own.has(path)) continue;
       files.push({ path, status: status === 'A' ? 'added' : status === 'D' ? 'deleted' : 'modified', before: /^0+$/.test(before) ? null : before, after: /^0+$/.test(afterHash) ? null : afterHash, added: n?.added ?? null, removed: n?.removed ?? null });
     }
     return files;
@@ -148,7 +168,7 @@ export async function filesChanged(cwd: string, beforeTree: string | null): Prom
 export const APPROVAL_SHOWN_EVENT = 'muster/approval/shown';
 export const TOOL_TYPES = new Set(['commandExecution', 'mcpToolCall', 'dynamicToolCall', 'fileChange', 'webSearch', 'imageView']);
 const MAX_OPEN_RUNS = 1000;
-interface Open { chatId: string; startedAt: number; cwd: string; usage: UsageTotals; /** A message's usage arrived before its final count (#663). */ partial?: true; cursor?: UsageCursor; tools: Map<string, number>; approvals: number; tests: number }
+interface Open { chatId: string; startedAt: number; cwd: string; /** HEAD when the turn started, read without blocking the start (#387). */ head: Promise<string | null>; usage: UsageTotals; /** A message's usage arrived before its final count (#663). */ partial?: true; cursor?: UsageCursor; tools: Map<string, number>; approvals: number; tests: number }
 /** How a tool shows in a Receipt: `server/tool` for MCP, `shell` for commands, else the item type. */
 export const toolName = (type: string, server: unknown, tool: unknown) => type === 'mcpToolCall' ? `${server ?? 'mcp'}/${tool ?? 'tool'}` : type === 'commandExecution' ? 'shell' : type;
 export const TEST_COMMAND = /\b(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|\bpytest\b|\bgo\s+test\b|\bcargo\s+test\b|\bnode\s+--test\b|\bvitest\b|\bjest\b|\bmake\s+test\b/;
@@ -173,7 +193,7 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
     if (previous) release(previous);
     // Bound abandoned runs without timers or work on provider events. Evicted runs produce no partial receipts.
     if (open.size >= MAX_OPEN_RUNS) release(open.keys().next().value!);
-    open.set(run.runId, { chatId: run.chat.id, startedAt: Date.now(), cwd: run.cwd, usage: { ...ZERO_USAGE }, tools: new Map(), approvals: 0, tests: 0 });
+    open.set(run.runId, { chatId: run.chat.id, startedAt: Date.now(), cwd: run.cwd, head: run.cwd ? headCommit(run.cwd) : Promise.resolve(null), usage: { ...ZERO_USAGE }, tools: new Map(), approvals: 0, tests: 0 });
     byChat.set(run.chat.id, run.runId);
   });
   const offEvent = hooks.onProviderEvent(event => {
@@ -202,7 +222,7 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
       try {
         ledger();
         const baseline = context.db().prepare('SELECT tree_sha FROM review_baselines WHERE run_id = ?').get(run.runId) as { tree_sha: string | null } | undefined;
-        files = await filesChanged(turn.cwd, baseline?.tree_sha ?? null);
+        files = await filesChanged(turn.cwd, baseline?.tree_sha ?? null, { before: await turn.head, startedAt: turn.startedAt });
       } catch { files = null; }
       const catalog = (() => { try { const provider = context.modelCatalog?.().providers.find(p => p.id === run.chat.providerId) as unknown as { models?: { id: string; pricing?: ModelPricing }[] } | undefined; return provider?.models?.find(m => m.id === run.chat.model)?.pricing; } catch { return undefined; } })();
       // The user's Settings price wins over the catalog's, as in Settings usage and the Dashboard (effectivePricing). Read

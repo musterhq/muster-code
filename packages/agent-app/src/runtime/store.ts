@@ -691,6 +691,15 @@ export class AgentStore {
   settleSubagentItems(chatId: string, status = 'interrupted'): void {
     this.db.prepare("UPDATE subagent_items SET status = ? WHERE chat_id = ? AND status = 'running'").run(status, chatId);
   }
+  /** #387: a settled run (or a restart) leaves no tool row running. Rows the provider never closed become interrupted
+   *  (shown as Stopped), keeping their output; `startedAt` gives a duration when the caller knows when each started. */
+  settleToolItems(chatId: string, startedAt?: (item: TimelineItem) => number | undefined): void {
+    for (const item of this.timeline(chatId)) {
+      if (item.kind !== 'tool' || item.status !== 'running') continue;
+      const started = startedAt?.(item) ?? Date.parse(item.createdAt);
+      this.updateItem(item.id, item.text, 'interrupted', {...item.data, awaitingApproval: undefined, ...(Number.isFinite(started) && item.data?.durationMs === undefined ? {durationMs: Math.max(0, Date.now() - started)} : {})});
+    }
+  }
 
   /** A spawn report that still says a child is running, in a run that no longer exists, is settled as interrupted. */
   interruptRunningChildren(chatId: string): void {
@@ -917,6 +926,7 @@ export class AgentStore {
           this.appendItem(id, 'notice', recovery.reason, 'recovery-needed', {recovery});
         }
         this.settleSubagentItems(id);
+        this.settleToolItems(id);
         this.interruptRunningChildren(id);
       }
       // Every run ended with the previous process: tool rows it left running (in these chats or any other) settle now.
