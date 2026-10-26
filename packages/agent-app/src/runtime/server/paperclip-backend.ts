@@ -204,24 +204,29 @@ export class PaperclipBackend implements ServerBackend, PersonalAccess {
     const path = decision === 'approve' ? 'approve' : decision === 'reject' ? 'reject' : 'request-revision';
     await this.client.send('POST', `/approvals/${enc(id)}/${path}`, { decisionNote: note });
   }
-  async respond(taskId: string, interactionId: string, input: { accept: boolean; reason?: string; answers?: { questionId: string; optionIds: string[]; otherText?: string | null }[] }): Promise<void> {
+  async respond(taskId: string, interactionId: string, input: Parameters<ServerBackend['respond']>[2]): Promise<void> {
     const base = `/issues/${enc(taskId)}/interactions/${enc(interactionId)}`;
     if (input.answers) { await this.client.send('POST', `${base}/respond`, { answers: input.answers }); return; }
-    await this.client.send('POST', `${base}/${input.accept ? 'accept' : 'reject'}`, input.accept ? {} : { ...(input.reason ? { reason: input.reason } : {}) });
+    // Item verdicts have their own endpoint: one verdict per item (and a reason where the request asks for one).
+    if (input.verdicts) { await this.client.send('POST', `${base}/verdicts`, { verdicts: input.verdicts.map(v => ({ id: v.id, verdict: v.verdict, ...(v.reason ? { reason: v.reason } : {}) })) }); return; }
+    // A connection request is declined through its own endpoint; connecting happens on the server, in the app's own sign-in.
+    if (input.connection) { await this.client.send('POST', `/connection-intents/${enc(interactionId)}/decline`, input.reason ? { reason: input.reason } : {}); return; }
+    if (input.accept) await this.client.send('POST', `${base}/accept`, { ...(input.selectedClientKeys ? { selectedClientKeys: input.selectedClientKeys } : {}), ...(input.selectedOptionIds ? { selectedOptionIds: input.selectedOptionIds } : {}) });
+    else await this.client.send('POST', `${base}/reject`, input.reason ? { reason: input.reason } : {});
   }
 
   async receipts(company: WorkspaceCompany, limit: number, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<LedgerEntry[]> {
     const runs = await this.client.get<unknown>(`/companies/${enc(company.id)}/heartbeat-runs?limit=${Math.min(limit, 200)}`).catch(() => []);
     return arr(runs).map(r => mapReceipt(r, agents));
   }
-  async dashboard(company: WorkspaceCompany, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<{ receipts: LedgerEntry[]; activity: WorkspaceRow[]; budgets?: unknown }> {
+  async dashboard(company: WorkspaceCompany, agents: ReadonlyMap<string, WorkspaceAgent>, people?: ReadonlyMap<string, string>): Promise<{ receipts: LedgerEntry[]; activity: WorkspaceRow[]; budgets?: unknown }> {
     const base = `/companies/${enc(company.id)}`;
     const [runs, activity, overview] = await Promise.all([this.client.get<unknown>(`${base}/heartbeat-runs?limit=200`).catch(() => []), this.client.get<unknown>(`${base}/activity?limit=12`).catch(() => []), this.client.get<unknown>(`${base}/budgets/overview`).catch(() => null)]);
-    return { receipts: arr(runs).map(r => mapReceipt(r, agents)), activity: mapRows('audit', activity), ...(overview ? { budgets: overview } : {}) };
+    return { receipts: arr(runs).map(r => mapReceipt(r, agents)), activity: mapRows('audit', activity, { agents, people }), ...(overview ? { budgets: overview } : {}) };
   }
-  async rows(kind: WorkspaceListKind, company: WorkspaceCompany): Promise<WorkspaceRow[]> {
+  async rows(kind: WorkspaceListKind, company: WorkspaceCompany, names?: { agents?: ReadonlyMap<string, WorkspaceAgent>; people?: ReadonlyMap<string, string> }): Promise<WorkspaceRow[]> {
     const base = `/companies/${enc(company.id)}`;
-    const rows = mapRows(kind, await this.client.get<unknown>(kind === 'artifacts' ? `${base}/artifacts` : kind === 'audit' ? `${base}/activity?limit=150` : `${base}/routines`));
+    const rows = mapRows(kind, await this.client.get<unknown>(kind === 'artifacts' ? `${base}/artifacts` : kind === 'audit' ? `${base}/activity?limit=150` : `${base}/routines`), names);
     // An output's page is a path on the server's web UI: make it the full address ("Open on server").
     return kind === 'artifacts' ? rows.map(r => r.output ? { ...r, output: { ...r.output, href: `${this.client.endpoint.baseUrl}${r.output.href}` } } : r) : rows;
   }

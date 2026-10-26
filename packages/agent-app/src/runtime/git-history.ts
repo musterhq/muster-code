@@ -9,7 +9,7 @@ const LOG_LIMIT = 100, FILE_LIMIT = 1000, SIDE_BYTES = 512 * 1024, BLAME_LINES =
 const EMPTY_TREE = GIT_EMPTY_TREE;
 
 function relativePath(value: unknown): string {
-  if (typeof value !== 'string' || !value || value.length > 4096 || value.includes('\0') || value.startsWith('-')) throw new Error('Choose a file in this repository.');
+  if (typeof value !== 'string' || !value || value.length > 4096 || value.includes('\0')) throw new Error('Choose a file in this repository.');
   return value;
 }
 
@@ -74,8 +74,8 @@ async function changedFiles(real: string, base: string, head: string): Promise<{
     const finalPath = renamed ? fields[++index] : path;
     if (finalPath === undefined) break;
     const count = counts.get(finalPath) ?? {adds: null, dels: null};
-    files.push({path: finalPath, ...(renamed ? {previousPath: path} : {}), status, adds: count.adds, dels: count.dels, binary: count.adds === null && count.dels === null});
     if (files.length >= FILE_LIMIT) return {files, truncated: true};
+    files.push({path: finalPath, ...(renamed ? {previousPath: path} : {}), status, adds: count.adds, dels: count.dels, binary: count.adds === null && count.dels === null});
   }
   return {files, truncated: false};
 }
@@ -112,6 +112,10 @@ export async function compareRefs(root: string, input: {base: unknown; head: unk
 }
 
 async function blobAt(real: string, sha: string, path: string): Promise<{text: string; truncated: boolean} | null> {
+  // A submodule is a gitlink, not a blob: `git show` on it prints (or fails to find) the pinned commit, so show git's own pointer line.
+  const entry = (await runGit(real, ['ls-tree', '-z', sha, '--', path]).catch(() => '')).split('\0')[0] ?? '';
+  const gitlink = /^160000 commit ([0-9a-f]+)\t/.exec(entry);
+  if (gitlink) return {text: `Subproject commit ${gitlink[1]}\n`, truncated: false};
   const exists = await runGit(real, ['cat-file', '-e', `${sha}:${path}`]).then(() => true, () => false);
   if (!exists) return null;
   try {

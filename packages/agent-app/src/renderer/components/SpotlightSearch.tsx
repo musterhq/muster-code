@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {imeComposing} from '../ime';
 import { useHiddenSideChats } from '../artifacts';
 import { Dialog } from '@base-ui/react/dialog';
 import { ArchiveRestore, Blocks, Bot, Box, Brain, CalendarClock, ChevronsDown, CircleDot, Command, Download, FileSearch as FileSearchIcon, FileText, Folder as FolderIcon, FolderOpen, GitBranch, Layers, MessageSquare, Scale, Settings2, SlidersHorizontal, SquarePen, SquareTerminal, Search } from 'lucide-react';
@@ -558,7 +559,7 @@ function SpotlightSearchPanel({ onClose, initialQuery = '' }: { onClose: () => v
               onKeyDown={(event) => {
                 if (event.key === 'ArrowDown') { event.preventDefault(); setActiveIndex(moveHighlight(rowCount, effectiveIndex, 1)); }
                 else if (event.key === 'ArrowUp') { event.preventDefault(); setActiveIndex(moveHighlight(rowCount, effectiveIndex, -1)); }
-                else if (event.key === 'Enter') { event.preventDefault(); activateRow(effectiveIndex); }
+                else if (event.key === 'Enter') { if (imeComposing(event)) return; event.preventDefault(); activateRow(effectiveIndex); }
                 else {
                   const slot = ['1', '2', '3', '4', '5', '6', '7', '8', '9'].findIndex((digit) => isChord(event.nativeEvent, digit));
                   if (slot === -1) return;

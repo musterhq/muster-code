@@ -16,11 +16,18 @@ export interface AdapterRunInput {
   /** Muster's own tool servers for this run (in-app browser, terminal, mailbox…), from the domains' `mcp_servers.*`
    *  overrides. Adapters that can load MCP servers pass them to the model; the rest ignore them. */
   mcpServers?: Record<string, McpServerSpec>;
+  /** #424: offer Muster's in-app browser as native tools (HTTP routes); they call the same bridge as the MCP server. */
+  browserTools?: boolean;
   /** Extra environment for the run's process: the agent's git identity and the secrets lent to it. */
   env?: Record<string, string>;
   permissionMode: 'read-only' | 'workspace' | 'full';
+  /** #653: the chat runs in the sandbox. permissionMode is then read-only, and routes that receive the sandbox tools also
+   *  deny their own host shell and edit tools (Claude Code --disallowedTools, the OpenCode plan agent, Grok's rejections). */
+  sandboxed?: boolean;
   /** Asked before a tool this adapter runs itself changes anything (a command, a file change). Resolves true to go ahead: the Project tool rules, the guard for the user's own processes and approval cards live behind it. */
   authorize?(method: string, params: Record<string, unknown>): Promise<boolean>;
+  /** ask_user (HTTP routes): posts the question card and resolves at once with the text for the model; it never waits for the user. */
+  askUser?(args: Record<string, unknown>): Promise<string>;
   /** The saved conversation to continue; only set when it belongs to this route and binding. */
   resumeThreadId?: string;
   signal: AbortSignal;
@@ -40,6 +47,7 @@ export interface AdapterRunResult {
   /** not-dispatched: the upstream refused before doing work (bad key, 4xx, missing binary). */
   dispatchState: 'not-dispatched' | 'dispatched';
   statusCode?: number;
+  retryAfterMs?: number;
 }
 export interface RunnableAdapter {
   /** 'http' runs are stateless requests; 'cli' runs own a local child process. Neither leaves remote work behind once settled. */

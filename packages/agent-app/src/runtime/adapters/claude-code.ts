@@ -1,23 +1,31 @@
 import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {cliSpawn, jsonLines, loadImages, text} from './shared.ts';
+import {killTree} from './cli-common.ts';
 import {launcherSpec} from '../launcher-script.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
 import {CLAUDE_CODE_ALIASES, CLAUDE_CODE_DEFAULT} from './claude-models.ts';
 import {MESSAGE_BOUNDARY_EVENT} from '../transcript-wire.ts';
 
-export type Spawn = (command: string, args: string[], options: {cwd: string; env: NodeJS.ProcessEnv; stdio: ['pipe', 'pipe', 'pipe']; windowsHide?: boolean}) => ChildProcess;
+export type Spawn = (command: string, args: string[], options: {cwd: string; env: NodeJS.ProcessEnv; stdio: ['pipe', 'pipe', 'pipe']; windowsHide?: boolean; detached?: boolean}) => ChildProcess;
 /** Claude Code's default and family aliases only; the versioned list comes from claude-models.ts. */
 export const CLAUDE_CODE_MODELS = [CLAUDE_CODE_DEFAULT, ...CLAUDE_CODE_ALIASES];
 
 /** read-only (and every Ask/Plan chat) → plan; workspace → acceptEdits; full → bypassPermissions. */
 export const claudePermissionMode = (mode: AdapterRunInput['permissionMode']) => mode === 'full' ? 'bypassPermissions' : mode === 'workspace' ? 'acceptEdits' : 'plan';
 
-function mcpArgs(servers: AdapterRunInput['mcpServers']): string[] {
+/** #427: the sub-agent tools (Task, and Agent in newer builds) are allowed in every permission mode, so a print-mode run
+ *  (which cannot ask) never denies a sub-agent. A sub-agent still works under the chat's permission mode. */
+export const CLAUDE_SUBAGENT_TOOLS = ['Task', 'Agent'];
+function toolArgs(servers: AdapterRunInput['mcpServers']): string[] {
   const names = Object.keys(servers ?? {});
-  if (!names.length) return [];
-  return ['--mcp-config', JSON.stringify({mcpServers: Object.fromEntries(Object.entries(servers ?? {}).map(([name, spec]) => [name, spec.args ? spec : {...spec, ...launcherSpec(spec.command)}]))}), '--allowedTools', ...names.map(name => `mcp__${name}`)];
+  return [...(names.length ? ['--mcp-config', JSON.stringify({mcpServers: Object.fromEntries(Object.entries(servers ?? {}).map(([name, spec]) => [name, spec.args ? spec : {...spec, ...launcherSpec(spec.command)}]))})] : []),
+    '--allowedTools', ...CLAUDE_SUBAGENT_TOOLS, ...names.map(name => `mcp__${name}`)];
 }
+
+/** #653: Claude Code's host tools that run commands or change files, denied outright while the chat is sandboxed. Reads
+ *  (Read, Grep, Glob, LS) stay; commands and edits go through the muster_sandbox tools. */
+export const CLAUDE_SANDBOX_DENIED_TOOLS = ['Bash', 'BashOutput', 'KillShell', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit'];
 
 export function claudeArgs(input: AdapterRunInput, sessionId: string): string[] {
   const alias = input.model.replace(/^claude-code\//, '');
@@ -27,8 +35,10 @@ export function claudeArgs(input: AdapterRunInput, sessionId: string): string[] 
     '--input-format', 'stream-json',
     // Muster's own tool servers (in-app browser, terminal, mailbox…): loaded alongside the user's, and allowed, since
     // they are first-party and each enforces its own lease and scope. Both flags are variadic, so a flag follows them.
-    ...mcpArgs(input.mcpServers),
-    '--permission-mode', claudePermissionMode(input.permissionMode),
+    ...toolArgs(input.mcpServers),
+    // Variadic too, so a flag follows it. A deny rule wins over every permission mode and allow rule.
+    ...(input.sandboxed ? ['--disallowedTools', ...CLAUDE_SANDBOX_DENIED_TOOLS] : []),
+    '--permission-mode', claudePermissionMode(input.sandboxed ? 'read-only' : input.permissionMode),
     ...(alias && alias !== 'default' ? ['--model', alias] : []),
     ...(input.reasoningEffort ? ['--effort', input.reasoningEffort] : []),
     ...(input.resumeThreadId ? ['--resume', input.resumeThreadId] : ['--session-id', sessionId]),
@@ -105,6 +115,10 @@ const handBack = (content: string): string => { const at = content.indexOf('The 
 /** The turn's stdin: the plain prompt, or with images one stream-json user message whose
  *  image content blocks carry the attachment bytes (the model sees them directly). */
 export const claudeUserMessage = (text: string): string => JSON.stringify({type: 'user', message: {role: 'user', content: [{type: 'text', text}]}}) + '\n';
+/** A steer is written as another user message. Said bare, the model often answers just it and ends the turn with the
+ *  original task half done: frame it as a correction to fold in, then keep working. */
+export const claudeSteerText = (text: string): string =>
+  `[The user sent this while you were working. Take it into account and continue the current task; do not stop after acknowledging it. If it changes the task, adjust and keep going until the task is done.]\n\n${text}`;
 export function claudeStdin(input: Pick<AdapterRunInput, 'prompt' | 'images'>): string {
   if (!input.images?.length) return claudeUserMessage(input.prompt);
   const images = loadImages(input.images);
@@ -115,7 +129,8 @@ export function claudeStdin(input: Pick<AdapterRunInput, 'prompt' | 'images'>): 
 }
 
 /** Headless Claude Code (`claude -p --output-format stream-json`) in the chat folder. */
-export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; spawn?: Spawn; killGraceMs?: number; backgroundTimeoutMs?: number}): RunnableAdapter {
+const STEER_GRACE_MS = 2500;
+export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; spawn?: Spawn; killGraceMs?: number; backgroundTimeoutMs?: number; steerGraceMs?: number}): RunnableAdapter {
   const spawn = options.spawn ?? (nodeSpawn as unknown as Spawn);
   return {kind: 'cli', run(input) {
     return new Promise<AdapterRunResult>(resolve => {
@@ -125,11 +140,62 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       const env = {...(options.env ?? process.env), ...(input.env ?? {})}; delete env.ANTHROPIC_API_KEY;
       let child: ChildProcess;
       const launch = cliSpawn(options.binary, claudeArgs(input, sessionId), env);
-      try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true}); }
+      try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32'}); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `Claude Code could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let accepted = false, settled = false, final: {ok: boolean; text: string} | undefined, stderr = '', streamedText = false;
-      let pending = 1, inputClosed = false;
+      // `pending` counts results still owed. The CLI folds a message that arrives mid-turn into that turn, so several
+      // steers can share ONE result: after a result, stdin stays open for a short grace while steers are unanswered.
+      let pending = 1, inputClosed = false, unanswered = 0, grace: ReturnType<typeof setTimeout> | undefined;
+      const graceMs = options.steerGraceMs ?? STEER_GRACE_MS;
       const closeInput = () => { if (inputClosed) return; inputClosed = true; try { child.stdin?.end(); } catch { /* already closed */ } };
+      // Token usage (#94). Claude Code repeats an API message's usage on each of its content blocks' `assistant` events,
+      // with the output count as of message_start; the final count arrives on that message's `message_delta` stream event,
+      // and each `result` carries the totals of its own turn (per result, not per process). So each parent API message is
+      // reported once, when its usage is final (message_delta) or its tool results, the next message, the result or the
+      // exit end it, and a result only adds what its turn's messages under-reported. Cache reads are cached input; cache
+      // writes are input. Counts the CLI did not report stay unknown; a message without its final count is flagged `partial`.
+      type Tokens = {input?: number; cached?: number; output?: number};
+      const count = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+      const tokensOf = (raw: unknown): Tokens | null => {
+        if (!raw || typeof raw !== 'object') return null;
+        const usage = raw as Record<string, unknown>, fresh = count(usage.input_tokens), output = count(usage.output_tokens);
+        const read = count(usage.cache_read_input_tokens) ?? 0, written = count(usage.cache_creation_input_tokens) ?? 0;
+        const tokens: Tokens = {...(fresh !== undefined ? {input: fresh + read + written, cached: read} : {}), ...(output !== undefined ? {output} : {})};
+        return tokens.input === undefined && tokens.output === undefined ? null : tokens;
+      };
+      const fields = ['input', 'cached', 'output'] as const;
+      let openMessage: {id: string; tokens: Tokens; final: boolean} | undefined, streamId: string | undefined;
+      /** Messages already reported this turn: a late event for one adds nothing (the result reconciles). */
+      const reportedIds = new Set<string>();
+      let turnTokens = {input: 0, cached: 0, output: 0};
+      const emitUsage = (tokens: Tokens, flags: {partial?: true; reconciliation?: true}) => {
+        if (!fields.some(key => (tokens[key] ?? 0) > 0)) return;
+        for (const key of fields) turnTokens[key] += tokens[key] ?? 0;
+        const last = {...(tokens.input !== undefined ? {inputTokens: tokens.input, cachedInputTokens: tokens.cached ?? 0} : {}), ...(tokens.output !== undefined ? {outputTokens: tokens.output} : {})};
+        // A reconciliation is spend, not one request's context, so the context meter ignores it.
+        input.onEvent('thread/tokenUsage/updated', {threadId: sessionId, turnId, tokenUsage: {last, ...flags}});
+      };
+      const flushUsage = () => { if (!openMessage) return; const done = openMessage; openMessage = undefined; if (done.id) reportedIds.add(done.id); emitUsage(done.tokens, done.final ? {} : {partial: true}); };
+      const observeUsage = (id: string | undefined, raw: unknown, final = false) => {
+        if (id && reportedIds.has(id)) return;
+        const tokens = tokensOf(raw);
+        if (openMessage && id !== undefined && openMessage.id !== id) flushUsage();
+        if (!tokens) { if (final) flushUsage(); return; }
+        if (!openMessage) openMessage = {id: id ?? '', tokens: {}, final: false};
+        // Counts only grow within a message; later events carry the same input and a larger output.
+        for (const key of fields) if (tokens[key] !== undefined) openMessage.tokens[key] = Math.max(openMessage.tokens[key] ?? 0, tokens[key]);
+        if (final) { openMessage.final = true; flushUsage(); }
+      };
+      const settleTurnUsage = (raw: unknown) => {
+        flushUsage();
+        const totals = tokensOf(raw), reported = turnTokens;
+        if (totals) {
+          const shortfall: Tokens = {};
+          for (const key of fields) if (totals[key] !== undefined) shortfall[key] = Math.max(0, totals[key] - reported[key]);
+          emitUsage(shortfall, {reconciliation: true});
+        }
+        turnTokens = {input: 0, cached: 0, output: 0}; reportedIds.clear(); streamId = undefined;
+      };
       const tools = new Map<string, Record<string, unknown>>();
       // Task/Agent children run inside the CLI. Each is a child thread `<session>:<tool_use id>`; its events carry that
       // tool_use id as parent_tool_use_id. A background child outlives the tool_result that launched it.
@@ -139,7 +205,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       // A background child that never reports back must not hold stdin (and the chat's run) open forever.
       let watchdog: ReturnType<typeof setTimeout> | undefined;
       const maybeClose = () => {
-        if (pending > 0) return;
+        if (pending > 0 || grace) return;
         if (!backgroundRunning()) { clearTimeout(watchdog); watchdog = undefined; closeInput(); return; }
         watchdog ??= setTimeout(() => {
           for (const [id, run] of agents) if (run.background && run.state === 'running') { run.launched = true; settle(id, 'interrupted', 'Timed out waiting for this background agent to report back.'); }
@@ -159,9 +225,12 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       };
       const accept = () => { if (!accepted) { accepted = true; input.onThreadReady(sessionId); input.onTurnAccepted({threadId: sessionId, turnId}); } };
       const threadFor = (parent: unknown) => typeof parent === 'string' && parent ? `${sessionId}:${parent}` : sessionId;
-      const finish = (result: AdapterRunResult) => { if (settled) return; settled = true; input.signal.removeEventListener('abort', abort); clearTimeout(killer); clearTimeout(watchdog); resolve(result); };
+      const finish = (result: AdapterRunResult) => { if (settled) return; settled = true; input.signal.removeEventListener('abort', abort); clearTimeout(killer); clearTimeout(watchdog); clearTimeout(grace); resolve(result); };
       let killer: ReturnType<typeof setTimeout> | undefined;
-      const abort = () => { child.kill('SIGINT'); killer = setTimeout(() => child.kill('SIGKILL'), options.killGraceMs ?? 3000); };
+      // SIGINT lets the CLI stop its own work; then the whole process group goes, so a tool command it started (which still
+      // holds stdout) cannot keep the run open after Stop.
+      const abort = () => { child.kill('SIGINT'); killer = setTimeout(() => killTree(child, 'SIGKILL'), options.killGraceMs ?? 3000); };
+      child.on('exit', () => { if (input.signal.aborted) killTree(child, 'SIGKILL'); });
       if (input.signal.aborted) abort(); else input.signal.addEventListener('abort', abort, {once: true});
       child.stderr?.setEncoding('utf8');
       child.stderr?.on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-4096); });
@@ -170,6 +239,8 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
         const type = event.type;
         if (type === 'system' && event.subtype === 'init') { accept(); return; }
         accept();
+        // Work after a result means the unanswered steer started another turn: its result will follow.
+        if (grace && (type === 'assistant' || type === 'stream_event' || type === 'user')) { clearTimeout(grace); grace = undefined; }
         if (type === 'system' && (event.subtype === 'task_started' || event.subtype === 'task_notification')) {
           const toolUseId = text(event.tool_use_id) || taskTools.get(text(event.task_id)) || '', run = agents.get(toolUseId);
           if (event.subtype === 'task_started') {
@@ -193,9 +264,10 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
         // so the service notes it and re-sends static context on the next turn.
         if (type === 'system' && (event.subtype === 'compact_boundary' || event.subtype === 'compaction')) { input.onEvent('thread/compacted', {threadId: sessionId, turnId}); return; }
         if (type === 'stream_event') {
-          const inner = event.event as {type?: string; delta?: {type?: string; text?: unknown; thinking?: unknown}} | undefined;
+          const inner = event.event as {type?: string; delta?: {type?: string; text?: unknown; thinking?: unknown}; message?: {id?: unknown; usage?: unknown}; usage?: unknown} | undefined;
           // Each assistant message is its own reply segment, even when no tool call sits between two of them.
-          if (!event.parent_tool_use_id && inner?.type === 'message_start') { input.onEvent(MESSAGE_BOUNDARY_EVENT, {}); return; }
+          if (!event.parent_tool_use_id && inner?.type === 'message_start') { input.onEvent(MESSAGE_BOUNDARY_EVENT, {}); streamId = typeof inner.message?.id === 'string' ? inner.message.id : undefined; observeUsage(streamId, inner.message?.usage); return; }
+          if (!event.parent_tool_use_id && inner?.type === 'message_delta') { observeUsage(streamId ?? openMessage?.id, inner.usage, true); return; }
           if (event.parent_tool_use_id || inner?.type !== 'content_block_delta') return;
           if (inner.delta?.type === 'text_delta' && typeof inner.delta.text === 'string') { streamedText = true; input.onDelta(inner.delta.text); }
           if (inner.delta?.type === 'thinking_delta' && typeof inner.delta.thinking === 'string') input.onReasoning(inner.delta.thinking);
@@ -228,11 +300,12 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
           }
           // Each assistant message restarts text streaming; the next one streams fresh deltas.
           streamedText = false;
-          const usage = message?.usage;
-          if (usage && !event.parent_tool_use_id && typeof usage.input_tokens === 'number') input.onEvent('thread/tokenUsage/updated', {threadId: sessionId, turnId, tokenUsage: {last: {inputTokens: usage.input_tokens + (typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0) + (typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0), outputTokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : 0}}});
+          if (!event.parent_tool_use_id) observeUsage(typeof message?.id === 'string' ? message.id : undefined, message?.usage);
           return;
         }
         if (type === 'user') {
+          // Tool results follow a finished API message: its usage is as final as it will get.
+          if (!event.parent_tool_use_id) flushUsage();
           const results = blocks.filter(block => block?.type === 'tool_result');
           for (const block of blocks) {
             if (block?.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
@@ -257,14 +330,21 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
           return;
         }
         if (type === 'result') {
+          if (!event.parent_tool_use_id) settleTurnUsage(event.usage);
           final = {ok: event.is_error !== true && event.subtype === 'success', text: text(event.result)};
           // Each user message (the prompt, then any steers) ends in one result; the last one closes stdin so the run ends.
           // A background subagent keeps the CLI alive: closing stdin now would end it before it reports back.
-          pending--; maybeClose();
+          if (grace) { clearTimeout(grace); grace = undefined; }
+          if (unanswered > 0) {
+            // Steers written since the last result may have been folded into this turn, or may start another one.
+            unanswered = 0; pending = 1;
+            grace = setTimeout(() => { grace = undefined; pending = 0; maybeClose(); }, graceMs);
+          } else { pending = 0; maybeClose(); }
         }
       });
       child.on('error', error => finish({status: 'failed', finalMessage: '', dispatchState: accepted ? 'dispatched' : 'not-dispatched', ...(accepted ? {threadId: sessionId, turnId} : {}), errorMessage: `Claude Code could not start: ${error.message}`}));
       child.on('close', code => {
+        flushUsage();
         for (const [id, item] of tools) input.onEvent('item/completed', {threadId: toolThreads.get(id) ?? sessionId, turnId, item: {...item, id, status: 'interrupted'}});
         for (const run of agents.values()) if (run.state === 'running') { run.state = 'interrupted'; run.launched = true; run.endedAt ??= Date.now(); emitAgent(run); }
         const identity = accepted ? {threadId: sessionId, turnId} : {};
@@ -277,8 +357,8 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       child.stdin?.write(claudeStdin(input));
       input.onSteerable?.(message => {
         if (settled || inputClosed || !child.stdin || input.signal.aborted) return false;
-        pending++;
-        try { child.stdin.write(claudeUserMessage(message)); return true; } catch { pending--; return false; }
+        pending++; unanswered++;
+        try { child.stdin.write(claudeUserMessage(claudeSteerText(message))); if (grace) { clearTimeout(grace); grace = undefined; } return true; } catch { pending--; unanswered--; return false; }
       });
     });
   }};

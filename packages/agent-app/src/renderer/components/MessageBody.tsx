@@ -5,8 +5,10 @@ import { Check, Code, Copy, Quote, WrapText, X } from 'lucide-react';
 import {addComposerContext} from '../composerContext';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
+import type { PluggableList } from 'unified';
 import {ResourceLink, type ResourceContext} from './ResourceLink';
 import {ChatImage} from './ChatImage';
+import {invoke} from '../bridge';
 import {GalleryCoverage} from './ImageGallery';
 import {activeChat} from '../store';
 import {MarkdownTable} from './MarkdownTable';
@@ -16,6 +18,7 @@ import { createIncrementalMarkdownPlugin } from '../markdown-incremental';
 import {markdownHeadingId} from './markdownAnchors';
 import {HighlightedCode} from './HighlightedCode';
 import {inferMarkdownCodeLanguages} from './codeLanguage';
+import {remarkProseBreaks} from '../markdown-breaks';
 
 import './message-body.css';
 
@@ -145,6 +148,12 @@ function Heading({
 
 const components: Components = {
   pre: Pre,
+  // Right-to-left prose: each block takes its direction (and list-marker side) from its own first strong character.
+  p: ({node: _node, ...props}) => <p dir="auto" {...props}/>,
+  ul: ({node: _node, ...props}) => <ul dir="auto" {...props}/>,
+  ol: ({node: _node, ...props}) => <ol dir="auto" {...props}/>,
+  li: ({node: _node, ...props}) => <li dir="auto" {...props}/>,
+  blockquote: ({node: _node, ...props}) => <blockquote dir="auto" {...props}/>,
   table: ({node: _node, ...props}) => <MarkdownTable {...props}/>,
   a: ({ children, href, ...props }: any) => <ResourceLink href={href} auto={props['data-auto-file'] === 'true'}>{children}</ResourceLink>,
   h1: ({node, children, ...props}) => <Heading level={1} node={node} {...props}>{children}</Heading>,
@@ -196,7 +205,21 @@ function ReplyImage({src, alt}: {src?: string; alt?: string}): React.ReactElemen
   // The turn's gallery already shows this picture.
   if (path && covered.has(path)) return <></>;
   if (path && chat) return <ChatImage chatId={chat.id} path={path} variant="inline"/>;
+  if (isServerAttachment(src)) return <ServerImage src={src!} alt={alt}/>;
   return <span className="md-unavailable-link">[Image: {alt || 'image'} — preview unavailable]</span>;
+}
+/** An image attached on the connected server (`/api/attachments/<id>/content`, relative or on the server's own address). */
+export const isServerAttachment = (src?: string): boolean => Boolean(src) && /^(?:https?:\/\/[^/]+)?\/api\/attachments\/[0-9a-f-]{8,64}\/content$/i.test(src!.trim());
+/** Fetched with the connection's own sign-in (the server's attachments need it), then shown inline; a failure is a sentence, never a broken picture. */
+function ServerImage({src, alt}: {src: string; alt?: string}): React.ReactElement {
+  const [state, setState] = React.useState<{url: string} | {error: string} | null>(null);
+  React.useEffect(() => {
+    let live = true;
+    void invoke('paperclip.attachment.image', {src}).then(r => { if (live) setState({url: r.dataUrl}); }, () => { if (live) setState({error: 'unavailable'}); });
+    return () => { live = false; };
+  }, [src]);
+  if (state && 'url' in state) return <img className="md-server-image" src={state.url} alt={alt ?? ''} loading="lazy"/>;
+  return <span className="md-unavailable-link">{state ? `[Image: ${alt || 'image'} — could not be loaded from the server]` : `[Image: ${alt || 'image'} — loading]`}</span>;
 }
 /** The local file a markdown image points at: `/abs/path.png` or `file:///abs/path.png`; undefined for anything else. */
 export function localImagePath(src?: string): string | undefined {
@@ -208,9 +231,16 @@ export function localImagePath(src?: string): string | undefined {
   return (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)) && /\.(?:png|jpe?g|gif|webp|bmp|avif|svg)$/i.test(path) ? path : undefined;
 }
 
-function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean }): React.ReactElement {
+function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false, asDocument = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean; asDocument?: boolean }): React.ReactElement {
   // Replies link the files they mention (markdown-file-links.ts); documents and previews render as written.
-  const remarkPlugins = React.useMemo(() => linkFiles ? [remarkGfm, createIncrementalMarkdownPlugin(), remarkLeadingLabels, remarkFileLinks] : [remarkGfm, createIncrementalMarkdownPlugin()], [linkFiles]);
+  // Agent prose keeps its single line breaks (markdown-breaks.ts); a Markdown document keeps CommonMark soft
+  // breaks, so a hard-wrapped README still reads as flowing paragraphs.
+  const remarkPlugins = React.useMemo(() => {
+    const plugins: PluggableList = [remarkGfm, createIncrementalMarkdownPlugin()];
+    if (linkFiles) plugins.push(remarkLeadingLabels, remarkFileLinks);
+    if (!asDocument) plugins.push(remarkProseBreaks);
+    return plugins;
+  }, [linkFiles, asDocument]);
   const renderedText = React.useMemo(() => inferMarkdownCodeLanguages(text), [text]);
   // Streaming fade (markdown-fade.ts): text that arrives after the first render fades in.
   const fade = useRef<FadeState | null>(null);
@@ -262,6 +292,7 @@ export const MessageBody = React.memo(MessageBodyContent, (previous, next) =>
   previous.text === next.text &&
   previous.animate === next.animate &&
   previous.linkFiles === next.linkFiles &&
+  previous.asDocument === next.asDocument &&
   previous.resourceContext?.folderId === next.resourceContext?.folderId &&
   previous.resourceContext?.path === next.resourceContext?.path,
 );

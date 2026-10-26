@@ -212,7 +212,7 @@ jobs:
           [[ "$(uname -m)" == "${{ matrix.arch }}" || ( "$(uname -m)" == "x86_64" && "${{ matrix.arch }}" == "x64" ) ]] || { echo "::error::Runner is $(uname -m), expected ${{ matrix.arch }}"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: packages/agent-app/.nvmrc
           cache: npm
@@ -222,7 +222,7 @@ jobs:
         # Download caches only (never node_modules): keyed on OS, CPU and the locked Electron version.
         shell: bash
         run: echo "version=$(node -p "require(process.env.GITHUB_WORKSPACE + '/packages/agent-app/package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/Library/Caches/electron
@@ -305,7 +305,7 @@ jobs:
           security delete-keychain "$RUNNER_TEMP/muster-sign.keychain-db" 2>/dev/null || true
           rm -f "$RUNNER_TEMP/muster-sign.p12" "$RUNNER_TEMP/muster-sign.pw"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: muster-agent-${{ matrix.arch }}
           path: |
@@ -325,7 +325,8 @@ jobs:
       matrix:
         include:
           - os: linux
-            runner: ubuntu-latest
+            # Build on the oldest supported Ubuntu so native modules (node-pty) run there and on anything newer (#680).
+            runner: ubuntu-24.04
             target: --linux
           - os: windows
             runner: windows-latest
@@ -339,7 +340,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: packages/agent-app/.nvmrc
           cache: npm
@@ -352,7 +353,7 @@ jobs:
         # Download caches only (never node_modules): keyed on OS, CPU and the locked Electron version.
         shell: bash
         run: echo "version=$(node -p "require(process.env.GITHUB_WORKSPACE + '/packages/agent-app/package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/Library/Caches/electron
@@ -439,7 +440,7 @@ jobs:
         run: node scripts/smoke-packaged.mjs
         env:
           SMOKE_EXPECT_UPDATES: '1'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: muster-agent-${{ matrix.os }}
           if-no-files-found: error
@@ -466,7 +467,7 @@ jobs:
             platform: darwin-arm64
           - runner: macos-15-intel
             platform: darwin-x64
-          - runner: ubuntu-latest
+          - runner: ubuntu-24.04
             platform: linux-x64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
@@ -479,7 +480,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: packages/agent-app/.nvmrc
           cache: npm
@@ -513,7 +514,7 @@ jobs:
           "$BIN" --version
           echo 'smoke-test-password-1' | "$BIN" init --data-dir "$DIR/data" --username smoke --port 17999 --password-stdin
           "$BIN" doctor --data-dir "$DIR/data"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: muster-server-${{ matrix.platform }}
           path: packages/server/release-dist/muster-server-*.tar.xz
@@ -551,13 +552,13 @@ jobs:
           gh api "repos/${{ github.repository }}/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$SHA" --silent
           echo "Created tag $TAG at $SHA"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: muster-agent-*
           path: out
           merge-multiple: true
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: muster-server-*
           path: out
@@ -639,7 +640,7 @@ jobs:
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ needs.gate.outputs.sha }}

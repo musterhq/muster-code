@@ -93,6 +93,7 @@ export async function wave1(t: TestContext, opts: Wave1Options = {}) {
         slow.delete(input.chat.id);
         return stopped.has(input.chat.id) ? { status: 'failed', finalMessage: '', errorMessage: 'stopped', failure: { kind: 'aborted' }, dispatchState: 'dispatched' } : done('slow done');
       }
+      if (/W1-FAIL-SPAWN/.test(first)) return { status: 'failed', finalMessage: '', errorMessage: 'Claude Code could not start: spawn claude ENOENT', dispatchState: 'not-dispatched' };
       if (/W1-FAIL-ALWAYS/.test(first)) return { status: 'failed', finalMessage: '', errorMessage: 'rate_limited: 429 try later', dispatchState: 'dispatched' };
       if (/W1-FAIL-PERMANENT/.test(first)) return { status: 'failed', finalMessage: '', errorMessage: 'the model refused the request', dispatchState: 'dispatched' };
       if (/W1-FAIL-LIMIT/.test(first)) return { status: 'failed', finalMessage: '', errorMessage: 'You hit your usage limit. Resets in 3 hours.', dispatchState: 'dispatched' };

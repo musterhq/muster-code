@@ -83,6 +83,16 @@ export function fileStats(data:Record<string,unknown>|undefined):FileStat[] {
 /** F60: a started tool the provider has blocked on an approval card is waiting, not running (runtime sets `awaitingApproval`). */
 export const APPROVAL_WAIT_LABEL='Waiting for approval';
 export function awaitingApproval(item:{status?:string;data?:Record<string,unknown>}):boolean {return item.status==='running'&&typeof item.data?.awaitingApproval==='string';}
+/** #580: the user denied the card, a tool rule refused it, or the card timed out. It never ran, whatever status the provider closed it with. */
+export const executionDenied=(data:Record<string,unknown>|undefined):boolean=>data?.executionDenied===true;
+/** Terminal verbs must not imply that a refused tool executed. */
+export function toolState(item:{status?:string;data?:Record<string,unknown>},presentation:ToolPresentation,failed=false):string {
+ if(awaitingApproval(item))return APPROVAL_WAIT_LABEL;
+ if(executionDenied(item.data))return 'Did not run';
+ if(item.status==='interrupted')return 'Stopped';
+ if(item.status==='running')return presentation.runningVerb;
+ return item.status==='completed'||failed||item.status==='cancelled'?presentation.verb:'Tool';
+}
 export const basename=(path:string)=>path.split('/').filter(Boolean).at(-1)||path;
 /**
  * VS Code-style disambiguation: every path gets the shortest path-segment suffix that is
@@ -123,8 +133,10 @@ export interface CommandOutcome {exitCode?:number;duration?:string;failed:boolea
 export function commandOutcome(data:Record<string,unknown>|undefined,status:string|undefined,output=''):CommandOutcome {
  const exitCode=typeof data?.exitCode==='number'?data.exitCode:undefined;
  const duration=typeof data?.durationMs==='number'&&status!=='running'?formatToolDuration(data.durationMs):undefined;
- const failed=status==='failed'||(exitCode!=null&&exitCode!==0&&status!=='running');
- const suffix=failed?(exitCode!=null?`failed (exit ${exitCode})`:'failed'):status==='interrupted'?'interrupted':status==='cancelled'?'cancelled':'';
+ // A refused tool is not a failure: adapters close it as failed with the refusal as its output.
+ const denied=executionDenied(data);
+ const failed=!denied&&(status==='failed'||(exitCode!=null&&exitCode!==0&&status!=='running'));
+ const suffix=denied?(data?.deniedReason==='timeout'?'not approved':'denied'):failed?(exitCode!=null?`failed (exit ${exitCode})`:'failed'):status==='cancelled'?'cancelled':'';
  const source=string(data?.stderr)||output||(()=>{const error=data?.error;if(typeof error==='string'){try{const parsed=JSON.parse(error);return typeof parsed==='string'?parsed:typeof parsed?.message==='string'?parsed.message:error;}catch{return error;}}return '';})();
  return {exitCode,duration,failed,suffix,excerpt:failed?lastLines(source,2):[]};
 }

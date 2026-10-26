@@ -9,14 +9,15 @@ import http from 'node:http';
 import path from 'node:path';
 import {launcherFile, nodeLauncherScript} from './launcher-script.ts';
 import type {McpToolResult, SandboxAgentTarget} from './sandbox-registry.ts';
+import {SANDBOX_MCP_SERVER} from '../shared/sandbox-routes.ts';
 
-export const SANDBOX_MCP = 'muster_sandbox';
+export const SANDBOX_MCP = SANDBOX_MCP_SERVER;
 export const SANDBOX_EXEC_MAX_MS = 30 * 60_000;
 const MAX_BODY = 4 * 1024 * 1024;
 export const textResult = (text: string, isError = false): McpToolResult => ({content: [{type: 'text', text}], ...(isError ? {isError: true} : {})});
 
 export const SANDBOX_TOOL_SPECS = [
-  {name: 'sandbox_exec', description: 'Run a shell command inside this chat’s Linux container (sh -lc, cwd /workspace, unprivileged user, no network unless the user granted egress). Returns exit code, stdout and stderr. Run every command for this chat here; your own shell runs on the user’s Mac, outside the container, and must not be used in this chat.',
+  {name: 'sandbox_exec', description: 'Run a shell command inside this chat’s Linux container (sh -lc, cwd /workspace, unprivileged user, no network unless the user granted egress). Returns exit code, stdout and stderr. Run every command for this chat here; do not use a shell of your own, which would run on the user’s Mac, outside the container.',
     inputSchema: {type: 'object', properties: {command: {type: 'string', description: 'Shell command line'}, timeout_seconds: {type: 'integer', minimum: 1, maximum: SANDBOX_EXEC_MAX_MS / 1000, description: 'Default 600'}}, required: ['command']}},
   {name: 'sandbox_read', description: 'Read a UTF-8 text file from /workspace (path relative to /workspace).', inputSchema: {type: 'object', properties: {path: {type: 'string'}}, required: ['path']}},
   {name: 'sandbox_write', description: 'Create or overwrite a file under /workspace with the given content (parent folders are created). Every edit for this chat must go through this tool so it lands in the container workspace; do not edit the host folder.', inputSchema: {type: 'object', properties: {path: {type: 'string'}, content: {type: 'string'}}, required: ['path', 'content']}},

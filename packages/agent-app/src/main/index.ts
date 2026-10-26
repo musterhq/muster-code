@@ -7,24 +7,28 @@ import path from 'node:path';
 import { writeProjectExportFile, projectExportFilename } from './project-export-file.ts';
 import {createRequire} from 'node:module';
 import {ProcessSessions} from '../runtime/process-sessions.ts';
+import {ProcessContinuations} from '../runtime/process-continuations.ts';
 import {ScopedComputers} from '../runtime/scoped-computers.ts';
 import {DesktopWorkspaces,commandAuthority,computerAuthority} from './desktop-workspaces.ts';
 import { pathToFileURL } from 'node:url';
 import { ARCHIVE_RUNNING_WARNING, type AgentEvent, type Commands, type Snapshot } from '../shared/protocol.ts';
 import {chatMenuTemplate,folderMenuTemplate,projectMenuTemplate,popupChoice,type ChatMenuCommand,type FolderMenuCommand,type ProjectMenuCommand} from './chat-menu.ts';
-import {attentionAllowed,createSettleTracker,notificationPrefs,notificationsMuted,wantedNotices,type NotificationPrefs} from './chat-notifications.ts';
+import {attentionAllowed,createAttentionTracker,createSettleTracker,notificationPrefs,notificationsMuted,wantedNotices,type NotificationPrefs} from './chat-notifications.ts';
 import { isCommandName } from './commands.ts';
 import { fileOperation, mutablePath } from '../runtime/file-operations.ts';
 import { accessSync, constants as fsConstants, existsSync, readFileSync, promises as fs } from 'node:fs';
 import { resolveInside } from '../runtime/paths.ts';
 import {archiveNames,zipStore} from './zip.ts';
 import {BrowserWorkspaceController} from './browser-workspace.ts';
-import {BrowserBridge} from './agent-tools/browser-bridge.ts';
+import {BrowserBridge,BROWSER_BRIDGE_START_KEY} from './agent-tools/browser-bridge.ts';
 import {TERMINAL_MCP_LAUNCHER_ENV,TERMINAL_READ_MAX_BYTES,TerminalToolHost} from '../runtime/terminal-agent-tools.ts';
+import {BACKGROUND_MCP_LAUNCHER_ENV,BackgroundToolHost} from '../runtime/background-agent-tools.ts';
 import {accessibilityText,captureSource,captureSources,computerPermissions} from './computer-capture.ts';
 import {NativePreviewController} from './native-preview.ts';
 import { buildMenuTemplate } from './menu.ts';
 import {AppUpdater,bundlePathOf,detectInstallMethod,plistString} from './app-updater.ts';
+import {createUpdateGate,type UpdateGate} from './update-gate.ts';
+import type {UpdateStatus} from '../shared/update-protocol.ts';
 import {unpackedPath} from '../runtime/unpacked-path.ts';
 import {resolveUpdateChannel} from './update-channel.ts';
 import { createQuitCoordinator, quitChoice, quitPrompt, withinDeadline } from './quit-coordinator.ts';
@@ -32,7 +36,7 @@ import { loadAgentService, type AgentService } from './service-loader.ts';
 import { clampGeometry, DEFAULT_GEOMETRY, MIN_HEIGHT, MIN_WIDTH, planDisplayChange, WindowStateStore, type WindowGeometry } from './window-state.ts';
 import {chatIdFromArgs,chatIdFromLink} from './chat-links.ts';
 import {parseTaskLink,taskLinkFromArgs,type TaskLink} from '../shared/task-link.ts';
-import {attentionBadge,createCrashTracker,isRendererCrash} from './app-shell.ts';
+import {createBadgeTracker,createCrashTracker,isRendererCrash} from './app-shell.ts';
 import {MENU_CHANNEL,MENU_CLOSE_CHANNEL,type MenuAction} from '../shared/menu-protocol.ts';
 import {installProcessGuard} from './process-guard.ts';
 import {passwordStoreSwitch} from './linux-launch.ts';
@@ -76,6 +80,9 @@ async function main(): Promise<void> {
   });
   let service: AgentService | null = null;
   let runningChats = 0;
+  let updateGate: UpdateGate<UpdateStatus> | undefined;
+  /** A background process the agent left running at the end of its turn wakes the chat when it exits. */
+  let processContinuations: ProcessContinuations | undefined;
   let repaintPolicy: (() => void) | undefined;
   let disposal: Promise<void> | undefined;
   let shutdownStarted = false;
@@ -127,8 +134,7 @@ async function main(): Promise<void> {
   const dataDir = path.join(app.getPath('userData'), 'agent-data');
   const favicons = new FaviconCache({dir: path.join(dataDir, 'favicons')});
   // Pending approvals/questions badge the dock while the window is not in front.
-  let attentionCount = 0;
-  let shownBadge = '';
+  const badgeTracker = createBadgeTracker();
   // AUT-05: monitoring notifications follow the user's settings (mute, failures only, attention alerts off).
   let notifyPrefs: NotificationPrefs = notificationPrefs(undefined);
   let pendingAttention = 0;
@@ -136,10 +142,8 @@ async function main(): Promise<void> {
     pendingAttention = requested;
     const next = attentionAllowed(notifyPrefs, Date.now()) ? requested : 0;
     const focused = window !== null && !window.isDestroyed() && window.isVisible() && window.isFocused();
-    const update = attentionBadge(attentionCount, next, focused);
-    attentionCount = next;
-    if (!update || (update.badge === shownBadge && !update.bounce)) return;
-    shownBadge = update.badge;
+    const update = badgeTracker(next, focused);
+    if (!update) return;
     if (process.platform === 'darwin') {
       app.dock?.setBadge(update.badge);
       if (update.bounce) app.dock?.bounce('informational');
@@ -168,6 +172,26 @@ async function main(): Promise<void> {
       toast.show();
     }
   };
+  // An approval or question raised out of sight gets one toast, and one reminder shortly before it closes.
+  const attentionTracker = createAttentionTracker();
+  let lastAttention: Snapshot['attention'];
+  // Timers can fire late after a sleep: close every request past its stored deadline so cards and badges follow the clock.
+  const sweepAttention = (): Promise<unknown> => loaded.service.invoke('attention.sweep', {}).catch(() => undefined);
+  const notifyAttention = (): void => {
+    const focused = window !== null && !window.isDestroyed() && window.isVisible() && window.isFocused();
+    const notices = attentionTracker(lastAttention, Date.now(), notifyPrefs, focused && lastActiveChatId ? lastActiveChatId : null);
+    if (!notices.length || !Notification.isSupported()) return;
+    for (const notice of notices.slice(0, 3)) {
+      const toast = new Notification({ title: notice.title, body: notice.body });
+      shownNotifications.add(toast);
+      if (shownNotifications.size > 12) shownNotifications.delete(shownNotifications.values().next().value!);
+      toast.on('click', () => { shownNotifications.delete(toast); void openLinkedChat(notice.chatId); });
+      toast.on('close', () => shownNotifications.delete(toast));
+      toast.show();
+    }
+  };
+  // Snapshots only arrive on change, so reminders need a clock of their own.
+  setInterval(() => { if (lastAttention?.totalRequests) { void sweepAttention(); notifyAttention(); } }, 30_000).unref();
   // CHAT-15: a timed or activity wake carries exactly one notification (the runtime emits chatWoke once per transition).
   let lastActiveChatId: string | undefined;
   const justWoke = new Set<string>();
@@ -192,8 +216,13 @@ async function main(): Promise<void> {
       const before = runningChats;
       runningChats = event.snapshot.chats.filter((c) => c.status === 'running' || c.status === 'stopping').length;
       if ((before === 0) !== (runningChats === 0)) repaintPolicy?.();
+      // #449: an update Install that waited for running work starts once nothing runs.
+      if (runningChats === 0) updateGate?.idle();
       applyBadge(event.snapshot.attention?.totalRequests ?? 0);
       notifySettled(event.snapshot);
+      processContinuations?.observe(event.snapshot.chats);
+      lastAttention = event.snapshot.attention;
+      notifyAttention();
     }
     if (window && !window.isDestroyed() && window.isVisible()) {
       window.webContents.send('muster:event', event);
@@ -220,12 +249,20 @@ async function main(): Promise<void> {
   };
   // CR-18: new terminals launch the Integrated terminal shell chosen in Preferences (login shell when unset or missing).
   const processes = new ProcessSessions(path.join(dataDir,'process-sessions.json'),async input=>commandAuthority(await loaded.service.invoke('app.snapshot',undefined),dataDir,input),onEvent,undefined,
-    {terminal:{shell:async()=>(await loaded.service.invoke('settings.get',{})).values['terminal.shell']}});
+    {terminal:{shell:async()=>(await loaded.service.invoke('settings.get',{})).values['terminal.shell']},onExit:session=>processContinuations?.exited(session)});
+  processContinuations = new ProcessContinuations({
+    agentProcesses:chatId=>processes.agentProcesses(chatId),
+    // The same queue a typed follow-up goes through: it waits for a running turn and holds while the queue is paused.
+    enqueue:(chatId,text,requestId)=>loaded.service.invoke('chat.queue.add',{id:chatId,text,requestId}),
+  });
   // C3.b4: read_thread_terminal for chats whose user allowed it; consent is re-checked on every call.
   const terminalTools = new TerminalToolHost({dir:path.join(dataDir,'agent-tools','terminal'),execPath:process.execPath,
     allowed:async chatId=>(await loaded.service.invoke('terminalAccess.get',{chatId})).allowed,
     tails:chatId=>processes.terminals.agentTails(chatId,TERMINAL_READ_MAX_BYTES*2)});
   void terminalTools.start().then(launcher=>{process.env[TERMINAL_MCP_LAUNCHER_ENV]=launcher;},error=>console.warn(`Agent terminal tool unavailable: ${error instanceof Error?error.message:String(error)}`));
+  // Agent-owned long-running commands: the source of the exit follow-ups above.
+  const backgroundTools = new BackgroundToolHost({dir:path.join(dataDir,'agent-tools','background'),execPath:process.execPath,processes});
+  void backgroundTools.start().then(launcher=>{process.env[BACKGROUND_MCP_LAUNCHER_ENV]=launcher;},error=>console.warn(`Agent background tool unavailable: ${error instanceof Error?error.message:String(error)}`));
   userProcessGroups = () => processes.userProcessGroups();
   userProcessTargets = () => processes.userProcessTargets();
   const computers = new ScopedComputers({
@@ -262,6 +299,7 @@ async function main(): Promise<void> {
   // provider sessions; sandboxes are re-inspected here because ScopedComputers lives in main. Lock/unlock are no-ops.
   const forwardPower=(state:'suspend'|'resume'|'lock-screen'|'unlock-screen')=>{
     void loaded.service.power?.({state}).catch(error=>console.warn(`power ${state} failed:`,error instanceof Error?error.message:error));
+    if(state==='resume')void sweepAttention();
     if(state==='resume')void computers.recheckAfterWake().catch(()=>undefined);
   };
   powerMonitor.on('suspend',()=>forwardPower('suspend'));
@@ -298,7 +336,7 @@ async function main(): Promise<void> {
     trafficLightPosition: isMac ? { x: 18, y: 18 } : undefined,
     ...(wantsVibrancy
       ? { vibrancy: 'sidebar' as const, visualEffectState: 'active' as const, transparent: false }
-      : { backgroundColor: '#181818' }),
+      : { backgroundColor: '#0e0e0e' }),
     webPreferences: {
       sandbox: true,
       contextIsolation: true,
@@ -324,7 +362,11 @@ async function main(): Promise<void> {
   // RUN-X1: the agent drives this same browser through the muster_browser MCP bridge; each chat's tab shows in the right pane.
   const browserBridge = new BrowserBridge({dir:path.join(dataDir,'agent-tools'),browser:browserWorkspace,execPath:process.execPath,script:unpackedPath(path.join(__dirname,'browser-mcp.cjs')),
     snapshot:()=>loaded.service.invoke('app.snapshot',undefined),lease:async chatId=>(await loaded.service.invoke('computer.lease',{chatId})).owner,emit:onEvent});
-  void browserBridge.start().then(launcher=>{process.env.MUSTER_BROWSER_MCP_LAUNCHER=launcher;},error=>console.warn(`Agent browser bridge unavailable: ${error instanceof Error?error.message:String(error)}`));
+  // #387/#424: started now (retried once), and again on first use if that failed; HTTP routes call it in-process.
+  const startBrowserBridge=()=>browserBridge.ensureStarted().then(launcher=>{process.env.MUSTER_BROWSER_MCP_LAUNCHER=launcher;return launcher;});
+  (globalThis as Record<symbol,unknown>)[BROWSER_BRIDGE_START_KEY]=startBrowserBridge;
+  const unregisterBrowserCaller=browserBridge.register();
+  void startBrowserBridge().catch(error=>console.warn(`Agent browser bridge unavailable: ${error instanceof Error?error.message:String(error)}`));
   window.on('hide',()=>nativePreview.hide());
   window.on('closed',()=>nativePreview.hide());
   window.webContents.on('did-start-loading',()=>{nativePreview.hide();processes.detachAll();});
@@ -341,11 +383,13 @@ async function main(): Promise<void> {
     if (!reduce && reducedTransparency) window.setBackgroundColor('#00000000');
     reducedTransparency = reduce;
     window.setVibrancy(reduce ? null : 'sidebar');
-    if (reduce) window.setBackgroundColor('#181818');
+    if (reduce) window.setBackgroundColor('#0e0e0e');
   };
   syncTransparency();
   nativeTheme.on('updated', syncTransparency);
-  window.on('focus', () => { applyBadge(attentionCount); if (!isMac) window?.flashFrame(false); });
+  // Re-apply the unfiltered count: passing the muted (0) count would forget the requests still pending.
+  window.on('blur', () => applyBadge(pendingAttention));
+  window.on('focus', () => { applyBadge(pendingAttention); if (!isMac) window?.flashFrame(false); });
 
   // --- Renderer crash recovery ---------------------------------------------
   const crashes = createCrashTracker();
@@ -463,6 +507,7 @@ async function main(): Promise<void> {
     quit:()=>app.quit(),
     openExternal:url=>{void shell.openExternal(url);},
   });
+  updateGate=createUpdateGate({running:()=>runningChats,install:()=>updater.install(),notify:message=>{if(window&&!window.isDestroyed())window.webContents.send('muster:event',{type:'notice',message} satisfies AgentEvent);}});
   void updater.start();
   app.on('browser-window-focus', () => updater.checkIfStale());
 
@@ -488,7 +533,8 @@ async function main(): Promise<void> {
         if(!request||typeof request.enabled!=='boolean')throw new Error('Invalid update setting.');
         return updater.setAutoCheck(request.enabled);
       }
-      case 'updates.install': return updater.install();
+      // #449: never install (and quit) over running turns; it waits for them and says so.
+      case 'updates.install': return (await updateGate!.install()) ?? updater.snapshot();
       case 'chat.contextMenu': {
         const request=input as Commands['chat.contextMenu']['input'];
         if(!request||typeof request.id!=='string'||request.id.length>256||!Number.isFinite(request.x)||!Number.isFinite(request.y)||(request.surface!==undefined&&request.surface!=='sidebar'&&request.surface!=='header'))throw new Error('Invalid chat menu request.');
@@ -817,6 +863,8 @@ async function main(): Promise<void> {
     window.focus();
     window.webContents.send(MENU_CHANNEL, action);
   };
+  // Three-finger trackpad swipe (macOS "Swipe between pages" set to three fingers): Back / Forward. Two-finger swipes are handled in the renderer.
+  window?.on('swipe', (_event, direction) => { if (direction === 'left') sendMenuAction('back'); else if (direction === 'right') sendMenuAction('forward'); });
   ipcMain.on(MENU_CLOSE_CHANNEL, (event) => {
     if (!isTrustedSender(event.senderFrame, event.sender.id)) return;
     window?.close();
@@ -881,8 +929,8 @@ async function main(): Promise<void> {
           if(failure?.status==='rejected')throw failure.reason;
         })().catch(error=>{disposal=undefined;throw error;});
         await withinDeadline(disposal, 5000);
-        browserBridge.dispose();
-        terminalTools.dispose();
+        unregisterBrowserCaller();browserBridge.dispose();
+        terminalTools.dispose(); backgroundTools.dispose();
         browserWorkspace.dispose();
         nativePreview.hide();
       }

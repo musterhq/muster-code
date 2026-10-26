@@ -1,0 +1,121 @@
+# MUS-SPEC-09: Browser and previews
+
+A chat can open web pages and local app previews in a browser tab inside Muster, and the agent can use that browser.
+
+What the user can do:
+- open a URL or a local dev server in a browser tab, with back, forward, reload and dev tools;
+- let the agent read, click and type in the page, and pick an element to point the agent at;
+- keep sign-ins per workspace, and see the page picture-in-picture while working elsewhere.
+
+Boundaries:
+- Each workspace has its own browser storage; one workspace's sign-in does not leak to another.
+- A page that hangs does not freeze the app.
+
+## Acceptance cases
+
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-09-611A](09-browser-and-previews.md#mus-spec-09-611a) | A newly opened browser tab's view is given a white background colour. | [`web pages use a white background independent of the app theme`](../../../packages/agent-app/tests/browser-workspace.test.ts) |
+| [MUS-SPEC-09-629A](09-browser-and-previews.md#mus-spec-09-629a) | With a live browser preview card on screen, either the card clears the transcript text or the conversation pane has a reserve on that side; a reserve exists only when the card would otherwise cover text. | [`the visible browser preview never covers transcript text`](../../../packages/agent-app/tests/pip-components.tsx) |
+| [MUS-SPEC-09-629B](09-browser-and-previews.md#mus-spec-09-629b) | When a card overlaps the text column, the calculated reserve makes the text end one gap short of the card, in a wide pane and in a pane narrower than the column. | [`the smallest reserve that clears the card: the text ends at the card minus the gap`](../../../packages/agent-app/tests/pip-reserve.test.ts) |
+| [MUS-SPEC-09-465A](09-browser-and-previews.md#mus-spec-09-465a) | Taking a picture of a frozen tab wakes it first; a tab whose page was dropped to save memory is recreated; an unknown tab gives nothing. | [`frame() on a frozen tab thaws it and on a discarded tab recreates it`](../../../packages/agent-app/tests/browser-workspace-memory.test.ts) |
+| [MUS-SPEC-09-465B](09-browser-and-previews.md#mus-spec-09-465b) | A tab an agent tool is using is not frozen when the panel closes and is not discarded to make room; once the agent is done it can be frozen and discarded again. | [`a tab an agent tool is using is neither frozen nor discarded by the memory paths`](../../../packages/agent-app/tests/browser-workspace-memory.test.ts) |
+| [MUS-SPEC-09-465C](09-browser-and-previews.md#mus-spec-09-465c) | A lost connection retries read-only browser tools with backoff, never repeats a click, retries a refused connection for any tool, and gives up after three retries. | [`MCP server: connection resets retry read-only tools with backoff but never repeat a click`](../../../packages/agent-app/tests/browser-route-matrix.test.ts) |
+| [MUS-SPEC-09-465D](09-browser-and-previews.md#mus-spec-09-465d) | The idle sweep leaves a tab an agent tool just used awake for three minutes, then freezes it. | [`agent use thaws a hidden page; the sweeper refreezes it once idle`](../../../packages/agent-app/tests/browser-freeze.test.ts) |
+| [MUS-SPEC-09-564A](09-browser-and-previews.md#mus-spec-09-564a) | A download name with a right-to-left override keeps its real .exe extension and holds no direction control characters. | [`a downloaded file name cannot use text-direction controls to disguise its extension`](../../../packages/agent-app/tests/browser-download-name.test.ts) |
+
+### Page background
+
+<a id="mus-spec-09-611a"></a>
+#### MUS-SPEC-09-611A: Web pages sit on white, not on the app's dark colour
+
+- Precondition: The browser workspace is set up with a fake window and fake page views. Nothing has been opened yet.
+- Action: Open a browser tab on a web page.
+- Expected result: The page view is given the background colour white (`#ffffff`), whatever the app theme is. A page that sets no background of its own therefore shows white, not the app's dark colour.
+- Test: `packages/agent-app/tests/browser-workspace.test.ts::web pages use a white background independent of the app theme`
+- Environment: Node test runner; fake window, view and session objects; no Electron and no network.
+- Known gaps: The page view is a fake that records the colour it was given. The test does not render a real page, so it shows the colour is set, not that a real page looks white.
+- Evidence: UNVERIFIED
+
+### The preview card and the transcript
+
+<a id="mus-spec-09-629a"></a>
+#### MUS-SPEC-09-629A: The browser preview does not cover transcript text
+
+- Precondition: A chat has two live browser sessions, so two preview cards show in the corner. The conversation pane is 1000px wide and its text column is 804px, centred.
+- Action: Render the app with the preview cards visible.
+- Expected result: Either the cards sit clear of the transcript text, or the conversation pane has been given a reserve on the card's side. Space is reserved only when the card would cover text.
+- Test: `packages/agent-app/tests/pip-components.tsx::the visible browser preview never covers transcript text`
+- Environment: DOM suite (`linkedom`); the native browser views are stubbed and layout sizes are faked, so no real window is used.
+- Known gaps: Sizes come from a fake layout, not a real one, so it does not show the look on screen. It checks one pane width and one card size; other sizes are covered only by the calculation test in MUS-SPEC-09-629B.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-09-629b"></a>
+#### MUS-SPEC-09-629B: The reserve is the smallest that clears the card
+
+- Precondition: A pane width, a text column width, a window width and a card position and size, once for a wide pane and once for a pane narrower than the column.
+- Action: Ask for the reserve for a card that overlaps the text column on the right.
+- Expected result: A reserve is returned, and with it the text ends within 1px of one gap short of the card in both panes.
+- Test: `packages/agent-app/tests/pip-reserve.test.ts::the smallest reserve that clears the card: the text ends at the card minus the gap`
+- Environment: Node test runner; no window or network.
+- Known gaps: A unit test of the pure calculation. The other tests in the file cover the no-reserve, left-side and 440px cases, but only this one is linked. MUS-SPEC-09-629A links the screen-level check.
+- Evidence: UNVERIFIED
+
+### The agent's tab survives a closed panel
+
+<a id="mus-spec-09-465a"></a>
+#### MUS-SPEC-09-465A: A picture of a frozen or discarded tab wakes or recreates it
+
+- Precondition: A browser tab was hidden, so it is frozen. Other tabs are then opened and hidden until the live-page cap is reached and the first tab's page is discarded.
+- Action: Ask for a frame of the frozen tab, then of the discarded tab, then of a tab that does not exist.
+- Expected result: The frozen tab is thawed and returns a frame. The discarded tab is recreated and returns a frame. The unknown tab returns nothing.
+- Test: `packages/agent-app/tests/browser-workspace-memory.test.ts::frame() on a frozen tab thaws it and on a discarded tab recreates it`
+- Environment: Node test runner; a fake browser view and debugger; no Electron.
+- Known gaps: Uses fake web contents, so it does not show a real page render.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-09-465b"></a>
+#### MUS-SPEC-09-465B: A tab the agent is using is not frozen or discarded
+
+- Precondition: An agent tool has opened a tab, and the user then closes the browser panel. The live-page cap is 2.
+- Action: Open and hide more tabs, run the idle discard, then move the clock four minutes past the agent's last use and run the freeze and discard sweeps again.
+- Expected result: Closing the panel does not freeze the agent's tab. It keeps its page while other tabs are discarded and while the idle sweep runs. After the agent is idle for the hold time, the tab is frozen and may be discarded.
+- Test: `packages/agent-app/tests/browser-workspace-memory.test.ts::a tab an agent tool is using is neither frozen nor discarded by the memory paths`
+- Environment: Node test runner; a fake browser view; no Electron.
+- Known gaps: Uses fake web contents and a fake clock.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-09-465c"></a>
+#### MUS-SPEC-09-465C: Browser tool calls retry safely after a lost connection
+
+- Precondition: The browser tool server's connection fails: a reset on a read-only tool, a reset on a click, a refused connection on a click, and a refused connection on every try.
+- Action: Call each through the retry wrapper.
+- Expected result: The read-only tool succeeds on the third try. The click after a reset runs once and the error is passed on, so it is never doubled. The click after a refused connection is retried and succeeds on the third try. A call that is always refused is tried four times (the first call and three retries) and then fails.
+- Test: `packages/agent-app/tests/browser-route-matrix.test.ts::MCP server: connection resets retry read-only tools with backoff but never repeat a click`
+- Environment: Node test runner; a fake tool call, no network. The wait between tries is set to 1 ms.
+- Known gaps: Does not use a real tool server.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-09-465d"></a>
+#### MUS-SPEC-09-465D: The idle sweep waits three minutes after the agent's last use
+
+- Precondition: A hidden tab was just driven by an agent tool and has been thawed.
+- Action: Run the idle freeze sweep 15 seconds later, then again after three more minutes.
+- Expected result: The first sweep freezes nothing. The second sweep freezes the tab.
+- Test: `packages/agent-app/tests/browser-freeze.test.ts::agent use thaws a hidden page; the sweeper refreezes it once idle`
+- Environment: Node test runner; a fake browser view and clock; no Electron.
+- Known gaps: Uses fake web contents and a fake clock.
+- Evidence: UNVERIFIED
+
+### Downloads
+
+<a id="mus-spec-09-564a"></a>
+#### MUS-SPEC-09-564A: A downloaded file name has no hidden text-direction characters
+
+- Precondition: A page offers a download whose name has a right-to-left override character in the middle, so `invoice` + override + `fdp.exe` would read as `invoiceexe.pdf`.
+- Action: Work out the file name the in-app browser saves the download under.
+- Expected result: The saved name holds no invisible text-direction characters and still ends in `.exe`. A name that starts with an override character and then reads `report.pdf` is saved as `report.pdf`.
+- Test: `packages/agent-app/tests/browser-download-name.test.ts::a downloaded file name cannot use text-direction controls to disguise its extension`
+- Environment: Node test runner; no network, no provider.
+- Known gaps: Calls the name function used by the download handler, not a real download in the browser tab.
+- Evidence: UNVERIFIED

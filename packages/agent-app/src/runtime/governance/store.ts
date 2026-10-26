@@ -28,6 +28,7 @@ CREATE INDEX IF NOT EXISTS holds_project ON holds(project_id,status);
 CREATE TABLE IF NOT EXISTS task_hidden(task_id TEXT PRIMARY KEY,project_id TEXT NOT NULL,at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS wakes(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,member_id TEXT,task_id TEXT,reason TEXT NOT NULL,status TEXT NOT NULL,detail TEXT NOT NULL,note TEXT,merged INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,delivered_at TEXT,chat_id TEXT);
 CREATE INDEX IF NOT EXISTS wakes_project ON wakes(project_id,created_at);
+CREATE TABLE IF NOT EXISTS wake_marks(project_id TEXT NOT NULL,task_id TEXT NOT NULL,kind TEXT NOT NULL,fingerprint TEXT NOT NULL,at TEXT NOT NULL,PRIMARY KEY(task_id,kind));
 CREATE TABLE IF NOT EXISTS run_meta(chat_id TEXT PRIMARY KEY,project_id TEXT NOT NULL,task_id TEXT,member_id TEXT,reason TEXT NOT NULL,liveness TEXT,comment TEXT,continuations INTEGER NOT NULL DEFAULT 0,retries INTEGER NOT NULL DEFAULT 0,note TEXT,created_at TEXT NOT NULL,settled_at TEXT,pending_at TEXT);
 CREATE INDEX IF NOT EXISTS run_meta_task ON run_meta(task_id,created_at);
 CREATE TABLE IF NOT EXISTS watchdogs(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,task_id TEXT NOT NULL,fingerprint TEXT NOT NULL,state TEXT NOT NULL,summary TEXT NOT NULL,leaves TEXT NOT NULL,verdict_by TEXT,note TEXT,created_at TEXT NOT NULL,resolved_at TEXT,review_chat_id TEXT,UNIQUE(task_id,fingerprint));
@@ -43,6 +44,11 @@ CREATE INDEX IF NOT EXISTS secret_events_project ON secret_events(project_id,at)
 `;
 const json = <T>(raw: unknown, fallback: T): T => { try { const v = JSON.parse(String(raw)); return v ?? fallback; } catch { return fallback; } };
 const str = (v: unknown): string | null => typeof v === 'string' ? v : null;
+/** Columns added to `wakes` after it shipped: what a waiting wake needs to resume after a restart. */
+const WAKE_COLUMNS = [['reasons', 'TEXT'], ['notes', 'TEXT'], ['force', 'INTEGER NOT NULL DEFAULT 0'], ['due_at', 'TEXT']] as const;
+/** A waiting (throttled or deferred) wake's merged requests, kept on its row so a restart resumes it. */
+export interface WakeWait { reasons: RunReason[]; notes: string[]; force: boolean; dueAt: string | null }
+const WAITING = "status IN ('throttled','deferred')";
 
 /** Rows kept per project for the bounded logs. */
 export const KEEP = { wakes: 300, secretEvents: 1000, runMeta: 500, breakers: 100 } as const;
@@ -55,7 +61,7 @@ export function clampHeartbeat(input: Partial<HeartbeatPolicy>, current: Heartbe
   if (!Number.isFinite(gap) || gap < 0 || gap > HEARTBEAT_LIMITS.maxMinGapSec) throw new Error('The least time between wakes is 0 to 3,600 seconds.');
   const cap = Math.round(Number(next.maxConcurrent ?? 0));
   if (!Number.isFinite(cap) || cap < 0 || cap > HEARTBEAT_LIMITS.maxConcurrent) throw new Error(`Runs at once is 0 (no limit) to ${HEARTBEAT_LIMITS.maxConcurrent}.`);
-  return { enabled: next.enabled === true, intervalSec: interval, wakeOnAssignment: next.wakeOnAssignment === true, wakeOnComment: next.wakeOnComment === true, wakeOnDecision: next.wakeOnDecision !== false, minGapSec: gap, maxConcurrent: cap };
+  return { enabled: next.enabled === true, intervalSec: interval, wakeOnAssignment: next.wakeOnAssignment === true, wakeOnComment: next.wakeOnComment === true, wakeOnDecision: next.wakeOnDecision !== false, wakeOnChildren: next.wakeOnChildren !== false, minGapSec: gap, maxConcurrent: cap };
 }
 
 export class GovernanceStore {
@@ -69,6 +75,8 @@ export class GovernanceStore {
     const path = join(dataDir, file);
     this.db = new DatabaseSync(path); try { chmodSync(path, 0o600); } catch { /* in-memory or no modes */ }
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000;'); this.db.exec(SCHEMA);
+    const wakeColumns = new Set((this.db.prepare("SELECT name FROM pragma_table_info('wakes')").all() as { name: string }[]).map(c => c.name));
+    for (const [name, definition] of WAKE_COLUMNS) if (!wakeColumns.has(name)) this.db.exec(`ALTER TABLE wakes ADD COLUMN ${name} ${definition}`);
   }
   tx<T>(fn: () => T): T {
     if (this.depth) return fn();
@@ -165,18 +173,37 @@ export class GovernanceStore {
   hidden(projectId: string): string[] { return (this.db.prepare('SELECT task_id FROM task_hidden WHERE project_id=?').all(projectId) as { task_id: string }[]).map(r => r.task_id); }
 
   // ── wakes and run metadata (C14, C30, G9, C8) ───────────────────────────────
-  addWake(w: { projectId: string; memberId: string | null; taskId: string | null; reason: RunReason; status: WakeStatus; detail: string; note?: string | null; merged?: number; chatId?: string | null; delivered?: boolean }): WakeRecord {
-    const id = randomUUID(), at = this.stamp();
-    this.db.prepare('INSERT INTO wakes(id,project_id,member_id,task_id,reason,status,detail,note,merged,created_at,delivered_at,chat_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(id, w.projectId, w.memberId, w.taskId, w.reason, w.status, w.detail.slice(0, 500), w.note?.slice(0, 1000) ?? null, w.merged ?? 1, at, w.delivered ? at : null, w.chatId ?? null);
-    this.db.prepare('DELETE FROM wakes WHERE project_id=? AND id NOT IN (SELECT id FROM wakes WHERE project_id=? ORDER BY created_at DESC LIMIT ?)').run(w.projectId, w.projectId, KEEP.wakes);
+  addWake(w: { projectId: string; memberId: string | null; taskId: string | null; reason: RunReason; status: WakeStatus; detail: string; note?: string | null; merged?: number; chatId?: string | null; delivered?: boolean; waiting?: WakeWait }): WakeRecord {
+    const id = randomUUID(), at = this.stamp(), wait = this.waitColumns(w.waiting);
+    this.db.prepare('INSERT INTO wakes(id,project_id,member_id,task_id,reason,status,detail,note,merged,created_at,delivered_at,chat_id,reasons,notes,force,due_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id, w.projectId, w.memberId, w.taskId, w.reason, w.status, w.detail.slice(0, 500), w.note?.slice(0, 1000) ?? null, w.merged ?? 1, at, w.delivered ? at : null, w.chatId ?? null, ...wait);
+    // A wake still waiting is never trimmed: it has not run yet.
+    this.db.prepare(`DELETE FROM wakes WHERE project_id=? AND NOT ${WAITING} AND id NOT IN (SELECT id FROM wakes WHERE project_id=? ORDER BY created_at DESC LIMIT ?)`).run(w.projectId, w.projectId, KEEP.wakes);
     return this.getWake(id)!;
   }
   private wake(r: Record<string, unknown>): WakeRecord { return { id: String(r.id), projectId: String(r.project_id), memberId: str(r.member_id), taskId: str(r.task_id), reason: r.reason as RunReason, status: r.status as WakeStatus, detail: String(r.detail), note: str(r.note), merged: Number(r.merged), createdAt: String(r.created_at), deliveredAt: str(r.delivered_at), chatId: str(r.chat_id) }; }
   getWake(id: string): WakeRecord | undefined { const r = this.db.prepare('SELECT * FROM wakes WHERE id=?').get(id) as Record<string, unknown> | undefined; return r ? this.wake(r) : undefined; }
-  updateWake(id: string, patch: { status?: WakeStatus; detail?: string; merged?: number; note?: string | null; chatId?: string | null; delivered?: boolean }) {
+  updateWake(id: string, patch: { status?: WakeStatus; detail?: string; merged?: number; note?: string | null; chatId?: string | null; delivered?: boolean; waiting?: WakeWait }) {
     const cur = this.getWake(id); if (!cur) return;
     this.db.prepare('UPDATE wakes SET status=?,detail=?,merged=?,note=?,chat_id=?,delivered_at=? WHERE id=?').run(patch.status ?? cur.status, (patch.detail ?? cur.detail).slice(0, 500), patch.merged ?? cur.merged, patch.note === undefined ? cur.note : patch.note?.slice(0, 1000) ?? null, patch.chatId === undefined ? cur.chatId : patch.chatId, patch.delivered ? this.stamp() : cur.deliveredAt, id);
+    if (patch.waiting) this.db.prepare('UPDATE wakes SET reasons=?,notes=?,force=?,due_at=? WHERE id=?').run(...this.waitColumns(patch.waiting), id);
   }
+  private waitColumns(w: WakeWait | undefined): [string | null, string | null, number, string | null] {
+    return w ? [JSON.stringify(w.reasons), JSON.stringify(w.notes.map(n => n.slice(0, 1000))), w.force ? 1 : 0, w.dueAt] : [null, null, 0, null];
+  }
+  /** Every wake still waiting, oldest first, with what it needs to resume (rows from before this was stored fall back to their own reason and note). */
+  waitingWakes(): (WakeRecord & { waiting: WakeWait })[] {
+    return (this.db.prepare(`SELECT * FROM wakes WHERE ${WAITING} AND delivered_at IS NULL ORDER BY created_at`).all() as Record<string, unknown>[]).map(r => {
+      const w = this.wake(r), reasons = json<unknown>(r.reasons, null), notes = json<unknown>(r.notes, null);
+      return { ...w, waiting: {
+        reasons: Array.isArray(reasons) && reasons.length ? reasons as RunReason[] : [w.reason],
+        notes: Array.isArray(notes) ? notes.filter((n): n is string => typeof n === 'string') : w.note ? [w.note] : [],
+        force: Number(r.force) === 1, dueAt: str(r.due_at),
+      } };
+    });
+  }
+  /** The last fingerprint a once-per-state wake (children completed) fired for, per task. */
+  wakeMark(taskId: string, kind: string): string | null { return (this.db.prepare('SELECT fingerprint FROM wake_marks WHERE task_id=? AND kind=?').get(taskId, kind) as { fingerprint: string } | undefined)?.fingerprint ?? null; }
+  setWakeMark(projectId: string, taskId: string, kind: string, fingerprint: string) { this.db.prepare('INSERT INTO wake_marks(project_id,task_id,kind,fingerprint,at) VALUES(?,?,?,?,?) ON CONFLICT(task_id,kind) DO UPDATE SET fingerprint=excluded.fingerprint,at=excluded.at').run(projectId, taskId, kind, fingerprint, this.stamp()); }
   wakes(projectId: string, opts: { memberId?: string; limit?: number } = {}): WakeRecord[] {
     return (this.db.prepare(`SELECT * FROM wakes WHERE project_id=?${opts.memberId ? ' AND member_id=?' : ''} ORDER BY created_at DESC LIMIT ?`).all(...(opts.memberId ? [projectId, opts.memberId, opts.limit ?? 50] : [projectId, opts.limit ?? 50])) as Record<string, unknown>[]).map(r => this.wake(r));
   }
@@ -184,7 +211,7 @@ export class GovernanceStore {
   wakeCount(projectId: string, sinceIso: string, memberId?: string): number {
     return Number((this.db.prepare(`SELECT COUNT(*) AS n FROM wakes WHERE project_id=? AND status IN ('started','storm') AND created_at>=?${memberId ? ' AND member_id=?' : ''}`).get(...(memberId ? [projectId, sinceIso, memberId] : [projectId, sinceIso])) as { n: number }).n);
   }
-  lastStart(projectId: string, memberId: string): string | null { const r = this.db.prepare("SELECT created_at FROM wakes WHERE project_id=? AND member_id=? AND status='started' ORDER BY created_at DESC LIMIT 1").get(projectId, memberId) as { created_at: string } | undefined; return r?.created_at ?? null; }
+  lastStart(projectId: string, memberId: string): string | null { const r = this.db.prepare("SELECT COALESCE(delivered_at,created_at) AS at FROM wakes WHERE project_id=? AND member_id=? AND status='started' ORDER BY COALESCE(delivered_at,created_at) DESC LIMIT 1").get(projectId, memberId) as { at: string } | undefined; return r?.at ?? null; }
 
   runMeta(chatId: string): RunMeta | undefined { const r = this.db.prepare('SELECT * FROM run_meta WHERE chat_id=?').get(chatId) as Record<string, unknown> | undefined; return r ? this.meta(r) : undefined; }
   private meta(r: Record<string, unknown>): RunMeta { return { chatId: String(r.chat_id), taskId: str(r.task_id), memberId: str(r.member_id), reason: r.reason as RunReason, liveness: (str(r.liveness) as Liveness | null), comment: (str(r.comment) as CommentState | null), continuations: Number(r.continuations), retries: Number(r.retries), note: str(r.note), createdAt: String(r.created_at), settledAt: str(r.settled_at), pendingAt: str(r.pending_at) }; }
@@ -276,9 +303,9 @@ export class GovernanceStore {
   // ── cleanup ─────────────────────────────────────────────────────────────────
   noteWorktree(folderId: string, projectId: string, taskId: string) { this.db.prepare('INSERT INTO task_worktrees(folder_id,project_id,task_id) VALUES(?,?,?) ON CONFLICT(folder_id) DO UPDATE SET project_id=excluded.project_id,task_id=excluded.task_id').run(folderId, projectId, taskId); }
   worktreeTask(folderId: string): { projectId: string; taskId: string } | undefined { const r = this.db.prepare('SELECT project_id,task_id FROM task_worktrees WHERE folder_id=?').get(folderId) as { project_id: string; task_id: string } | undefined; return r ? { projectId: r.project_id, taskId: r.task_id } : undefined; }
-  purgeTask(taskId: string) { this.db.prepare('DELETE FROM task_worktrees WHERE task_id=?').run(taskId); for (const t of ['task_policy', 'task_stage', 'task_hidden', 'recovery_dismissed']) this.db.prepare(`DELETE FROM ${t} WHERE task_id=?`).run(taskId); this.db.prepare('DELETE FROM watchdogs WHERE task_id=?').run(taskId); this.db.prepare('DELETE FROM monitors WHERE task_id=?').run(taskId); }
+  purgeTask(taskId: string) { this.db.prepare('DELETE FROM task_worktrees WHERE task_id=?').run(taskId); for (const t of ['task_policy', 'task_stage', 'task_hidden', 'recovery_dismissed', 'wake_marks']) this.db.prepare(`DELETE FROM ${t} WHERE task_id=?`).run(taskId); this.db.prepare('DELETE FROM watchdogs WHERE task_id=?').run(taskId); this.db.prepare('DELETE FROM monitors WHERE task_id=?').run(taskId); }
   purgeProject(projectId: string) {
-    for (const t of ['agent_gov', 'agent_files', 'agent_revisions', 'gov_settings', 'task_policy', 'task_stage', 'holds', 'task_hidden', 'wakes', 'run_meta', 'watchdogs', 'monitors', 'breakers', 'secrets_meta', 'secret_proposals', 'secret_events', 'task_worktrees']) this.db.prepare(`DELETE FROM ${t} WHERE project_id=?`).run(projectId);
+    for (const t of ['agent_gov', 'agent_files', 'agent_revisions', 'gov_settings', 'task_policy', 'task_stage', 'holds', 'task_hidden', 'wakes', 'wake_marks', 'run_meta', 'watchdogs', 'monitors', 'breakers', 'secrets_meta', 'secret_proposals', 'secret_events', 'task_worktrees']) this.db.prepare(`DELETE FROM ${t} WHERE project_id=?`).run(projectId);
   }
   close() { try { this.db.close(); } catch { /* already closed */ } }
 }

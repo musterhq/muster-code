@@ -3,6 +3,17 @@ import {randomUUID} from 'node:crypto';
 import {cleanAgentEnv, compareVersions, killTree, num, obj, parseVersion, probeCli, stripAnsi, type AgentSpawn} from './cli-common.ts';
 import {cliSpawn, jsonLines, loadImages, text} from './shared.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
+import {launcherSpec} from '../launcher-script.ts';
+import {BROWSER_MCP, BROWSER_TOOLS, NO_BROWSER_NOTE, browserNote} from '../../shared/computer-use.ts';
+import {SANDBOX_TOOLS} from '../../shared/sandbox-routes.ts';
+
+/** #424: Muster's tool servers (the in-app browser among them) as ACP stdio MCP servers for session/new and session/load. */
+export function acpMcpServers(servers: AdapterRunInput['mcpServers']): Array<{name: string; command: string; args: string[]; env: Array<{name: string; value: string}>}> {
+  return Object.entries(servers ?? {}).map(([name, spec]) => {
+    const run = spec.args ? spec : {...spec, ...launcherSpec(spec.command)};
+    return {name, command: run.command, args: [...(run.args ?? [])], env: Object.entries(spec.env ?? {}).map(([key, value]) => ({name: key, value}))};
+  });
+}
 
 export const GROK_ENV = ['XAI_API_KEY'] as const;
 /** Older builds have a broken `grok agent stdio`; T3 Code marks them unsupported as well. */
@@ -37,17 +48,21 @@ export async function grokCapabilities(binary: string, options: {spawn?: AgentSp
 }
 
 /** `--always-approve` only for full access; everything else starts in Grok's default (ask) mode and is decided below. */
-export const grokLaunchArgs = (mode: AdapterRunInput['permissionMode']): string[] => mode === 'full' ? ['agent', '--always-approve', 'stdio'] : ['--permission-mode', 'default', 'agent', 'stdio'];
+export const grokLaunchArgs = (mode: AdapterRunInput['permissionMode'], sandboxed = false): string[] => mode === 'full' && !sandboxed ? ['agent', '--always-approve', 'stdio'] : ['--permission-mode', 'default', 'agent', 'stdio'];
 
-/** Which option to answer an ACP permission request with. read-only: reads/searches only; workspace: no commands; full: everything. */
-export function grokPermissionChoice(mode: AdapterRunInput['permissionMode'], toolKind: string, options: Array<{optionId: string; kind: string}>): string | undefined {
-  const allowed = mode === 'full' || (mode === 'workspace' ? toolKind !== 'execute' : ['read', 'search', 'think'].includes(toolKind));
+/** #653: a sandbox tool call (muster_sandbox), named in the request's title the way grokToolItem finds the browser tools. */
+const SANDBOX_TOOL_TITLE = new RegExp(`\\b(?:${SANDBOX_TOOLS.join('|')})\\b`);
+/** Which option to answer an ACP permission request with. read-only: reads/searches only; workspace: no commands; full: everything.
+ *  #653 sandboxed: reads/searches plus the muster_sandbox tools; host commands, edits and everything else are rejected. */
+export function grokPermissionChoice(mode: AdapterRunInput['permissionMode'], toolKind: string, options: Array<{optionId: string; kind: string}>, sandbox?: {title: string}): string | undefined {
+  const allowed = sandbox ? ['read', 'search', 'think'].includes(toolKind) || (!['execute', 'edit', 'delete', 'move'].includes(toolKind) && SANDBOX_TOOL_TITLE.test(sandbox.title))
+    : mode === 'full' || (mode === 'workspace' ? toolKind !== 'execute' : ['read', 'search', 'think'].includes(toolKind));
   const order = allowed ? ['allow_once', 'allow_always'] : ['reject_once', 'reject_always'];
   for (const kind of order) { const hit = options.find(option => option.kind === kind); if (hit) return hit.optionId; }
   return undefined;
 }
 
-function toolItem(call: Record<string, unknown>, cwd: string): Record<string, unknown> {
+export function grokToolItem(call: Record<string, unknown>, cwd: string): Record<string, unknown> {
   const id = text(call.toolCallId), kind = text(call.kind), title = text(call.title), raw = obj(call.rawInput), first = obj(Array.isArray(call.locations) ? call.locations[0] : undefined);
   const path = text(first.path) || text(raw.path) || text(raw.file_path) || text(raw.filePath);
   switch (kind) {
@@ -56,7 +71,12 @@ function toolItem(call: Record<string, unknown>, cwd: string): Record<string, un
     case 'execute': return {id, type: 'commandExecution', command: text(raw.command) || title, cwd};
     case 'search': return {id, type: 'commandExecution', command: title || 'search', cwd, commandActions: [{type: 'search', query: text(raw.pattern) || text(raw.query) || title, path}]};
     case 'fetch': return {id, type: 'webSearch', query: text(raw.url) || text(raw.query) || title};
-    default: return {id, type: 'dynamicToolCall', tool: title || kind || 'tool', name: title || kind || 'tool', arguments: raw};
+    default: {
+      // Muster's browser server: shown as the same muster_browser row the other routes produce, so the PiP follows it.
+      const browser = /\b(browser_[a-z_]+)\b/.exec(title)?.[1];
+      if (browser && (BROWSER_TOOLS as readonly string[]).includes(browser)) return {id, type: 'mcpToolCall', server: BROWSER_MCP, tool: browser, arguments: raw};
+      return {id, type: 'dynamicToolCall', tool: title || kind || 'tool', name: title || kind || 'tool', arguments: raw};
+    }
   }
 }
 const contentText = (content: unknown): string => (Array.isArray(content) ? content : []).map(entry => text(obj(obj(entry).content).text) || text(obj(entry).text)).join('\n').slice(0, 256 * 1024);
@@ -66,7 +86,7 @@ export function grokAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; s
   const spawn = options.spawn ?? (nodeSpawn as unknown as AgentSpawn);
   return {kind: 'cli', run(input) {
     return new Promise<AdapterRunResult>(resolve => {
-      const turnId = randomUUID(), env = cleanAgentEnv(options.env ?? process.env, GROK_ENV, input.env, options.binary), launch = cliSpawn(options.binary, grokLaunchArgs(input.permissionMode), env);
+      const turnId = randomUUID(), env = cleanAgentEnv(options.env ?? process.env, GROK_ENV, input.env, options.binary), launch = cliSpawn(options.binary, grokLaunchArgs(input.permissionMode, input.sandboxed), env);
       let child: ChildProcess;
       try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32'}); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `Grok could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
@@ -84,7 +104,7 @@ export function grokAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; s
         if (replaying) return;
         if (kind === 'agent_message_chunk') { const chunk = text(obj(body.content).text); if (chunk) { answer += chunk; input.onDelta(chunk); } }
         else if (kind === 'agent_thought_chunk') { const chunk = text(obj(body.content).text); if (chunk) input.onReasoning(chunk); }
-        else if (kind === 'tool_call') { const item = toolItem(body, input.cwd), id = text(item.id); if (!id || open.has(id)) return; open.set(id, item); input.onEvent('item/started', {threadId: session ?? '', turnId, item: {...item, status: undefined}}); if (body.status === 'completed' || body.status === 'failed') settleTool(id, body); }
+        else if (kind === 'tool_call') { const item = grokToolItem(body, input.cwd), id = text(item.id); if (!id || open.has(id)) return; open.set(id, item); input.onEvent('item/started', {threadId: session ?? '', turnId, item: {...item, status: undefined}}); if (body.status === 'completed' || body.status === 'failed') settleTool(id, body); }
         else if (kind === 'tool_call_update') { const id = text(body.toolCallId); if (open.has(id) && (body.status === 'completed' || body.status === 'failed')) settleTool(id, body); }
       };
       const settleTool = (id: string, body: Record<string, unknown>) => {
@@ -97,7 +117,7 @@ export function grokAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; s
           // A request from the agent. Permission asks follow the access level; files and terminals are not offered by Muster.
           if (method === 'session/request_permission') {
             const params = obj(message.params), options_ = (Array.isArray(params.options) ? params.options : []).map(entry => ({optionId: text(obj(entry).optionId), kind: text(obj(entry).kind)}));
-            const choice = grokPermissionChoice(input.permissionMode, text(obj(params.toolCall).kind), options_);
+            const choice = grokPermissionChoice(input.permissionMode, text(obj(params.toolCall).kind), options_, input.sandboxed ? {title: text(obj(params.toolCall).title)} : undefined);
             send({id, result: {outcome: choice ? {outcome: 'selected', optionId: choice} : {outcome: 'cancelled'}}});
           } else send({id, error: {code: -32601, message: `${method} is not supported by Muster.`}});
         } else if (method === 'session/update') update(obj(obj(message.params).update));
@@ -121,20 +141,26 @@ export function grokAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; s
           const methods = Array.isArray(init.authMethods) ? init.authMethods.map(entry => text(obj(entry).id)) : [];
           const wanted = env.XAI_API_KEY ? 'xai.api_key' : 'cached_token';
           if (!methods.length || methods.includes(wanted)) await call('authenticate', {methodId: wanted}).catch(error => { throw new Error(`Grok sign-in failed: ${error.message}. Run \`grok login\` in Terminal.`); });
-          const caps = obj(init.agentCapabilities), mcpServers: unknown[] = [];
+          const caps = obj(init.agentCapabilities);
+          let mcpServers: unknown[] = acpMcpServers(input.mcpServers), instructions = input.instructions;
           let opened: Record<string, unknown> | undefined;
           if (input.resumeThreadId && caps.loadSession === true) {
             replaying = true;
             opened = await call('session/load', {sessionId: input.resumeThreadId, cwd: input.cwd, mcpServers}).then(value => ({...value, sessionId: input.resumeThreadId}), () => undefined);
             replaying = false;
           }
-          opened ??= await call('session/new', {cwd: input.cwd, mcpServers});
+          // A build that cannot start Muster's servers still runs the turn, and is told plainly that it has no browser.
+          opened ??= await call('session/new', {cwd: input.cwd, mcpServers}).catch(async error => {
+            if (!mcpServers.length) throw error;
+            mcpServers = []; instructions = instructions?.replace(browserNote('acp'), NO_BROWSER_NOTE);
+            return call('session/new', {cwd: input.cwd, mcpServers});
+          });
           session = text(opened.sessionId); if (!session) throw new Error('Grok did not return a session.');
           accepted = true; input.onThreadReady(session); input.onTurnAccepted({threadId: session, turnId});
           const model = input.model.replace(/^grok-cli\//, '');
           if (model && model !== 'default') await call('session/set_model', {sessionId: session, modelId: model}).catch(() => undefined);
           const images = caps.promptCapabilities && obj(caps.promptCapabilities).image === true ? loadImages(input.images).map(image => ({type: 'image', data: image.data, mimeType: image.mediaType})) : [];
-          const reply = await call('session/prompt', {sessionId: session, prompt: [{type: 'text', text: input.instructions ? `${input.instructions}\n\n${input.prompt}` : input.prompt}, ...images]});
+          const reply = await call('session/prompt', {sessionId: session, prompt: [{type: 'text', text: instructions ? `${instructions}\n\n${input.prompt}` : input.prompt}, ...images]});
           stopReason = text(reply.stopReason) || 'end_turn';
           const usage = obj(reply.usage) , inputTokens = num(usage.inputTokens), outputTokens = num(usage.outputTokens);
           if (inputTokens !== undefined || outputTokens !== undefined) input.onEvent('thread/tokenUsage/updated', {threadId: session, turnId, tokenUsage: {last: {inputTokens: inputTokens ?? 0, outputTokens: outputTokens ?? 0, totalTokens: num(usage.totalTokens) ?? (inputTokens ?? 0) + (outputTokens ?? 0)}}});

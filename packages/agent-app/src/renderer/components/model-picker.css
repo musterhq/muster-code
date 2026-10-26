@@ -43,3 +43,5 @@
 .model-picker-segments button[aria-checked='true'] { background: var(--bg-raised); color: var(--text); font-weight: 600; box-shadow: var(--shadow-xs), inset 0 0 0 1px color-mix(in srgb, var(--text) 14%, transparent); }
 .model-picker-segments button:focus-visible { outline: 1px solid var(--accent); }
 @media (prefers-reduced-motion: reduce) { .model-picker-routes > svg { transition: none; } }
+
+.model-picker-limit { color: var(--warn); }

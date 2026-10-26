@@ -1,4 +1,4 @@
-import type {TranscriptEntry} from './activityGrouping.ts';
+import {subagentContext,type SubagentRoster,type TranscriptEntry} from './activityGrouping.ts';
 import type {TimelineItem} from '../../shared/protocol';
 
 export interface TurnSummary {id:string;rowIndex:number;prompt:string;response:string}
@@ -48,9 +48,11 @@ export function summarizeTurns(rows:readonly TranscriptEntry[],previous:readonly
 export function createTimelineProjection(){
   const snippets=new WeakMap<TimelineItem,string>();
   let prior:{rows:TranscriptEntry[];turns:readonly TurnSummary[];rowIndexes:Map<string,number>}={rows:[],turns:[],rowIndexes:new Map()};
+  let roster:SubagentRoster|undefined;
   return (items:readonly TimelineItem[])=>{
     const rows:TranscriptEntry[]=[],turns:TurnSummary[]=[];
     let current:TurnSummary|undefined,sameTurns=true,sameRows=true;
+    const subagents=subagentContext(roster);
     const finish=()=>{
       if(!current)return;
       const old=prior.turns[turns.length];
@@ -58,11 +60,16 @@ export function createTimelineProjection(){
       sameTurns&&=next===old;turns.push(next);
     };
     for(const item of items){
+      // Memory suggestions live in the Memory inbox, never inline in the transcript.
+      if(item.kind==='notice'&&item.data?.kind==='memory-offer')continue;
       const last=rows.at(-1);
-      if(item.kind==='tool'&&last?.kind==='activity'){last.items.push(item);continue;}
+      if(item.kind==='tool'&&last?.kind==='activity'){last.items.push(item);subagents.see(last,item);continue;}
       const rowIndex=rows.length;
       sameRows&&=prior.rows[rowIndex]?.id===item.id;
-      rows.push(item.kind==='tool'?{kind:'activity',id:item.id,items:[item]}:item);
+      if(item.kind==='tool'){
+        const row=subagents.open({kind:'activity',id:item.id,items:[item]});
+        rows.push(row);subagents.see(row,item);
+      } else rows.push(item);
       if(item.kind==='user'||item.kind==='assistant'){
         let text=snippets.get(item);
         if(text===undefined){text=preview(item.text,item.kind==='user'?150:240);snippets.set(item,text);}
@@ -70,7 +77,7 @@ export function createTimelineProjection(){
         else if(current&&!current.response)current.response=text;
       }
     }
-    finish();sameRows&&=rows.length===prior.rows.length;sameTurns&&=turns.length===prior.turns.length;
+    finish();roster=subagents.finish();sameRows&&=rows.length===prior.rows.length;sameTurns&&=turns.length===prior.turns.length;
     prior={rows,turns:sameTurns?prior.turns:turns,rowIndexes:sameRows?prior.rowIndexes:new Map(rows.map((row,index)=>[row.id,index]))};
     return prior;
   };

@@ -4,7 +4,7 @@ import {copyText} from '../clipboard';
 import { ArrowDownUp, ArrowLeft, ArrowLeftRight, Bot, Braces, Camera, Check, ChevronRight, Circle, CircleCheck, CircleDot, Command, Copy, Crosshair, FileMinus2, FilePlus2, FileText, Files, Globe, Hand, Hourglass, Image as ImageIcon, Keyboard, ListTodo, MousePointerClick, NotebookText, Plug, RotateCw, ScanSearch, ScanText, SquarePen, SquareTerminal, Wrench, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import type { TimelineItem } from '../../shared/protocol';
-import { APPROVAL_WAIT_LABEL, awaitingApproval, basename, classifyTool, commandLabel, commandOutcome, planPreview, planSteps, resolveToolPath, uniqueFileLabels, type PlanStep, type ToolKind, type ToolPresentation } from './toolPresentation';
+import { toolState, awaitingApproval, executionDenied, basename, classifyTool, commandLabel, commandOutcome, planPreview, planSteps, resolveToolPath, uniqueFileLabels, type PlanStep, type ToolKind, type ToolPresentation } from './toolPresentation';
 import {getState,openFile} from '../store';
 import {useStoreSelector} from '../useStore';
 import {PluginIcon} from './PluginIcon';
@@ -188,14 +188,14 @@ function ToolCardImpl({item,reveal=false}: {item: TimelineItem;reveal?:boolean})
   const p = classifyTool(item.data);
   // F60: blocked on an approval card — not running yet, so no spinner, live tail or "Running" verb.
   const waiting = awaitingApproval(item);
-  const running = item.status === 'running' && !waiting;
+  // #580: a denied tool can stay open until the provider closes it; it is not running.
+  const running = item.status === 'running' && !waiting && !executionDenied(item.data);
   const raw = p.subject || 'Tool';
   const prefix=typeof item.data?.name==='string'?item.data.name:raw;
   const output = typeof item.data?.output==='string'?item.data.output:item.text.startsWith(prefix) ? item.text.slice(prefix.length).replace(/^\n/, '') : item.text;
   const outcome=commandOutcome(item.data,item.status,output);
-  const failed = item.status === 'failed'||outcome.failed;
-  // Keep the verb ("Ran npm test") and state the outcome as a red suffix instead of replacing it.
-  const state = waiting ? APPROVAL_WAIT_LABEL : running ? p.runningVerb : item.status==='completed'||failed||item.status==='interrupted'||item.status==='cancelled' ? p.verb : 'Tool';
+  const failed = outcome.failed;
+  const state = toolState(item,p,failed);
   const images=p.images??[];
   const files=images.length>1?[]:p.kind==='edit'?p.files??[]:p.kind==='read'?(p.paths??(p.subject?[p.subject]:[])).map(path=>({path})):[];
   // Codex: a computer-use step carries its app's icon, so the line reads as the step alone ("Clicked “Send”").

@@ -18,8 +18,22 @@ export interface ExcludedModel { id: string; name: string; reason: string }
  *  (a chat already on one keeps working); they are only left out of the model picker. */
 /** `hidden`: models the user switched off. `shown`: models that are off by default (a router's third-party
  *  models) that the user switched on. */
-export interface ModelPolicy { hidden: string[]; shown: string[]; pricing: Record<string, PricingInput> }
-export const EMPTY_MODEL_POLICY: ModelPolicy = Object.freeze({ hidden: [], shown: [], pricing: {} }) as ModelPolicy;
+export interface ModelPolicy { hidden: string[]; shown: string[]; pricing: Record<string, PricingInput>; /** #668: the user's own context window per model, in tokens. Beats every other window source. */ contextWindows: Record<string, number> }
+export const EMPTY_MODEL_POLICY: ModelPolicy = Object.freeze({ hidden: [], shown: [], pricing: {}, contextWindows: {} }) as ModelPolicy;
+export const MIN_CONTEXT_WINDOW = 1_000, MAX_CONTEXT_WINDOW = 50_000_000;
+/** "1000000", "1,000,000", "1m", "200k" or "1.5M" as a token count; NaN when it is none of those. */
+export function parseTokenCount(text: string): number {
+  const match = /^([0-9][0-9,]*(?:\.[0-9]+)?)\s*([kKmM]?)$/.exec(text.trim());
+  if (!match) return NaN;
+  const value = Number(match[1]!.replace(/,/g, '')) * (match[2]!.toLowerCase() === 'm' ? 1_000_000 : match[2]!.toLowerCase() === 'k' ? 1_000 : 1);
+  return Math.round(value);
+}
+
+/** A whole number of tokens from 1,000 to 50,000,000; throws a sentence otherwise. */
+export function validateContextWindow(raw: unknown): number {
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < MIN_CONTEXT_WINDOW || raw > MAX_CONTEXT_WINDOW) throw new Error(`The context window must be a whole number of tokens from ${MIN_CONTEXT_WINDOW.toLocaleString('en-US')} to ${MAX_CONTEXT_WINDOW.toLocaleString('en-US')}.`);
+  return raw;
+}
 
 export const modelKey = (providerId: string, model: string): string => `${providerId}::${model}`;
 export function splitModelKey(key: string): { providerId: string; model: string } | undefined {
@@ -53,7 +67,7 @@ export function catalogPricing(entry: Record<string, unknown>): ModelPricing | u
 }
 /** Known keys with valid values survive; anything else in a stored file is dropped. */
 export function normalizeModelPolicy(raw: unknown): ModelPolicy {
-  const out: ModelPolicy = { hidden: [], shown: [], pricing: {} };
+  const out: ModelPolicy = { hidden: [], shown: [], pricing: {}, contextWindows: {} };
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
   const v = raw as Record<string, unknown>;
   if (Array.isArray(v.hidden)) out.hidden = [...new Set(v.hidden.filter(isModelKey))].slice(0, 2000);
@@ -62,6 +76,12 @@ export function normalizeModelPolicy(raw: unknown): ModelPolicy {
     for (const [key, value] of Object.entries(v.pricing).slice(0, 2000)) {
       if (!isModelKey(key)) continue;
       try { out.pricing[key] = validatePricing(value); } catch { /* dropped */ }
+    }
+  }
+  if (v.contextWindows && typeof v.contextWindows === 'object' && !Array.isArray(v.contextWindows)) {
+    for (const [key, value] of Object.entries(v.contextWindows).slice(0, 2000)) {
+      if (!isModelKey(key)) continue;
+      try { out.contextWindows[key] = validateContextWindow(value); } catch { /* dropped */ }
     }
   }
   return out;
@@ -90,7 +110,8 @@ export function applyVisibility<T extends { id: string; providerId: string; hidd
 export function formatTokenCount(tokens: number): string {
   if (!Number.isFinite(tokens) || tokens < 0) return '—';
   if (tokens < 1000) return String(Math.round(tokens));
-  const [value, unit] = tokens >= 1_000_000 ? [tokens / 1_000_000, 'M'] : [tokens / 1000, 'K'];
+  // 999,999 reads as 1M, not 1000K.
+  const [value, unit] = tokens >= 999_500_000 ? [tokens / 1_000_000_000, 'B'] : tokens >= 999_500 ? [tokens / 1_000_000, 'M'] : [tokens / 1000, 'K'];
   return `${value >= 100 || Number.isInteger(value) ? Math.round(value) : value.toFixed(1).replace(/\.0$/, '')}${unit}`;
 }
 
@@ -127,7 +148,7 @@ export function estimateCostUsd(totals: UsageTotals, pricing: ModelPricing | Pri
   return (fresh * pricing.inputPerMTok + cached * (pricing.cachedInputPerMTok ?? pricing.inputPerMTok) + totals.outputTokens * pricing.outputPerMTok) / 1_000_000;
 }
 export function formatUsd(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  if (value === null || value === undefined || !Number.isFinite(value) || value < 0) return '—';
   if (value === 0) return '$0.00';
   if (value < 0.01) return '<$0.01';
   return `$${value < 1000 ? value.toFixed(2) : Math.round(value).toLocaleString('en-US')}`;

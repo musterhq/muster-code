@@ -112,6 +112,7 @@
 .md-resource-link { display:inline; color:var(--text-dim); text-decoration:underline; text-decoration-color:var(--hairline); text-underline-offset:3px; text-align:inherit; font:inherit; user-select:text; }
 .md-resource-link:hover { color:var(--text); text-decoration-color:var(--text-faint); }
 .md-unavailable-link { color:var(--text-dim); }
+.md-server-image { display:block; max-width:100%; max-height:420px; border-radius:var(--radius-8); }
 .md-body input[type='checkbox'] { accent-color:var(--accent); margin-right:6px; }
 .file-line-target { background:var(--bg-active); }
 
@@ -124,6 +125,14 @@
   padding: 4px 8px 6px;
   color: color-mix(in srgb, var(--text) 88%, transparent);
 }
+/* #442: consecutive replies in one turn read as one answer. The reply above gives up its bottom spacing (row, message and its
+   last block's margin) and the reply below its top spacing, so the two meet at exactly one paragraph gap (--md-gap). */
+.timeline-row.has-reply-continuation { padding-bottom: 0; }
+.timeline-row.has-reply-continuation .msg-assistant { padding-bottom: 0; }
+.timeline-row.has-reply-continuation .msg-assistant > .md-body > :last-child { margin-bottom: 0; }
+.timeline-row.is-reply-continuation { padding-top: 0; }
+.timeline-row.is-reply-continuation .msg-assistant { padding-top: 0; }
+.timeline-row.is-reply-continuation .msg-assistant > .md-body > :first-child { margin-top: var(--md-gap); }
 .timeline-row .msg-assistant > .md-body { font-size: var(--chat-font-size); font-weight: 430; line-height: var(--md-leading); letter-spacing: 0; }
 /* One compact gap between blocks (adjacent margins collapse): paragraph to paragraph, to a list, to a quote. */
 .md-body p, .md-body ul, .md-body ol, .md-body blockquote { margin-block: var(--md-gap); }
@@ -229,3 +238,7 @@
 .md-quote-note { position: absolute; right: 0; bottom: -18px; color: var(--text-faint); font-size: var(--fs-11); }
 /* Tool output header: Add to chat sits beside Copy on the right. */
 .tool-result > header .tool-add-context { margin-left: auto; }
+
+/* Right-to-left prose: each block takes its direction from its first strong character; code stays left-to-right. */
+.md-body :is(h1, h2, h3, h4, h5, h6) { unicode-bidi: plaintext; }
+.md-body :is(pre, code) { direction: ltr; unicode-bidi: isolate; }

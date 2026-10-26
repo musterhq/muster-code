@@ -29,12 +29,37 @@ function packageOf(input){
   const name=parts[at+1]?.startsWith('@')?`${parts[at+1]}/${parts[at+2]}`:parts[at+1];
   return {name,dir:parts.slice(0,at+1+name.split('/').length).join('/')};
 }
+// Packages whose published manifest has no license field and ship no license file. The license is confirmed upstream
+// and recorded here, keyed by name@version so a version bump is re-checked by a person.
+const LICENSE_OVERRIDES={
+  'buffers@0.1.1':{license:'MIT',source:'package.json of github.com/bitpay/node-buffers (a copy of substack/node-buffers, whose repository is gone) declares "MIT/X11"; the Debian node-buffers 0.1.1 package records MIT (debian/copyright, Source: github.com/substack/node-buffers). The npm tarball ships neither a license field nor a license file.',copyright:'Copyright (c) James Halliday <mail@substack.net>'},
+};
+const MIT_TERMS=`Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`;
 function licenseOf(dir){
   const abs=path.resolve(root,dir);
   let pkg={};try{pkg=JSON.parse(readFileSync(path.join(abs,'package.json'),'utf8'));}catch{/* no manifest */}
   const license=typeof pkg.license==='string'?pkg.license:pkg.license?.type??(Array.isArray(pkg.licenses)?pkg.licenses.map(l=>l.type).join(' OR '):'UNKNOWN');
   const file=existsSync(abs)?readdirSync(abs).find(name=>/^(licen[cs]e|copying)(\.|-|$)/i.test(name)):undefined;
-  return {version:pkg.version??'unknown',license,text:file?readFileSync(path.join(abs,file),'utf8').trim():'',file:file??null};
+  const found={version:pkg.version??'unknown',license,text:file?readFileSync(path.join(abs,file),'utf8').trim():'',file:file??null};
+  const override=LICENSE_OVERRIDES[`${pkg.name}@${found.version}`];
+  if(override&&license==='UNKNOWN'&&!file)return {...found,license:override.license,text:`${override.copyright}\n\n${MIT_TERMS}\n\nThe published package declares no license. Confirmed upstream: ${override.source}`};
+  return found;
 }
 
 const started=Date.now();

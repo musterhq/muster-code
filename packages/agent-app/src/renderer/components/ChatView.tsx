@@ -44,6 +44,7 @@ import {deriveRows,shareRows,type TranscriptRow} from '../transcriptRows';
 import {FoldRow,LiveRow,SubagentCardRow,WorkRow,itemsOfRow} from './transcript/TranscriptRows';
 import {ChangedFilesCard} from './transcript/ChangedFilesCard';
 import {ThoughtRow} from './transcript/ThoughtRow';
+import {dividerLabel,dividerRows} from '../dayDividers';
 import {attachmentPreview} from '../timelineBridge';
 import {attachmentPdfThumbnail,isPdf} from '../pdfThumbnail';
 import {openAttachment, openAttachmentOnKey} from '../attachmentOpen';
@@ -107,7 +108,7 @@ function UserMessage({item,reveal}:{item:TimelineItem;reveal:boolean}) {
   return <>
     {attachments.length>0&&<div className="msg-attachments" aria-label="Attachments">{attachments.map(attachment=><Attachment key={attachment.id} chatId={item.chatId} attachment={attachment}/>)}</div>}
     <div className={`msg msg-user${long&&!expanded?' is-clamped':''}`}>
-      <div className="msg-text"><MentionText chatId={item.chatId} text={item.text}/></div>
+      <div className="msg-text" dir="auto"><MentionText chatId={item.chatId} text={item.text}/></div>
       {long&&<button type="button" className="msg-user-more" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?'Show less':'Show more'}</button>}
     </div>
   </>;
@@ -116,7 +117,7 @@ function UserMessage({item,reveal}:{item:TimelineItem;reveal:boolean}) {
 interface EditingProps {onSubmit:(text:string,mode:EditResendMode,restoreFiles?:Array<{path:string;afterHash:string}>)=>Promise<boolean>;onCancel:()=>void}
 function TimelineCardImpl({ item, nextAt, reveal, tail=false, actions, editing, plan=false, meta=true, gallery }: { gallery?:readonly string[]; item: TranscriptEntry; nextAt?:string; reveal?:string; tail?:boolean; actions?:MessageActions; editing?:EditingProps; plan?:boolean; meta?:boolean }): React.ReactElement {
   switch (item.kind) {
-    case 'activity': return <ActivityGroup items={item.items} reveal={reveal} live={tail}/>;
+    case 'activity': return <ActivityGroup items={item.items} prior={item.prior} agents={item.agents} reveal={reveal} live={tail}/>;
     case 'user':
       return (
         <div className="user-message-row">
@@ -168,6 +169,12 @@ const highlightApi=()=>{const css=(globalThis as {CSS?:{highlights?:HighlightReg
 
 /** Images a turn names, in order: the ones its tool rows viewed and the local pictures its replies embed. */
 const MARKDOWN_IMAGE=/!\[[^\]]*\]\(\s*<?([^)\s>]+)>?[^)]*\)/g;
+/** "Today 0:52" above a message that opens the chat or resumes it after a pause. */
+const DayDivider=React.memo(function DayDivider({at}:{at:number}){
+  const {day,time}=dividerLabel(at);
+  return <div className="day-divider" role="separator" aria-label={`${day} ${time}`}><time dateTime={new Date(at).toISOString()}><b>{day}</b> {time}</time></div>;
+});
+
 function itemImages(item:TimelineItem):string[] {
   if(item.kind==='tool')return viewedImages([item]);
   if(item.kind!=='assistant')return [];
@@ -218,6 +225,7 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
   const [turnOpen,setTurnOpen]=useState<ReadonlyMap<string,boolean>>(()=>new Map(turnsOf(chatId)));
   const shared=useRef<TranscriptRow[]>([]);
   const {rows,turns:turnMeta}=useMemo(()=>{const next=deriveRows(items,{running:live,turnOpen});shared.current=shareRows(shared.current,next.rows);return {rows:shared.current,turns:next.turns};},[items,live,turnOpen]);
+  const dividers=useMemo(()=>dividerRows(rows),[rows]);
   const rowIndexes=useMemo(()=>{const map=new Map<string,number>();rows.forEach((row,index)=>{map.set(row.key,index);for(const item of itemsOfRow(row))map.set(item.id,index);});return map;},[rows]);
   const turnOfItem=useMemo(()=>new Map(turnMeta.flatMap(turn=>turn.itemIds.map(id=>[id,turn.id] as const))),[turnMeta]);
   const turnItems=useMemo(()=>{const map=new Map<string,TimelineItem[]>();for(const item of items){const turn=turnOfItem.get(item.id);if(turn)map.set(turn,[...(map.get(turn)??[]),item]);}return map;},[items,turnOfItem]);
@@ -418,6 +426,11 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
     followFrame.current=requestAnimationFrame(()=>{followFrame.current=undefined;const el=scrollRef.current;if(el&&atBottom.current)el.scrollTo({top:el.scrollHeight,behavior:'smooth'});});
   }, [rows.length, totalSize, virtualizer, live]);
 
+  /** A reply straight after another reply of the same turn, with no other row between them. */
+  const continuesReply=(index:number):boolean=>{
+    const row=rows[index],before=rows[index-1];
+    return row?.kind==='assistant'&&before?.kind==='assistant'&&before.turnId===row.turnId;
+  };
   return (
     <div className={`timeline-shell${turns.length?' timeline-with-navigation':''}`}>
     <TimelineNavigation turns={turns} currentId={currentTurn} canGoBack={backCount>0} onTurn={jumpToTurn} onBack={jumpBack} onLatest={jumpToLatest} searchQuery={searchQuery} onSearch={setSearchQuery} searchCount={searchMatches.length} searchIndex={searchIndex} onSearchStep={stepSearch}/>
@@ -426,7 +439,11 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
         {virtualizer.getVirtualItems().map((v) => {
           const row=rows[v.index];
           const reveal=activeMatch?.rowIndex===v.index?activeMatch.itemId:undefined;
-          return <div key={v.key} data-index={v.index} data-item-id={row.key} ref={virtualizer.measureElement} className="timeline-row" data-kind={row.kind} style={{ transform: `translateY(${v.start}px)` }}>
+          // A reply straight after another reply of the same turn (nothing visible between) sits at the paragraph gap,
+          // and the reply above it gives up its bottom spacing, so the two meet at exactly one paragraph gap.
+          const continues=continuesReply(v.index),continued=continuesReply(v.index+1);
+          return <div key={v.key} data-index={v.index} data-item-id={row.key} ref={virtualizer.measureElement} className={`timeline-row${continues?' is-reply-continuation':''}${continued?' has-reply-continuation':''}`} data-kind={row.kind} style={{ transform: `translateY(${v.start}px)` }}>
+            {dividers.has(v.index)&&<DayDivider at={dividers.get(v.index)!}/>}
             <AreaBoundary area="this message" scope="item" resetKey={row}><GalleryCoverage.Provider value={galleries.get(row.turnId??'')?.covered??NO_COVERAGE}>
               <RowView row={row} chatId={chatId} reveal={reveal} actions={actionsFor(row)} editing={editingFor(row)} plan={row.kind==='assistant'&&row.item.id===planId}
                 gallery={galleryByReply.get(row.key)?.paths} turnItems={row.kind==='changed-files'?stableTurnItems.get(row.turnId!):undefined} onToggleTurn={toggleTurn}/>
@@ -462,13 +479,14 @@ export function ChatView(): React.ReactElement {
   const timeline = state.timelines[chat.id] ?? { phase: 'idle' as const };
   const project = chat.projectId ? state.snapshot?.projects.find(p=>p.id===chat.projectId) : undefined;
   const headStatus = displayStatus(chat, liveItems, stalled);
+  const retryId = retryTarget(liveItems, chat.status === 'running' || chat.status === 'stopping');
   const place = project?.name ?? folder?.name, placeTitle = project ? project.goal || project.name : folder?.path;
 
   return (
     <div className="chat">
       <header className="chat-head" data-scrolled={scrolled||undefined}>
         <StatusDot status={headStatus} showLabel={headStatus!=='idle'&&headStatus!=='completed'} />
-        <span className="chat-head-title" title={folder ? `${chat.title} — ${folder.path}` : chat.title}>
+        <span className="chat-head-title" dir="auto" title={folder ? `${chat.title} — ${folder.path}` : chat.title}>
           {chat.title}
         </span>
         {folder && <span className="chat-head-folder" title={folder.path}><Folder size={12} aria-hidden="true"/>{folder.name}</span>}
@@ -476,7 +494,7 @@ export function ChatView(): React.ReactElement {
       </header>
       {chat.originChatId&&(()=>{const origin=state.snapshot?.chats.find(c=>c.id===chat.originChatId);return <ForkOrigin title={origin?.title} onOpen={origin?()=>void selectChat(origin.id):undefined}/>;})()}
       {timeline.phase==='ready'&&(()=>{const imported=timeline.value?.find(item=>item.kind==='notice'&&item.data?.kind==='imported');return imported?.data?<ImportOrigin data={imported.data}/>:null;})()}
-      <RecoveryNotice key={`${chat.id}:${chat.providerThreadId ?? ""}:${chat.providerTurnId ?? ""}:${chat.recovery?.kind ?? ""}`} chat={chat}/>
+      <RecoveryNotice key={`${chat.id}:${chat.providerThreadId ?? ""}:${chat.providerTurnId ?? ""}:${chat.recovery?.kind ?? ""}`} chat={chat} onRetry={retryId?()=>retryTurn(chat.id,retryId):undefined}/>
       {timeline.phase === 'loading' || timeline.phase === 'idle' ? (
         <div className="chat-loading" role="status">
           Loading conversation…

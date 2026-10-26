@@ -20,11 +20,16 @@ function storedAnswers(item: TimelineItem): Record<string, string[]> {
 }
 /** Readable end state; a question closed without answers told the provider it was cancelled. */
 export function questionOutcome(item: TimelineItem): {label: string; detail?: string} {
-  if (item.data?.expiredReason === 'restart' || item.status === 'unavailable') return {label: 'Expired · reopen not possible', detail: 'Muster restarted while this question was open. The provider stopped waiting for it; send your answer as a new message.'};
+  if (item.status === 'unavailable' || (item.data?.expiredReason === 'restart' && item.status !== 'expired')) return {label: 'Lost when Muster restarted', detail: 'Muster restarted while this question was open. The provider stopped waiting for it; use Ask again, or send your answer as a new message.'};
+  if (item.data?.nonBlocking === true) {
+    // ask_user: the run never waited, so nothing was cancelled at the provider.
+    if (item.status === 'answered') return {label: 'Answer sent', ...(item.data.delivered === 'queued' ? {detail: 'It goes to the agent as the next message.'} : {})};
+    if (item.status === 'dismissed') return {label: 'Dismissed', detail: `The agent kept its default${typeof item.data.defaultAnswer === 'string' ? `: ${item.data.defaultAnswer}` : ''}.`};
+  }
   switch (item.status) {
     case 'answered': return {label: 'Answer sent'};
     case 'dismissed': return {label: 'Dismissed', detail: 'The provider was told the question was declined.'};
-    case 'expired': return {label: 'Expired', detail: 'No answer within 10 minutes; the provider was told the question was cancelled.'};
+    case 'expired': return {label: 'Expired', detail: 'No answer before the deadline; the provider was told the question was cancelled. Use Ask again to have it re-ask.'};
     case 'interrupted': return {label: 'Closed · the run stopped before an answer'};
     default: return {label: 'Closed'};
   }
@@ -59,6 +64,12 @@ export function PendingQuestion({ item }: { item: TimelineItem }): React.ReactEl
     try { await invoke('question.dismiss', { id: item.id }); }
     catch (cause) { setResponding(false); setError(cause instanceof Error ? cause.message : 'The question could not be dismissed.'); }
   };
+  const reask = async () => {
+    setError(''); setResponding(true);
+    try { await invoke('approval.reask', { id: item.id }); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not ask again.'); }
+    finally { setResponding(false); }
+  };
   const outcome = item.status === 'pending' ? null : questionOutcome(item);
   return <section className={`pending-question${item.status === 'pending' ? '' : ' is-settled'}`} aria-label="Provider question">
     <h3>Input needed</h3>
@@ -68,10 +79,12 @@ export function PendingQuestion({ item }: { item: TimelineItem }): React.ReactEl
       {question.options.map(option => { const answer = option.value ?? option.label; const selected = answerValues(answers, question.id).includes(answer); return <label key={option.label} className="pending-question-option"><input type={question.multiSelect ? 'checkbox' : 'radio'} name={`${item.id}:${question.id}`} checked={selected} onChange={() => setAnswers(current => ({ ...current, [question.id]: question.multiSelect ? (selected ? answerValues(current, question.id).filter(value => value !== answer) : [...answerValues(current, question.id), answer]) : [answer] }))} /> <span>{option.label}{option.description && <small>{option.description}</small>}</span></label>; })}
       {question.allowCustomAnswer && <label className="pending-question-custom">Other answer<input type={question.isSecret ? 'password' : 'text'} autoComplete={question.isSecret ? 'off' : undefined} value={question.allowCustomAnswer ? (answerValues(answers, question.id).find(value => !question.options.some(option => (option.value ?? option.label) === value)) ?? '') : ''} onChange={event => setAnswers(current => ({ ...current, [question.id]: event.target.value ? [event.target.value] : answerValues(current, question.id).filter(value => question.options.some(option => (option.value ?? option.label) === value)) }))} placeholder={question.options.length ? 'Or type a custom response' : 'Type your answer'} /></label>}
     </fieldset>)}
+    {pending && data.nonBlocking && data.defaultAnswer && <p className="pending-question-outcome pending-question-default"><span>Continuing with: {data.defaultAnswer}</span></p>}
     {pending && <div className="pending-question-actions"><button type="button" className="pending-question-submit" disabled={data.questions.some(question => answerValues(answers, question.id).length === 0)} onClick={() => void submit()}>Send answer</button>
       <button type="button" className="pending-question-dismiss" onClick={() => void dismiss()}>Dismiss</button></div>}
     {responding && item.status === 'pending' && <span className="pending-question-status" role="status">Sending…</span>}
     {outcome && <p className="pending-question-outcome" role="status"><strong>{outcome.label}</strong>{outcome.detail && <span>{outcome.detail}</span>}</p>}
+    {(item.status === 'expired' || item.status === 'unavailable' || (item.status === 'interrupted' && item.data?.expiredReason === 'stale')) && !item.data?.reaskedAt && <div className="pending-question-actions"><button type="button" className="pending-question-submit" disabled={responding} onClick={() => void reask()}>Ask again</button></div>}
     {error && <p className="pending-question-error" role="alert">{error}</p>}
   </section>;
 }

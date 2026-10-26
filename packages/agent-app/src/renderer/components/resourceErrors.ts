@@ -7,7 +7,7 @@
  *  Only a prefix in one of these is a command label to peel; `package.json: Unexpected token` is a file
  *  name and part of the message. Keep in step with src/main/commands.ts (tests/resource-errors checks). */
 export const COMMAND_NAMESPACES: ReadonlySet<string> = new Set([
-  'app', 'approval', 'artifacts', 'attachments', 'automations', 'browser', 'chat', 'ci', 'clipboard', 'computer', 'extensions', 'favicon', 'files', 'folder',
+  'app', 'approval', 'artifacts', 'attachments', 'attention', 'automations', 'browser', 'chat', 'ci', 'clipboard', 'computer', 'extensions', 'favicon', 'files', 'folder',
   'git', 'github', 'goals', 'hindsight', 'import', 'link', 'mailbox', 'mcp', 'memory', 'models', 'musterServer', 'paperclip', 'plugins', 'processes', 'project', 'providers', 'question',
   'backups', 'checkout', 'insight', 'org', 'orgs', 'review', 'sandbox', 'search', 'services', 'settings', 'setup', 'skills', 'ssh', 'stashes', 'studio', 'subagents', 'terminal', 'terminalAccess', 'updates', 'work', 'workspace',
 ]);

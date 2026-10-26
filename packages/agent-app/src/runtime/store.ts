@@ -758,6 +758,15 @@ export class AgentStore {
     }
   }
 
+  /** Tool rows still 'running' after their run ended (a stop, a crash, a quit) are settled as interrupted, never left spinning.
+   *  With no chat id: every chat that is not running (used at launch, when nothing runs yet). Returns how many rows changed. */
+  settleRunningTools(chatId?: string): number {
+    const result = chatId
+      ? this.db.prepare("UPDATE timeline SET status = 'interrupted' WHERE chat_id = ? AND kind = 'tool' AND status = 'running'").run(chatId)
+      : this.db.prepare("UPDATE timeline SET status = 'interrupted' WHERE kind = 'tool' AND status = 'running' AND chat_id IN (SELECT id FROM chats WHERE status NOT IN ('running', 'stopping'))").run();
+    return Number(result.changes);
+  }
+
   item(id: string): TimelineItem | undefined {
     this.flushStaged();
     const row = this.db.prepare('SELECT * FROM timeline WHERE id = ?').get(id) as TimelineRow | undefined;
@@ -936,19 +945,30 @@ export class AgentStore {
     });
   }
 
-  /** Crash recovery: any chat still running/stopping was orphaned by a dead process. */
-  recoverOrphanedRuns(): string[] {
+  /** Crash recovery: any chat still running/stopping was orphaned by a dead process.
+   *  `isLocalRoute` names routes that run inside Muster (their work died with the process): those are plainly interrupted,
+   *  never "recovery needed", because there is nothing at a provider to ask. */
+  recoverOrphanedRuns(isLocalRoute: (chat: Chat) => boolean = () => false): string[] {
     return this.tx(() => {
       const rows = this.db.prepare("SELECT id FROM chats WHERE status IN ('running', 'stopping')").all() as unknown as { id: string }[];
       for (const { id } of rows) {
-        const recovery: ChatRecovery = {kind:'recovery-needed',retryable:false,reason:'May still be running at the provider · Check status before sending another message.'};
-        // Interrupted, not failed: the provider may still finish the turn; RecoveryNotice checks it.
-        this.updateChatRaw(id, { status: 'interrupted', error: recovery.reason, recovery:JSON.stringify(recovery) });
-        this.appendItem(id, 'notice', recovery.reason, 'recovery-needed', {recovery});
+        const chat = this.chat(id);
+        if (chat && isLocalRoute(chat)) {
+          const reason = 'Muster closed while this was running. Nothing is still running; check the folder for partial changes, then send a new message.';
+          this.updateChatRaw(id, { status: 'interrupted', error: reason, recovery: null });
+          this.appendItem(id, 'notice', reason, 'interrupted', {kind: 'local-interrupted'});
+        } else {
+          const recovery: ChatRecovery = {kind:'recovery-needed',retryable:false,reason:'May still be running at the provider · Check status before sending another message.'};
+          // Interrupted, not failed: the provider may still finish the turn; RecoveryNotice checks it.
+          this.updateChatRaw(id, { status: 'interrupted', error: recovery.reason, recovery:JSON.stringify(recovery) });
+          this.appendItem(id, 'notice', recovery.reason, 'recovery-needed', {recovery});
+        }
         this.settleSubagentItems(id);
         this.interruptRunningChildren(id);
       }
-      if (rows.length > 0) this.bumpVersion();
+      // Every run ended with the previous process: tool rows it left running (in these chats or any other) settle now.
+      const settled = this.settleRunningTools();
+      if (rows.length > 0 || settled > 0) this.bumpVersion();
       return rows.map((row) => row.id);
     });
   }

@@ -76,13 +76,13 @@ export interface ServerBackend extends Partial<PersonalAccess> {
   resumeAgent(id: string): Promise<void>;
   cancelRun(id: string): Promise<void>;
   decideApproval(id: string, decision: ApprovalDecision, note: string | null): Promise<void>;
-  respond(taskId: string, interactionId: string, input: { accept: boolean; reason?: string; answers?: PaperclipAnswer[] }): Promise<void>;
+  respond(taskId: string, interactionId: string, input: { accept: boolean; reason?: string; answers?: PaperclipAnswer[]; selectedClientKeys?: string[]; selectedOptionIds?: string[]; verdicts?: { id: string; verdict: 'approve' | 'reject' | 'defer'; reason?: string }[]; connection?: boolean }): Promise<void>;
   /** Starts a task's first run on the server (a Muster Server runs its own agents; a Paperclip server's tasks start there). */
   startTask?(taskId: string): Promise<TaskStartResult>;
   receipts(company: WorkspaceCompany, limit: number, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<LedgerEntry[]>;
   /** Run receipts, recent activity and budgets for the Dashboard. */
-  dashboard(company: WorkspaceCompany, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<{ receipts: LedgerEntry[]; activity: WorkspaceRow[]; budgets?: unknown }>;
-  rows(kind: WorkspaceListKind, company: WorkspaceCompany): Promise<WorkspaceRow[]>;
+  dashboard(company: WorkspaceCompany, agents: ReadonlyMap<string, WorkspaceAgent>, people?: ReadonlyMap<string, string>): Promise<{ receipts: LedgerEntry[]; activity: WorkspaceRow[]; budgets?: unknown }>;
+  rows(kind: WorkspaceListKind, company: WorkspaceCompany, names?: { agents?: ReadonlyMap<string, WorkspaceAgent>; people?: ReadonlyMap<string, string> }): Promise<WorkspaceRow[]>;
   /** One run by id, with its tool use read from the server. `null`: the server has no such run. Optional: a backend that cannot read a single run leaves it out. */
   runDetail?(runId: string, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<{ run: WorkspaceRun; receipt: LedgerEntry } | null>;
   /** One output's bytes (a document's text or an attachment's content) read with this connection's own sign-in. Optional: a backend with no download route leaves it out. */

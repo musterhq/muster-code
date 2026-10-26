@@ -149,6 +149,12 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
       setPlan(next); setTargets(Object.fromEntries(next.projects.map(p => [p.id, 'import']))); setOwners(Object.fromEntries(next.projects.filter(p => p.existing === 'ask' && p.added).map(p => [p.id, 'mine' as const])));
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
   };
+  /** Brings back a project or task you deleted here: the next import makes it again (nothing is written to the server). */
+  const restoreDeleted = async (kind: 'project' | 'task', id: string) => {
+    setBusy('import'); setError('');
+    try { await invoke('paperclip.import.restore', { kind, id }); notifySuccess('Restored. The next import brings it back.'); setBusy(null); await planImport(); }
+    catch (cause) { setError(errorText(cause)); setBusy(null); }
+  };
   /** Step 2: one-shot copy into the chosen Muster projects (GET only). Safe to repeat: it updates what it made. */
   const runImport = async () => {
     setBusy('import'); setError(''); setImported(null);
@@ -215,7 +221,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
       <div className="project-edit-actions"><span className="project-edit-spacer"/><button type="button" className="settings-button secondary" onClick={() => void cancelSignIn()}>Cancel</button></div>
     </div>}
     {connected && error && <p role="alert" className="settings-error">{error}</p>}
-    {plan && <ImportMapping plan={plan} targets={targets} owners={owners} onOwner={(id, value) => setOwners(o => { const next = { ...o }; if (value) next[id] = value; else delete next[id]; return next; })} busy={busy !== null} onChange={(id, value) => setTargets(t => ({ ...t, [id]: value }))} onCancel={() => setPlan(null)} onImport={() => void runImport()}/>}
+    {plan && <ImportMapping plan={plan} targets={targets} owners={owners} onOwner={(id, value) => setOwners(o => { const next = { ...o }; if (value) next[id] = value; else delete next[id]; return next; })} busy={busy !== null} onChange={(id, value) => setTargets(t => ({ ...t, [id]: value }))} onCancel={() => setPlan(null)} onImport={() => void runImport()} onRestore={(kind, id) => void restoreDeleted(kind, id)}/>}
     {imported && <div className="ws-import-report" role="status">
       <p><Check size={13} aria-hidden="true"/>Imported {imported.company}: {imported.projects.created} new and {imported.projects.updated} updated projects, {imported.tasks.created} new and {imported.tasks.updated} updated tasks, {imported.comments} comments, {imported.agents} Roster places, {imported.history} decisions{imported.needsYou ? ` (${imported.needsYou} need you, in the Inbox)` : ''}.</p>
       {imported.removed > 0 && <p><Check size={13} aria-hidden="true"/>{imported.removed} {imported.removed === 1 ? 'task' : 'tasks'} removed on Muster Server: cancelled here and flagged.</p>}
@@ -235,7 +241,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
 const addedText = (a: { tasks: number; members: number; chats: number }) => [a.tasks && `${a.tasks} ${a.tasks === 1 ? 'task' : 'tasks'}`, a.members && `${a.members} Roster ${a.members === 1 ? 'member' : 'members'}`, a.chats && `${a.chats} ${a.chats === 1 ? 'chat' : 'chats'}`].filter(Boolean).join(' and ');
 const EXISTING_NOTE: Record<ImportPlan['projects'][number]['existing'], string> = { new: 'new project', imported: 'updated in place', detached: 'imported as its own project (your own project is left alone)', ask: 'an earlier import’s project: say whether it is yours' };
 /** Import plan: each Paperclip project becomes its own Paperclip project in Muster (never written into one you made), or is left out. */
-export function ImportMapping({ plan, targets, owners = {}, onOwner = () => undefined, busy, onChange, onCancel, onImport }: { plan: ImportPlan; targets: Record<string, string>; owners?: Record<string, 'mine' | 'made'>; onOwner?: (paperclipId: string, value: 'mine' | 'made' | '') => void; busy: boolean; onChange: (paperclipId: string, target: string) => void; onCancel: () => void; onImport: () => void }): React.ReactElement {
+export function ImportMapping({ plan, targets, owners = {}, onOwner = () => undefined, busy, onChange, onCancel, onImport, onRestore = () => undefined }: { plan: ImportPlan; targets: Record<string, string>; owners?: Record<string, 'mine' | 'made'>; onOwner?: (paperclipId: string, value: 'mine' | 'made' | '') => void; busy: boolean; onChange: (paperclipId: string, target: string) => void; onCancel: () => void; onImport: () => void; onRestore?: (kind: 'project' | 'task', id: string) => void }): React.ReactElement {
   const chosen = plan.projects.filter(p => targets[p.id] !== 'skip');
   const asking = chosen.filter(p => p.existing === 'ask'), unanswered = asking.filter(p => !owners[p.id]).length;
   return <section className="ws-import-map" aria-label="Choose which Muster Server projects to import">
@@ -257,6 +263,14 @@ export function ImportMapping({ plan, targets, owners = {}, onOwner = () => unde
         </select>
       </div></li>;
     })}</ul>}
+    {(plan.deleted?.length ?? 0) > 0 && <div className="ws-import-deleted">
+      <h4>Deleted here</h4>
+      <p className="project-edit-hint">You deleted {plan.deleted!.length === 1 ? 'this' : 'these'} in Muster, so an import leaves {plan.deleted!.length === 1 ? 'it' : 'them'} out. Restore one to bring it back on the next import.</p>
+      <ul className="ws-rows">{plan.deleted!.map(d => <li key={`${d.kind}:${d.id}`}><div className="ws-row is-static ws-import-map-row">
+        <span className="ws-row-text"><span className="ws-row-title">{d.key ? `${d.key} · ` : ''}{d.label}</span><span className="ws-row-meta">{d.kind === 'project' ? 'Project' : 'Task'}</span></span>
+        <button type="button" className="settings-button secondary" disabled={busy} aria-label={`Restore ${d.label}`} onClick={() => onRestore(d.kind, d.id)}>Restore</button>
+      </div></li>)}</ul>
+    </div>}
     <div className="project-edit-actions"><span className="project-edit-spacer"/>
       <button type="button" className="project-edit-cancel" disabled={busy} onClick={onCancel}>Cancel</button>
       <button type="button" className="settings-button" disabled={busy || chosen.length === 0 || unanswered > 0} title={unanswered ? 'Say whether each earlier project is yours first' : undefined} onClick={onImport}>{busy ? 'Importing…' : `Import ${chosen.length} ${chosen.length === 1 ? 'project' : 'projects'}`}</button>

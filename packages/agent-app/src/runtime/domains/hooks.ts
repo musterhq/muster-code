@@ -1,11 +1,13 @@
 /** Hook registry behind DomainContext.hooks, plus the bounded runners the service calls. */
 import { isAbsolute } from 'node:path';
 import type { Chat } from '../../shared/protocol.ts';
-import type { ChatDefaults, ChatDefaultsResolver, CommandCompleted, DomainHooks, PromptContributor, ProviderEventInfo, ReasoningEffort, RunEnvironmentResolver, ToolPolicyResolver, RunOptions, RunOptionsContributor, RunSettled, RunStarted } from './types.ts';
+import type { AutomatedWorktreeResolver, TaskHistoryBriefResolver, ChatDefaults, ChatRemoval, ChatDefaultsResolver, CommandCompleted, DomainHooks, PromptContributor, ProviderEventInfo, ReasoningEffort, RunEnvironmentResolver, ToolPolicyResolver, RunOptions, RunOptionsContributor, RunSettled, RunStarted } from './types.ts';
 
 export const PROMPT_CONTRIBUTOR_TIMEOUT_MS = 2_000;
 export const PROMPT_CONTRIBUTION_MAX_BYTES = 8 * 1024;
 export const RUN_STARTED_TIMEOUT_MS = 5_000;
+/** Stopping an archived chat's sandbox waits at most this long (docker stop takes up to ~10 s). */
+export const CHAT_ARCHIVE_TIMEOUT_MS = 30_000;
 const EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
 
 /** Settles with the work's value, or undefined on throw or timeout (the signal aborts then). */
@@ -28,7 +30,11 @@ export function createDomainHooks() {
   const started = new Set<(run: RunStarted) => Promise<void> | void>(), settled = new Set<(run: RunSettled) => Promise<void> | void>();
   const providerEvents = new Set<(event: ProviderEventInfo) => void>();
   const commands = new Set<(event: CommandCompleted) => void>();
+  const removals = new Set<(event: ChatRemoval) => Promise<void> | void>();
   let defaults: ChatDefaultsResolver | undefined, environment: RunEnvironmentResolver | undefined, toolPolicy: ToolPolicyResolver | undefined, commitIdentity: ((folderId: string) => { name: string; email: string } | null) | undefined, worktreeRecorder: ((projectId: string, taskId: string, folderId: string) => void) | undefined;
+  let automated: AutomatedWorktreeResolver | undefined;
+  let contextWindow: ((providerId: string, model: string) => number | undefined) | undefined;
+  let historyBrief: TaskHistoryBriefResolver | undefined;
   const add = <T>(set: Set<T>, fn: T) => { set.add(fn); return () => { set.delete(fn); }; };
   const hooks: DomainHooks = {
     addPromptContributor: fn => add(prompts, fn),
@@ -39,14 +45,22 @@ export function createDomainHooks() {
     setChatDefaults(fn) { defaults = fn; },
     setRunEnvironmentResolver(fn) { environment = fn; },
     setToolPolicy(fn) { toolPolicy = fn; },
+    setContextWindowResolver(fn) { contextWindow = fn; },
     setCommitIdentity(fn) { commitIdentity = fn; },
     setTaskWorktreeRecorder(fn) { worktreeRecorder = fn; },
     noteTaskWorktree(projectId, taskId, folderId) { try { worktreeRecorder?.(projectId, taskId, folderId); } catch { /* best effort */ } },
+    setAutomatedWorktree(fn) { automated = fn; },
+    automatedWorktree(projectId, taskId) { return automated ? automated(projectId, taskId) : Promise.resolve(null); },
+    setTaskHistoryBrief(fn) { historyBrief = fn; },
+    async taskHistoryBrief(input) { try { return historyBrief ? await historyBrief(input) : null; } catch { return null; } },
     commitIdentity(folderId) { try { return commitIdentity?.(folderId) ?? null; } catch { return null; } },
     onCommand: fn => add(commands, fn),
+    onChatRemoval: fn => add(removals, fn),
   };
   return {
     hooks,
+    /** The user's own context window for a model, if they set one. */
+    contextWindowOverride(providerId: string, model: string): number | undefined { try { return contextWindow?.(providerId, model); } catch { return undefined; } },
     hasRunHooks: () => prompts.size + runOptions.size + started.size > 0,
     /** Each contributor gets 2s and 8KB; results are wrapped as <context source="label">. */
     async contributePrompt(input: Omit<Parameters<PromptContributor>[0], 'signal'>): Promise<{ text: string; sources: string[]; blocks: { label: string; text: string }[] }> {
@@ -95,6 +109,11 @@ export function createDomainHooks() {
     /** Observers run synchronously after the command resolved; a throwing observer never fails the command. */
     commandCompleted(event: CommandCompleted): void {
       for (const fn of commands) { try { fn(event); } catch { /* observers are best-effort */ } }
+    },
+    /** #654: deleting awaits every observer and rejects with the first failure; archiving is bounded and never rejects. */
+    async chatRemoval(event: ChatRemoval): Promise<void> {
+      if (event.kind === 'delete') { await Promise.all([...removals].map(async fn => fn(event))); return; }
+      await Promise.all([...removals].map(fn => bounded(() => fn(event), CHAT_ARCHIVE_TIMEOUT_MS)));
     },
     /** The tool-policy verdict for an approval request, or null. A resolver that throws decides nothing. */
     toolPolicy(chat: Chat, method: string, params: Record<string, unknown>) {

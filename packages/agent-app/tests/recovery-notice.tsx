@@ -1,6 +1,7 @@
-/** Run with node tests/run-recovery-notice.mjs; the store is imported after the DOM and bridge exist. */
+/** Run with npm run test:renderer (suite recovery-notice); the store is imported after the DOM and bridge exist. */
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
+import {check} from './dom-check.ts';
 import {setTimeout as delay} from 'node:timers/promises';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
@@ -21,7 +22,7 @@ const text=()=>document.querySelector('.chat-error-banner')?.textContent??'';
 
 root.render(<RecoveryNotice chat={rejected}/>);await delay(20);
 assert.ok(text().includes('Provider admission is temporarily unavailable'),'reason text is shown');
-assert.ok(text().includes('your draft is retained'));
+assert.ok(text().includes('Your draft is retained.'));assert.ok(!/dispatched|admission/i.test(document.querySelector('.chat-error-banner p')?.textContent??''),'the banner adds no runtime jargon');
 assert.equal(button()?.textContent,'Retry now');assert.equal(button()?.hasAttribute('disabled'),false);
 button()!.click();await delay(30);
 assert.equal(button()?.textContent,'Retrying…','busy label while the send is in flight');
@@ -62,7 +63,11 @@ assert.equal(button()?.hasAttribute('disabled'),true);assert.ok(text().includes(
 root.render(<RecoveryNotice chat={{...rejected,recovery:{...rejected.recovery,retryable:false}}}/>);await delay(20);
 assert.ok(!button(),'a non-retryable rejection shows the reason only');assert.ok(text().includes('temporarily unavailable'));
 root.render(<RecoveryNotice chat={{...base,recovery:{kind:'recovery-needed',retryable:false,reason:'The provider may have accepted this turn.'}}}/>);await delay(20);
-assert.equal(button()?.textContent,'Check provider status');assert.equal(document.querySelectorAll('.chat-error-banner button').length,1);
+assert.equal(button()?.textContent,'Check provider status');assert.equal(document.querySelectorAll('.chat-error-banner button').length,2);
+// #381: an unresolvable check never traps the user; the override is always offered and goes through the runtime.
+const proceed=document.querySelector<HTMLButtonElement>('[data-testid="recovery-continue-anyway"]');
+assert.equal(proceed?.textContent,'Continue anyway');proceed!.click();await delay(20);
+assert.ok(invoked.some(call=>call.command==='chat.continueAnyway'&&call.input.id==='chat-1'),'Continue anyway invokes the runtime override');
 root.render(<RecoveryNotice chat={{...base,error:undefined}}/>);await delay(20);
 assert.ok(!document.querySelector('.chat-error-banner'),'nothing to recover renders nothing');
 // PER-08 (F42/F43): a user Stop is neutral: no red failure, no button to resolve before sending again.
@@ -79,5 +84,25 @@ assert.equal(button()?.textContent,'Open Accounts & providers');
 button()!.click();await delay(20);
 const {getState}=await import('../src/renderer/store');
 assert.equal(getState().screen,'settings');assert.equal(getState().settingsSection,'providers');
+// A closed network transport offers manual Retry even after the draft was consumed.
+// Spec: MUS-SPEC-02-608D (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-608d)
+await check('a failed network turn offers Retry, which re-runs the turn and never sends the draft in its place',async()=>{
+  setComposerDraft('chat-1','');
+  let networkRetries=0,finishRetry!:()=>void;
+  root.render(<RecoveryNotice chat={{...base,draft:'',error:'The HTTPS proxy failed.',recovery:{kind:'failed',retryable:true,reason:'The HTTPS proxy failed.'}}} onRetry={async()=>{networkRetries++;await new Promise<void>(resolve=>{finishRetry=resolve;});}}/>);await delay(20);
+  assert.ok(text().includes('HTTPS proxy'));
+  assert.equal(button()?.textContent,'Retry');assert.equal(button()?.hasAttribute('disabled'),false);
+  button()!.click();await delay(20);
+  assert.equal(networkRetries,1);assert.equal(button()?.textContent,'Retrying…');assert.equal(button()?.hasAttribute('disabled'),true);
+  finishRetry();await delay(20);
+  assert.equal(button()?.textContent,'Retry');
+  // Retry re-runs the failed turn: a follow-up the user is typing is never sent in its place.
+  setComposerDraft('chat-1','A follow-up I am still writing');await delay(20);
+  const sendsBefore=invoked.filter(call=>call.command==='chat.send').length;
+  button()!.click();await delay(20);
+  assert.equal(networkRetries,2,'Retry uses the turn retry');assert.equal(invoked.filter(call=>call.command==='chat.send').length,sendsBefore,'the draft is not sent');
+  finishRetry();await delay(20);
+  setComposerDraft('chat-1','');
+});
 root.unmount();assert.deepEqual(errors,[]);
 console.log('PASS: admission-rejected Retry now sends the retained draft with busy/disabled states; recovery-needed keeps the reconcile button');

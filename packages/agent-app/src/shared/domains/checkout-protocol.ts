@@ -121,6 +121,8 @@ export interface CheckoutLease {
   worktree: string | null; branch: string | null; chatId: string | null; folderId: string | null;
   /** The commit the worktree started from (the dev branch tip), the base of every "files changed" count. */
   baseSha: string | null;
+  /** The server agents' branch this worktree was started from (`origin/<branch>`), when it was on the remote (#434). */
+  continuedFrom?: string | null;
   model: ModelChoice; modelLabel: string;
   /** "Run on server": the person chose to run this task's agent on the server while keeping it. Off by default. */
   runOnServer: boolean;

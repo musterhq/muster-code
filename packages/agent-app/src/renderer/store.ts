@@ -15,6 +15,8 @@ import type {
   Snapshot,
   TimelineItem,
 } from '../shared/protocol';
+import type {ReviewBaseline} from '../shared/domains/review-protocol';
+import {reviewBaselineFor} from './reviewState';
 import type {ScopedComputerRef} from '../shared/scoped-computer-protocol';
 import {SETTING_DEFAULTS,normalizeSettings,type AppSettings,type SettingKey} from '../shared/domains/settings-protocol';
 import {browserURL} from '../shared/browser-protocol';
@@ -24,7 +26,7 @@ import {cleanIpcError, isNotGitRepository} from './components/resourceErrors';
 import { BridgeError, getBridge, invoke, subscribe } from './bridge';
 import { runtimeMessage } from './composerBridge';
 import { focusComposer } from './focus';
-import { killChatTerminals } from './processSummary';
+import { killChatTerminals, requestTerminal } from './processSummary';
 import { shareStructure } from './structuralShare';
 import { TimelineReplica } from './timeline-replica';
 import { recordTransport } from './connectionHealth';
@@ -46,6 +48,8 @@ export interface WorkspaceTab {
   kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView';
   /** kind: 'git' only — which segment is showing. */
   gitView?: GitView;
+  /** kind: 'diff' — comparison local to this tab, independent of the Changes picker. */
+  reviewBaseline?: ReviewBaseline;
   /** kind: 'canvas' only (WRK-12). */
   canvasId?: string;
   /** kind: 'pluginUi' only (EXT-10): the plugin (its folder id) and the app it declares. */
@@ -313,8 +317,10 @@ export function pushNotice(message: string, options: {kind?: NoticeKind; action?
   const notice: Notice = {id: ++noticeSeq, message, kind, count: 1, ...(options.action ? {action: options.action} : {}), ...(options.secondary ? {secondary: options.secondary} : {}), ...(options.countdown ? {countdown: options.countdown} : {}), ...(options.lifetimeMs ? {lifetimeMs: options.lifetimeMs} : {})};
   let notices = [...state.notices, notice];
   while (notices.length > MAX_NOTICES) {
-    // Drop the oldest transient row first; persistent errors leave only when errors alone overflow.
-    const drop = notices.find(n => n.kind !== 'error') ?? notices[0]!;
+    // Drop the oldest transient row first; persistent errors leave only when errors alone overflow. The notice just
+    // pushed is never the one dropped: it may carry the Undo for something that already happened.
+    const older = notices.filter(n => n !== notice);
+    const drop = older.find(n => n.kind !== 'error') ?? older[0]!;
     clearTimeout(noticeTimers.get(drop.id)); noticeTimers.delete(drop.id);
     notices = notices.filter(n => n !== drop);
   }
@@ -568,9 +574,9 @@ export function retryTimeline(id: string): void {
 }
 
 /** Opens a new chat; `draft` prefills its composer (Codex's prefilled "Record a skill" conversation). */
-export async function createChat(folderId?: string, projectId?: string, options: {draft?: string} = {}): Promise<string | undefined> {
+export async function createChat(folderId?: string, projectId?: string, options: {draft?: string; inheritFrom?: string} = {}): Promise<string | undefined> {
   try {
-    const chat = await invoke('chat.create', { folderId, projectId });
+    const chat = await invoke('chat.create', { folderId, projectId, ...(options.inheritFrom ? { inheritFrom: options.inheritFrom } : {}) });
     set({ activeChatId: chat.id, screen: 'work' });
     if (options.draft) setComposerDraft(chat.id, options.draft);
     await loadTimeline(chat.id);
@@ -581,9 +587,10 @@ export async function createChat(folderId?: string, projectId?: string, options:
   }
 }
 
-/** A hoisted declaration: it runs while `state` initializes, before any module constant exists. */
+/** A hoisted declaration: it runs while `state` initializes, before any module constant exists.
+ *  Enter while a run is going steers it by default; Queue is the opt-in (Cmd/Ctrl+Enter does the other one either way). */
 function readFollowUpMode(): FollowUpMode {
-  try { return localStorage.getItem('muster.followUpMode') === 'steer' ? 'steer' : 'queue'; } catch { return 'queue'; }
+  try { return localStorage.getItem('muster.followUpMode') === 'queue' ? 'queue' : 'steer'; } catch { return 'steer'; }
 }
 export function setFollowUpMode(mode: FollowUpMode): void {
   if (state.followUpMode !== mode) set({followUpMode: mode});
@@ -1095,6 +1102,7 @@ export function openComputerTab(scope:ScopedComputerRef,label:string):void {
 }
 export function openProcessesTab(chatId:string,label:string):void {
   void label; // every terminal surface is simply "Terminal"
+  requestTerminal(chatId);
   openTab({id:`processes:${chatId}`,kind:'processes',chatId,title:'Terminal'});
 }
 
@@ -1419,9 +1427,9 @@ export async function loadGitChanges(folderId: string): Promise<void> {
   }
 }
 
-export async function openDiff(folderId: string, path: string): Promise<void> {
+export async function openDiff(folderId: string, path: string, reviewBaseline: ReviewBaseline = reviewBaselineFor(folderId)): Promise<void> {
   const id = `diff:${folderId}:${path}`;
-  openTab({ id, kind: 'diff', folderId, path, title: `Diff: ${path.split('/').pop() ?? path}` });
+  openTab({ id, kind: 'diff', folderId, path, reviewBaseline, title: `Diff: ${path.split('/').pop() ?? path}` });
   set({ diffs: { ...state.diffs, [id]: { phase: 'loading' } } });
   try {
     const diff = await invoke('git.diff', { folderId, path });

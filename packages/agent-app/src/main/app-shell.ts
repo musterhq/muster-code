@@ -32,3 +32,16 @@ export function createCrashTracker(windowMs = 60_000) {
 export function isRendererCrash(reason: string): boolean {
   return reason !== 'clean-exit';
 }
+
+/** Remembers what the dock shows, so a badge cleared by focusing the window returns on blur while requests are still pending. */
+export function createBadgeTracker() {
+  let requested = 0, shown = '';
+  return (next: number, focused: boolean): BadgeUpdate | null => {
+    const badge = focused || next <= 0 ? '' : String(next);
+    const bounce = !focused && next > requested;
+    requested = next;
+    if (badge === shown && !bounce) return null;
+    shown = badge;
+    return { badge, bounce };
+  };
+}

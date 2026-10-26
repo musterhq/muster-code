@@ -53,6 +53,22 @@ export async function* sseEvents(body: ReadableStream<Uint8Array>, maxLine = 4 *
   } finally { await reader.cancel().catch(() => {}); }
 }
 
+/** Milliseconds a non-2xx response asks the client to wait, or undefined when it names no usable wait.
+ *  Reads `retry-after-ms` (sent by some OpenAI-compatible routers) and then `retry-after` as delta-seconds or an
+ *  HTTP-date (RFC 9110 §10.2.3). A date already past means "now" (0). Negative, NaN, empty and free-text values
+ *  are ignored; a too-large number becomes MAX_SAFE_INTEGER so callers' caps apply instead of a silent fallback. */
+export function retryAfterMs(headers: Pick<Headers, 'get'>, now: number = Date.now()): number | undefined {
+  const millis = headers.get('retry-after-ms')?.trim();
+  if (millis && /^\d+(?:\.\d+)?$/.test(millis)) return Math.min(Math.ceil(Number(millis)), Number.MAX_SAFE_INTEGER);
+  const value = headers.get('retry-after')?.trim();
+  if (!value) return undefined;
+  if (/^\d+(?:\.\d+)?$/.test(value)) return Math.min(Math.ceil(Number(value) * 1000), Number.MAX_SAFE_INTEGER);
+  // HTTP-date only: a weekday or month name and a time. Date.parse alone accepts "-5" or "1.5.2030" as dates.
+  if (!/^[A-Za-z]{3,9},? .*\d{1,2}:\d{2}(?::\d{2})?/.test(value)) return undefined;
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.max(0, Math.ceil(at - now)) : undefined;
+}
+
 /** A short, secret-free error line from a non-2xx response. */
 export async function responseError(response: Response, label: string): Promise<string> {
   let text = '';
@@ -63,6 +79,7 @@ export async function responseError(response: Response, label: string): Promise<
   let message = '';
   try { const parsed = JSON.parse(text) as {error?: {message?: unknown} | string; message?: unknown}; const raw = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message ?? parsed.message; if (typeof raw === 'string') message = raw; } catch { message = ''; }
   message = message.replace(/[\x00-\x1f]+/g, ' ').replace(/\b(sk|key|token)[-_][A-Za-z0-9_-]{8,}/gi, '[redacted]').slice(0, 300);
+  if (response.status === 429) return `Rate limited by ${label} (429)${message ? `: ${message}` : '.'}`;
   return `${label} returned HTTP ${response.status}${message ? `: ${message}` : '.'}`;
 }
 
@@ -80,6 +97,9 @@ export class ConversationMemory {
     if (file) try {
       if (statSync(file).size <= 2 * this.maxChars + 65536) { const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown; if (Array.isArray(parsed)) known = parsed.filter((m): m is ChatMessage => !!m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string'); }
     } catch { known = undefined; }
+    // A history saved by an older build can open with a reply or hold an empty reply; the APIs reject both on every turn.
+    while (known && known.length > 0 && known[0]!.role !== 'user') known = known.slice(1);
+    known = known?.map(m => m.role === 'assistant' && !m.content.trim() ? {...m, content: '(no reply)'} : m);
     return known ? {threadId: threadId!, history: [...known], resumed: true} : {threadId: randomUUID(), history: [], resumed: false};
   }
   /** Saves the thread, trimmed to the newest 80 messages / `maxChars`. Returns how many user turns the saved
@@ -87,6 +107,8 @@ export class ConversationMemory {
   commit(threadId: string, messages: ChatMessage[]): {retainedUserTurns: number; trimmed: boolean} {
     let kept = messages.slice(-80), size = kept.reduce((n, m) => n + m.content.length, 0);
     while (kept.length > 2 && size > this.maxChars) { size -= kept[0]!.content.length + kept[1]!.content.length; kept = kept.slice(2); }
+    // A steer makes two user messages in a row, so a cut can land on a reply; a resent history must open with the user.
+    while (kept.length > 1 && kept[0]!.role !== 'user') kept = kept.slice(1);
     this.threads.delete(threadId); this.threads.set(threadId, kept);
     while (this.threads.size > this.maxThreads) this.threads.delete(this.threads.keys().next().value!);
     const file = this.file(threadId);

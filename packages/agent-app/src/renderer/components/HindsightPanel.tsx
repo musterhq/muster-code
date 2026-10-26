@@ -1,6 +1,7 @@
 import { ChevronDown, Square, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import {MarkdownTable} from './MarkdownTable';
 import remarkGfm from 'remark-gfm';
 import type { MemoryRecallExcluded, MemoryRecord, MemoryStatusView } from '../../shared/domains/memory-protocol';
 import { invoke } from '../bridge';
@@ -145,7 +146,7 @@ export function HindsightPanel({ folderId, onClose, onConfigure }: { folderId?: 
     {notice && <p className="hindsight-notice" role="status">{notice}</p>}
     {records && records.length > 0 && <div className="hindsight-results" aria-label="Recalled memories"><Evidence records={records} /></div>}
     {reflection && <div className="hindsight-results" aria-label="Memory reflection">
-      <div className="md-body hindsight-answer"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={safeLink}>{reflection.text}</ReactMarkdown></div>
+      <div className="md-body hindsight-answer"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={safeLink} components={{table: ({node: _node, ...props}) => <MarkdownTable {...props}/>}}>{reflection.text}</ReactMarkdown></div>
       {reflection.sources.length > 0 && <><h3>Based on {reflection.sources.length} {reflection.sources.length === 1 ? 'memory' : 'memories'}</h3><Evidence records={reflection.sources} /></>}
     </div>}
   </section>;

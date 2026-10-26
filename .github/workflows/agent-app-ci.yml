@@ -7,10 +7,14 @@ on:
     paths:
       - "packages/agent-app/**"
       - ".github/workflows/agent-app-ci.yml"
+      - "docs/spec/**"
+      - "scripts/check-spec.mjs"
   pull_request:
     paths:
       - "packages/agent-app/**"
       - ".github/workflows/agent-app-ci.yml"
+      - "docs/spec/**"
+      - "scripts/check-spec.mjs"
   workflow_dispatch:
 
 concurrency:
@@ -36,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: packages/agent-app/.nvmrc
           cache: npm
@@ -46,7 +50,7 @@ jobs:
         # Download caches only (never node_modules): keyed on OS, CPU and the locked Electron version.
         shell: bash
         run: echo "version=$(node -p "require(process.env.GITHUB_WORKSPACE + '/packages/agent-app/package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/Library/Caches/electron
@@ -62,8 +66,22 @@ jobs:
       - name: Install
         run: npm ci --no-audit --no-fund
 
-      - name: Typecheck
-        run: npx tsc --noEmit
+      # Every acceptance case names one real, non-skipped test and that test names the case back (docs/spec/acceptance-cases.md).
+      - name: Spec links
+        working-directory: .
+        run: node scripts/check-spec.mjs
+
+      - name: Typecheck (tsc-rs)
+        run: npm run typecheck
+
+      # Parity guard: the official compiler stays the reference while tsc-rs (a 0.x Rust port) earns trust. This runs both
+      # checkers on packages/agent-app and packages/server and fails if their sorted diagnostics differ.
+      # The official tsc run can be dropped after two weeks of agreement (started with the PR that introduced this step).
+      - name: Typecheck parity (tsc vs tsc-rs)
+        run: |
+          npm run typecheck:tsc
+          (cd ../server && npm ci --no-audit --no-fund --ignore-scripts)
+          node scripts/typecheck-parity.mjs
 
       # Some runtime tests load the bundled core from dist/, so build before testing.
       - name: Build
@@ -74,3 +92,12 @@ jobs:
 
       - name: Renderer tests
         run: npm run test:renderer
+
+      # Suites that need real Chrome layout (see `excluded` in scripts/renderer-suites.mjs).
+      - name: Browser layout tests
+        run: node tests/run-virtual-file-source.mjs
+
+      - name: Router workflows with the real coding client
+        env:
+          MUSTER_REQUIRE_CODEX_E2E: "1"
+        run: npm exec --yes --package=@openai/codex@0.163.0 -- node --experimental-transform-types --import ./tests/pin-device-platform.mjs --test tests/router-usage-workflow.test.ts

@@ -14,6 +14,15 @@ export class PaperclipError extends Error {
 }
 
 const TIMEOUT_MS = 10_000;
+/** The longest a 429's Retry-After is honoured (a longer wait is a failure to report, not a pause to sit through). */
+const RETRY_AFTER_MAX_MS = 30_000;
+/** Retry-After as milliseconds: delta-seconds or an HTTP date; one second when missing or unreadable; never more than 30 s. */
+export function retryAfterMs(header: string | null, now = Date.now()): number {
+  const value = header?.trim();
+  if (!value) return 1000;
+  const seconds = /^\d+(?:\.\d+)?$/.test(value) ? Number(value) : (Date.parse(value) - now) / 1000;
+  return Number.isFinite(seconds) ? Math.min(RETRY_AFTER_MAX_MS, Math.max(0, Math.round(seconds * 1000))) : 1000;
+}
 const CACHE_MAX = 64;
 /** Rows per page when listing issues (Paperclip allows up to 1000) and comments (up to 500). */
 export const ISSUE_PAGE = 1000, COMMENT_PAGE = 500;
@@ -37,13 +46,21 @@ export class PaperclipClient {
   /** Bumped whenever any GET returned a new body (not a 304), so callers can skip rebuilding views. */
   generation = 0;
   /** `cache: false` keeps no parsed bodies (an importer reads each page once and must not hold a large org in memory). */
-  constructor(readonly endpoint: PaperclipEndpoint, readonly fetcher: FetchLike = (input, init) => fetch(input, init), private readonly options: { cache?: boolean; /** A 401: returns the sentence to show instead of the generic one (a key the server revoked). */ onUnauthorized?: (hadToken: boolean, status: number) => string | undefined } = {}) {}
+  constructor(readonly endpoint: PaperclipEndpoint, readonly fetcher: FetchLike = (input, init) => fetch(input, init), private readonly options: { cache?: boolean; /** Waits between a 429 and its one retry (tests pass an instant one). */ sleep?: (ms: number) => Promise<void>; /** A 401: returns the sentence to show instead of the generic one (a key the server revoked). */ onUnauthorized?: (hadToken: boolean, status: number) => string | undefined } = {}) {}
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
     return { accept: 'application/json', ...(this.endpoint.token ? { authorization: `Bearer ${this.endpoint.token}` } : {}), ...extra };
   }
 
   private async request(method: string, path: string, body?: unknown, headers: Record<string, string> = {}, timeoutMs = TIMEOUT_MS): Promise<Response> {
+    const first = await this.attempt(method, path, body, headers, timeoutMs);
+    if (first.status !== 429) return first;
+    // Rate limited: the request was refused, so asking once more after the wait the server named is safe for every method.
+    await first.body?.cancel().catch(() => undefined);
+    await (this.options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))))(retryAfterMs(first.headers.get('retry-after')));
+    return this.attempt(method, path, body, headers, timeoutMs);
+  }
+  private async attempt(method: string, path: string, body?: unknown, headers: Record<string, string> = {}, timeoutMs = TIMEOUT_MS): Promise<Response> {
     let response: Response;
     try {
       response = await this.fetcher(`${this.endpoint.baseUrl}/api${path}`, {
@@ -120,26 +137,32 @@ export class PaperclipClient {
    * the rows read so far. The loop ends on a short page, on a page that brings nothing new (a server that ignores paging), or
    * at MAX_PAGES. Rows are yielded page by page so a caller can process and drop them.
    */
-  async *pages<T extends { id?: unknown }>(firstPath: string, pageSize: number, nextPath: (last: T[], soFar: number) => string): AsyncGenerator<T[]> {
+  async *pages<T extends { id?: unknown }>(firstPath: string, pageSize: number, nextPath: (last: T[], soFar: number) => string, fallbackPath?: (last: T[], soFar: number) => string): AsyncGenerator<T[]> {
     const seen = new Set<string>();
-    let path = firstPath, soFar = 0;
+    let path = firstPath, soFar = 0, lastPage: T[] = [];
     for (let n = 0; n < MAX_PAGES; n++) {
-      const raw = await this.get<unknown>(path);
+      let raw: unknown;
+      try { raw = await this.get<unknown>(path); }
+      catch (cause) {
+        // A server that does not know the cursor (400/422) is paged by offset from here on.
+        if (n > 0 && fallbackPath && cause instanceof PaperclipError && (cause.status === 400 || cause.status === 422)) { path = fallbackPath(lastPage, soFar); fallbackPath = undefined; n--; continue; }
+        throw cause;
+      }
       const page = (Array.isArray(raw) ? raw : []).filter((row): row is T => Boolean(row) && typeof row === 'object');
       const fresh = page.filter(row => { const key = typeof row.id === 'string' ? row.id : undefined; if (key === undefined) return true; if (seen.has(key)) return false; seen.add(key); return true; });
       if (fresh.length) yield fresh;
-      soFar += page.length;
+      soFar += page.length; lastPage = page;
       if (page.length < pageSize || fresh.length === 0) return;
       path = nextPath(page, soFar);
     }
   }
-  /** All issues of a company (compact or full), sorted by id and paged by offset. A repeat is dropped; a skipped row is harmless here because deletions are re-checked with a GET. */
+  /** All issues of a company (compact or full), sorted by id and paged by Paperclip's `afterId` cursor (an offset over UUID order can skip a row when one is added or removed mid-read). A server without the cursor is paged by offset. A repeat is dropped. */
   issuePages(companyId: string, query: string, fresh = false): AsyncGenerator<Json[]> {
     // Paperclip keeps a compact issue list for 2 s and a change does not clear it. A read right after a live event asks for one row fewer
     // per page: a different request key, so the server computes the list instead of replaying the old one.
     const limit = fresh ? ISSUE_PAGE - 1 : ISSUE_PAGE;
     const base = `/companies/${encodeURIComponent(companyId)}/issues?${query}${query ? '&' : ''}sortField=id&sortDir=asc&limit=${limit}`;
-    return this.pages<Json>(base, limit, (_page, soFar) => `${base}&offset=${soFar}`);
+    return this.pages<Json>(base, limit, page => `${base}&afterId=${encodeURIComponent(String(page[page.length - 1]!.id))}`, (_page, soFar) => `${base}&offset=${soFar}`);
   }
   /** All comments of an issue, oldest first, paged with Paperclip's `after` cursor. */
   commentPages(issueId: string): AsyncGenerator<Json[]> {

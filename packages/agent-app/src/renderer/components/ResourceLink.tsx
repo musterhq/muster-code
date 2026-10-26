@@ -8,7 +8,7 @@ import {notifyError, notifySuccess} from '../store';
 import './resource-link.css';
 import {activeChat,openFile,openBrowserTab} from '../store';
 import {invoke} from '../bridge';
-import {useStore} from '../useStore';
+import {useStoreSlice} from '../useStore';
 import {externalReference, resourceReference} from './resourceReference';
 import {markdownFragmentId} from './markdownAnchors';
 import {Tip} from './Tooltip';
@@ -21,7 +21,7 @@ import {hostOf} from '../../shared/turn-digest.ts';
 function LinkFavicon({href}:{href:string}){const host=hostOf(href);return host?<span className="md-link-favicon" aria-hidden="true"><SiteIcon host={host}/></span>:null;}
 export type ResourceContext = { folderId: string; path: string };
 export function ResourceLink({href,children,context,auto=false}:{href?:string;children?:React.ReactNode;context?:ResourceContext;auto?:boolean}){
- const state=useStore(),chat=activeChat();
+ const state=useStoreSlice('snapshot','activeChatId'),chat=activeChat();
  const project=state.snapshot?.projects.find(p=>p.id===chat?.projectId);
  const ids=project?.folderIds??(chat?.folderId?[chat.folderId]:[]);
  const folders=(state.snapshot?.folders??[]).filter(f=>context ? f.id===context.folderId : ids.includes(f.id));

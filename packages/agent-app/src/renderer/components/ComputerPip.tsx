@@ -3,16 +3,17 @@ import {startActiveInterval} from '../windowActivity';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {AppWindow,Download,ExternalLink,Eye,Globe,Hand,PanelRightOpen,Paperclip,Play,Square,X} from 'lucide-react';
 import {invoke} from '../bridge';
-import {getState,notifyError,notifySuccess,openTab,stopChat,type WorkspaceTab} from '../store';
+import {closeTab,getState,notifyError,notifySuccess,openTab,stopChat,type WorkspaceTab} from '../store';
 import {useStoreSelector} from '../useStore';
 import {stageAttachment} from '../composerBridge';
 import {rememberProfile} from './BrowserTab';
 import {ImageFile} from './ImageFile';
 import type {ComputerPermissions} from '../../shared/domains/computer-protocol';
-import {PIP_STACK_MAX,STACK_PEEK,STACK_WIDTH,dockedSessions,formatAge,frameFreshness,hostOf,mergeSources,orderPipSources,pipPhase,type PipPhase,raiseSession,recentComputerSources,screenshotName,sessionKey,sessionTabId,setMinimized,setSnapshot,sourceKey,stackAnchor,stackHeight,stackWidth,toolImageUrl,useComputerUi,wireComputerEvents,type Box,type Freshness,type PipSource} from '../computerUse';
+import {PIP_STACK_MAX,agentBrowserBinding,bindAgentBrowser,liveViewTabId,STACK_PEEK,STACK_WIDTH,dockedSessions,formatAge,frameFreshness,hostOf,mergeSources,orderPipSources,pipPhase,type PipPhase,raiseSession,recentComputerSources,screenshotName,sessionKey,sessionTabId,setMinimized,setSnapshot,sourceKey,stackAnchor,stackHeight,stackWidth,toolImageUrl,useComputerUi,wireComputerEvents,type Box,type Freshness,type PipSource} from '../computerUse';
 import {clampPipPosition,exceedsDragThreshold,loadPipCorner,pipCornerOrigin,savePipCorner,settlePipDrop,springSettled,springStep,type PipCorner,type PipPoint,type PipRect,type PipSize,type SpringState} from '../pipLayout';
 import {AppGlyph} from './AppGlyph';
 import './pip.css';
+import {pipReserveFor} from '../pipReserve';
 import {Tip} from './Tooltip';
 
 const loadImage=(id:string)=>invoke('computer.image',{id});
@@ -48,10 +49,16 @@ function useChatSources(chatId:string|null):{sources:PipSource[];source?:PipSour
   const ui=useComputerUi();
   const items=useStoreSelector(state=>chatId?state.timelines[chatId]?.value:undefined);
   const status=useStoreSelector(state=>state.snapshot?.chats.find(chat=>chat.id===chatId)?.status);
+  // Primitive selectors: the chat's scope decides its browser profile, and so the agent tab it is bound to.
+  const folderId=useStoreSelector(state=>state.snapshot?.chats.find(chat=>chat.id===chatId)?.folderId??null);
+  const projectId=useStoreSelector(state=>state.snapshot?.chats.find(chat=>chat.id===chatId)?.projectId??null);
+  const known=useStoreSelector(state=>!!chatId&&!!state.snapshot?.chats.some(chat=>chat.id===chatId));
+  const announced=chatId?ui.browsers[chatId]:undefined;
+  const binding=useMemo(()=>chatId?agentBrowserBinding(chatId,known?{folderId,projectId}:undefined,announced):undefined,[chatId,known,folderId,projectId,announced]);
   const steps=useMemo(()=>items?recentComputerSources(items):[],[items]);
   const recent=chatId?ui.recentFrames[chatId]:undefined,latest=chatId?ui.frames[chatId]:undefined;
   const frames=useMemo(()=>recent??(latest?[latest]:[]),[recent,latest]);
-  const sources=useMemo(()=>chatId?mergeSources(frames,steps):[],[chatId,frames,steps]);
+  const sources=useMemo(()=>chatId?bindAgentBrowser(mergeSources(frames,steps),binding):[],[chatId,frames,steps,binding]);
   return {sources,source:sources[0],running:status==='running'||status==='stopping'};
 }
 function useNow(active:boolean,everyMs=1000):number {
@@ -248,7 +255,8 @@ const sourceTitle=(source:PipSource)=>source.target==='browser'?(source.url?host
 /** Opens a session in the right sidebar as its own tab (the sidebar opens if it was closed), or focuses the tab it already has. */
 export function openSessionTab(source:PipSource):void {
   if(source.target==='browser'&&source.owner&&source.profileId&&(source.url||getState().tabs.some(tab=>tab.id===source.owner))){visitSource(source);return;}
-  openTab({id:sessionTabId(source),kind:'liveView',title:sourceTitle(source),chatId:source.chatId});
+  // The picture-only view never takes the agent tab's id: that id belongs to the live browser tab.
+  openTab({id:source.target==='browser'?liveViewTabId(source):sessionTabId(source),kind:'liveView',title:sourceTitle(source),chatId:source.chatId});
 }
 /** A transcript screenshot opens as a tab too; the picture is held in the UI store, never in the saved workspace. */
 export function openScreenshotTab(source:PipSource):void {
@@ -259,6 +267,16 @@ export function openScreenshotTab(source:PipSource):void {
 
 /** The sidebar tab that is on screen right now, or null when the sidebar is closed or showing something else. */
 const selectVisibleTab=(state:ReturnType<typeof getState>)=>!state.resourcesHidden&&state.rightPaneMode==='resources'&&state.screen==='work'?state.activeTabId:null;
+
+/** Space to keep beside the transcript so the preview card never covers its text, or undefined when it does not
+ *  overlap the (centred, max-width) column at all, or when reserving would leave the transcript too narrow to read. */
+function pipReserve(center:HTMLElement,anchor:{right:number;width:number},side:'left'|'right'):{side:'left'|'right';px:number}|undefined {
+  // The column centres inside the timeline's content box: the pane minus the summary card's own reserve (its padding).
+  const timeline=center.querySelector<HTMLElement>('.chat > .timeline-shell > .timeline');
+  const pad=timeline?getComputedStyle(timeline):undefined,box=center.getBoundingClientRect();
+  const left=box.left+(parseFloat(pad?.paddingLeft??'')||0),right=box.right-(parseFloat(pad?.paddingRight??'')||0);
+  return pipReserveFor({left,right,width:right-left},parseFloat(getComputedStyle(center).getPropertyValue('--timeline-max'))||804,window.innerWidth,anchor,side);
+}
 
 /** Codex-style picture-in-picture: a frameless cluster of live window thumbnails at the conversation's right,
  *  under the summary card; one card per app or page the agent used lately. The user can raise any card, drag the
@@ -284,6 +302,19 @@ export function ComputerPip({paneVisible=true}:{paneVisible?:boolean}={}) {
   const [corner,setCorner]=useState<PipCorner|undefined>(loadPipCorner);
   const frozen=useRef(false),stack=useRef<HTMLDivElement>(null);
   const [anchor,setAnchor]=useStackAnchor(shown,ui.minimized?1:Math.max(1,open.length),corner,frozen);
+  useEffect(()=>{
+    const center=document.querySelector<HTMLElement>('main.center')??document.querySelector<HTMLElement>('.center');
+    if(!center)return;
+    const reserve=shown&&open.length&&!ui.minimized?pipReserve(center,anchor,corner?.endsWith('left')?'left':'right'):undefined;
+    if(reserve){
+      center.dataset.pipSide=reserve.side;
+      center.style.setProperty('--pip-reserve',`${reserve.px}px`);
+    }else{
+      delete center.dataset.pipSide;
+      center.style.removeProperty('--pip-reserve');
+    }
+    return()=>{delete center.dataset.pipSide;center.style.removeProperty('--pip-reserve');};
+  },[shown,open.length,ui.minimized,corner,anchor]);
   const drag=usePipDrag(stack,frozen,(next,target,width)=>{
     savePipCorner(next);setCorner(next);setAnchor({right:Math.max(0,window.innerWidth-target.x-width),top:target.y,width});
   });
@@ -329,7 +360,11 @@ export function LiveViewTab({tab}:{tab:Pick<WorkspaceTab,'id'|'chatId'|'title'>}
   const ui=useComputerUi();
   const shot=tab.id.startsWith('shot:');
   const {sources,running}=useChatSources(shot?null:tab.chatId??null);
-  const found=shot?ui.snapshots[tab.id]:sources.find(candidate=>sessionTabId(candidate)===tab.id);
+  // A live-view tab opened before its browser session was bound (an older build, or a saved layout) still finds it.
+  const found=shot?ui.snapshots[tab.id]:sources.find(candidate=>sessionTabId(candidate)===tab.id||liveViewTabId(candidate)===tab.id);
+  // #423: a browser session is shown by its live page, never by this picture-only view ("Starting…", "Disconnected").
+  const agentPage=useStoreSelector(state=>!shot&&found?.target==='browser'&&!!found.owner&&!!found.profileId&&(!!found.url||state.tabs.some(item=>item.id===found.owner)));
+  useEffect(()=>{if(agentPage&&found){visitSource(found);closeTab(tab.id);}},[agentPage,tab.id]);
   // The session can slide out of the recent list while idle; keep showing its last picture rather than blanking the tab.
   const last=useRef<PipSource|undefined>(undefined);
   if(found)last.current=found;

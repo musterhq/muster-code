@@ -1,6 +1,6 @@
 {
   "name": "@muster/server",
-  "version": "0.3.11",
+  "version": "0.3.13",
   "private": true,
   "description": "Muster Server: self-hosted, headless Muster Agent runtime with a web UI, accounts, connectors and the muster-server CLI.",
   "license": "MIT",
@@ -12,7 +12,8 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc-rs --noEmit -p tsconfig.json",
+    "typecheck:tsc": "tsc --noEmit",
     "test": "node --max-old-space-size=1536 --experimental-transform-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test 'tests/*.test.ts'",
     "e2e": "node --max-old-space-size=1536 e2e/run-e2e.mjs",
     "package": "node scripts/package.mjs"
@@ -20,6 +21,7 @@
   "devDependencies": {
     "@types/node": "26.6.1",
     "esbuild": "0.28.2",
+    "tsc-rs": "0.7.0",
     "typescript": "7.0.2"
   },
   "homepage": "https://github.com/musterhq/muster-code",

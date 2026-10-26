@@ -214,8 +214,10 @@ export function ImportOrigin({ data }: { data: Record<string, unknown> }): React
   const label = source ? IMPORT_SOURCE_LABELS[source] ?? String(source) : 'another app';
   const cwd = typeof data.cwd === 'string' ? homeTilde(data.cwd) : undefined;
   const at = typeof data.importedAt === 'string' ? relativeLabel(data.importedAt) : undefined;
+  // The session's own model and provider, as recorded at import. Read-only text: the chat's composer picks what Muster runs next.
+  const ran = [typeof data.model === 'string' ? data.model : '', typeof data.provider === 'string' ? data.provider : ''].filter(Boolean);
   return <div className="fork-origin import-origin" role="note" data-testid="import-origin"><Download size={12} aria-hidden="true"/>
-    Imported from {label.replace(/ export$/, '')}{cwd ? <> · originally in <span title={typeof data.cwd === 'string' ? data.cwd : undefined}>{cwd}</span></> : null}{at ? <> · {at}</> : null}
+    Imported from {label.replace(/ export$/, '')}{cwd ? <> · originally in <span title={typeof data.cwd === 'string' ? data.cwd : undefined}>{cwd}</span></> : null}{ran.length ? <> · ran <span className="import-origin-model" data-testid="import-origin-model">{ran.length === 2 ? `${ran[0]} on ${ran[1]}` : ran[0]}</span></> : null}{at ? <> · {at}</> : null}
   </div>;
 }
 

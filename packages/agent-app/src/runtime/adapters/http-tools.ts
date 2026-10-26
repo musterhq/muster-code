@@ -1,4 +1,5 @@
 import {spawn} from 'node:child_process';
+import {StringDecoder} from 'node:string_decoder';
 import {constants as fsc, promises as fs} from 'node:fs';
 import {basename, dirname, extname, isAbsolute, join, relative, sep} from 'node:path';
 import {isInsidePath, normalizeFsPath} from '../../shared/path-normalize.ts';
@@ -6,6 +7,9 @@ import {agentCommandEnvironment} from '../command-environment.ts';
 import {killTreeAndEscapees, WINDOWS} from '../process-tree.ts';
 import {redactSecrets} from '../secret-redaction.ts';
 import type {AdapterRunInput} from './types.ts';
+import {BROWSER_TOOL_SPECS, type McpToolResult} from '../../main/agent-tools/browser-tools.ts';
+import {BROWSER_MCP, browserNote} from '../../shared/computer-use.ts';
+import {ASK_MCP, ASK_USER_SPEC, ASK_USER_TOOL} from '../ask-user.ts';
 
 /**
  * Tools for OpenAI-compatible HTTP routes (a local OmniRoute or Ollama server, an API key route, a saved connection).
@@ -24,7 +28,7 @@ export interface ToolImage { mediaType: string; data: string; name: string }
 export interface ToolResult { content: string; ok: boolean; image?: ToolImage }
 /** Resolves true to proceed. The service answers with the Project tool policy, the user-process guard and approval cards. */
 export type Authorize = (method: string, params: Record<string, unknown>) => Promise<boolean>;
-export interface ToolContext { cwd: string; access: ToolAccess; signal: AbortSignal; emit: AdapterRunInput['onEvent']; threadId: string; turnId: string; authorize?: Authorize; env?: Record<string, string>; deadline?: number; /** True when the model reports image input. read_file of an image returns the picture only then. */ vision?: boolean; /** Shared across one turn so the "this model cannot see images" explanation is given once. */ visionNote?: {told: boolean} }
+export interface ToolContext { /** The chat whose browser tab the browser tools drive (#424). */ chatId?: string; /** Offer Muster's in-app browser tools. */ browser?: boolean; cwd: string; access: ToolAccess; signal: AbortSignal; emit: AdapterRunInput['onEvent']; threadId: string; turnId: string; authorize?: Authorize; /** ask_user: posts the question card and resolves at once with the reply for the model. */ askUser?: (args: Record<string, unknown>) => Promise<string>; env?: Record<string, string>; deadline?: number; /** True when the model reports image input. read_file of an image returns the picture only then. */ vision?: boolean; /** Shared across one turn so the "this model cannot see images" explanation is given once. */ visionNote?: {told: boolean} }
 
 export const MAX_TOOL_OUTPUT = 64 * 1024, MAX_FILE_READ = 256 * 1024, MAX_EDIT_FILE = 5 * 1024 * 1024, MAX_TIMELINE_OUTPUT = 8 * 1024;
 const DEFAULT_TIMEOUT_S = 120, MAX_TIMEOUT_S = 600;
@@ -33,7 +37,21 @@ interface FunctionSpec { type: 'function'; function: { name: string; description
 const spec = (name: string, description: string, properties: Record<string, unknown>, required: string[]): FunctionSpec => ({type: 'function', function: {name, description, parameters: {type: 'object', properties, required}}});
 const string = (description: string) => ({type: 'string', description});
 
-export function toolSpecs(access: ToolAccess): FunctionSpec[] {
+/** #424: the in-app browser as native tools on HTTP routes, with the same names and schemas as the MCP server. Read-only
+ *  chats get the ones that only look; the bridge enforces the same rule again. */
+export function browserToolSpecs(access: ToolAccess): FunctionSpec[] {
+  return BROWSER_TOOL_SPECS.filter(tool => access !== 'read-only' || !tool.mutates).map(tool => ({type: 'function' as const, function: {name: tool.name, description: tool.description, parameters: tool.inputSchema}}));
+}
+/** How HTTP routes reach main's browser bridge: an in-process caller main registers (main and the runtime are separate bundles). */
+type BrowserCaller = (chatId: string, tool: string, args: unknown, session?: string) => Promise<McpToolResult>;
+export const browserCaller = (): BrowserCaller | undefined => {
+  const caller = (globalThis as Record<symbol, unknown>)[Symbol.for('muster.browserToolCaller')];
+  return typeof caller === 'function' ? caller as BrowserCaller : undefined;
+};
+/** Browser tools are offered only when asked for and when Muster's bridge is there to run them. */
+export const browserOffered = (browser: boolean | undefined) => !!browser && !!browserCaller();
+
+export function toolSpecs(access: ToolAccess, browser = false, ask = false): FunctionSpec[] {
   const tools = [
     spec('read_file', 'Read a text file (the first 256 KB). Relative paths are inside the working folder.', {path: string('File path')}, ['path']),
     spec('list_directory', 'List the entries of a folder.', {path: string('Folder path; defaults to the working folder')}, []),
@@ -42,17 +60,21 @@ export function toolSpecs(access: ToolAccess): FunctionSpec[] {
     spec('write_file', 'Create or overwrite a text file (parent folders are created).', {path: string('File path'), content: string('Complete new file content')}, ['path', 'content']),
     spec('edit_file', 'Replace one exact occurrence of old_string with new_string in a file.', {path: string('File path'), old_string: string('Exact text to replace; must occur once'), new_string: string('Replacement text')}, ['path', 'old_string', 'new_string']),
   );
+  if (browser) tools.push(...browserToolSpecs(access));
+  // Non-blocking question to the user: allowed at every access level, since it changes nothing and never waits.
+  if (ask) tools.push({type: 'function', function: {name: ASK_USER_SPEC.name, description: ASK_USER_SPEC.description, parameters: ASK_USER_SPEC.inputSchema}});
   if (access === 'full') tools.push(spec('run_command', `Run a shell command (${WINDOWS ? 'PowerShell' : 'sh'}) in the working folder and return its output.`, {command: string('The command line'), timeout_sec: {type: 'number', description: `Seconds before it is stopped (default ${DEFAULT_TIMEOUT_S}, max ${MAX_TIMEOUT_S})`}}, ['command']));
   return tools;
 }
 
 /** What the model is told about its tools, so it never claims to have none (or to be unable to add them). */
-export function toolInstructions(access: ToolAccess, cwd: string): string {
-  const names = toolSpecs(access).map(tool => tool.function.name).join(', ');
+export function toolInstructions(access: ToolAccess, cwd: string, browser = false, ask = false): string {
+  const names = toolSpecs(access, false, ask).map(tool => tool.function.name).join(', ');
+  const web = browser ? ` ${browserNote('native')}${access === 'read-only' ? ' In this read-only chat the browser tools can open and read pages but not click or type.' : ''}` : '';
   const limits = access === 'read-only' ? 'Access is read-only: you can look at files in the working folder but not change them or run commands.'
     : access === 'workspace' ? 'You can edit files inside the working folder; running commands needs Full access, which the user can switch on in the composer.'
-    : 'You have Full access: commands and files anywhere the user can reach. Ask the user in chat before anything destructive or irreversible (deleting data, force-pushing, changing system settings).';
-  return `You have these tools in this chat: ${names}. Working folder: ${normalizeFsPath(cwd)}. ${limits} There is no sub-agent tool in this chat, so do the work directly and don't mention it.`;
+    : 'You have Full access: commands and files anywhere the user can reach. Do not ask for permission to proceed (commit, push, install, restart and the like are yours to do); ask in chat only before irreversibly deleting user data (files, databases, branches).';
+  return `You have these tools in this chat: ${names}. Working folder: ${normalizeFsPath(cwd)}. ${limits} There is no sub-agent tool in this chat, so do the work directly and don't mention it.${web}`;
 }
 
 const clip = (text: string, max = MAX_TOOL_OUTPUT) => text.length > max ? text.slice(0, max) + `\n[output cut at ${max} characters]` : text;
@@ -150,7 +172,8 @@ async function readLimited(path: string, limit: number, refuseHardLinked = false
     if (refuseHardLinked && info.nlink > 1) throw new Error(`${path} has other hard links, so it is not read outside Full access (it may be the same file as one outside the working folder).`);
     const buffer = Buffer.alloc(Math.min(info.size, limit));
     const {bytesRead} = await handle.read(buffer, 0, buffer.length, 0);
-    return {text: buffer.subarray(0, bytesRead).toString('utf8'), size: info.size};
+    // A cut at the limit can fall inside a character: the decoder holds back that partial character instead of emitting U+FFFD.
+    return {text: bytesRead < info.size ? new StringDecoder('utf8').write(buffer.subarray(0, bytesRead)) : buffer.subarray(0, bytesRead).toString('utf8'), size: info.size};
   } finally { await handle.close(); }
 }
 
@@ -197,8 +220,9 @@ function runCommand(command: string, timeoutSeconds: number, ctx: ToolContext): 
     // Its own process group on POSIX (so Stop can end everything it started); taskkill /T does the same job on Windows.
     const child = spawn(file, args, {cwd, windowsHide: true, detached: !WINDOWS, stdio: ['ignore', 'pipe', 'pipe'], env: agentCommandEnvironment(ctx.env)});
     let output = '', done = false;
-    const add = (chunk: Buffer) => { if (output.length < MAX_TOOL_OUTPUT * 2) output += chunk.toString('utf8'); };
-    child.stdout.on('data', add); child.stderr.on('data', add);
+    // One decoder per stream: a multi-byte character split across two pipe chunks is joined, not turned into U+FFFD.
+    const reader = (decoder: StringDecoder) => (chunk: Buffer) => { const piece = decoder.write(chunk); if (output.length < MAX_TOOL_OUTPUT * 2) output += piece; };
+    child.stdout.on('data', reader(new StringDecoder('utf8'))); child.stderr.on('data', reader(new StringDecoder('utf8')));
     const end = () => {
       if (child.pid === undefined) return;
       try { killTreeAndEscapees(child.pid, 'SIGTERM'); } catch { /* already gone */ }
@@ -214,6 +238,25 @@ function runCommand(command: string, timeoutSeconds: number, ctx: ToolContext): 
   });
 }
 
+/** One browser call through main's bridge, shown in the timeline as the same muster_browser tool row the MCP routes produce
+ *  (so the PiP and the sidebar follow it). The bridge applies the take-control lease and the read-only rule. */
+async function browserTool(call: ToolCall, args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
+  const base = {threadId: ctx.threadId, turnId: ctx.turnId};
+  const item = {type: 'mcpToolCall', server: BROWSER_MCP, tool: call.name, arguments: args};
+  const caller = browserCaller();
+  const allowed = !!ctx.browser && !!ctx.chatId && !!caller && browserToolSpecs(ctx.access).some(tool => tool.function.name === call.name);
+  ctx.emit('item/started', {...base, item: {...item, id: call.id}});
+  const done = (result: ToolResult, shown = result.content): ToolResult => { ctx.emit('item/completed', {...base, item: {...item, id: call.id, status: result.ok ? 'completed' : 'failed', aggregatedOutput: stored(shown), ...(result.ok ? {} : {success: false, error: clip(result.content, 2000)})}}); return result; };
+  if (!allowed) return done({content: !ctx.browser || !caller ? "Muster's in-app browser is not available in this chat." : 'This chat is read-only. Clicking, typing and form changes in the browser are not allowed.', ok: false});
+  let answer: McpToolResult;
+  try { answer = await caller!(ctx.chatId!, call.name, args); }
+  catch (error) { return done({content: `Muster's browser could not run ${call.name}: ${error instanceof Error ? error.message : String(error)}`, ok: false}); }
+  const text = answer.content.filter(part => part.type === 'text').map(part => (part as {text: string}).text).join('\n');
+  const picture = answer.content.find(part => part.type === 'image') as {data: string; mimeType: string} | undefined;
+  if (picture && ctx.vision) return done({content: `${text || 'Screenshot of the page'} (attached as an image below).`, ok: !answer.isError, image: {mediaType: picture.mimeType, data: picture.data, name: 'browser screenshot'}}, text || 'Took a screenshot');
+  return done({content: (text || (picture ? 'A screenshot was taken, but this model cannot see images. Use browser_snapshot to read the page.' : '(no output)')), ok: !answer.isError});
+}
+
 /** Runs one tool call, reporting it to the timeline in the same item shapes Codex and Claude Code produce. */
 export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
   const base = {threadId: ctx.threadId, turnId: ctx.turnId};
@@ -227,6 +270,15 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
     emit('item/completed', {...base, item: {...item, id, status: result.ok ? 'completed' : 'failed', aggregatedOutput: stored(shown), ...(result.ok ? {} : {success: false})}});
     return result;
   };
+  if (BROWSER_TOOL_SPECS.some(tool => tool.name === call.name)) return browserTool(call, args, ctx);
+  if (call.name === ASK_USER_TOOL && ctx.askUser) {
+    // Shown as the same muster_ask tool row the MCP routes produce; returns at once with the default.
+    const item = {type: 'mcpToolCall', server: ASK_MCP, tool: ASK_USER_TOOL, arguments: args};
+    emit('item/started', {...base, item: {...item, id}});
+    let content: string, ok = true;
+    try { content = await ctx.askUser(args); } catch (error) { content = `The question could not be shown (${error instanceof Error ? error.message : String(error)}). Continue with your default.`; ok = false; }
+    return finish(item, {content, ok});
+  }
   const kindOf = call.name === 'run_command' ? 'commandExecution' : call.name === 'read_file' ? 'fileRead' : call.name === 'write_file' || call.name === 'edit_file' ? 'fileChange' : 'commandExecution';
   const allowed = toolSpecs(ctx.access).some(tool => tool.function.name === call.name);
   if (!allowed) {
@@ -294,7 +346,9 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
       if (!await approved('item/fileChange/requestApproval', {changes: [{path, kind: 'update'}]})) return finish(item, declined);
       const info = await fs.stat(path);
       if (!info.isFile() || info.size > MAX_EDIT_FILE) return finish(item, {content: `${path} is not a regular file under ${MAX_EDIT_FILE / 1024 / 1024} MB.`, ok: false});
-      const current = await fs.readFile(path, 'utf8');
+      const bytes = await fs.readFile(path), current = bytes.toString('utf8');
+      // Decoding replaces bytes that are not UTF-8 and the write would save those replacements over the whole file.
+      if (!Buffer.from(current, 'utf8').equals(bytes)) return finish(item, {content: `${path} is not valid UTF-8 text, so edit_file would change bytes outside the edit. Use run_command or ask the user.`, ok: false});
       const first = oldText ? current.indexOf(oldText) : -1;
       if (first < 0) return finish(item, {content: 'old_string was not found in the file.', ok: false});
       if (current.indexOf(oldText, first + 1) >= 0) return finish(item, {content: 'old_string occurs more than once; include more context.', ok: false});

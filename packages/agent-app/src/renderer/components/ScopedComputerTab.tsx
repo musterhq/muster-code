@@ -136,7 +136,7 @@ function SandboxView({scope}:{scope:ScopedComputerRef}) {
         :<button className="is-primary" disabled={!!busy||!computer||state==='recovery-needed'||!!computer.repair} onClick={()=>void lifecycle('start')}><Play size={12}/>{busy==='start'?'Starting…':state==='stopped'?'Start':'Create and start'}</button>}
       {created&&<button disabled={!!busy||!!active} onClick={()=>void openConfirm(scratch?'dispose':'remove')}><Trash2 size={12}/>{scratch?'Dispose…':'Remove container…'}</button>}
       {!scratch&&<button disabled={!!busy||!!active||!files.entries.length&&!files.path} onClick={()=>void openConfirm('delete')}>Delete files…</button>}
-      <span className="sbx-limits">{limits?`${limits.memoryMiB} MiB · ${limits.cpus} CPU · ${limits.processes} processes · user ${computer!.user.split(':')[0]} · up to ${limits.maxRunning} running`:''}</span>
+      <span className="sbx-limits">{limits?`${limits.memoryMiB} MiB · ${limits.cpus} CPU · ${limits.processes} processes · ${limits.diskGiB} GB disk · user ${computer!.user.split(':')[0]} · up to ${limits.maxRunning} running`:''}</span>
       <button className={`sbx-toggle${settingsOpen?' is-on':''}`} aria-pressed={settingsOpen} title="Resources, services, read-only layers and export" onClick={()=>setSettingsOpen(open=>!open)}><Settings2 size={12}/>Settings</button>
       <button className={`sbx-toggle${filesOpen?' is-on':''}`} aria-pressed={filesOpen} onClick={()=>setFilesOpen(open=>!open)}><FolderOpen size={12}/>Files</button>
     </div>
@@ -163,7 +163,7 @@ function SandboxView({scope}:{scope:ScopedComputerRef}) {
     <div className="sbx-body">
       <div className="sbx-terminal" ref={terminal} role="log" aria-label="Sandbox output" onScroll={event=>{const el=event.currentTarget;stick.current=el.scrollHeight-el.scrollTop-el.clientHeight<40;}}>
         {runs.length?runs.map(run=><RunBlock key={run.id} run={run} busy={!!busy} onStop={()=>void cancel(run.id)}/>)
-          :<p className="sbx-empty">{state==='running'?'Commands run as an unprivileged user in /workspace inside the container. Nothing runs on '+device().lower+'.':state==='not-created'?'Create the sandbox to get an isolated Linux shell. Its /workspace folder is kept on '+device().lower+'.':'Start the sandbox to run commands.'}</p>}
+          :<p className="sbx-empty">{state==='running'?'Commands you run here, and the agent’s sandbox tools, run as an unprivileged user in /workspace inside the container. The agent can still read files on '+device().lower+'.':state==='not-created'?'Create the sandbox to get an isolated Linux shell. Its /workspace folder is kept on '+device().lower+'.':'Start the sandbox to run commands.'}</p>}
       </div>
       {filesOpen&&<FilesPane files={files} busy={!!busy} onOpen={path=>void loadFiles(path)} onImport={()=>void act('import',()=>invoke('computer.files.import',{scope,into:files.path}),()=>void loadFiles())} onExport={path=>void act('export',()=>invoke('computer.files.export',{scope,path}))}/>}
     </div>
