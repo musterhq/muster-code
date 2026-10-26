@@ -1685,7 +1685,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           if (changed) await provider.release?.(chatId);
           if (disposed || closing) throw new Error('Agent runtime is stopping. Provider selection was not changed.');
           const updated=store.updateChat(chatId,{providerId,providerBindingId:bindingId,model,...(changed?{providerThreadId:null,providerTurnId:null,providerThreadProviderId:null,providerThreadBindingId:null,providerThreadDriver:null,recovery:null,error:null}:{})});
-          if(changed && chat.providerThreadId) {store.appendItem(chatId,'notice','Provider selection changed. The next run starts a fresh provider conversation; displayed history is retained.','completed');timeline(chatId);}
+          // #724: the other provider never saw this conversation; its first message carries a summary of it.
+          if(changed && store.timeline(chatId).some(item=>item.kind==='user'&&item.text.trim())) {store.requireDigest(chatId);contextLedger.forget(chatId);store.appendItem(chatId,'notice','Provider selection changed. The next message starts a fresh provider conversation with a summary of the earlier messages; the displayed history is retained.','completed');timeline(chatId);}
           state();return updated;
         } finally {providerSelections.delete(chatId);}
       }
