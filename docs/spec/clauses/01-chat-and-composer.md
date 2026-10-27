@@ -237,7 +237,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/sidebar-chrome-403-dom.tsx::sending a first message keeps punctuation in its generated sidebar title`
 - Environment: The renderer bridge uses the real AgentStore title lifecycle with a scripted send; no external provider.
 - Known gaps: No external provider or native desktop; browser screenshots cover both themes separately.
-- Evidence: `~/.muster-work/review/403/red-on-main.txt` (four workflows fail on origin/main `66231c31`); `green-focused-final.txt` (four pass, plus sidebar and timeline regressions); `{before,after}-{chat,draft}-{light,dark}.png` (isolated browser).
+- Evidence: local; node packages/agent-app/dist/tests/sidebar-chrome-403-dom/sidebar-chrome-403-dom.mjs; exit 0; 4 passed, 0 failed, 0 skipped; commit 3d6bdf75f2454256e508cbebff87d2d923443774
 
 <a id="mus-spec-01-403b"></a>
 #### MUS-SPEC-01-403B: New chat remembers the last selected project folder, avoids broad home folders and submits in the displayed folder.
@@ -248,7 +248,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/sidebar-chrome-403-dom.tsx::New chat returns to the last project after a folderless or Documents chat`
 - Environment: DOM suite with a fake runtime and in-memory browser storage; no desktop or filesystem writes.
 - Known gaps: No external provider or native desktop; browser screenshots cover both themes separately.
-- Evidence: `~/.muster-work/review/403/red-on-main.txt` (four workflows fail on origin/main `66231c31`); `green-focused-final.txt` (four pass, plus sidebar and timeline regressions); `{before,after}-{chat,draft}-{light,dark}.png` (isolated browser).
+- Evidence: local; node packages/agent-app/dist/tests/sidebar-chrome-403-dom/sidebar-chrome-403-dom.mjs; exit 0; 4 passed, 0 failed, 0 skipped; commit 3d6bdf75f2454256e508cbebff87d2d923443774
 
 <a id="mus-spec-01-403c"></a>
 #### MUS-SPEC-01-403C: A single turn leaves no stray minimap dash; multi-turn ticks jump to their matching user row and disappear when the conversation shrinks.
@@ -259,7 +259,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/sidebar-chrome-403-dom.tsx::a one-turn transcript has no lone minimap dash and later turns remain reachable`
 - Environment: DOM suite rendering the real Timeline with virtualized layout measurements.
 - Known gaps: No external provider or native desktop; browser screenshots cover both themes separately.
-- Evidence: `~/.muster-work/review/403/red-on-main.txt` (four workflows fail on origin/main `66231c31`); `green-focused-final.txt` (four pass, plus sidebar and timeline regressions); `{before,after}-{chat,draft}-{light,dark}.png` (isolated browser).
+- Evidence: local; node packages/agent-app/dist/tests/sidebar-chrome-403-dom/sidebar-chrome-403-dom.mjs; exit 0; 4 passed, 0 failed, 0 skipped; commit 3d6bdf75f2454256e508cbebff87d2d923443774
 
 <a id="mus-spec-01-403d"></a>
 #### MUS-SPEC-01-403D: Duplicate chat names show distinct visible suffix hints, including same-folder chats; unique names stay plain.
@@ -270,4 +270,4 @@ Boundaries:
 - Test: `packages/agent-app/tests/sidebar-chrome-403-dom.tsx::duplicate sidebar chat names get distinct suffixes without renaming them`
 - Environment: DOM suite rendering the real Sidebar; no provider or desktop.
 - Known gaps: No external provider or native desktop; browser screenshots cover both themes separately.
-- Evidence: `~/.muster-work/review/403/red-on-main.txt` (four workflows fail on origin/main `66231c31`); `green-focused-final.txt` (four pass, plus sidebar and timeline regressions); `{before,after}-{chat,draft}-{light,dark}.png` (isolated browser).
+- Evidence: local; node packages/agent-app/dist/tests/sidebar-chrome-403-dom/sidebar-chrome-403-dom.mjs; exit 0; 4 passed, 0 failed, 0 skipped; commit 3d6bdf75f2454256e508cbebff87d2d923443774
