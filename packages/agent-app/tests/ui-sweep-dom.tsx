@@ -77,10 +77,10 @@ await check('an unprobed gateway says not checked yet and explains its model cou
   assert.match(document.body.textContent??'',/1 image, audio and other models/);
 });
 // Spec: MUS-SPEC-15-398B (docs/spec/clauses/15-settings-and-themes.md#mus-spec-15-398b)
-await check('duplicate folder names and search results show their parent paths',async()=>{
+await check('duplicate folder names and search results show their parent folders',async()=>{
   await render(<Sidebar/>);
   const names=[...document.querySelectorAll('[data-folder-id] .nav-section-title')].map(e=>e.textContent);
-  assert.ok(names.some(n=>n?.includes('/work/alpha')));assert.ok(names.some(n=>n?.includes('/work/beta')));
+  assert.ok(names.includes('redis-automation · alpha'));assert.ok(names.includes('redis-automation · beta'));
   openSpotlightSearch();await render(<SpotlightSearchHost/>);
   assert.match(document.body.textContent??'',/redis-automation.*alpha|alpha.*redis-automation/s);
   assert.match(document.body.textContent??'',/redis-automation.*beta|beta.*redis-automation/s);

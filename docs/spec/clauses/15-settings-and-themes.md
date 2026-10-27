@@ -16,7 +16,7 @@ Boundaries:
 | Case | What the assertions check | Test |
 |---|---|---|
 | [MUS-SPEC-15-398C](15-settings-and-themes.md#mus-spec-15-398c) | The sidebar collapses at 900 and returns when widened. | [`at 900 pixels the sidebar steps aside and returns when widened`](../../../packages/agent-app/tests/responsive-nav.test.ts) |
-| [MUS-SPEC-15-398B](15-settings-and-themes.md#mus-spec-15-398b) | Both surfaces show parent-path hints so the folders and chats can be distinguished. | [`duplicate folder names and search results show their parent paths`](../../../packages/agent-app/tests/ui-sweep-dom.tsx) |
+| [MUS-SPEC-15-398B](15-settings-and-themes.md#mus-spec-15-398b) | Both surfaces add the parent folder's name (the parent path when those also match) so the folders and chats can be told apart. | [`duplicate folder names and search results show their parent folders`](../../../packages/agent-app/tests/ui-sweep-dom.tsx) |
 | [MUS-SPEC-15-398A](15-settings-and-themes.md#mus-spec-15-398a) | Only the destination has an active highlight. | [`only the visible destination is highlighted after leaving a draft`](../../../packages/agent-app/tests/ui-sweep-dom.tsx) |
 | [MUS-SPEC-15-622A](15-settings-and-themes.md#mus-spec-15-622a) | All 27 built-in themes are loaded; every colour token of each parses, and each meets the contrast minimums on its text and background pairs, with the new ones at 4.5:1 on every pair. | [`contrast: every theme meets WCAG AA on its text/background pairs (the six new ones on every pair at 4.5:1)`](../../../packages/agent-app/tests/theme.test.ts) |
 | [MUS-SPEC-15-572A](15-settings-and-themes.md#mus-spec-15-572a) | A theme with extra fields or padded token values is refused. | [`a custom theme list with extra fields or untrimmed token values is rejected, not stored as given`](../../../packages/agent-app/tests/protocol-bughunt.test.ts) |
@@ -57,12 +57,12 @@ Boundaries:
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-15-398b"></a>
-#### MUS-SPEC-15-398B: Duplicate folder names and search results show their parent paths
+#### MUS-SPEC-15-398B: Duplicate folder names and search results show their parent folders
 
 - Precondition: Two folders have the same basename and each holds a chat with the same title.
 - Action: Read the sidebar and open chat search.
-- Expected result: Both surfaces show parent-path hints so the folders and chats can be distinguished.
-- Test: `packages/agent-app/tests/ui-sweep-dom.tsx::duplicate folder names and search results show their parent paths`
+- Expected result: Both surfaces add the parent folder's name (the parent path when those also match) so the folders and chats can be told apart.
+- Test: `packages/agent-app/tests/ui-sweep-dom.tsx::duplicate folder names and search results show their parent folders`
 - Environment: Node and linkedom with the real renderer and a fixture bridge; responsive navigation uses a window media-query fixture. No desktop app or network.
 - Known gaps: Does not exercise a live provider or imported history database. Visual layout is checked separately in a browser harness.
 - Evidence: UNVERIFIED

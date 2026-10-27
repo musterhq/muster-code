@@ -4,6 +4,7 @@ import { OrgSidebar } from './OrgSidebar';
 import { badgeCount, buildActivity } from '../inboxModel';
 import { NAMES } from '../../shared/workspace-names';
 import { taskWorktreeFolderIds } from '../taskWorktrees';
+import { folderDisplayName } from '../spotlightModel';
 import type { WorkspaceProject, WorkspaceTask } from '../../shared/domains/paperclip-protocol';
 import {
   AlarmClock,
@@ -576,7 +577,7 @@ export function Sidebar(): React.ReactElement {
             <Collapsible.Root className="nav-section" key={folder.id} open={isOpen(gid)} onOpenChange={value=>toggleGroup(gid,value)} data-folder-id={folder.id} {...dropMark}>
               {renamingFolder===folder.id
                 ? <FolderRename folder={folder} done={()=>setRenamingFolder(null)}/>
-                : <GroupHead nested draggable={folderIds.length>1} title={snapshot.folders.filter(item=>item.name===folder.name).length>1?`${folder.name} · ${folder.path.replace(/[\\/][^\\/]+[\\/]?$/, '')}`:folder.name} tooltip={folder.missing?`${folder.path} — not found`:`${folder.path}${folderIds.length>1?' · drag or ⌥⇧↑/⌥⇧↓ to reorder':''}`} chats={chats} className={folder.missing?'is-missing':''} icon={folder.missing?<TriangleAlert size={13}/>:<FolderOpen size={13}/>} onContextMenu={event=>{event.preventDefault();void folderMenu(folder,event.clientX,event.clientY);}}>
+                : <GroupHead nested draggable={folderIds.length>1} title={folderDisplayName(folder,snapshot.folders)} tooltip={folder.missing?`${folder.path} — not found`:`${folder.path}${folderIds.length>1?' · drag or ⌥⇧↑/⌥⇧↓ to reorder':''}`} chats={chats} className={folder.missing?'is-missing':''} icon={folder.missing?<TriangleAlert size={13}/>:<FolderOpen size={13}/>} onContextMenu={event=>{event.preventDefault();void folderMenu(folder,event.clientX,event.clientY);}}>
                 {folder.missing
                   ? <button type="button" className="nav-relink" title={`${folder.path} was moved or deleted. Choose its new location.`} onClick={()=>void folderMenu(folder,0,0,'relink')}>Relink</button>
                   : <>

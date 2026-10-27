@@ -75,6 +75,17 @@ export function splitHighlight(text: string, ranges: FuzzyMatch['ranges']): Arra
 /** Empty query shows up to nine rows, so ⌘1…⌘9 always maps to a visible row. */
 export const MAX_CHAT_RESULTS = 9;
 
+const parentOf = (path: string) => path.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '');
+const baseOf = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+/** A folder's name, plus its parent folder's name when another folder has the same name (the parent path if that also matches). */
+export function folderDisplayName(folder: Pick<Folder, 'name' | 'path'>, folders: readonly Pick<Folder, 'name' | 'path'>[]): string {
+  const twins = folders.filter(item => item.name === folder.name);
+  if (twins.length < 2) return folder.name;
+  const parent = parentOf(folder.path);
+  const short = baseOf(parent);
+  return `${folder.name} · ${twins.filter(item => baseOf(parentOf(item.path)) === short).length > 1 ? parent : short}`;
+}
+
 /** The muted right-aligned label: the chat's project name, else its folder name, else "Personal chat". */
 export function chatLocationName(
   chat: Pick<Chat, 'folderId' | 'projectId'>,
@@ -87,7 +98,7 @@ export function chatLocationName(
   }
   if (chat.folderId) {
     const folder = folders.find((f) => f.id === chat.folderId);
-    if (folder) return folders.filter(item => item.name === folder.name).length > 1 ? `${folder.name} · ${folder.path.replace(/[\\/][^\\/]+[\\/]?$/, '')}` : folder.name;
+    if (folder) return folderDisplayName(folder, folders);
   }
   return 'Personal chat';
 }
