@@ -2,6 +2,7 @@ import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
 import {check} from './dom-check.ts';
+import {until} from './dom-wait.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 (globalThis as any).require=require;
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
@@ -51,13 +52,13 @@ summaryForDock.setTerminalDock({placement:'panel',open:true},false);
 await check('browsing chats with the terminal dock open starts no shell; opening Terminal starts exactly one',async()=>{
   for(let index=0;index<5;index++){
     root.render(<><button onClick={()=>openTerminalTab(`browse:${index}`,'Terminal','terminals')}>Open Terminal</button><BrowsingDock chatId={`browse:${index}`}/></>);
-    await delay(40);
+    await delay(40);await until(()=>/No terminal is open/.test(text()),'the empty terminal dock');
     assert.match(text(),/No terminal is open/);
     assert.ok(document.querySelector('.terminal-start'),'the empty state offers New terminal');
   }
   assert.equal(count('terminal.create'),0,'switching through five chats with the dock open starts no shells');
   const listsBeforeOpen=count('terminal.list');
-  click('button');await delay(60);
+  click('button');await delay(60);await until(()=>count('terminal.create')>0,'the explicit terminal open');
   assert.equal(count('terminal.create'),1,'explicitly opening Terminal in the visible dock starts exactly one shell');
   assert.equal(calls.find(call=>call.command==='terminal.create')?.input.chatId,'browse:4');
   assert.equal(count('terminal.list'),listsBeforeOpen+1,'opening only reloads the current chat once');
@@ -66,8 +67,8 @@ await check('browsing chats with the terminal dock open starts no shell; opening
 });
 // #614: a rejected automatic open still leaves New terminal available for retry.
 terminalList=[];failTerminalCreate=true;
-root.render(<BrowsingDock chatId="browse:retry"/>);await delay(40);
-openTerminalTab('browse:retry','Terminal','terminals');await delay(40);
+root.render(<BrowsingDock chatId="browse:retry"/>);await delay(40);await until(()=>/No terminal is open/.test(text()),'the empty terminal dock');
+openTerminalTab('browse:retry','Terminal','terminals');await delay(40);await until(()=>/Close a terminal before opening another/.test(text()),'the failed open error');
 assert.match(text(),/Close a terminal before opening another/);
 assert.match(text(),/No terminal is open/);
 click('.terminal-start');await delay(40);
