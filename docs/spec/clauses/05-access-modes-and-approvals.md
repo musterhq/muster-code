@@ -51,7 +51,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/write-confined-347.test.ts::a racer swapping a folder and a link under repeated writes puts no content outside`
 - Environment: Node test runner, a concurrent filesystem racer, temp folders, a file system that allows links.
 - Known gaps: A race test is a sample, not a proof. It does not show which check stopped each attempt. Deterministic creation races are covered by MUS-SPEC-19-710A, MUS-SPEC-19-710B and MUS-SPEC-19-710C.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/710/green-workflows.txt; exit 0; 51 passed, 0 failed, 1 skipped; commit db2dcfbd0197ba0406bb3135b41764e4ff8a15e2
 
 <a id="mus-spec-05-347c"></a>
 #### MUS-SPEC-05-347C: A policyOnly flag in the parameters is not trusted

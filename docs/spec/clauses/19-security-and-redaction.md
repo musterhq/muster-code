@@ -178,7 +178,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/workspace-write-race-710.test.ts::a workspace write raced at file creation leaves no empty file outside`
 - Environment: Node test runner; real temporary folders; filesystem/child-process hooks force the race at the mutation boundary; the native helper is built locally when present.
 - Known gaps: Does not cover a process able to move a pinned directory outside the workspace or to add hard links after the handle check; that process already has access outside. No desktop UI is involved.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/710/green.txt; exit 0; 4 passed, 0 failed, 0 skipped; commit db2dcfbd0197ba0406bb3135b41764e4ff8a15e2
 
 <a id="mus-spec-19-710b"></a>
 #### MUS-SPEC-19-710B: A workspace write raced at parent creation leaves no folder outside
@@ -189,7 +189,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/workspace-write-race-710.test.ts::a workspace write raced at parent creation leaves no folder outside`
 - Environment: Node test runner; real temporary folders; filesystem/child-process hooks force the race at the mutation boundary; the native helper is built locally when present.
 - Known gaps: Does not cover a process able to move a pinned directory outside the workspace or to add hard links after the handle check; that process already has access outside. No desktop UI is involved.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/710/green.txt; exit 0; 4 passed, 0 failed, 0 skipped; commit db2dcfbd0197ba0406bb3135b41764e4ff8a15e2
 
 <a id="mus-spec-19-710c"></a>
 #### MUS-SPEC-19-710C: A workspace edit raced at file open leaves nothing outside and preserves outside files
@@ -200,4 +200,4 @@ Boundaries:
 - Test: `packages/agent-app/tests/workspace-write-race-710.test.ts::a workspace edit raced at file open leaves nothing outside and preserves outside files`
 - Environment: Node test runner; real temporary folders; filesystem/child-process hooks force the race at the mutation boundary; the native helper is built locally when present.
 - Known gaps: Does not cover a process able to move a pinned directory outside the workspace or to add hard links after the handle check; that process already has access outside. No desktop UI is involved.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/710/green.txt; exit 0; 4 passed, 0 failed, 0 skipped; commit db2dcfbd0197ba0406bb3135b41764e4ff8a15e2
