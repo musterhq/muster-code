@@ -767,7 +767,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       if (disposed || !runs.has(chatId) || !delta) return;
       if (reconnectNotice) reconnected();
       attemptActivity = true;
-      if (kind === 'assistant') { producedAssistant = true; assistantText += delta; lastAssistantText = lastWasTool ? delta : lastAssistantText + delta; lastWasTool = false; }
+      if (kind === 'assistant') { producedAssistant = true; assistantText += delta; lastAssistantText = lastWasTool || segment?.kind !== 'assistant' ? delta : lastAssistantText + delta; lastWasTool = false; }
       if (segment && segment.kind !== kind) seal();
       if (!segment) segment = store.appendItem(chatId, kind, '', 'running');
       // Rewriting the whole growing text on every delta made a long reply O(n²) in SQLite writes; the text is
