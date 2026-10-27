@@ -22,7 +22,7 @@ import type {Chat, TimelineItem} from '../src/shared/protocol.ts';
 import type {AgentService} from '../src/main/service-loader.ts';
 
 /** One start of the fake Claude Code: its arguments, the environment a router turn depends on, its folder and the prompt it got. */
-interface Launch {argv: string[]; env: Record<string, string | null>; cwd: string; prompt: string}
+interface Launch {argv: string[]; env: Record<string, string | null>; cwd: string; prompt: string; mcpConfig?: string}
 const ENV_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_CUSTOM_HEADERS', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_SMALL_FAST_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL'];
 
 /** A stand-in for the `claude` CLI: records each start, reads the stream-json prompt and answers like Claude Code does. */
@@ -43,7 +43,8 @@ process.stdin.on('data', chunk => {
   const message = JSON.parse(line).message;
   const prompt = typeof message.content === 'string' ? message.content : message.content.filter(part => part.type === 'text').map(part => part.text).join('\\n');
   const previous = fs.existsSync(${JSON.stringify(log)}) ? JSON.parse(fs.readFileSync(${JSON.stringify(log)}, 'utf8')) : [];
-  previous.push({argv, env, cwd: process.cwd(), prompt});
+  const mcpConfig = at('--mcp-config') ? fs.readFileSync(at('--mcp-config'), 'utf8') : undefined;
+  previous.push({argv, env, cwd: process.cwd(), prompt, mcpConfig});
   fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify(previous));
   const n = previous.length, out = event => process.stdout.write(JSON.stringify(event) + '\\n');
   out({type: 'system', subtype: 'init', session_id: session, model: at('--model'), tools: ['Bash'], cwd: process.cwd()});
@@ -151,7 +152,7 @@ test('a Workspace router Claude turn with a user tool server runs through Claude
   for (const key of ['ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_SMALL_FAST_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL']) assert.equal(run!.env[key], 'cc/claude-opus-5-5', `${key} is pinned to the chosen model`);
   assert.equal(flag(run!.argv, '--model'), 'cc/claude-opus-5-5');
   assert.equal(flag(run!.argv, '--permission-mode'), 'acceptEdits', 'Workspace access');
-  assert.ok(Object.keys(JSON.parse(flag(run!.argv, '--mcp-config')!).mcpServers).includes('projectdb'), 'the user tool server is loaded');
+  assert.ok(Object.keys(JSON.parse(run!.mcpConfig!).mcpServers).includes('projectdb'), 'the user tool server is loaded');
   assert.match(run!.prompt, /Look at the schema\./);
   assert.ok((await h.items(chat.id)).some(item => item.kind === 'assistant' && item.text === 'claude code answer 1'), 'the answer shows in the chat');
   assert.equal(after.providerThreadDriver, 'claude-code-cli', 'the thread is a Claude Code thread');

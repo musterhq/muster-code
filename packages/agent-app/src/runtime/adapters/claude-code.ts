@@ -2,6 +2,9 @@ import {spawnOwned} from '../owned-process.ts';
 import {permissionResult} from '../permission-result.ts';
 import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {cliSpawn, jsonLines, loadImages, text} from './shared.ts';
 import {killTree} from './cli-common.ts';
 import {launcherSpec} from '../launcher-script.ts';
@@ -23,9 +26,9 @@ export const claudePromptsHost = (mode: AdapterRunInput['permissionMode']) => mo
 /** #427: the sub-agent tools (Task, and Agent in newer builds) are allowed in every permission mode, so a print-mode run
  *  (which cannot ask) never denies a sub-agent. A sub-agent still works under the chat's permission mode. */
 export const CLAUDE_SUBAGENT_TOOLS = ['Task', 'Agent'];
-function toolArgs(servers: AdapterRunInput['mcpServers']): string[] {
+function toolArgs(servers: AdapterRunInput['mcpServers'], configFile?: string): string[] {
   const names = Object.keys(servers ?? {});
-  return [...(names.length ? ['--mcp-config', JSON.stringify({mcpServers: Object.fromEntries(Object.entries(servers ?? {}).map(([name, spec]) => [name, spec.args ? spec : {...spec, ...launcherSpec(spec.command)}]))})] : []),
+  return [...(configFile ? ['--mcp-config', configFile] : []),
     '--allowedTools', ...CLAUDE_SUBAGENT_TOOLS, ...names.map(name => `mcp__${name}`)];
 }
 
@@ -33,7 +36,7 @@ function toolArgs(servers: AdapterRunInput['mcpServers']): string[] {
  *  (Read, Grep, Glob, LS) stay; commands and edits go through the muster_sandbox tools. */
 export const CLAUDE_SANDBOX_DENIED_TOOLS = ['Bash', 'BashOutput', 'KillShell', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit'];
 
-export function claudeArgs(input: AdapterRunInput, sessionId: string): string[] {
+export function claudeArgs(input: AdapterRunInput, sessionId: string, configFile?: string): string[] {
   const alias = input.model.replace(/^claude-code\//, '');
   return ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     // The turn arrives as stream-json user messages on stdin (images as content blocks); stdin stays open while the
@@ -41,7 +44,7 @@ export function claudeArgs(input: AdapterRunInput, sessionId: string): string[] 
     '--input-format', 'stream-json',
     // Muster's own tool servers (in-app browser, terminal, mailbox…): loaded alongside the user's, and allowed, since
     // they are first-party and each enforces its own lease and scope. Both flags are variadic, so a flag follows them.
-    ...toolArgs(input.mcpServers),
+    ...toolArgs(input.mcpServers, configFile),
     // Variadic too, so a flag follows it. A deny rule wins over every permission mode and allow rule.
     ...(input.sandboxed ? ['--disallowedTools', ...CLAUDE_SANDBOX_DENIED_TOOLS] : []),
     '--permission-mode', claudePermissionMode(input.sandboxed ? 'read-only' : input.permissionMode),
@@ -158,9 +161,21 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       // would silently switch billing. That key has its own Anthropic API row.
       const env = {...(options.env ?? process.env), ...(input.env ?? {})}; delete env.ANTHROPIC_API_KEY;
       let child: ChildProcess;
-      const launch = cliSpawn(options.binary, claudeArgs(input, sessionId), env);
-      try { child = spawnOwned(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe']}, spawn); }
-      catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `Claude Code could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
+      let configDir: string | undefined;
+      const cleanConfig = () => { if (configDir) { try { rmSync(configDir, {recursive: true, force: true}); } catch { /* best effort after process exit */ } } };
+      try {
+        // The config contains MCP environment secrets and per-chat tokens. Only its path belongs in argv.
+        let configFile: string | undefined;
+        if (Object.keys(input.mcpServers ?? {}).length) {
+          configDir = mkdtempSync(join(tmpdir(), 'muster-mcp-'));
+          configFile = join(configDir, 'config.json');
+          const mcpServers = Object.fromEntries(Object.entries(input.mcpServers ?? {}).map(([name, spec]) => [name, spec.args ? spec : {...spec, ...launcherSpec(spec.command)}]));
+          writeFileSync(configFile, JSON.stringify({mcpServers}), {mode: 0o600});
+        }
+        const launch = cliSpawn(options.binary, claudeArgs(input, sessionId, configFile), env);
+        child = spawnOwned(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe']}, spawn);
+      }
+      catch (error) { cleanConfig(); resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `Claude Code could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let accepted = false, settled = false, final: {ok: boolean; text: string} | undefined, stderr = '', streamedText = false;
       // `pending` counts results still owed. The CLI folds a message that arrives mid-turn into that turn, so several
       // steers can share ONE result: after a result, stdin stays open for a short grace while steers are unanswered.
@@ -240,7 +255,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       };
       const accept = () => { if (!accepted) { accepted = true; input.onThreadReady(sessionId); input.onTurnAccepted({threadId: sessionId, turnId}); } };
       const threadFor = (parent: unknown) => typeof parent === 'string' && parent ? `${sessionId}:${parent}` : sessionId;
-      const finish = (result: AdapterRunResult) => { if (settled) return; settled = true; input.signal.removeEventListener('abort', abort); clearTimeout(killer); clearTimeout(grace); resolve(result); };
+      const finish = (result: AdapterRunResult) => { if (settled) return; settled = true; input.signal.removeEventListener('abort', abort); clearTimeout(killer); clearTimeout(grace); cleanConfig(); resolve(result); };
       let killer: ReturnType<typeof setTimeout> | undefined;
       // SIGINT lets the CLI stop its own work; then the whole process group goes, so a tool command it started (which still
       // holds stdout) cannot keep the run open after Stop.
