@@ -1089,3 +1089,6 @@ textarea:focus-visible {
 :root[data-transparency='reduce'] .ui-menu.ui-menu { background: var(--bg-menu); -webkit-backdrop-filter: none; backdrop-filter: none; }
 @media (prefers-reduced-transparency: reduce) { .ui-menu.ui-menu { background: var(--bg-menu); -webkit-backdrop-filter: none; backdrop-filter: none; } }
 @media (prefers-reduced-motion: reduce) { .ui-menu.ui-menu { transition: none; } }
+
+/* Duplicate chat names keep their title and reserve a compact suffix in the row. */
+.chat-title-hint { flex:0 1 auto; max-width:42%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-faint); font-size:var(--fs-10); }

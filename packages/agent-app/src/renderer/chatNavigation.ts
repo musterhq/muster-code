@@ -1,3 +1,4 @@
+import {looksBroadFolder} from '../shared/domains/checkout-protocol.ts';
 import type {Chat,Snapshot} from '../shared/protocol.ts';
 
 export type ChatSort = 'recent' | 'name' | 'active';
@@ -58,13 +59,21 @@ export function edgeScrollStep(pointerY:number,rect:{top:number;bottom:number},b
   return 0;
 }
 
-/** Where a new chat should land: the active chat's folder/project, dropping stale or mismatched references the runtime would reject. */
-export function newChatTarget(chat:Pick<Chat,'folderId'|'projectId'>|null|undefined,snapshot:Pick<Snapshot,'projects'|'folders'>|null|undefined):{folderId?:string;projectId?:string} {
-  if(!chat||!snapshot)return {};
-  const folderId=chat.folderId&&snapshot.folders.some(folder=>folder.id===chat.folderId)?chat.folderId:undefined;
-  const project=chat.projectId?snapshot.projects.find(item=>item.id===chat.projectId):undefined;
-  if(project&&(folderId?project.folderIds.includes(folderId):project.folderIds.length===1))return {folderId,projectId:project.id};
-  return folderId?{folderId}:{};
+/** Implicit New chat targets stay in the last project folder; broad home folders are explicit choices only. */
+export function newChatTarget(chat:Pick<Chat,'folderId'|'projectId'>|null|undefined,snapshot:(Pick<Snapshot,'projects'|'folders'>&Partial<Pick<Snapshot,'chats'>>)|null|undefined,previous?:ChatTarget):ChatTarget {
+  if(!snapshot)return {};
+  const targetFor=(candidate:Pick<Chat,'folderId'|'projectId'>|null|undefined):ChatTarget|undefined=>{
+    if(!candidate)return;
+    const project=candidate.projectId?snapshot.projects.find(item=>item.id===candidate.projectId&&!item.archived):undefined;
+    const folderId=candidate.folderId??project?.primaryFolderId??project?.folderIds[0];
+    const folder=snapshot.folders.find(item=>item.id===folderId&&!item.missing&&!looksBroadFolder(item.path));
+    if(folder)return {folderId:folder.id,...(project?.folderIds.includes(folder.id)?{projectId:project.id}:{})};
+  };
+  const selected=targetFor(chat)??targetFor(previous);
+  if(selected)return selected;
+  const recent=[...(snapshot.chats??[])].filter(item=>!item.archived).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
+  for(const candidate of recent){const target=targetFor(candidate);if(target)return target;}
+  return {};
 }
 
 /** A stateful selection guard keeps streaming snapshots from requesting scroll. */

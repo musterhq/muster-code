@@ -36,7 +36,7 @@ export const TimelineNavigation=memo(function TimelineNavigation({turns,currentI
       <Tip label="Close search"><button type="button" aria-label="Close conversation search" onClick={()=>{onSearch('');setSearchOpen(false);}}><X size={12}/></button></Tip>
     </div>}
     <nav className="turn-navigation" aria-label="Conversation turns" onKeyDown={event=>{if(event.key==='Escape'){setDismissed(true);setHovered(undefined);}}} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget)){setFocused(undefined);setWindowFocus(undefined);}}} onMouseLeave={()=>setHovered(undefined)}>
-    <div className="turn-rail">
+    {turns.length>1&&<div className="turn-rail">
       {start>0&&<button type="button" className="turn-page" aria-label="Earlier conversation turns" onClick={()=>focus(Math.max(0,start-1))}><ChevronUp size={12}/></button>}
       {turns.slice(start,end).map((turn,offset)=>{const turnIndex=start+offset;return <button type="button" key={turn.id} ref={node=>{if(node)buttons.current.set(turn.id,node);else buttons.current.delete(turn.id);}}
         className={`turn-tick${currentId===turn.id?' is-current':''}`} aria-label={`Turn ${turnIndex+1}: ${turn.prompt||'User message'}`} aria-current={currentId===turn.id?'location':undefined}
@@ -44,7 +44,7 @@ export const TimelineNavigation=memo(function TimelineNavigation({turns,currentI
         onFocus={()=>{setFocused(turn.id);setHovered(undefined);setDismissed(false);}} onMouseEnter={()=>{setHovered(turn.id);setDismissed(false);}}
         onKeyDown={event=>keyboard(event,turnIndex)} onClick={()=>onTurn(turn.id)}><span aria-hidden="true"/></button>;})}
       {end<turns.length&&<button type="button" className="turn-page" aria-label="Later conversation turns" onClick={()=>focus(end)}><ChevronDown size={12}/></button>}
-    </div>
+    </div>}
     <div className="turn-navigation-actions">
       {onSearch&&<Tip label="Find in conversation"><button type="button" aria-label="Find in conversation" aria-expanded={searchOpen} onClick={openSearch}><Search size={13}/></button></Tip>}
       <Tip label="Previous reading position"><button type="button" disabled={!canGoBack} onClick={onBack} aria-label="Back to previous reading position"><Undo2 size={13}/></button></Tip>
