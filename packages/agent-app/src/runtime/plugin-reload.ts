@@ -74,14 +74,14 @@ export const pluginReloadNotice = (name: string) => `${name} installed — resta
 export class PluginReloads {
   private readonly handled = new Set<string>();
   private readonly awaiting = new Set<string>();
-  private readonly connectorChats = new Set<string>();
+  private readonly connectorChats = new Map<string, Set<string>>();
   /** True the first time this install reaches this chat. */
   claim(plugin: InstalledPlugin, chatId: string): boolean {
     const key = `${plugin.key}\0${chatId}`;
     if (this.handled.has(key)) return false;
     this.handled.add(key);
     if (this.handled.size > 2048) this.handled.delete(this.handled.values().next().value!);
-    if (plugin.connectors) this.connectorChats.add(chatId);
+    if (plugin.connectors) this.connectorChats.set(chatId, new Set([...this.connectorChats.get(chatId) ?? [], plugin.name]));
     return true;
   }
   /** The chat's running turn is being stopped for a re-send. */
@@ -90,5 +90,7 @@ export class PluginReloads {
   settled(chatId: string): boolean { return this.awaiting.delete(chatId); }
   /** An installed plugin brought connector apps: this chat's turns load them from now on. */
   wantsConnectors(chatId: string): boolean { return this.connectorChats.has(chatId); }
+  /** The installed plugins' names, so only their connectors load (#756). */
+  connectorNames(chatId: string): string[] { return [...this.connectorChats.get(chatId) ?? []]; }
   forget(chatId: string): void { this.awaiting.delete(chatId); this.connectorChats.delete(chatId); }
 }

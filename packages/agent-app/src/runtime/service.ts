@@ -56,7 +56,7 @@ import { createNativeTurnObserver } from './native-turns.ts';
 import { createNativeQueueMirror } from './native-queue.ts';
 import { ChatAttachments, attachedFileLines } from './attachments.ts';
 import { admissionRetryText, asSentence, retryClock, withAdmissionRetry } from './admission-retry.ts';
-import { ContextLedger, HISTORY_WINDOW_EVENT, TOOLS_UNAVAILABLE_EVENT, requestsConnectors, type ContextBlock } from './context-budget.ts';
+import { ContextLedger, HISTORY_WINDOW_EVENT, TOOLS_UNAVAILABLE_EVENT, requestsConnectors, requestedConnectorNames, type ContextBlock } from './context-budget.ts';
 import { createDomainHooks } from './domains/hooks.ts';
 import { createDomains } from './domains/index.ts';
 import type { DomainFactory } from './domains/types.ts';
@@ -827,7 +827,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // #739: this run's model; the window its events report belongs to it, and only its own earlier report caps it.
         const runModel = modelKey(chat.providerId ?? '', chat.model), engineWindow = reportedWindowFor(store.contextTelemetry(chatId), runModel);
         const attempt = () => run.stopped ? Promise.resolve(stoppedBeforeDispatch) : provider.run({ chat: {...chat,providerTurnId:undefined,recovery:undefined}, cwd, prompt: contextualPrompt,
-          ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) || pluginReloads.wantsConnectors(chatId) ? {connectorsRequested: true} : {}),
+          ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) || pluginReloads.wantsConnectors(chatId) ? {connectorsRequested: true, connectorNames: [...requestedConnectorNames(prompt), ...pluginReloads.connectorNames(chatId)]} : {}),
           ...(runOptions.configOverrides ? {configOverrides: runOptions.configOverrides as Record<string, string | number | boolean | string[]>} : {}), ...(runOptions.developerInstructions ? {developerInstructions: runOptions.developerInstructions} : {}),
           ...(claudeCommand ? {claudeCommand} : {}),
           ...(engineWindow ? {engineWindow} : {}),
