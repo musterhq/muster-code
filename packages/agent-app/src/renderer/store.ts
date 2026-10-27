@@ -26,6 +26,7 @@ import {cleanIpcError, isNotGitRepository} from './components/resourceErrors';
 import { BridgeError, getBridge, invoke, subscribe } from './bridge';
 import { runtimeMessage } from './composerBridge';
 import { focusComposer } from './focus';
+import {newChatTarget,type ChatTarget} from './chatNavigation';
 import { killChatTerminals, requestTerminal } from './processSummary';
 import { shareStructure } from './structuralShare';
 import { TimelineReplica } from './timeline-replica';
@@ -267,6 +268,11 @@ function set(patch: Partial<AppState>): void {
       nextState.resourcesHidden = false;
     }
   }
+  // Remember deliberate chat selection, not a background snapshot's updatedAt changes.
+  if ('activeChatId' in patch && nextState.activeChatId !== state.activeChatId) {
+    const target = newChatTarget(nextState.snapshot?.chats.find(chat=>chat.id===nextState.activeChatId),nextState.snapshot,lastChatTarget());
+    if(target.folderId)try {localStorage.setItem('muster.lastChatTarget.v1',JSON.stringify(target));} catch {}
+  }
   state = nextState;
   if ('timelines' in patch || 'activeChatId' in patch || 'tabs' in patch) {
     const protectedIds = new Set([state.activeChatId, ...state.tabs.map(tab=>tab.chatId), ...timelineReads.keys()]);
@@ -491,6 +497,17 @@ function applySnapshot(snapshot: Snapshot): void {
 export function activeChat(): Chat | null {
   return state.snapshot?.chats.find((c) => c.id === state.activeChatId) ?? null;
 }
+
+function lastChatTarget():ChatTarget {
+  try {const value:unknown=JSON.parse(localStorage.getItem('muster.lastChatTarget.v1')??'null');
+    if(value&&typeof value==='object'){
+      const target=value as ChatTarget;
+      return {folderId:typeof target.folderId==='string'?target.folderId:undefined,projectId:typeof target.projectId==='string'?target.projectId:undefined};
+    }
+  } catch {}
+  return {};
+}
+export function defaultNewChatTarget():ChatTarget {return newChatTarget(activeChat(),state.snapshot,lastChatTarget());}
 
 // ---------------------------------------------------------------------------
 // Chats

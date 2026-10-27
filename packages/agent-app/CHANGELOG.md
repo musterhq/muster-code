@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - Unanswered permissions now decline, Stop ends tool process trees, and startup leaves reused process IDs alone (#407).
+- Chat titles keep their punctuation, New chat returns to your last project folder, matching chat names get a small suffix, and one-turn chats no longer show a stray minimap dash (#403).
 - A temporary provider failure after work has started now gets up to two automatic continuations on the same thread, with a countdown and a notice for each failure. A turn that ends after a tool call without replying gets one chance to finish, and live plan updates show their checklist (#386).
 - UI fixes from the 0.3.11 sweep (#398). Only one sidebar item is highlighted at a time, and Memory is highlighted while it is open. Two folders with the same name now show their parent folder in the sidebar and in search. Memory suggestions start as one line you can expand to edit. A turn's time no longer counts an import notice added later, so it no longer reads hundreds of hours. A gateway that hasn't been checked says Not checked yet instead of Ready. An empty project no longer shows In progress. The sidebar folds away below 960px.
 - Workspace writes and edits can no longer leave empty files or folders outside the chat’s folder when another process swaps a parent folder for a link (#710).

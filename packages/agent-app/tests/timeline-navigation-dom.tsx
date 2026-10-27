@@ -57,7 +57,7 @@ assert.deepEqual(readingAnchor(),previousReading,'Back restores anchor plus offs
 (document.querySelector('[aria-label="Go to latest conversation activity"]') as HTMLButtonElement).click();await delay(30);
 assert.ok(timeline.scrollTop>0);
 await render([{...rows[0],id:'other',chatId:'two',text:'Second chat only'}],'two');
-assert.equal(document.querySelectorAll('.turn-tick').length,1);assert.match(document.querySelector('.turn-tick')?.getAttribute('aria-label')??'',/Second chat only/);
+assert.equal(document.querySelectorAll('.turn-tick').length,0,'a one-turn chat has no lone minimap dash');
 assert.equal(document.querySelector('[aria-label="Back to previous reading position"]')?.hasAttribute('disabled'),true);
 // All turns remain keyboard-reachable without rendering thousands of buttons.
 const many=summarizeTurns(Array.from({length:5000},(_,index)=>({...rows[0],id:'many'+index,text:'Prompt '+index})));

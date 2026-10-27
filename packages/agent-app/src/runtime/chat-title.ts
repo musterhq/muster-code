@@ -24,7 +24,7 @@ export function generateChatTitle(prompt: string, reply = ''): string | null {
 function fromText(source: string): string | null {
   let text = source.replace(/```[\s\S]*?(?:```|$)/g, ' ').replace(/`([^`\n]*)`/g, (_, code: string) => code.length <= 24 ? code : ' ').replace(/https?:\/\/\S+/g, ' ').replace(/<[^>\n]+>/g, ' ');
   // The first line that says something names the task ("Hi!\nFix the build" skips the greeting line).
-  const lines = text.split(/\n+/).map(line => line.replace(/^\s*(?:[-*#>]+|\d+[.)])\s*/, '').trim()).filter(line => /[\p{L}\p{N}]/u.test(line));
+  const lines = text.split(/\n+/).map(line => line.replace(/^\s*(?:[-*#>]+|\d+[.)])\s+/, '').trim()).filter(line => /[\p{L}\p{N}]/u.test(line));
   for (const line of lines.slice(0, 4)) { const title = fromLine(line); if (title) return title; }
   return null;
 }
@@ -37,21 +37,21 @@ function fromLine(line: string): string | null {
     const lead = text.replace(/^[\s,.:;!?'"-]+/, '');
     for (const opener of OPENERS) {
       const match = opener.exec(lead.toLowerCase());
-      if (match) { text = lead.slice(match[0].length); changed = true; break; }
+      if (match) { text = lead.slice(match[0].length).replace(/^[\s,.:;!?-]+/, ''); changed = true; break; }
     }
-    if (!changed) text = lead;
+    if (!changed) text = text.trim();
   }
-  const tokens = text.split(/\s+/).map(token => token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')).filter(Boolean);
+  const tokens = text.split(/\s+/).filter(token => /[\p{L}\p{N}]/u.test(token));
   const words: string[] = [];
   let key = 0;
   for (const token of tokens) {
-    const lower = token.toLowerCase();
+    const lower = token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').toLowerCase();
     if (DROP.has(lower)) continue;
     const minor = MINOR.has(lower);
     if (minor && (!words.length || MINOR.has(words.at(-1)!.toLowerCase()))) continue;
     if (!minor && key === MAX_WORDS) break;
     // Sentence case like Codex ("Fix login bug in auth service"): only the first word gains a capital.
-    words.push(minor ? lower : words.length ? token : titleWord(token));
+    words.push(minor ? token.toLowerCase() : words.length ? token : titleWord(token));
     if (!minor) key++;
   }
   while (words.length && MINOR.has(words.at(-1)!)) words.pop();
@@ -71,5 +71,5 @@ function fromLine(line: string): string | null {
 function titleWord(word: string): string {
   if (word !== word.toLowerCase()) return word;
   if (/[./_]/.test(word) || /\d/.test(word[0]!)) return word;
-  return word[0]!.toUpperCase() + word.slice(1);
+  return word.replace(/\p{L}/u, letter => letter.toUpperCase());
 }
