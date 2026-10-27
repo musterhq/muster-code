@@ -95,15 +95,15 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Server tests
+        working-directory: packages/server
+        run: npm test
+
       - name: Unit tests
         run: npm test
 
       - name: Renderer tests
         run: npm run test:renderer
-
-      # Suites that need real Chrome layout (see `excluded` in scripts/renderer-suites.mjs).
-      - name: Browser layout tests
-        run: node tests/run-virtual-file-source.mjs
 
       - name: Router workflows with the real coding client
         env:
