@@ -56,7 +56,7 @@ import { createNativeTurnObserver } from './native-turns.ts';
 import { createNativeQueueMirror } from './native-queue.ts';
 import { ChatAttachments, attachedFileLines } from './attachments.ts';
 import { admissionRetryText, asSentence, RETRY_AFTER_CAP_MS, retryClock, waitForRetry, withAdmissionRetry } from './admission-retry.ts';
-import { ContextLedger, HISTORY_WINDOW_EVENT, TOOLS_UNAVAILABLE_EVENT, requestsConnectors, type ContextBlock } from './context-budget.ts';
+import { ContextLedger, HISTORY_WINDOW_EVENT, TOOLS_UNAVAILABLE_EVENT, requestsConnectors, requestedConnectorNames, type ContextBlock } from './context-budget.ts';
 import { createDomainHooks } from './domains/hooks.ts';
 import { createDomains } from './domains/index.ts';
 import type { DomainFactory } from './domains/types.ts';
@@ -836,7 +836,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           producedAssistant = false; attemptActivity = false; lastWasTool = false; assistantText = ''; lastAssistantText = '';
           return run.stopped ? Promise.resolve(stoppedBeforeDispatch) : provider.run({ chat: {...(continuationPrompt ? store.chat(chatId)! : chat),providerTurnId:undefined,recovery:undefined}, cwd, prompt: continuationPrompt ?? contextualPrompt,
           contextWindow,
-          ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) || pluginReloads.wantsConnectors(chatId) ? {connectorsRequested: true} : {}),
+          ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) || pluginReloads.wantsConnectors(chatId) ? {connectorsRequested: true, connectorNames: [...requestedConnectorNames(prompt), ...pluginReloads.connectorNames(chatId)]} : {}),
           ...(runOptions.configOverrides ? {configOverrides: runOptions.configOverrides as Record<string, string | number | boolean | string[]>} : {}), ...(runOptions.developerInstructions ? {developerInstructions: runOptions.developerInstructions} : {}),
           ...(!continuationPrompt && claudeCommand ? {claudeCommand} : {}),
           ...(engineWindow ? {engineWindow} : {}),

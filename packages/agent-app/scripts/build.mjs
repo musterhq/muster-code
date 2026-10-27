@@ -184,6 +184,7 @@ function copyRendererStatic() {
 `);
 }
 
+execFileSync(process.execPath,[path.join(root,'scripts/build-write-helper.mjs')],{stdio:'inherit'});
 execFileSync(process.execPath,[path.join(root,'scripts/build-quick-look.mjs')],{stdio:'inherit'});
 execFileSync(process.execPath,[path.join(root,'scripts/build-computer-helper.mjs')],{stdio:'inherit'});
 copyRendererStatic();
