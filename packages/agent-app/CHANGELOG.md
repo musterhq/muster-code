@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - UI fixes from the 0.3.11 sweep (#398). Only one sidebar item is highlighted at a time, and Memory is highlighted while it is open. Two folders with the same name now show their parent folder in the sidebar and in search. Memory suggestions start as one line you can expand to edit. A turn's time no longer counts an import notice added later, so it no longer reads hundreds of hours. A gateway that hasn't been checked says Not checked yet instead of Ready. An empty project no longer shows In progress. The sidebar folds away below 960px.
+- Chats on router models keep their sub-agents, file edits and MCP tools after you ask for a connector such as Figma or Google Drive. Muster now loads only the connectors the chat named instead of every connector's tools, which the router cut off past 128 (#756).
 - MCP credentials stay out of process command lines, saved API keys are cleared when their endpoint changes host, and release builds require a signing identity and pinned build actions (#406).
 - Chats on API-key and local router routes remember earlier tool results, fit requests to the model's window and retry brief outages without repeating commands. Long command output keeps its opening and final summary, files can be searched and read in pages, and the agent only gets instructions for tools it can use (#384).
 - In a narrow window the browser preview card now sits above the chat instead of covering its text (#637).
