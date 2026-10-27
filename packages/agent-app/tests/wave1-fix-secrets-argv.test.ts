@@ -17,8 +17,8 @@ test('M1: secret overrides leave the argument list and go to the thread config',
     'secret.mcp_servers.gh.http_headers.Authorization': `Bearer ${SECRET}`, 'secret.mcp_servers.gh.env.API_KEY': SECRET,
     'mcp_servers.gh.url': 'https://example.com/mcp', personality: 'terse',
   });
-  assert.deepEqual(args, { 'mcp_servers.gh.url': 'https://example.com/mcp', personality: 'terse' });
-  assert.deepEqual(threadConfig, { shell_environment_policy: { set: { NPM_TOKEN: SECRET, GIT_AUTHOR_NAME: 'QA Agent' } }, mcp_servers: { gh: { http_headers: { Authorization: `Bearer ${SECRET}` }, env: { API_KEY: SECRET } } } });
+  assert.deepEqual(args, { personality: 'terse' });
+  assert.deepEqual(threadConfig, { shell_environment_policy: { set: { NPM_TOKEN: SECRET, GIT_AUTHOR_NAME: 'QA Agent' } }, mcp_servers: { gh: { url: 'https://example.com/mcp', http_headers: { Authorization: `Bearer ${SECRET}` }, env: { API_KEY: SECRET } } } });
   assert.equal(splitSecretOverrides({ a: 1 }).threadConfig, undefined);
 });
 
@@ -29,7 +29,7 @@ test('M1: through the real core, the app-server argv holds no secret and thread/
   t.after(async () => { core.clearCodexAppServerSessions('argv-test'); await rm(dir, { recursive: true, force: true }); });
   const log = join(dir, 'fake.log');
   process.env.FAKE_CODEX_LOG = log;
-  const { args, threadConfig } = splitSecretOverrides({ 'shell_environment_policy.set.NPM_TOKEN': SECRET, 'mcp_servers.x.url': 'https://example.com' });
+  const { args, threadConfig } = splitSecretOverrides({ 'shell_environment_policy.set.NPM_TOKEN': SECRET, 'mcp_servers.x.url': 'https://example.com', 'mcp_servers.x.env.MUSTER_CHAT_TOKEN': SECRET });
   await core.runCodexAppServer({
     prompt: 'hi', cwd: dir, command: resolve(import.meta.dirname, 'fixtures/fake-codex-app-server.cjs'), model: 'm', reasoning: 'low', transportOwner: 'argv-test', cacheKey: 'argv-1', keepAlive: false, sandbox: 'workspace-write', approvalPolicy: 'never',
     configOverrides: Object.entries(args).map(([k, v]) => `${k}=${JSON.stringify(v)}`), threadConfig, env: {},
@@ -37,9 +37,10 @@ test('M1: through the real core, the app-server argv holds no secret and thread/
   const lines = (await readFile(log, 'utf8')).trim().split('\n').map(l => JSON.parse(l) as Record<string, unknown>);
   const argv = JSON.stringify(lines.find(l => l.argv));
   assert.ok(!argv.includes(SECRET), 'the secret is not in the process arguments');
-  assert.ok(argv.includes('mcp_servers.x.url'), 'ordinary overrides still are');
-  const start = lines.find(l => l.method === 'thread/start')!.params as { config?: { shell_environment_policy?: { set?: Record<string, string> } } };
+  assert.ok(!argv.includes('mcp_servers.x.url'), 'the complete MCP configuration goes over stdin');
+  const start = lines.find(l => l.method === 'thread/start')!.params as { config?: { shell_environment_policy?: { set?: Record<string, string> }; mcp_servers?: { x?: { env?: Record<string, string> } } } };
   assert.equal(start.config?.shell_environment_policy?.set?.NPM_TOKEN, SECRET);
+  assert.equal(start.config?.mcp_servers?.x?.env?.MUSTER_CHAT_TOKEN, SECRET, 'unmarked per-chat tokens reach the real core over stdin too');
 });
 
 test('M1: the provider hands run-option secrets to the core as thread config, never as -c overrides', async () => {
