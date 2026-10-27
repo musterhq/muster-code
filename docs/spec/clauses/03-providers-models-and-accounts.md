@@ -16,6 +16,8 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-03-721H](03-providers-models-and-accounts.md#mus-spec-03-721h) | With no Codex, npm, Node or other app on the machine, installing Codex gives a managed copy that reports its version, and chats run that native binary. | [`MUS-SPEC-03-721H: on a machine with no Codex, npm or Node, one click installs a Codex that runs`](../../../packages/agent-app/tests/cli-maintenance.test.ts) |
+| [MUS-SPEC-03-721I](03-providers-models-and-accounts.md#mus-spec-03-721i) | A download whose checksum does not match the registry's fails with a message naming the checksum, leaves no files and does not change which Codex chats use. | [`MUS-SPEC-03-721I: a download that fails its checksum installs nothing`](../../../packages/agent-app/tests/cli-maintenance.test.ts) |
 | [MUS-SPEC-03-1A](03-providers-models-and-accounts.md#mus-spec-03-1a) | All four turns complete without reconnecting; one request per turn with valid credentials; real counters preserved. | [`router usage compatibility: two independent chats complete successive turns without reconnecting`](../../../packages/agent-app/tests/router-usage-workflow.test.ts) |
 | [MUS-SPEC-03-1B](03-providers-models-and-accounts.md#mus-spec-03-1b) | The first turn completes and the truncated one fails, on the same thread. | [`router usage compatibility: a genuinely truncated stream still fails`](../../../packages/agent-app/tests/router-usage-workflow.test.ts) |
 | [MUS-SPEC-03-1C](03-providers-models-and-accounts.md#mus-spec-03-1c) | 404 without the private path; nothing forwarded; the real request is forwarded unchanged. | [`router bridge: a request without the private path prefix is refused and never forwarded`](../../../packages/agent-app/tests/responses-compat.test.ts) |
@@ -63,7 +65,6 @@ Boundaries:
 | [MUS-SPEC-03-730C](03-providers-models-and-accounts.md#mus-spec-03-730c) | A GPT model, a GPT combo and a connector turn on the same router run on the Codex client; only the Claude combo's turn starts Claude Code. | [`on one router, only the Claude turn runs through Claude Code; GPT models, GPT combos and connector turns stay on the Codex client`](../../../packages/agent-app/tests/router-claude-code-730.test.ts) |
 | [MUS-SPEC-03-730D](03-providers-models-and-accounts.md#mus-spec-03-730d) | After a Codex turn, Claude Code starts a fresh session whose prompt carries a summary of the earlier messages; the turn after continues that session with no summary. | [`a chat whose earlier turn ran on the Codex client moves to Claude Code with a summary, then continues that session`](../../../packages/agent-app/tests/router-claude-code-730.test.ts) |
 | [MUS-SPEC-03-740A](03-providers-models-and-accounts.md#mus-spec-03-740a) | With a Codex profile inherited from the parent shell, a config.toml provider route still lists its models and answers a chat with its own provider. | [`(b) a Codex config.toml provider with [auth] command: models listed and a chat answered with the command’s token`](../../../packages/agent-app/tests/provider-auth-e2e.test.ts) |
-
 | [MUS-SPEC-03-384A](03-providers-models-and-accounts.md#mus-spec-03-384a) | A follow-up after restarting the adapter answers from the earlier file result, without reading the deleted file again. | [`an HTTP follow-up after restart can answer from an earlier tool result`](../../../packages/agent-app/tests/http-router-384.test.ts) |
 | [MUS-SPEC-03-384B](03-providers-models-and-accounts.md#mus-spec-03-384b) | A command runs once; its next model request survives a 429 and a 503 with identical history and completes. | [`HTTP tool rounds retry a 429 and a 503 without executing a command twice`](../../../packages/agent-app/tests/http-router-384.test.ts) |
 | [MUS-SPEC-03-384C](03-providers-models-and-accounts.md#mus-spec-03-384c) | A persistent outage gets four attempts, a bad key one, and Stop ends a server-requested wait promptly. | [`HTTP retries stop at a bound, do not retry credentials, and Stop interrupts backoff`](../../../packages/agent-app/tests/http-router-384.test.ts) |
@@ -617,7 +618,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/http-router-384.test.ts::an HTTP follow-up after restart can answer from an earlier tool result`
 - Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
 - Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
-- Evidence: `~/.muster-work/review/384/red-on-main.txt` (8 failed on main `8a99e2a5`); `~/.muster-work/review/384/green-workflows.txt` (8 passed).
+- Evidence: UNVERIFIED
 
 <a id="mus-spec-03-384b"></a>
 #### MUS-SPEC-03-384B: HTTP tool rounds retry a 429 and a 503 without executing a command twice
@@ -628,7 +629,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/http-router-384.test.ts::HTTP tool rounds retry a 429 and a 503 without executing a command twice`
 - Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
 - Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
-- Evidence: `~/.muster-work/review/384/red-on-main.txt` (8 failed on main `8a99e2a5`); `~/.muster-work/review/384/green-workflows.txt` (8 passed).
+- Evidence: UNVERIFIED
 
 <a id="mus-spec-03-384c"></a>
 #### MUS-SPEC-03-384C: HTTP retries stop at a bound, do not retry credentials, and Stop interrupts backoff
@@ -639,7 +640,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/http-router-384.test.ts::HTTP retries stop at a bound, do not retry credentials, and Stop interrupts backoff`
 - Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
 - Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
-- Evidence: `~/.muster-work/review/384/red-on-main.txt` (8 failed on main `8a99e2a5`); `~/.muster-work/review/384/green-workflows.txt` (8 passed).
+- Evidence: UNVERIFIED
 
 <a id="mus-spec-03-384d"></a>
 #### MUS-SPEC-03-384D: A long HTTP command preserves its opening and final test summary for the model and timeline
@@ -650,7 +651,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/http-router-384.test.ts::a long HTTP command preserves its opening and final test summary for the model and timeline`
 - Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
 - Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
-- Evidence: `~/.muster-work/review/384/red-on-main.txt` (8 failed on main `8a99e2a5`); `~/.muster-work/review/384/green-workflows.txt` (8 passed).
+- Evidence: UNVERIFIED
 
 <a id="mus-spec-03-384e"></a>
 #### MUS-SPEC-03-384E: A read-only HTTP chat can search by glob and text and read beyond the first file page
@@ -661,7 +662,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/http-router-384.test.ts::a read-only HTTP chat can search by glob and text and read beyond the first file page`
 - Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
 - Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
-- Evidence: `~/.muster-work/review/384/red-on-main.txt` (8 failed on main `8a99e2a5`); `~/.muster-work/review/384/green-workflows.txt` (8 passed).
+- Evidence: UNVERIFIED
 
 <a id="mus-spec-03-384f"></a>
 #### MUS-SPEC-03-384F: An HTTP request keeps mailbox data but only describes tools the route can execute
@@ -672,7 +673,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/http-router-384.test.ts::an HTTP request keeps mailbox data but only describes tools the route can execute`
 - Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
 - Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
-- Evidence: `~/.muster-work/review/384/red-on-main.txt` (8 failed on main `8a99e2a5`); `~/.muster-work/review/384/green-workflows.txt` (8 passed).
+- Evidence: UNVERIFIED
 
 <a id="mus-spec-03-384g"></a>
 #### MUS-SPEC-03-384G: An HTTP follow-up fits the declared window while retaining a summary and recent messages
@@ -683,7 +684,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/http-router-384.test.ts::an HTTP follow-up fits the declared window while retaining a summary and recent messages`
 - Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
 - Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
-- Evidence: `~/.muster-work/review/384/red-on-main.txt` (8 failed on main `8a99e2a5`); `~/.muster-work/review/384/green-workflows.txt` (8 passed).
+- Evidence: UNVERIFIED
 
 <a id="mus-spec-03-384h"></a>
 #### MUS-SPEC-03-384H: An HTTP context overflow in a later tool round shrinks old output and continues without repeating the tool
@@ -694,4 +695,26 @@ Boundaries:
 - Test: `packages/agent-app/tests/http-router-384.test.ts::an HTTP context overflow in a later tool round shrinks old output and continues without repeating the tool`
 - Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
 - Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
-- Evidence: `~/.muster-work/review/384/red-on-main.txt` (8 failed on main `8a99e2a5`); `~/.muster-work/review/384/green-workflows.txt` (8 passed).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-721h"></a>
+#### MUS-SPEC-03-721H: Codex installs on a clean machine without npm, Node or another app
+
+- Precondition: No Codex on PATH or in standard locations, no other desktop app bundle, no npm and no Node (`PATH` is empty). The registry publishes `@openai/codex` with a build for this machine.
+- Action: Install Codex from Settings or the setup guide (`providers.cli.update` for `codex`).
+- Expected result: The latest version is read from the registry, the platform build is downloaded and checked against the registry's sha512, and the managed copy reports its version. `MUSTER_CODEX_COMMAND` points at the native binary inside its package layout, so starting it needs no Node.
+- Test: `packages/agent-app/tests/cli-maintenance.test.ts::MUS-SPEC-03-721H: on a machine with no Codex, npm or Node, one click installs a Codex that runs`
+- Environment: Node test runner; a local registry serving a stand-in binary; skipped on platforms with no Codex build. A manual run against the real registry is in the PR evidence.
+- Known gaps: Claude Code and OpenCode still install through npm.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-721i"></a>
+#### MUS-SPEC-03-721I: A Codex download that fails its checksum installs nothing
+
+- Precondition: As 721H, but the registry's checksum does not match the download.
+- Action: Install Codex.
+- Expected result: The install fails with "nothing changed" and a reason naming the checksum; the version folder is removed and `MUSTER_CODEX_COMMAND` is unchanged.
+- Test: `packages/agent-app/tests/cli-maintenance.test.ts::MUS-SPEC-03-721I: a download that fails its checksum installs nothing`
+- Environment: As 721H.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
