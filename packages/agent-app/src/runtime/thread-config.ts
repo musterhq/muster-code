@@ -2,12 +2,13 @@
  * Keeps secrets out of process arguments. Run-option overrides normally become `-c key=value` arguments of the Codex
  * process, which any process of the same user can read with `ps`. Values that are secret (lent project secrets, MCP
  * bearer tokens and secret environment) are instead sent in the body of thread/start and thread/resume.
- *  - `shell_environment_policy.set.NAME` (lent secrets, git identity) and
- *  - `secret.<dotted.config.key>` (marked by the domain that holds the value)
+ *  - `shell_environment_policy.set.NAME` (lent secrets, git identity),
+ *  - `secret.<dotted.config.key>` (marked by the domain that holds the value), and
+ *  - every `mcp_servers` override (including unmarked per-chat tokens)
  * go to `threadConfig`; everything else stays an argument.
  */
 export const SECRET_PREFIX = 'secret.';
-const SECRET_KEY = /^(?:secret\.|shell_environment_policy\.set\.)/;
+const SECRET_KEY = /^(?:secret\.|shell_environment_policy\.set\.|mcp_servers(?:\.|$))/;
 
 export function splitSecretOverrides(overrides: Record<string, unknown> | undefined): { args: Record<string, unknown>; threadConfig: Record<string, unknown> | undefined } {
   const args: Record<string, unknown> = {}, threadConfig: Record<string, unknown> = {};
