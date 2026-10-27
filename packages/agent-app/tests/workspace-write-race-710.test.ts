@@ -57,7 +57,14 @@ function race(t: TestContext, ws: string, outside: string, directory = false) {
           // Always finish stdin, including when Windows refuses the rename of a pinned directory.
           // Otherwise a failed injection leaves the helper waiting forever and hides the test failure.
           let swapped = false, failure: unknown;
-          try { await swap(); swapped = true; } catch (error) { failure = error; }
+          try { await swap(); swapped = true; } catch (error) {
+            const denied = error as NodeJS.ErrnoException;
+            // Windows refuses to rename d while its descendant sub has a pinned directory handle.
+            // The attack is blocked by the OS itself; still send the content and check every visible result.
+            if (directory && process.platform === 'win32' && denied.code === 'EPERM' && denied.syscall === 'rename')
+              t.diagnostic('Windows blocked the parent swap while the helper held its descendant directory.');
+            else failure = error;
+          }
           const closed = new Promise<void>(resolve => child.once('close', () => resolve()));
           end(...input); await closed;
           if (swapped) await restore();
@@ -70,7 +77,7 @@ function race(t: TestContext, ws: string, outside: string, directory = false) {
   });
   syncBuiltinESMExports();
   t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
-  return async () => { await restored; assert.equal(attacked, true, 'the folder was swapped during this tool call'); };
+  return async () => { await restored; assert.equal(attacked, true, 'the racer attempted the folder swap during this tool call'); };
 }
 
 // Spec: MUS-SPEC-19-710A (docs/spec/clauses/19-security-and-redaction.md#mus-spec-19-710a)

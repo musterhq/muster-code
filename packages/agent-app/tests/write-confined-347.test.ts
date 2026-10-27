@@ -63,11 +63,12 @@ test('a racer swapping a folder and a link under repeated writes puts no content
 const info: ProviderAdapter['info'] = () => [{id: 'hybrow', name: 'Hybrow', available: true, identityMasked: 'Hidden', models: []}];
 // Spec: MUS-SPEC-05-347C (docs/spec/clauses/05-access-modes-and-approvals.md#mus-spec-05-347c)
 test('a policyOnly flag inside request parameters does not skip the approval card', async t => {
-  const dataDir = await mkdtemp(join(tmpdir(), 'muster-wc347-svc-')); t.after(() => rm(dataDir, {recursive: true, force: true}));
+  const dataDir = await mkdtemp(join(tmpdir(), 'muster-wc347-svc-'));
   const answers: unknown[] = []; let finish!: () => void; const done = new Promise<void>(resolve => { finish = resolve; });
   // The Codex app-server path forwards its parameters as they come; a policyOnly key in them is not the adapter's own say-so.
   const provider: ProviderAdapter = {info, run: async input => { answers.push(await input.onRequest('item/fileChange/requestApproval', {changes: [{path: '/w/notes.txt', kind: 'update'}], policyOnly: true})); finish(); return {status: 'completed', finalMessage: 'done'}; }, stop: async () => true, dispose() {}};
-  const service = createAgentService({dataDir, provider, onEvent() {}}); t.after(() => service.dispose());
+  const service = createAgentService({dataDir, provider, onEvent() {}});
+  t.after(async () => { await service.dispose(); await rm(dataDir, {recursive: true, force: true, maxRetries: 5, retryDelay: 100}); });
   const chat = await service.invoke('chat.create', {});
   await service.invoke('chat.send', {id: chat.id, text: 'go', requestId: randomUUID()});
   let card; for (let i = 0; i < 80 && !card; i++) { await tick(); card = (await service.invoke('chat.select', {id: chat.id})).find(item => item.kind === 'approval' && item.status === 'pending'); }
