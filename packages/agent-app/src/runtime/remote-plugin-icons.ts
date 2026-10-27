@@ -116,8 +116,26 @@ function imageExtension(bytes: Buffer): string | null {
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return '.jpg';
   if (bytes.subarray(0, 4).toString('latin1') === 'GIF8') return '.gif';
   if (bytes.subarray(0, 4).toString('latin1') === 'RIFF' && bytes.subarray(8, 12).toString('latin1') === 'WEBP') return '.webp';
-  if (/^\s*(?:<\?xml[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(bytes.subarray(0, 1024).toString('utf8'))) return '.svg';
+  if (startsWithSvg(bytes.subarray(0, 1024).toString('utf8'))) return '.svg';
   return null;
+}
+
+/** Whether the text opens with <svg after an optional XML declaration and comments (a linear scan, no backtracking). */
+function startsWithSvg(text: string): boolean {
+  let at = text.length - text.trimStart().length;
+  if (text.startsWith('<?xml', at)) {
+    const end = text.indexOf('>', at);
+    if (end < 0) return false;
+    at = end + 1;
+  }
+  for (;;) {
+    while (at < text.length && /\s/.test(text[at]!)) at++;
+    if (!text.startsWith('<!--', at)) break;
+    const end = text.indexOf('-->', at + 4);
+    if (end < 0) return false;
+    at = end + 3;
+  }
+  return /^<svg[\s>]/i.test(text.slice(at, at + 5));
 }
 
 /** The image, null when the URL gives nothing usable, or 'retry' when it may work later (offline, a 5xx or 429, a timeout). */
