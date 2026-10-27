@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - Chats on router models keep their sub-agents, file edits and MCP tools after you ask for a connector such as Figma or Google Drive. Muster now loads only the connectors the chat named instead of every connector's tools, which the router cut off past 128 (#756).
+- MCP credentials stay out of process command lines, saved API keys are cleared when their endpoint changes host, and release builds require a signing identity and pinned build actions (#406).
 - Chats on API-key and local router routes remember earlier tool results, fit requests to the model's window and retry brief outages without repeating commands. Long command output keeps its opening and final summary, files can be searched and read in pages, and the agent only gets instructions for tools it can use (#384).
 - In a narrow window the browser preview card now sits above the chat instead of covering its text (#637).
 - Installing Codex from Muster no longer needs npm, Node or another app on the machine. Muster downloads Codex's own build for your Mac, checks it against the published checksum and runs it directly, so a clean machine can sign in and chat (#721).

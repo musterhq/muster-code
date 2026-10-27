@@ -80,9 +80,8 @@ test('route matrix: the browser tool is offered where the route can load it, und
         chatIdSent=server!.env?.MUSTER_CHAT_ID;named=browserToolName(style,'browser_navigate');
         assert.ok(text.includes(named),`${row.route}: the instructions name ${named}`);
         if(row.driver==='claude-code-cli'){
-          const args=claudeArgs({chat:chat as never,cwd:dir,prompt:'p',model:'claude-code/default',permissionMode:'workspace',mcpServers:run.mcpServers,instructions:run.instructions,signal:new AbortController().signal} as never,'s1');
-          const config=JSON.parse(args[args.indexOf('--mcp-config')+1]!);
-          assert.equal(config.mcpServers[BROWSER_MCP].env.MUSTER_CHAT_ID,chat.id);assert.ok(args.includes(`mcp__${BROWSER_MCP}`),'allowed without a prompt');
+          const args=claudeArgs({chat:chat as never,cwd:dir,prompt:'p',model:'claude-code/default',permissionMode:'workspace',mcpServers:run.mcpServers,instructions:run.instructions,signal:new AbortController().signal} as never,'s1','/private/config.json');
+          assert.equal(args[args.indexOf('--mcp-config')+1],'/private/config.json');assert.ok(args.includes(`mcp__${BROWSER_MCP}`),'allowed without a prompt');
         }
         if(row.driver==='opencode-cli'){
           const env=JSON.parse(openCodeMcpEnv(run.mcpServers,'{"model":"x/y"}').OPENCODE_CONFIG_CONTENT!);

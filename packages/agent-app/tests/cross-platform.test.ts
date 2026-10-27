@@ -59,9 +59,9 @@ test('a .cmd launcher runs through cmd.exe for Node-based clients, and only on W
   assert.deepEqual(launcherSpec('C:\\d\\muster-browser-mcp.cmd','win32','C:\\Windows\\System32\\cmd.exe'),{command:'C:\\Windows\\System32\\cmd.exe',args:['/d','/c','C:\\d\\muster-browser-mcp.cmd']});
   assert.deepEqual(launcherSpec('C:\\Program Files\\nodejs\\node.exe','win32'),{command:'C:\\Program Files\\nodejs\\node.exe'});
   assert.deepEqual(launcherSpec('/d/muster-browser-mcp','darwin'),{command:'/d/muster-browser-mcp'});
-  const args=claudeArgs({chat:{id:'c'},cwd:'/w',prompt:'p',model:'claude-code/sonnet',permissionMode:'full',mcpServers:{muster_terminal:{command:'/d/muster-terminal-mcp',env:{MUSTER_CHAT_ID:'c'}}}} as never,'s');
-  const config=JSON.parse(args[args.indexOf('--mcp-config')+1]!);
-  assert.deepEqual(config.mcpServers.muster_terminal,{command:'/d/muster-terminal-mcp',env:{MUSTER_CHAT_ID:'c'}});
+  const args=claudeArgs({chat:{id:'c'},cwd:'/w',prompt:'p',model:'claude-code/sonnet',permissionMode:'full',mcpServers:{muster_terminal:{command:'/d/muster-terminal-mcp',env:{MUSTER_CHAT_ID:'c'}}}} as never,'s','/private/config.json');
+  assert.equal(args[args.indexOf('--mcp-config')+1],'/private/config.json');
+  assert.ok(args.includes('mcp__muster_terminal'));
 });
 
 test('the terminal tool launcher really starts and answers MCP on this platform',async t=>{

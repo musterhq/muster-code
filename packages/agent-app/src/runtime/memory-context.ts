@@ -102,20 +102,26 @@ export class MemoryConfigStore {
     if (typeof input.autoRecall !== 'boolean') throw new Error('autoRecall must be true or false.');
     if (!RETAIN.includes(input.autoRetain)) throw new Error('autoRetain must be never, ask or verified.');
     const next: StoredConfig = { version: 1, endpoint, autoRecall: input.autoRecall, autoRetain: input.autoRetain };
+    // Keys belong to an origin (scheme, host and port), not just to the settings row.
+    const origin = (value: string) => { try { return new URL(value).origin; } catch { return undefined; } };
+    const changedOrigin = origin(current.endpoint) !== origin(endpoint);
+    let sessionKey = changedOrigin ? undefined : this.sessionKey;
     if (input.apiKey === undefined) {
-      if (current.apiKey) next.apiKey = current.apiKey;
+      if (!changedOrigin && current.apiKey) next.apiKey = current.apiKey;
     } else {
       if (typeof input.apiKey !== 'string' || input.apiKey.length > 4096 || /[\x00-\x1f]/.test(input.apiKey)) throw new Error('The API key must be a single line of at most 4096 characters.');
       const key = input.apiKey.trim();
-      this.sessionKey = undefined;
+      sessionKey = undefined;
       if (key) {
         const box = this.box();
         if (box) next.apiKey = box.encryptString(key).toString('base64');
-        else this.sessionKey = key;
+        else sessionKey = key;
       }
     }
     writeJson(this.path, next);
     this.cached = next;
+    this.sessionKey = sessionKey;
+    if (changedOrigin || input.apiKey !== undefined) this.decrypted = undefined;
   }
 }
 
