@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import {executeTool,MAX_FILE_READ,type ToolContext} from '../src/runtime/adapters/http-tools.ts';
 
 async function folder(t:TestContext){const root=await mkdtemp(join(tmpdir(),'muster-enc-'));t.after(()=>rm(root,{recursive:true,force:true}));return root;}
-const ctx=(cwd:string,access:ToolContext['access']):ToolContext=>({cwd,access,signal:new AbortController().signal,emit:()=>{},threadId:'t',turnId:'u'});
+const ctx=(cwd:string,access:ToolContext['access']):ToolContext=>({cwd,access,signal:new AbortController().signal,emit:()=>{},threadId:'t',turnId:'u',authorize:async()=>'allow'});
 const call=(name:string,args:object)=>({id:'1',name,arguments:JSON.stringify(args)});
 
 // Spec: MUS-SPEC-03-568A (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-568a)

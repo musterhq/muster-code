@@ -1,3 +1,4 @@
+import type {PermissionResult} from '../permission-result.ts';
 import type {Chat} from '../../shared/protocol.ts';
 
 /** One turn for a non-Codex route. Events use the Codex app-server shapes service.ts
@@ -26,8 +27,8 @@ export interface AdapterRunInput {
   /** #653: the chat runs in the sandbox. permissionMode is then read-only, and routes that receive the sandbox tools also
    *  deny their own host shell and edit tools (Claude Code --disallowedTools, the OpenCode plan agent, Grok's rejections). */
   sandboxed?: boolean;
-  /** Asked before a tool this adapter runs itself changes anything (a command, a file change). Resolves true to go ahead: the Project tool rules, the guard for the user's own processes and approval cards live behind it. */
-  authorize?(method: string, params: Record<string, unknown>, options?: {policyOnly?: boolean}): Promise<boolean>;
+  /** Asked before a tool this adapter runs itself changes anything (a command, a file change). Resolves allow to go ahead: the Project tool rules, the guard for the user's own processes and approval cards live behind it. */
+  authorize?(method: string, params: Record<string, unknown>, options?: {policyOnly?: boolean}): Promise<PermissionResult>;
   /** ask_user (HTTP routes): posts the question card and resolves at once with the text for the model; it never waits for the user. */
   askUser?(args: Record<string, unknown>): Promise<string>;
   /** The saved conversation to continue; only set when it belongs to this route and binding. */

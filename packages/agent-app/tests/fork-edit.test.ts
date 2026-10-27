@@ -11,7 +11,7 @@ import type {ProviderAdapter,ProviderInput,ProviderResult} from '../src/runtime/
 import type {AgentEvent,TimelineItem} from '../src/shared/protocol.ts';
 
 const info:ProviderAdapter['info']=()=>[{id:'hybrow',name:'Hybrow',available:true,identityMasked:'Hidden',bindingId:'gateway',models:[{id:'claude/claude-fable-5',name:'Fable'}]}];
-async function directory(t:TestContext){const path=await mkdtemp(join(tmpdir(),'muster-fork-'));t.after(()=>rm(path,{recursive:true,force:true}));return path;}
+async function directory(t:TestContext){const path=await mkdtemp(join(tmpdir(),'muster-fork-'));t.after(()=>rm(path,{recursive:true,force:true,maxRetries:10,retryDelay:100}));return path;}
 async function until(check:()=>boolean|Promise<boolean>){for(let i=0;i<500;i++){if(await check())return;await new Promise(resolve=>setTimeout(resolve,2));}assert.fail('condition not reached');}
 /** Every run answers at once with `reply-<n>`; a run's input is kept for inspection. */
 function scripted(){

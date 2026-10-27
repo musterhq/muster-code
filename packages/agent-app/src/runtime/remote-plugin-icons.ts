@@ -2,7 +2,7 @@
  *  The images are downloaded in the background, kept under the data dir and read back through the same checks as a
  *  plugin's own icon files; a plugin with nothing usable keeps its monogram. A plugin from another marketplace with no
  *  logo borrows the one an OpenAI catalog lists under its exact name (brandIconFiles). */
-import { spawn } from 'node:child_process';
+import {spawnOwned, killOwned} from './owned-process.ts';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
@@ -169,16 +169,17 @@ async function download(url: string, fetchImpl: typeof fetch): Promise<{ bytes: 
 /** One `plugin/list` call over a short-lived `codex app-server`. */
 function listOver(cli: string, env: NodeJS.ProcessEnv): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cli, ['app-server'], { env, stdio: ['pipe', 'pipe', 'ignore'] });
+    const child = spawnOwned(cli, ['app-server'], { env, stdio: ['pipe', 'pipe', 'ignore'] });
     let buffer = '', settled = false;
-    const finish = (error: Error | null, value?: unknown) => { if (settled) return; settled = true; clearTimeout(timer); child.kill(); if (error) reject(error); else resolve(value); };
+    const finish = (error: Error | null, value?: unknown) => { if (settled) return; settled = true; clearTimeout(timer); killOwned(child, 'SIGKILL'); if (error) reject(error); else resolve(value); };
     const timer = setTimeout(() => finish(new Error('plugin/list timed out')), LIST_TIMEOUT_MS);
     timer.unref?.();
-    const send = (message: Record<string, unknown>) => { try { child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`); } catch (error) { finish(error as Error); } };
+    const send = (message: Record<string, unknown>) => { try { child.stdin!.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`); } catch (error) { finish(error as Error); } };
+    child.stdin!.on('error', error => finish(error));
     child.on('error', error => finish(error));
     child.on('exit', code => finish(new Error(`codex app-server exited (${code})`)));
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
+    child.stdout!.setEncoding('utf8');
+    child.stdout!.on('data', (chunk: string) => {
       buffer += chunk;
       if (buffer.length > 64 * 1024 * 1024) return finish(new Error('plugin/list answer is too large'));
       let at: number;

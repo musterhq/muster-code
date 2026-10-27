@@ -195,7 +195,7 @@ test('tools follow the access level: read-only has no writes or shell, workspace
   assert.deepEqual(toolSpecs('read-only').map(tool=>tool.function.name),['read_file','list_directory','search_files']);
   assert.deepEqual(toolSpecs('workspace').map(tool=>tool.function.name),['read_file','list_directory','search_files','write_file','edit_file']);
   const cwd=await directory(t),events:string[]=[];
-  const ctx=(access:'read-only'|'workspace'|'full')=>({cwd,access,signal:new AbortController().signal,emit:(method:string)=>{events.push(method);},threadId:'t',turnId:'u'});
+  const ctx=(access:'read-only'|'workspace'|'full')=>({cwd,access,signal:new AbortController().signal,emit:(method:string)=>{events.push(method);},threadId:'t',turnId:'u',authorize:async()=>'allow' as const});
   const wrote=await executeTool({id:'1',name:'write_file',arguments:JSON.stringify({path:'notes/plan.md',content:'step 1'})},ctx('workspace'));
   assert.equal(wrote.ok,true);assert.equal(await readFile(join(cwd,'notes','plan.md'),'utf8'),'step 1');
   const edited=await executeTool({id:'2',name:'edit_file',arguments:JSON.stringify({path:'notes/plan.md',old_string:'step 1',new_string:'step 2'})},ctx('workspace'));

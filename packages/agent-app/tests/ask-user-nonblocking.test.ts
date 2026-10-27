@@ -1,3 +1,4 @@
+import {requestReply} from '../src/runtime/permission-result.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {mkdtemp, rm} from 'node:fs/promises';
@@ -32,7 +33,7 @@ async function setup(t: {after(fn: () => unknown): void}, steerable = true) {
   await service.invoke('chat.send', {id: chat.id, text: 'build it', requestId: 'start'});
   await until(() => fake.open);
   const items = async () => (await service.invoke('chat.timeline', {id: chat.id})).items;
-  const ask = (args: Record<string, unknown>) => fake.inputs.at(-1)!.onRequest(ASK_USER_METHOD, args);
+  const ask = (args: Record<string, unknown>) => fake.inputs.at(-1)!.onRequest(ASK_USER_METHOD, args).then(requestReply);
   return {service, fake, chat, items, ask, dataDir};
 }
 const answer = (text: string) => ({answer: {answers: [text]}});

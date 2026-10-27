@@ -17,6 +17,8 @@ MUSTER_SANDBOX_SOURCE_ROOT=/path/to/scoped-checkout \
 npm run vendor:sync
 ```
 
+Local patch (2026-10-27, #407): `muster-core/packages/core/src/codex-app-server.ts` uses the app's shared `spawnOwned`/`killOwned` and permission reply helpers, closes the whole app-server process group, handles stdin errors, and rejects stdout lines over 16 MiB. These two app-owned imports are relative to this snapshot's location. A re-sync must retain them or equivalent upstream behaviour; `tests/runtime-quality-407.test.ts` drives real app-server children and catches regressions.
+
 Local patch (2026-10-18, #654): `muster-sandbox/packages/core/src/local-docker-sandbox.ts` passes `--memory-swap` equal to `--memory` (no swap on top of the memory limit), and `--storage-opt size=` (the declared `maxDiskMb`, default 10 GiB) when the storage driver accepts it; `provision` retries once without it when Docker refuses the option. A re-sync must keep it; `tests/sandbox-disk-limit.test.ts` fails if it is lost. The `files` hash in `SOURCES.json` is the synced upstream copy, not this patched one.
 
 Local patch (2026-10-01): `muster-core/packages/core/src/codex-app-server.ts` accepts `threadConfig` and sends it as `config` in `thread/start` and `thread/resume`, so lent secrets and MCP bearer tokens never become `-c` process arguments (readable with `ps`). A re-sync must keep it; `tests/wave1-fix-mcp-bearer.test.ts` and `tests/wave1-fix-secrets-argv.test.ts` fail if it is lost. Upstream issue: see the link in the Wave 1 report.
