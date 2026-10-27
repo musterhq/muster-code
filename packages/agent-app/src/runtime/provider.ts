@@ -53,6 +53,11 @@ export interface ProviderInput {
   /** Extra `-c key=value` overrides from domain run-options contributors. Access policy keys are ignored. String[] values become a TOML array. */
   configOverrides?: Record<string, string | number | boolean | string[]>;
   developerInstructions?: string;
+  /** #729: the user picked a Claude Code skill or command. On a Claude Code run (its own route or the router's Claude Code
+   *  lane) the message is exactly `text` (`/<name> <request>`), which Claude Code expands itself, and `context` (what
+   *  `prompt` carries ahead of the request) joins this turn's system prompt. Every other run sends `prompt`, where Muster
+   *  inlined the expansion. */
+  claudeCommand?: {text: string; context: string};
   /** #739: the context window the engine reported on this chat's last turn, when it reported one. */
   engineWindow?: number;
   /** The user's request names a ChatGPT connector; Codex apps stay loaded for this chat from then on. */
@@ -69,7 +74,7 @@ export interface ProviderInput {
    *  conversation) to send ahead of this turn's prompt. */
   onThreadReset?(previousThreadId: string, reason?: 'lane' | 'expired'): string | undefined;
 }
-export interface ProviderResult { status: 'completed' | 'failed'; finalMessage: string; threadId?: string; errorMessage?: string; dispatchState?: 'not-dispatched' | 'dispatched' | 'unknown'; turnId?: string; recovery?: ProviderRecovery; threadReset?: boolean; /** The lane that ran the turn when it was not the route's own driver (#688). */ driver?: string; failure?: {kind: 'rpc-rejected' | 'request-timeout' | 'aborted'; method?: string; statusCode?: number; retryAfterMs?: number; requestId?: string} }
+export interface ProviderResult { status: 'completed' | 'failed'; finalMessage: string; threadId?: string; errorMessage?: string; dispatchState?: 'not-dispatched' | 'dispatched' | 'unknown'; turnId?: string; recovery?: ProviderRecovery; threadReset?: boolean; /** The lane that ran the turn when it was not the route's own driver (#688). */ driver?: string; /** #729: the message was the picked `/command` and the turn's context went to the system prompt, not the thread. */ nativeCommand?: boolean; failure?: {kind: 'rpc-rejected' | 'request-timeout' | 'aborted'; method?: string; statusCode?: number; retryAfterMs?: number; requestId?: string} }
 export interface ProviderAdapter {
   run(input: ProviderInput): Promise<ProviderResult>;
   /** True means an owned stop request settled locally; inspect recovery for remote certainty. */
@@ -246,13 +251,18 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     adapterRuns.set(input.chat.id, owned);
     const live = () => !owned.controller.signal.aborted && !disposed;
     let activity = false;
+    // A slash command must open the message to be expanded, so a turn that also carries the earlier conversation (a lane
+    // seed) keeps the inlined form: the summary has to stay in the thread.
+    const native = (lane?.driver ?? route.info.driver) === CLAUDE_CODE_LANE_DRIVER && input.claudeCommand && !lane?.seed?.trim() ? input.claudeCommand : undefined;
+    const browser = adapterBrowser(lane?.driver ?? route.info.driver, input.chat.mode, input.developerInstructions, input.configOverrides, subagentSupport(lane?.driver ?? route.info.driver) !== 'none', access.permissionMode);
+    const instructions = native?.context ? [browser.instructions, native.context].filter(Boolean).join('\n\n') : browser.instructions;
     try {
       const result = await adapter.run({
-        chat: input.chat, cwd: input.cwd, prompt: lane?.seed?.trim() ? `${lane.seed.trim()}\n\nCurrent user request:\n${input.prompt}` : input.prompt, model, permissionMode: access.permissionMode, signal: owned.controller.signal,
+        chat: input.chat, cwd: input.cwd, prompt: native ? native.text : lane?.seed?.trim() ? `${lane.seed.trim()}\n\nCurrent user request:\n${input.prompt}` : input.prompt, model, permissionMode: access.permissionMode, signal: owned.controller.signal,
         ...(sandboxedRun(input.configOverrides) ? {sandboxed: true} : {}),
         ...(input.images?.length ? {images: input.images} : {}), ...(route.info.models.find(entry => entry.id === model)?.images === true ? {vision: true} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),
         ...(resumeThreadId ? {resumeThreadId} : {}),
-        ...adapterBrowser(lane?.driver ?? route.info.driver, input.chat.mode, input.developerInstructions, input.configOverrides, subagentSupport(lane?.driver ?? route.info.driver) !== 'none', access.permissionMode),
+        ...browser, ...(instructions ? {instructions} : {}),
         ...(Object.keys({...envFromOverrides(input.configOverrides), ...lane?.env}).length ? {env: {...envFromOverrides(input.configOverrides), ...lane?.env}} : {}),
         // The adapter runs its own tools (HTTP routes): they meet the same Project tool rules, user-process guard and approval cards as Codex's.
         authorize: async (method, params, options) => {
@@ -285,7 +295,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         : notDispatched && (result.statusCode === 429 || result.statusCode === 503) ? {kind: 'admission-rejected', retryable: true, reason: `${asSentence(result.errorMessage ?? 'The provider is temporarily unavailable.')} The request was not accepted. Try again later.`}
         : authFailureStatus(result.statusCode, notDispatched ? result.errorMessage : '') ? authRecovery(route.info, authFailureStatus(result.statusCode, notDispatched ? result.errorMessage : '')!, result.errorMessage)
         : {kind: 'failed', retryable: notDispatched, reason: result.errorMessage ? `The provider attempt failed: ${result.errorMessage}` : 'The provider attempt failed.'};
-      return {status: cancelled ? 'failed' : result.status, finalMessage: result.finalMessage, dispatchState: result.dispatchState, ...(lane ? {driver: lane.driver} : {}),
+      return {status: cancelled ? 'failed' : result.status, finalMessage: result.finalMessage, dispatchState: result.dispatchState, ...(lane ? {driver: lane.driver} : {}), ...(native ? {nativeCommand: true} : {}),
         ...(result.threadId ? {threadId: result.threadId} : {}), ...(result.turnId ? {turnId: result.turnId} : {}),
         ...(recovery ? {recovery, errorMessage: result.errorMessage ?? recovery.reason} : {}),
         ...(result.statusCode ? {failure: {kind: 'rpc-rejected' as const, statusCode: result.statusCode, retryAfterMs: result.retryAfterMs}} : {})};

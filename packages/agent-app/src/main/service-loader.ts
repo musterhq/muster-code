@@ -16,6 +16,8 @@ export interface ServiceOptions {
   userProcesses?: () => readonly { pgid: number; label: string; chatId: string; cwd?: string }[];
   /** R5: user groups with ports/PIDs/names, so agent kill commands aimed at them always need approval. */
   userProcessTargets?: () => Promise<readonly { pgid: number; label: string; chatId: string; cwd?: string; pids?: readonly number[]; pgids?: readonly number[]; ports?: readonly number[]; names?: readonly string[] }[]>;
+  /** #729: scales plugin logos that are over the icon budget to PNG (Electron's nativeImage). */
+  downscaleIcon?: (bytes: Buffer, edge: number) => Buffer | null;
 }
 
 /** A missing or broken runtime is a startup failure, never a fake empty app. */

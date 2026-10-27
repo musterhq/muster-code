@@ -18,6 +18,9 @@
 
 .tool-glyph { display: inline-flex; flex: none; align-items: center; justify-content: center; width: var(--row-glyph); height: var(--row-glyph); color: var(--text-faint); transition: color 130ms ease; }
 .tool-glyph svg { display: block; }
+/* #729: a plugin mark sits in the glyph slot at full colour; a failed row dims it instead of tinting it. */
+.tool-glyph.is-plugin .item-icon { display: block; }
+.tool-row-card.is-failed .tool-glyph.is-plugin { opacity: .6; }
 .tool-row-head:hover .tool-glyph, .tool-row-card[data-open] > .tool-row-head .tool-glyph { color: var(--text-dim); }
 .tool-row-card.is-failed .tool-glyph { color: color-mix(in srgb, var(--danger) 75%, var(--text-faint)); }
 

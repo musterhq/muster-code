@@ -124,6 +124,8 @@ export interface AppState {
   providers: Loadable<ProviderInfo[]>;
   skills: Loadable<SkillEntry[]>;
   plugins: Loadable<PluginEntry[]>;
+  /** #729: bumps when cached plugin logos change, so views holding their own catalog reload it. */
+  pluginIconsRevision: number;
   pluginView: 'skills'|'plugins';
   /** Revealed provider identities; entries expire via remask timers in the view. */
   revealed: Record<string, string>;
@@ -208,6 +210,7 @@ let state: AppState = {
   providers: { phase: 'idle' },
   skills: { phase: 'idle' },
   plugins: { phase: 'idle' },
+  pluginIconsRevision: 0,
   pluginView: 'skills',
   revealed: {},
   files: {},
@@ -443,6 +446,7 @@ export async function boot(): Promise<void> {
       set({ contextTelemetry: { ...state.contextTelemetry, [event.chatId]: event.telemetry } });
     } else if (event.type === 'notice') pushNotice(event.message, {kind: runtimeNoticeKind(event.message)});
     else if (event.type === 'settingsChanged') applySettings(event.values);
+    else if (event.type === 'pluginIconsChanged') { set({pluginIconsRevision: state.pluginIconsRevision + 1}); if (state.plugins.phase === 'ready') void loadPlugins(true); }
     else if (event.type === 'automationsChanged') set({automations: {phase: 'ready', value: event.automations}});
   });
   try {
@@ -1219,16 +1223,22 @@ export function setPluginView(pluginView:'skills'|'plugins'):void {
   if(pluginView==='skills')void loadSkills(); else void loadPlugins();
 }
 
+/** The folders the loaded skills list was read for: a folder's own .claude and .agents entries only list for that folder. */
+let skillsScope: string | null = null;
+let skillsTicket = 0;
 export async function loadSkills(force = false, folderPaths?: string[]): Promise<void> {
-  if (state.skills.phase === 'loading') return;
-  if (!force && state.skills.phase === 'ready') return;
+  const allowedFolders = folderPaths ?? (state.snapshot?.folders ?? []).map(folder => folder.path);
+  const scope = allowedFolders.join('\n');
+  if (state.skills.phase === 'loading' && scope === skillsScope) return;
+  if (!force && state.skills.phase === 'ready' && scope === skillsScope) return;
+  skillsScope = scope;
+  const ticket = ++skillsTicket;
   set({ skills: { phase: 'loading', value: state.skills.value } });
   try {
-    const allowedFolders = folderPaths ?? (state.snapshot?.folders ?? []).map(folder => folder.path);
     const value = await invoke('plugins.list', { folderPaths: allowedFolders });
-    set({ skills: { phase: 'ready', value } });
+    if (ticket === skillsTicket) set({ skills: { phase: 'ready', value } });
   } catch (cause) {
-    set({ skills: { phase: 'error', error: errorText(cause) } });
+    if (ticket === skillsTicket) set({ skills: { phase: 'error', error: errorText(cause) } });
   }
 }
 

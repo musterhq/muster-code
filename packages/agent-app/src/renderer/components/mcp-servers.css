@@ -4,6 +4,10 @@
 .mcp-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border: 1px solid var(--hairline); border-radius: var(--radius); }
 .mcp-server + .mcp-server { border-top: 1px solid var(--hairline); }
 .mcp-server-row { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 12px; }
+/* #729: plugin mark with the health dot tucked into its corner, ringed in the row colour. */
+.mcp-server-mark { position: relative; flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; }
+.mcp-server-tile { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-6); background: var(--bg-active); border: 1px solid var(--hairline); color: var(--text-dim); }
+.mcp-server-mark > .mcp-dot { position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; box-shadow: 0 0 0 2px var(--bg); }
 .mcp-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
 .mcp-dot.is-ok { background: var(--ok); }
 .mcp-dot.is-danger { background: var(--danger); }

@@ -104,7 +104,7 @@ export function summarizeActivity(items:readonly TimelineItem[]):string {
   const unique=[...new Map(items.map(item=>[item.id,item])).values()];
   const running=unique.findLast(item=>item.status==='running'&&!executionDenied(item.data));
   if(running){const p=classifyTool(running.data);return `${awaitingApproval(running)?APPROVAL_WAIT_LABEL:p.runningVerb}${p.subject?' '+p.subject:''}`;}
-  const read=new Set<string>(),edited=new Set<string>(),viewed=new Set<string>(),used=new Set<string>();let searches=0,commands=0,tools=0,agents=0;
+  const read=new Set<string>(),edited=new Set<string>(),viewed=new Set<string>(),used=new Set<string>(),invoked=new Set<string>();let searches=0,commands=0,tools=0,agents=0;
   for(const item of unique.filter(item=>item.status==='completed'&&!executionDenied(item.data))){
     const p=classifyTool(item.data);
     if(p.images?.length) {for(const path of p.images)viewed.add(path);}
@@ -113,12 +113,13 @@ export function summarizeActivity(items:readonly TimelineItem[]):string {
     else if(p.kind==='search') searches++;
     else if(p.kind==='command') commands++;
     else if(p.kind==='subagent') agents++;
+    else if(p.kind==='skill') invoked.add(`${p.verb.toLowerCase()} ${p.subject}`);
     else if(p.kind==='computer'&&p.computer) used.add(p.computer.target==='browser'?'the browser':p.computer.app||'the computer');
     else tools++;
   }
   const count=(n:number,one:string,many=one+'s')=>`${n} ${n===1?one:many}`;
   // Codex order: the apps it drove ("Used Chrome integration"), what changed, what was looked at, then what ran.
-  const parts=[used.size?`used ${namesLabel([...used])}`:'',edited.size?`edited ${count(edited.size,'file')}`:'',read.size?`read ${count(read.size,'file')}`:'',viewed.size?`viewed ${count(viewed.size,'image')}`:'',searches?`${count(searches,'search','searches')}`:'',commands?`ran ${count(commands,'command')}`:'',agents?`${count(agents,'agent action')}`:'',tools?`${count(tools,'tool call')}`:''].filter(Boolean);
+  const parts=[used.size?`used ${namesLabel([...used])}`:'',edited.size?`edited ${count(edited.size,'file')}`:'',read.size?`read ${count(read.size,'file')}`:'',viewed.size?`viewed ${count(viewed.size,'image')}`:'',searches?`${count(searches,'search','searches')}`:'',...invoked,commands?`ran ${count(commands,'command')}`:'',agents?`${count(agents,'agent action')}`:'',tools?`${count(tools,'tool call')}`:''].filter(Boolean);
   // #580: the counts match the rows: a refused tool "did not run", a stopped one reads Stopped.
   let failed=0,interrupted=0,cancelled=0,denied=0;
   for(const item of unique){if(executionDenied(item.data))denied++;else if(item.status==='failed')failed++;else if(item.status==='interrupted')interrupted++;else if(item.status==='cancelled')cancelled++;}
@@ -134,7 +135,7 @@ export function activityKind(items:readonly TimelineItem[]):{kind:ReturnType<typ
   const running=items.findLast(item=>item.status==='running');
   if(running){const p=classifyTool(running.data);return {kind:p.kind,image:!!p.images?.length};}
   const kinds=items.map(item=>classifyTool(item.data));
-  for(const kind of ['edit','read','search','command','subagent','mcp','computer','list'] as const){const hit=kinds.find(p=>p.kind===kind&&!(kind==='read'&&p.images?.length));if(hit)return {kind,image:false};}
+  for(const kind of ['edit','read','search','command','skill','subagent','mcp','computer','list'] as const){const hit=kinds.find(p=>p.kind===kind&&!(kind==='read'&&p.images?.length));if(hit)return {kind,image:false};}
   if(kinds.some(p=>p.images?.length))return {kind:'read',image:true};
   return {kind:kinds[0]?.kind??'generic',image:false};
 }

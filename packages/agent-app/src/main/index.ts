@@ -1,5 +1,6 @@
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, protocol, screen, session, shell, clipboard, systemPreferences } from 'electron';
 import {execFile} from 'node:child_process';
+import {downscaleIcon} from './icon-downscale.ts';
 import {BrowserSessionVault} from './browser-session-vault.ts';
 import {PLUGIN_SCHEME,PluginUiRegistry} from './plugin-ui.ts';
 import {applyThemeSource,themeFromSettingsResult,windowBackground} from './theme';
@@ -45,6 +46,7 @@ import {shouldThrottleBackground} from './painting-policy.ts';
 import {electronSecretBox} from '../runtime/memory-context.ts';
 import {ServerSignInWindows} from './server-signin-window.ts';
 import { device } from '../shared/device-noun.ts';
+
 
 app.setName('Muster Agent');
 {const store=passwordStoreSwitch(process.env,process.argv);if(store)app.commandLine.appendSwitch('password-store',store);}
@@ -229,7 +231,7 @@ async function main(): Promise<void> {
   };
   let userProcessGroups: () => ReturnType<ProcessSessions['userProcessGroups']> = () => [];
   let userProcessTargets: () => ReturnType<ProcessSessions['userProcessTargets']> = async () => userProcessGroups();
-  const loaded = loadAgentService({ dataDir, onEvent, userProcesses: () => userProcessGroups(), userProcessTargets: () => userProcessTargets() });
+  const loaded = loadAgentService({ dataDir, onEvent, userProcesses: () => userProcessGroups(), userProcessTargets: () => userProcessTargets(), downscaleIcon });
   service = loaded.service;
   void service.invoke('settings.get', {}).then(result => { notifyPrefs = notificationPrefs(result.values); applyBadge(pendingAttention); }, () => {});
   openLinkedChat=async id=>{

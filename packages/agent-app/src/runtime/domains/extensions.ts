@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { isEnabled, pluginExtensionId, skillExtensionId, type DetectedSourceProvider, type ExtensionEnablement, type ExtensionScope, type ExtensionSource, type InstalledExtension, type InstallReview, type MarketplacePackage } from '../../shared/domains/extensions-protocol.ts';
 import type { Chat } from '../../shared/protocol.ts';
-import { discoverCodexProvenance, discoverPlugins, discoverSkills, setDiscoveryGates, setExtensionSkillRoots, type PluginEntry, type SkillRoot } from '../plugin-library.ts';
+import { brandIcon, discoverCodexProvenance, discoverPlugins, discoverSkills, setDiscoveryGates, setExtensionSkillRoots, type PluginEntry, type SkillRoot } from '../plugin-library.ts';
 import { compareVersions, expandRoot, extensionsRoot, installPackage, NAME, packageFiles, readCatalog, removeInstall, sourceRoot, sweepStaging, syncGitSource, type CatalogEntry } from '../plugin-install.ts';
 import { readLocalSkill, restoreLocalSkill, saveLocalSkill } from '../skill-editor.ts';
 import { PROMPT_CONTRIBUTION_MAX_BYTES } from './hooks.ts';
@@ -173,7 +173,10 @@ export function createExtensionsDomain(ctx: DomainContext): DomainModule {
   const catalog = async (): Promise<MarketplacePackage[]> => {
     const current = new Map(installed().map(entry => [entry.packageId, entry]));
     const output: MarketplacePackage[] = [];
-    for (const entry of sources()) for (const { pkg } of await catalogFor(entry).catch(() => [])) {
+    for (const entry of sources()) for (const { pkg: listed } of await catalogFor(entry).catch(() => [])) {
+      // #729: a plugin package with no logo of its own takes the one an OpenAI catalog lists under its name.
+      const brand = listed.kind === 'plugin' && listed.icon?.kind !== 'image' ? await brandIcon(listed.name) : null;
+      const pkg = brand ? { ...listed, icon: brand } : listed;
       const mine = current.get(pkg.id);
       output.push(mine ? { ...pkg, installed: { version: mine.version, updateAvailable: compareVersions(pkg.version, mine.version) > 0 } } : pkg);
     }

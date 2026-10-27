@@ -1,11 +1,14 @@
 import {ToolOutput,ToolDetail} from './ToolOutput';
 import {useDisclosure} from './useDisclosure';
 import {copyText} from '../clipboard';
-import { Blocks, BookOpen, Bot, Check, ChevronRight, Circle, CircleCheck, CircleDot, Copy, Image as ImageIcon, ListChecks, MousePointerClick, PencilLine, Search, SquareTerminal, Wrench } from 'lucide-react';
+import { Blocks, BookOpen, Bot, Check, ChevronRight, Circle, CircleCheck, CircleDot, Copy, Image as ImageIcon, ListChecks, MousePointerClick, PencilLine, Search, Sparkles, SquareSlash, SquareTerminal, Wrench } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import type { TimelineItem } from '../../shared/protocol';
 import { toolState, awaitingApproval, executionDenied, basename, classifyTool, commandLabel, commandOutcome, planPreview, planSteps, resolveToolPath, uniqueFileLabels, type PlanStep, type ToolKind } from './toolPresentation';
-import {getState,openFile} from '../store';
+import {getState,loadPlugins,openFile} from '../store';
+import {useStoreSelector} from '../useStore';
+import {mcpMark,mcpToolLabel,type McpMark} from '../mcpIcons';
+import {PluginIcon} from './PluginIcon';
 import {openTerminalTab} from './ProcessesTab';
 import './tool-card.css';
 import {Collapsible} from '@base-ui/react/collapsible';
@@ -25,9 +28,22 @@ import {GalleryCoverage,ImageGallery,type GalleryTarget} from './ImageGallery';
 type Glyph = React.ComponentType<{size?: number; strokeWidth?: number; 'aria-hidden'?: boolean | 'true'}>;
 /** Codex transcript glyphs: thin, monochrome, one per verb. */
 const ICONS: Record<ToolKind, Glyph> = {
-  read: BookOpen, edit: PencilLine, search: Search, list: ListChecks, command: SquareTerminal, subagent: Bot, mcp: Blocks, computer: MousePointerClick, generic: Wrench,
+  read: BookOpen, edit: PencilLine, search: Search, list: ListChecks, command: SquareTerminal, subagent: Bot, mcp: Blocks, computer: MousePointerClick, skill: Sparkles, generic: Wrench,
 };
-export function ToolGlyph({kind,running=false,image=false}:{kind:ToolKind;running?:boolean;image?:boolean}) { const Icon=image?ImageIcon:ICONS[kind];return <span className={running?'tool-glyph is-active':'tool-glyph'} aria-hidden="true"><Icon size={15} strokeWidth={1.6}/></span>; }
+/** #729: an MCP or app tool row carries the mark of the plugin that provides it (Figma, GitHub, Google Drive…); unknown servers keep the generic glyph. */
+function useMcpMark(item:TimelineItem,enabled=true):McpMark|undefined {
+  const plugins=useStoreSelector(state=>state.plugins.value),phase=useStoreSelector(state=>state.plugins.phase);
+  useEffect(()=>{if(enabled&&phase==='idle')void loadPlugins();},[enabled,phase]);
+  if(!enabled)return undefined;
+  const data=item.data,server=typeof data?.server==='string'?data.server:typeof data?.namespace==='string'?data.namespace:'',tool=typeof data?.tool==='string'?data.tool:'';
+  return mcpMark(plugins,server,tool);
+}
+export function McpGlyph({item,running=false}:{item:TimelineItem;running?:boolean}) {
+  const mark=useMcpMark(item);
+  if(!mark)return <ToolGlyph kind="mcp" running={running}/>;
+  return <span className={running?'tool-glyph is-plugin is-active':'tool-glyph is-plugin'} aria-hidden="true" data-plugin={mark.plugin}><PluginIcon icon={mark.icon} name={mark.plugin} brandColor={mark.brandColor} size={15}/></span>;
+}
+export function ToolGlyph({kind,running=false,image=false,slash=false}:{kind:ToolKind;running?:boolean;image?:boolean;slash?:boolean}) { const Icon=image?ImageIcon:slash?SquareSlash:ICONS[kind];return <span className={running?'tool-glyph is-active':'tool-glyph'} aria-hidden="true"><Icon size={15} strokeWidth={1.6}/></span>; }
 
 /** CUA-06: screenshots in a tool result are pictures, never base64 text; click opens the full-resolution viewer. */
 function Shot({shot,source,index}:{shot:ToolShot;source:PipSource;index:number}) {
@@ -52,13 +68,17 @@ function Metadata({item,plan}:{item:TimelineItem;plan:boolean}) {
   // A rendered checklist replaces the plan's raw argument/result JSON; errors stay visible.
   // CUA-04: computer-use rows read as actions; their masked arguments stay available under Details.
   const computer=classifyTool(d).kind==='computer';
-  const blocks=[[computer?'Details':'Arguments',d.arguments],['Result',d.result],['Error',d.error],['Task',d.prompt],['Agent status',d.agentsStates],['Output',d.contentItems]].filter(([label])=>!plan||label==='Error');
+  // #729: a Claude command's arguments are already in its command line; its source replaces the raw JSON.
+  const command=d.type==='claudeCommand';
+  const blocks=[[computer?'Details':'Arguments',command?null:d.arguments],['Result',d.result],['Error',d.error],['Task',d.prompt],['Agent status',d.agentsStates],['Output',d.contentItems]].filter(([label])=>!plan||label==='Error');
   return <div className="tool-details">
     {typeof d.command==='string'&&classifyTool(d).kind!=='command'&&<ToolDetail id={item.id+':command'} label="Command" text={d.command} language="shell"/>}
     <dl>{typeof d.cwd==='string'&&<><dt>Folder</dt><dd>{d.cwd}</dd></>}
       {typeof d.durationMs==='number'&&<><dt>Duration</dt><dd>{(d.durationMs/1000).toFixed(2)}s</dd></>}
       {typeof d.exitCode==='number'&&<><dt>Exit code</dt><dd>{d.exitCode}</dd></>}
       {typeof d.model==='string'&&<><dt>Model</dt><dd>{d.model}</dd></>}
+      {command&&typeof d.source==='string'&&<><dt>Source</dt><dd>{d.source}</dd></>}
+      {command&&typeof d.path==='string'&&<><dt>File</dt><dd>{d.path}</dd></>}
     </dl>
     {blocks.filter(([,value])=>value!=null).map(([label,value])=><ToolDetail key={String(label)} id={item.id+':'+label} label={String(label)} text={pretty(value)??''}/>)}
     {Array.isArray(d.receiverThreadIds)&&<div className="tool-child-ids">Agents: {d.receiverThreadIds.join(', ')}</div>}
@@ -164,7 +184,10 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
   const images=p.images??[];
   const files=images.length>1?[]:p.kind==='edit'?p.files??[]:p.kind==='read'?(p.paths??(p.subject?[p.subject]:[])).map(path=>({path})):[];
   // Codex: a computer-use step carries its app's icon, so the line reads as the step alone ("Clicked “Send”").
-  const subject=p.kind==='command'?commandLabel(raw):images.length>1?'':p.computer?computerStepSubject(p.computer):p.subject;
+  // #729: a connector call reads as its plugin and tool ("Used GitHub / search issues"); the raw server name stays in the tooltip.
+  const mark=useMcpMark(item,p.kind==='mcp'&&!p.computer);
+  const mcpSubject=mark&&typeof item.data?.title!=='string'&&typeof item.data?.tool==='string'?[mark.plugin,mcpToolLabel(item.data.tool,mark.plugin)].filter(Boolean).join(' / '):undefined;
+  const subject=p.kind==='command'?commandLabel(raw):images.length>1?'':p.computer?computerStepSubject(p.computer):mcpSubject??p.subject;
   const steps=p.plan?planSteps(item.data):[];
   const live=p.kind==='command'&&running&&!open?output.replace(/\s+$/,'').split('\n').filter(line=>line.trim()).slice(-4):[];
   const excerpt=open?[]:outcome.excerpt;
@@ -176,8 +199,8 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
   return <Collapsible.Root open={open} onOpenChange={setOpen} className={`tool-row-card kind-${p.kind}${images.length?' is-images':''}${running ? ' is-running' : ''}${waiting ? ' is-waiting' : ''}${failed ? ' is-failed' : ''}`}>
     <div className="tool-row-head">
       {/* The trigger covers the whole row; file links sit above it so they stay separate buttons. */}
-      <Collapsible.Trigger className="tool-row-hit" aria-label={label} title={p.subject||undefined}/>
-      {p.computer?<AppGlyph app={p.computer.app} target={p.computer.target} running={running}/>:<ToolGlyph kind={p.kind} running={running} image={images.length>0}/>}
+      <Collapsible.Trigger className="tool-row-hit" aria-label={label} title={p.slash&&typeof item.data?.source==='string'?[item.data.source,item.data.path].filter(value=>typeof value==='string'&&value).join(' · '):p.subject||undefined}/>
+      {p.computer?<AppGlyph app={p.computer.app} target={p.computer.target} running={running}/>:p.kind==='mcp'?<McpGlyph item={item} running={running}/>:<ToolGlyph kind={p.kind} running={running} image={images.length>0} slash={p.slash}/>}
       <span className="tool-row-text">
         <span className="tool-row-state">{state}</span>
         {files.length?<> <span className="tool-row-files"><FileLinks item={item} files={files}/></span></>:subject?<> <span className="tool-row-subject">{subject}</span></>:null}
@@ -199,7 +222,7 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
       {steps.length>0&&<PlanChecklist steps={steps}/>}
       <ToolShots item={item}/>
       {p.planText&&!steps.length&&<PlanToolLink chatId={item.chatId} text={p.planText}/>}
-      {(output||p.kind==='command')&&!steps.length&&!edit&&!p.planText&&<ToolOutput id={item.id} chatId={item.chatId} sourceTruncated={item.data?.outputTruncated===true} text={output || (running ? 'Waiting for output…' : 'No output')}/>}
+      {(output||p.kind==='command')&&!steps.length&&!edit&&!p.planText&&<ToolOutput id={item.id} chatId={item.chatId} title={p.slash?'Expanded prompt':undefined} sourceTruncated={item.data?.outputTruncated===true} text={output || (running ? 'Waiting for output…' : 'No output')}/>}
       <Metadata item={item} plan={steps.length>0}/>
     </div></Collapsible.Panel>
   </Collapsible.Root>;
