@@ -1,103 +1,15 @@
-// The renderer (DOM) suites run by scripts/test-renderer.mjs, in order. Each sets up its own linkedom globals.
-export const suites = [
-  'renderer-lifecycle',
-  'nav-history-screens-dom',
-  'folder-default-model',
-  'model-picker-dom',
-  'memory-recall-chip',
-  'summary-scheduled-dom',
-  'processes-components',
-  'skill-attach-components',
-  'subagent-components',
-  'mailbox-inbox-components',
-  'providers-components',
-  'browser-components',
-  'pip-components',
-  'message-meta',
-  'markdown-fade-dom',
-  'timeline-navigation-dom',
-  'scoped-computer-components',
-  'sandbox-controls-components',
-  'settings-shell',
-  'workspace-refresh-e2e',
-  'stop-keeps-workspace',
-  'review-fixes-dom',
-  'file-tree-multiselect',
-  'pdf-thumbnails',
-  'artifact-viewer',
-  'project-team-components',
-  'project-surface-components',
-  'plugins-screen-components',
-  'parallel-run-guard-e2e',
-  'area-boundary-dom',
-  'setup-guide-dom',
-  'new-project-sources-components',
-  'hub-components',
-  'projects-parity-components',
-  'paperclip-integration-dom',
-  'connected-views-dom',
-  'paperclip-signin-dom',
-  'muster-server-components',
-  'governance-components',
-  'work-components',
-  'nav-components',
-  'org-components',
-  'orgs-dom',
-  'server-outputs-dom',
-  'chat-polish-dom',
-  'device-noun-dom-win32',
-  'device-noun-dom-linux',
-  'add-provider-components',
-  'store-selectors',
-  'chat-image-dom',
-  'image-gallery-dom',
-  'reply-gap-dom',
-  'broken-image-gallery-dom',
-  'markdown-table-dom',
-  'org-sidebar-pages-dom',
-  'clone-retry-dom',
-  'composer-components',
-  'composer-s3a-components',
-  'claude-skills-729-components',
-  'git-components',
-  'git-history-components',
-  'highlighted-code-streaming',
-  'hindsight-panel-lifecycle',
-  'pending-attention',
-  'recovery-notice',
-  'resource-pane-components',
-  'share-sheet-dom',
-  'sidebar-navigation',
-  'sidebar-chrome-403-dom',
-  'spotlight-palette-dom',
-  'file-viewer-parity',
-  'limit-resume-dom',
-  'chat-render-bounds-dom',
-  'chat-rtl-dom',
-  'composer-rtl-dom',
-  'composer-inflight-chips-dom',
-  'queue-stale-edit-dom',
-  'hub-store-race',
-  'org-open-failure',
-  'my-work-retry-dom',
-  'receipt-token-format',
-  'org-avatar-emoji',
-  'project-confirm-retry-dom',
-  'memory-settings-rollback-dom',
-  'inbox-group-stale-dom',
-  'checkout-settings-reject-dom',
-  'file-editor-safety-dom',
-  'ime-enter-dom',
-  'update-status-retry-dom',
-  'markdown-breaks-dom',
-  'setup-clone-handoff-dom',
-  'sandbox-honesty-dom',
-  'side-chat-back-dom',
-  'import-origin-dom',
-  'file-find-dom',
-  'large-edited-file-dom',
-  'notice-placement-dom',
-];
+import {globSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+
+const root = fileURLToPath(new URL('../', import.meta.url));
+
+// New suites are picked up automatically; only shared bodies and separately driven suites are excluded.
+export function discoverRenderer(cwd = root) {
+  return {
+    suites: globSync('tests/*.tsx', {cwd}).map(file => file.replaceAll('\\', '/').slice(6, -4)).filter(name => !Object.hasOwn(excluded, name)).sort(),
+    runners: globSync('tests/run-*.mjs', {cwd}).map(file => file.replaceAll('\\', '/')).sort(),
+  };
+}
 
 /** Suites that open Base UI menus/portals get a split build: their `await import()` of UI code stays a separate
  * chunk, so Base UI is evaluated after the suite installs its linkedom globals (not on its SSR no-op paths). */
@@ -127,11 +39,11 @@ export const split = new Set([
   'pending-attention',
   'resource-pane-components',
   'sidebar-navigation',
-  'sidebar-chrome-403-dom',
   'spotlight-palette-dom',
   'limit-resume-dom',
   'ime-enter-dom',
   'sandbox-honesty-dom',
+  'sidebar-chrome-403-dom',
 ]);
 
 /** tests/*.tsx files that are deliberately not suites, with the reason. */
@@ -142,10 +54,12 @@ export const excluded = {
   'terminal-load-retry-dom': 'built and run by tests/terminal-load-retry.test.ts, which the node test job already runs',
 };
 
+export const {suites, runners} = discoverRenderer();
+
 /** Names that break the rule: a tests/*.tsx file in neither list, a listed or excluded name with no file, and a name in both. */
 export function suiteProblems(files, listed = suites, skipped = Object.keys(excluded)) {
   const present = new Set(files), known = new Set([...listed, ...skipped]), problems = [];
-  for (const file of [...present].sort()) if (!known.has(file)) problems.push(`${file}.tsx is not run by test:renderer: add it to suites in scripts/renderer-suites.mjs, or to excluded with the reason`);
+  for (const file of [...present].sort()) if (!known.has(file)) problems.push(`${file}.tsx is not run by test:renderer: check discovery in scripts/renderer-suites.mjs`);
   for (const name of [...listed].sort()) if (!present.has(name)) problems.push(`suites lists ${name}, but tests/${name}.tsx does not exist`);
   for (const name of [...skipped].sort()) if (!present.has(name)) problems.push(`excluded lists ${name}, but tests/${name}.tsx does not exist`);
   for (const name of [...skipped].sort()) if (listed.includes(name)) problems.push(`${name} is both a suite and excluded`);

@@ -1,7 +1,8 @@
 import {spawn} from 'node:child_process';
 import {StringDecoder} from 'node:string_decoder';
 import {constants as fsc, promises as fs} from 'node:fs';
-import {basename, dirname, extname, isAbsolute, join, relative, sep} from 'node:path';
+import {basename, dirname, extname, isAbsolute, join, matchesGlob, relative, sep} from 'node:path';
+import {headAndTail} from './shared.ts';
 import {isInsidePath, normalizeFsPath} from '../../shared/path-normalize.ts';
 import {agentCommandEnvironment} from '../command-environment.ts';
 import {killTreeAndEscapees, WINDOWS} from '../process-tree.ts';
@@ -53,8 +54,9 @@ export const browserOffered = (browser: boolean | undefined) => !!browser && !!b
 
 export function toolSpecs(access: ToolAccess, browser = false, ask = false): FunctionSpec[] {
   const tools = [
-    spec('read_file', 'Read a text file (the first 256 KB). Relative paths are inside the working folder.', {path: string('File path')}, ['path']),
+    spec('read_file', 'Read a text file (up to 256 KB per call). Relative paths are inside the working folder.', {path: string('File path'), offset: {type: 'integer', minimum: 0, description: 'Byte offset; defaults to 0. Use the next offset in a partial result to continue.'}, limit: {type: 'integer', minimum: 1, maximum: MAX_FILE_READ, description: 'Maximum bytes to read; defaults to 256 KB.'}}, ['path']),
     spec('list_directory', 'List the entries of a folder.', {path: string('Folder path; defaults to the working folder')}, []),
+    spec('search_files', 'Find file paths by glob and optionally lines containing literal text. Searches at most 10000 entries and returns at most 200 matches; links are skipped.', {path: string('Folder to search; defaults to the working folder'), glob: string('File glob relative to that folder; defaults to **/*'), query: string('Optional literal text to find in text files (first 256 KB of each)')}, []),
   ];
   if (access !== 'read-only') tools.push(
     spec('write_file', 'Create or overwrite a text file (parent folders are created).', {path: string('File path'), content: string('Complete new file content')}, ['path', 'content']),
@@ -79,7 +81,7 @@ export function toolInstructions(access: ToolAccess, cwd: string, browser = fals
 
 const clip = (text: string, max = MAX_TOOL_OUTPUT) => text.length > max ? text.slice(0, max) + `\n[output cut at ${max} characters]` : text;
 /** What the timeline stores of a tool's output: capped, with the pattern-based secret redaction. The model still gets the real output. */
-const stored = (text: string) => redactSecrets(clip(text, MAX_TIMELINE_OUTPUT));
+const stored = (text: string) => redactSecrets(headAndTail(text, MAX_TIMELINE_OUTPUT));
 
 /** The same event with secret shapes masked in the command line and in each file change's diff. */
 function redactedItem(params: Record<string, unknown>): Record<string, unknown> {
@@ -200,7 +202,7 @@ async function writeConfined(resolved: Resolved, content: string): Promise<void>
 }
 
 /** At most `limit` bytes of a regular file, never the whole thing. */
-async function readLimited(path: string, limit: number, refuseHardLinked = false): Promise<{text: string; size: number}> {
+async function readLimited(path: string, limit: number, refuseHardLinked = false, offset = 0): Promise<{text: string; size: number; bytesRead: number}> {
   // stat first: opening a FIFO or device for reading can block forever.
   if (!(await fs.stat(path)).isFile()) throw new Error(`${path} is not a regular file.`);
   const handle = await fs.open(path, fsc.O_RDONLY);
@@ -209,11 +211,43 @@ async function readLimited(path: string, limit: number, refuseHardLinked = false
     if (!info.isFile()) throw new Error(`${path} is not a regular file.`);
     // A hardlink planted in the folder can name a file that lives outside it; whether its other names are outside cannot be known, so refuse.
     if (refuseHardLinked && info.nlink > 1) throw new Error(`${path} has other hard links, so it is not read outside Full access (it may be the same file as one outside the working folder).`);
-    const buffer = Buffer.alloc(Math.min(info.size, limit));
-    const {bytesRead} = await handle.read(buffer, 0, buffer.length, 0);
+    const buffer = Buffer.alloc(Math.min(Math.max(0, info.size - offset), limit));
+    const {bytesRead} = await handle.read(buffer, 0, buffer.length, offset);
     // A cut at the limit can fall inside a character: the decoder holds back that partial character instead of emitting U+FFFD.
-    return {text: bytesRead < info.size ? new StringDecoder('utf8').write(buffer.subarray(0, bytesRead)) : buffer.subarray(0, bytesRead).toString('utf8'), size: info.size};
+    const text = offset + bytesRead < info.size ? new StringDecoder('utf8').write(buffer.subarray(0, bytesRead)) : buffer.subarray(0, bytesRead).toString('utf8');
+    return {text, size: info.size, bytesRead: Buffer.byteLength(text)};
   } finally { await handle.close(); }
+}
+
+/** Read-only discovery with the same confinement and hard-link checks as read_file; no shell or external binary. */
+async function searchFiles(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
+  const root = await resolvePath(args.path ?? '.', ctx), pending = [root.path], found: string[] = [];
+  const glob = typeof args.glob === 'string' ? args.glob : '**/*', query = typeof args.query === 'string' ? args.query : undefined;
+  let visited = 0, incomplete = false;
+  while (pending.length && !incomplete) {
+    const dir = await fs.opendir(pending.pop()!);
+    for await (const entry of dir) {
+      ctx.signal.throwIfAborted();
+      if (++visited > 10000 || found.length >= 200) { incomplete = true; break; }
+      if (entry.isSymbolicLink()) continue;
+      const path = join(dir.path, entry.name);
+      // Recheck the entire path in case an entry was replaced after readdir.
+      let resolved: Resolved;
+      try { resolved = await resolvePath(join(ctx.cwd, relative(root.base, path)), ctx); } catch { continue; }
+      if (entry.isDirectory()) { pending.push(resolved.path); continue; }
+      if (!entry.isFile()) continue;
+      const name = relative(root.path, path).split(sep).join('/');
+      if (!matchesGlob(name, glob)) continue;
+      if (query === undefined) { found.push(name); continue; }
+      try {
+        const {text} = await readLimited(resolved.path, MAX_FILE_READ, resolved.confined);
+        if (text.includes('\0')) continue;
+        const lines = text.split('\n');
+        for (let i = 0; i < lines.length && found.length < 200; i++) if (lines[i]!.includes(query)) found.push(`${name}:${i + 1}:${headAndTail(lines[i]!, 1000)}`);
+      } catch { /* unreadable or hard-linked files are skipped */ }
+    }
+  }
+  return headAndTail(found.join('\n') || '(no matches)', MAX_TOOL_OUTPUT) + (incomplete ? '\n[search limit reached; narrow the folder or glob]' : '');
 }
 
 const IMAGE_TYPES: Record<string, string> = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp'};
@@ -258,16 +292,20 @@ function runCommand(command: string, timeoutSeconds: number, ctx: ToolContext): 
     const {file, args} = shellInvocation(command);
     // Its own process group on POSIX (so Stop can end everything it started); taskkill /T does the same job on Windows.
     const child = spawn(file, args, {cwd, windowsHide: true, detached: !WINDOWS, stdio: ['ignore', 'pipe', 'pipe'], env: agentCommandEnvironment(ctx.env)});
-    let output = '', done = false;
+    let head = '', tail = '', total = 0, done = false;
     // One decoder per stream: a multi-byte character split across two pipe chunks is joined, not turned into U+FFFD.
-    const reader = (decoder: StringDecoder) => (chunk: Buffer) => { const piece = decoder.write(chunk); if (output.length < MAX_TOOL_OUTPUT * 2) output += piece; };
+    const reader = (decoder: StringDecoder) => (chunk: Buffer) => {
+      const piece = decoder.write(chunk); total += piece.length;
+      const take = Math.min(piece.length, MAX_TOOL_OUTPUT - head.length);
+      head += piece.slice(0, take); tail = (tail + piece.slice(take)).slice(-MAX_TOOL_OUTPUT);
+    };
     child.stdout.on('data', reader(new StringDecoder('utf8'))); child.stderr.on('data', reader(new StringDecoder('utf8')));
     const end = () => {
       if (child.pid === undefined) return;
       try { killTreeAndEscapees(child.pid, 'SIGTERM'); } catch { /* already gone */ }
       if (!WINDOWS) setTimeout(() => { try { killTreeAndEscapees(child.pid!, 'SIGKILL'); } catch { /* already gone */ } }, 2000).unref();
     };
-    const finish = (exitCode: number | null, extra = '') => { if (done) return; done = true; clearTimeout(timer); ctx.signal.removeEventListener('abort', stop); resolvePromise({output: clip(output + extra), exitCode}); };
+    const finish = (exitCode: number | null, extra = '') => { if (done) return; done = true; clearTimeout(timer); ctx.signal.removeEventListener('abort', stop); const output = total <= MAX_TOOL_OUTPUT ? head : headAndTail(head + tail, MAX_TOOL_OUTPUT); resolvePromise({output: output + extra, exitCode}); };
     const stop = () => { end(); finish(null, '\n[stopped]'); };
     const timer = setTimeout(() => { end(); finish(null, `\n[stopped after ${timeoutSeconds}s]`); }, timeoutSeconds * 1000);
     if (ctx.signal.aborted) { stop(); return; }
@@ -342,6 +380,11 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
       emit('item/completed', {...base, item: {...item, id, status: exitCode === 0 ? 'completed' : 'failed', exitCode, aggregatedOutput: stored(output)}});
       return {content: output || (exitCode === 0 ? '(no output)' : `Exited with code ${exitCode}`), ok: exitCode === 0};
     }
+    if (call.name === 'search_files') {
+      item = {type: 'commandExecution', command: `search_files ${typeof args.path === 'string' ? args.path : '.'}`, cwd, commandActions: [{type: 'search', query: args.query, path: args.path ?? '.'}]};
+      emit('item/started', {...base, item: {...item, id}});
+      return finish(item, {content: await searchFiles(args, ctx), ok: true});
+    }
     const resolved = await resolvePath(call.name === 'list_directory' && args.path === undefined ? '.' : args.path, ctx);
     const path = resolved.path;
     if (call.name === 'read_file') {
@@ -358,10 +401,13 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
         const image = await readImageLimited(path, resolved.confined);
         return finish(item, {content: `${name} (${image.mediaType}, ${image.size} bytes) is attached as an image below.`, ok: true, image: {mediaType: image.mediaType, data: image.data, name}}, `Viewed ${name} (${image.size} bytes)`);
       }
-      const {text, size} = await readLimited(path, MAX_FILE_READ, resolved.confined);
-      const content = (text || '(empty file)') + (size > MAX_FILE_READ ? `\n[file is ${size} bytes; the first ${MAX_FILE_READ} are shown]` : '');
+      const offset = args.offset === undefined ? 0 : args.offset, limit = args.limit === undefined ? MAX_FILE_READ : args.limit;
+      if (typeof offset !== 'number' || !Number.isSafeInteger(offset) || offset < 0 || typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 1 || limit > MAX_FILE_READ) throw new Error(`offset must be a non-negative byte offset and limit must be 1–${MAX_FILE_READ} bytes.`);
+      const {text, size, bytesRead} = await readLimited(path, limit, resolved.confined, offset);
+      const range = offset === 0 ? `the first ${bytesRead} are shown` : `bytes ${offset}–${offset + bytesRead} are shown`;
+      const content = (text || '(empty file range)') + (offset + bytesRead < size ? `\n[file is ${size} bytes; ${range}; continue with offset ${offset + bytesRead}]` : '');
       // The timeline row shows that the file was read, not its body.
-      return finish(item, {content, ok: true}, `Read ${Math.min(size, MAX_FILE_READ)} of ${size} bytes`);
+      return finish(item, {content, ok: true}, `Read ${bytesRead} of ${size} bytes at offset ${offset}`);
     }
     if (call.name === 'list_directory') {
       item = {type: 'commandExecution', command: `ls ${path}`, cwd, commandActions: [{type: 'listFiles', path}]};
