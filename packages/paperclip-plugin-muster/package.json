@@ -26,12 +26,12 @@
   "author": "Muster",
   "devDependencies": {
     "@paperclipai/plugin-sdk": "^2026.1001.0",
-    "@types/node": "^24.0.0",
+    "@types/node": "^26.6.5",
     "@types/react": "^19.0.8",
     "esbuild": "^0.28.2",
     "react": "^19.0.0",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.12"
+    "vitest": "^5.0.5"
   },
   "peerDependencies": {
     "react": ">=18"
