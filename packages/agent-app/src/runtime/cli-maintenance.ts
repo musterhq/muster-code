@@ -44,7 +44,7 @@ export function codexTarget(platform: string = process.platform, arch: string = 
   return triple ? { suffix: `${platform}-${arch}`, triple, exe: platform === 'win32' ? 'codex.exe' : 'codex' } : null;
 }
 const registryUrl = (env: NodeJS.ProcessEnv) => (env.npm_config_registry || env.NPM_CONFIG_REGISTRY || 'https://registry.npmjs.org').replace(/\/+$/, '');
-const registryPath = (pkg: string) => pkg.replace('/', '%2f');
+const registryPath = (pkg: string) => pkg.replace(/\//g, '%2f');
 /** The system tar (bsdtar on macOS and Windows 10+, GNU tar on Linux); found without PATH so a bare environment still has it. */
 const systemTar = (env: NodeJS.ProcessEnv) => process.platform === 'win32' ? join(env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : ['/usr/bin/tar', '/bin/tar'].find(existsSync) ?? 'tar';
 
