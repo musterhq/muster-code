@@ -1,4 +1,5 @@
-import {spawn} from 'node:child_process';
+import {permissionResult} from '../permission-result.ts';
+import {spawnOwned} from '../owned-process.ts';
 import {StringDecoder} from 'node:string_decoder';
 import {constants as fsc, promises as fs} from 'node:fs';
 import {basename, dirname, extname, isAbsolute, join, relative, sep} from 'node:path';
@@ -26,8 +27,8 @@ export interface ToolCall { id: string; name: string; arguments: string }
 /** An image a tool read, for the model to see (OpenAI `image_url` part on the next request). */
 export interface ToolImage { mediaType: string; data: string; name: string }
 export interface ToolResult { content: string; ok: boolean; image?: ToolImage }
-/** Resolves true to proceed. The service answers with the Project tool policy, the user-process guard and approval cards. */
-export type Authorize = (method: string, params: Record<string, unknown>, options?: {policyOnly?: boolean}) => Promise<boolean>;
+/** Resolves allow to proceed. The service answers with the Project tool policy, the user-process guard and approval cards. */
+export type Authorize = NonNullable<AdapterRunInput['authorize']>;
 export interface ToolContext { /** The chat whose browser tab the browser tools drive (#424). */ chatId?: string; /** Offer Muster's in-app browser tools. */ browser?: boolean; cwd: string; access: ToolAccess; signal: AbortSignal; emit: AdapterRunInput['onEvent']; threadId: string; turnId: string; authorize?: Authorize; /** ask_user: posts the question card and resolves at once with the reply for the model. */ askUser?: (args: Record<string, unknown>) => Promise<string>; env?: Record<string, string>; deadline?: number; /** True when the model reports image input. read_file of an image returns the picture only then. */ vision?: boolean; /** Shared across one turn so the "this model cannot see images" explanation is given once. */ visionNote?: {told: boolean} }
 
 export const MAX_TOOL_OUTPUT = 64 * 1024, MAX_FILE_READ = 256 * 1024, MAX_EDIT_FILE = 5 * 1024 * 1024, MAX_TIMELINE_OUTPUT = 8 * 1024;
@@ -257,11 +258,11 @@ function runCommand(command: string, timeoutSeconds: number, ctx: ToolContext): 
     const cwd = normalizeFsPath(ctx.cwd);
     const {file, args} = shellInvocation(command);
     // Its own process group on POSIX (so Stop can end everything it started); taskkill /T does the same job on Windows.
-    const child = spawn(file, args, {cwd, windowsHide: true, detached: !WINDOWS, stdio: ['ignore', 'pipe', 'pipe'], env: agentCommandEnvironment(ctx.env)});
+    const child = spawnOwned(file, args, {cwd, windowsHide: true, detached: !WINDOWS, stdio: ['ignore', 'pipe', 'pipe'], env: agentCommandEnvironment(ctx.env)});
     let output = '', done = false;
     // One decoder per stream: a multi-byte character split across two pipe chunks is joined, not turned into U+FFFD.
     const reader = (decoder: StringDecoder) => (chunk: Buffer) => { const piece = decoder.write(chunk); if (output.length < MAX_TOOL_OUTPUT * 2) output += piece; };
-    child.stdout.on('data', reader(new StringDecoder('utf8'))); child.stderr.on('data', reader(new StringDecoder('utf8')));
+    child.stdout!.on('data', reader(new StringDecoder('utf8'))); child.stderr!.on('data', reader(new StringDecoder('utf8')));
     const end = () => {
       if (child.pid === undefined) return;
       try { killTreeAndEscapees(child.pid, 'SIGTERM'); } catch { /* already gone */ }
@@ -326,7 +327,7 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
     return finish({type: 'commandExecution', command: `${call.name} (blocked)`, cwd}, {content: why, ok: false});
   }
   /** Project rules and the user-process guard; false when declined. */
-  const approved = async (method: string, params: Record<string, unknown>) => { if (!ctx.authorize) return true; try { return await ctx.authorize(method, {...params, itemId: id}, {policyOnly: true}); } catch { return false; } };
+  const approved = async (method: string, params: Record<string, unknown>) => { if (!ctx.authorize) return ctx.access === 'full'; try { return permissionResult(await ctx.authorize(method, {...params, itemId: id}, {policyOnly: true})) === 'allow'; } catch { return false; } };
   const declined: ToolResult = {content: 'This was declined (a Project tool rule, the protection for your own processes, or your answer).', ok: false};
   let item: Record<string, unknown> = {type: kindOf};
   try {

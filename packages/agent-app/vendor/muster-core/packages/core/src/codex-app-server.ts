@@ -1,4 +1,6 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import {spawnOwned, killOwned} from '../../../../../src/runtime/owned-process.ts';
+import {requestReply, type RequestResult} from '../../../../../src/runtime/permission-result.ts';
+import { type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -64,7 +66,7 @@ export interface CodexAppServerRunInput {
    * to send; return undefined to decline. Without a handler every request is
    * declined — which is why computer use never worked from muster before.
    */
-  readonly onRequest?: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
+  readonly onRequest?: (method: string, params: Record<string, unknown>) => Promise<RequestResult>;
   /** Per-turn approval policy (turn/start `approvalPolicy`); the thread itself starts with "never". */
   readonly approvalPolicy?: "untrusted" | "on-request" | "never";
   /** Local image paths attached to the prompt (turn/start `localImage` inputs). */
@@ -814,7 +816,7 @@ class CodexAppServerClient {
   private lastDispatchedTurnId: string | undefined;
   private observer?: {
     readonly onEvent?: (method: string, params: Record<string, unknown>) => void;
-    readonly onRequest?: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
+    readonly onRequest?: (method: string, params: Record<string, unknown>) => Promise<RequestResult>;
   };
   private observing = false;
   private observationPromise?: Promise<void>;
@@ -823,6 +825,9 @@ class CodexAppServerClient {
   private readonly observedActiveThreads = new Set<string>();
   private readonly maxNotifications = 512;
   private closed = false;
+  private closeError?: Error;
+  private killTimer?: ReturnType<typeof setTimeout>;
+  private readonly maxLineLength = 16 * 1024 * 1024;
 
   constructor(input: {
     readonly command: string;
@@ -847,18 +852,21 @@ class CodexAppServerClient {
     // provides one, else this process's executable (Electron runs as Node with ELECTRON_RUN_AS_NODE).
     const script = /\.(?:c|m)?js$/i.test(input.command);
     if (script && !env.MUSTER_PROVIDER_NODE && process.versions.electron) env.ELECTRON_RUN_AS_NODE = "1";
-    this.child = spawn(script ? env.MUSTER_PROVIDER_NODE || process.execPath : input.command, script ? [input.command, ...args] : args, {
+    this.child = spawnOwned(script ? env.MUSTER_PROVIDER_NODE || process.execPath : input.command, script ? [input.command, ...args] : args, {
       cwd: input.cwd,
       env,
       stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    this.child.stdout.on("data", (chunk: Buffer) => this.readStdout(chunk.toString("utf8")));
+    }) as ChildProcessWithoutNullStreams;
+    this.child.stdin.on("error", error => this.close(new Error(this.formatError(`codex app-server input failed: ${error.message}`))));
+    this.child.stdout.setEncoding("utf8");
+    this.child.stdout.on("data", (chunk: string) => this.readStdout(chunk));
     this.child.stderr.on("data", (chunk: Buffer) => this.readStderr(chunk.toString("utf8")));
     this.child.on("error", (error) => {
       this.finishClose(new Error(this.formatError(`codex app-server failed to start: ${error.message}`)));
     });
     this.child.on("exit", () => {
+      clearTimeout(this.killTimer);
+      killOwned(this.child, "SIGKILL");
       this.finishClose(new Error(this.formatError("codex app-server exited")));
     });
   }
@@ -867,16 +875,18 @@ class CodexAppServerClient {
     return !this.closed && this.child.exitCode === null && !this.child.killed;
   }
 
-  close(): void {
+  close(error = new Error(this.formatError("codex app-server closed"))): void {
     if (this.closed) return;
     this.observing = false;
     this.observationWake?.();
-    this.finishClose(new Error(this.formatError("codex app-server closed")));
-    this.child.kill();
+    this.finishClose(error);
+    killOwned(this.child);
+    this.killTimer = setTimeout(() => killOwned(this.child, "SIGKILL"), 3000);
+    this.killTimer.unref();
     this.child.stdin.destroy();
   }
 
-  setObserver(observer: { readonly onEvent?: (method: string, params: Record<string, unknown>) => void; readonly onRequest?: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown> | undefined> } | undefined): void { this.observer = observer; }
+  setObserver(observer: { readonly onEvent?: (method: string, params: Record<string, unknown>) => void; readonly onRequest?: (method: string, params: Record<string, unknown>) => Promise<RequestResult> } | undefined): void { this.observer = observer; }
 
   async startObservation(): Promise<void> {
     if (this.observing || this.closed || !this.observer) return;
@@ -979,7 +989,7 @@ class CodexAppServerClient {
     readonly onReasoningDelta?: (text: string) => void;
     readonly onActivity?: () => void;
     readonly onEvent?: (method: string, params: Record<string, unknown>) => void;
-    readonly onRequest?: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
+    readonly onRequest?: (method: string, params: Record<string, unknown>) => Promise<RequestResult>;
     readonly approvalPolicy?: "untrusted" | "on-request" | "never";
     readonly images?: readonly string[];
     readonly collaborationMode?: CodexCollaborationMode;
@@ -1077,7 +1087,7 @@ class CodexAppServerClient {
         if (Date.now() - started >= absoluteCeilingMs) {
           throw new CodexRunError(this.formatError(`codex app-server turn exceeded the absolute ceiling of ${absoluteCeilingMs}ms`), "dispatched");
         }
-        if (!this.isAlive()) throw new Error(this.formatError("codex app-server exited during turn"));
+        if (!this.isAlive()) throw this.closeError ?? new Error(this.formatError("codex app-server exited during turn"));
         const message = await this.takeNotification(250);
         if (!message) continue;
         lastNotificationAt = Date.now();
@@ -1098,7 +1108,7 @@ class CodexAppServerClient {
           }
           const id = message.id;
           void input.onRequest(method, params)
-            .then((response) => this.respond(id, response ?? decline))
+            .then((response) => this.respond(id, requestReply(response, method) ?? decline))
             .catch(() => this.respond(id, decline));
           continue;
         }
@@ -1194,13 +1204,19 @@ class CodexAppServerClient {
   }
 
   private write(message: Record<string, unknown>): void {
-    this.child.stdin.write(`${JSON.stringify(message)}\n`);
+    if (!this.closed) this.child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
   private readStdout(chunk: string): void {
+    if (this.closed) return;
     this.stdoutBuffer += chunk;
     const lines = this.stdoutBuffer.split(/\n/);
     this.stdoutBuffer = lines.pop() ?? "";
+    if (this.stdoutBuffer.length > this.maxLineLength || lines.some(line => line.length > this.maxLineLength)) {
+      this.stdoutBuffer = "";
+      this.close(new Error("codex app-server sent an oversized output line."));
+      return;
+    }
     for (const line of lines) {
       if (!line.trim()) continue;
       let message: Record<string, unknown>;
@@ -1247,7 +1263,7 @@ class CodexAppServerClient {
     const decline = { decision: "decline", action: "decline", content: null, _meta: null };
     if (!this.observer?.onRequest) { this.respond(message.id, decline); return; }
     void this.observer.onRequest(method, params)
-      .then((response) => this.respond(message.id, response ?? decline))
+      .then((response) => this.respond(message.id, requestReply(response, method) ?? decline))
       .catch(() => this.respond(message.id, decline));
   }
 
@@ -1305,6 +1321,7 @@ class CodexAppServerClient {
   private finishClose(error: Error): void {
     if (this.closed) return;
     this.closed = true;
+    this.closeError = error;
     this.observing = false;
     this.observationWake?.();
     for (const pending of this.pending.values()) {

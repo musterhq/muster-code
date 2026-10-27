@@ -1,3 +1,4 @@
+import {permissionResult, requestReply, type RequestResult} from './permission-result.ts';
 import {networkReconnectGuard} from './network-failure.ts';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
@@ -69,7 +70,7 @@ export interface ProviderInput {
   onReasoning(text: string): void;
   onEvent(method: string, params: Record<string, unknown>): void;
   /** `options` come from the adapter, never from the provider's parameters: policyOnly asks only for the rules, the guard and a card for a threat or an ask (an adapter that runs its own tools). */
-  onRequest(method: string, params: Record<string, unknown>, options?: {policyOnly?: boolean}): Promise<Record<string, unknown> | undefined>;
+  onRequest(method: string, params: Record<string, unknown>, options?: {policyOnly?: boolean}): Promise<RequestResult>;
   /** The saved provider thread could not be resumed and a fresh one starts. Returns text (a digest of the earlier
    *  conversation) to send ahead of this turn's prompt. */
   onThreadReset?(previousThreadId: string, reason?: 'lane' | 'expired'): string | undefined;
@@ -266,15 +267,13 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         ...(Object.keys({...envFromOverrides(input.configOverrides), ...lane?.env}).length ? {env: {...envFromOverrides(input.configOverrides), ...lane?.env}} : {}),
         // The adapter runs its own tools (HTTP routes): they meet the same Project tool rules, user-process guard and approval cards as Codex's.
         authorize: async (method, params, options) => {
-          if (!live()) return false;
-          const answer = await requestWhileOwned(owned.controller.signal, () => input.onRequest(method, params, options));
-          if (owned.controller.signal.aborted) return false;
-          const decision = answer?.decision;
-          return answer === undefined || decision === 'accept' || decision === 'acceptForSession';
+          if (!live()) return 'deny';
+          const answer = await requestWhileOwned(owned.controller.signal, () => input.onRequest(method, params, options)).catch(() => undefined);
+          return owned.controller.signal.aborted ? 'deny' : permissionResult(answer);
         },
         // ask_user never waits: the service posts the card and answers with the default at once.
         askUser: async args => {
-          const answer = live() ? await input.onRequest(ASK_USER_METHOD, args).catch(() => undefined) : undefined;
+          const answer = requestReply(live() ? await input.onRequest(ASK_USER_METHOD, args).catch(() => undefined) : undefined);
           return typeof answer?.text === 'string' ? answer.text : 'The question could not be shown. Continue with your default.';
         },
         onThreadReady: threadId => { if (live()) input.onThreadReady?.(threadId, lane?.driver); },
@@ -500,7 +499,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           onRequest(method: string, params: Record<string, unknown>) {
             session.activity = true; produced = true;
             if (lateCancellation()) return Promise.resolve(undefined);
-            return requestWhileOwned(session.controller.signal, () => input.onRequest(method, params));
+            return requestWhileOwned(session.controller.signal, () => input.onRequest(method, params)).then(answer => requestReply(answer, method));
           },
         };
         // The same app-server launch and observers re-open this thread when /compact finds the idle timer closed it.

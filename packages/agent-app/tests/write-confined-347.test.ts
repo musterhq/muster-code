@@ -15,7 +15,7 @@ async function sandbox(t: TestContext) {
   const ws = join(root, 'ws'), outside = join(root, 'outside'); await mkdir(ws); await mkdir(outside); return {root, ws, outside};
 }
 const canLink = async (root: string) => { try { await symlink(join(root, 'x'), join(root, 'probe-link'), win ? 'junction' : undefined); await unlink(join(root, 'probe-link')); return true; } catch { return false; } };
-const ctx = (cwd: string, extra: Partial<ToolContext> = {}): ToolContext => ({cwd, access: 'workspace', signal: new AbortController().signal, emit() {}, threadId: 't', turnId: 'u', ...extra});
+const ctx = (cwd: string, extra: Partial<ToolContext> = {}): ToolContext => ({cwd, access: 'workspace', signal: new AbortController().signal, emit() {}, threadId: 't', turnId: 'u', authorize: async () => 'allow', ...extra});
 const call = (name: string, args: object, id = '1') => ({id, name, arguments: JSON.stringify(args)});
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 
@@ -23,7 +23,7 @@ const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 test('a folder swapped for a link while a write waits for approval creates nothing outside', async t => {
   const {root, ws, outside} = await sandbox(t); if (!await canLink(root)) return t.skip('no link privilege');
   await mkdir(join(ws, 'd'));
-  const swapWhileAsking = async () => { await rename(join(ws, 'd'), join(ws, 'd.old')); await symlink(outside, join(ws, 'd'), win ? 'junction' : undefined); return true; };
+  const swapWhileAsking = async () => { await rename(join(ws, 'd'), join(ws, 'd.old')); await symlink(outside, join(ws, 'd'), win ? 'junction' : undefined); return 'allow' as const; };
   const result = await executeTool(call('write_file', {path: 'd/sub/x.txt', content: 'PWNED'}), ctx(ws, {authorize: swapWhileAsking}));
   assert.equal(result.ok, false, 'the write is refused');
   assert.deepEqual(await readdir(outside), [], 'no folder and no file appeared outside');
@@ -88,7 +88,7 @@ test('a policyOnly flag inside request parameters does not skip the approval car
 // Spec: MUS-SPEC-05-347D (docs/spec/clauses/05-access-modes-and-approvals.md#mus-spec-05-347d)
 test('the HTTP tools pass policyOnly as a separate authorize argument', async t => {
   const {ws} = await sandbox(t); const asked: unknown[][] = [];
-  const result = await executeTool(call('write_file', {path: 'f.txt', content: 'x'}, 'c1'), ctx(ws, {authorize: async (...args: unknown[]) => { asked.push(args); return true; }}));
+  const result = await executeTool(call('write_file', {path: 'f.txt', content: 'x'}, 'c1'), ctx(ws, {authorize: async (...args: unknown[]) => { asked.push(args); return 'allow'; }}));
   assert.equal(result.ok, true); assert.equal(await readFile(join(ws, 'f.txt'), 'utf8'), 'x');
   assert.equal(asked.length, 1); const [method, params, options] = asked[0] as [string, Record<string, unknown>, unknown];
   assert.equal(method, 'item/fileChange/requestApproval');

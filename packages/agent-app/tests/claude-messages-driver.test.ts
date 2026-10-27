@@ -64,7 +64,7 @@ function input(cwd: string, extra: Partial<AdapterRunInput> = {}) {
     chat: {id: 'chat-1', mode: 'agent'} as AdapterRunInput['chat'], cwd, prompt: 'Read notes.txt and tell me the first line.', model: 'cc/claude-opus-5-5',
     permissionMode: 'workspace', signal: new AbortController().signal,
     onThreadReady: id => { thread = id; }, onTurnAccepted() {}, onDelta: d => deltas.push(d), onReasoning: r => reasoning.push(r), onEvent: (m, p) => events.push([m, p]),
-    authorize: async () => true,
+    authorize: async () => 'allow',
     ...extra,
   };
   return {value, deltas, reasoning, events, thread: () => thread};
