@@ -16,6 +16,7 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-17-398A](17-usage-cost-and-ledger.md#mus-spec-17-398a) | Integrity details are collapsed with a plain-language summary. | [`ledger integrity jargon starts behind a details toggle`](../../../packages/agent-app/tests/ui-sweep-dom.tsx) |
 | [MUS-SPEC-17-387A](17-usage-cost-and-ledger.md#mus-spec-17-387a) | After the agent edits one file, checks out a branch that differs in five files, and commits a new file, the Receipt lists the edited file and the committed file only. | [`#387 a checkout during a turn is not counted as the turn's edits; the agent's own edit and commit are`](../../../packages/agent-app/tests/ledger-files-387.test.ts) |
 | [MUS-SPEC-17-387B](17-usage-cost-and-ledger.md#mus-spec-17-387b) | After the agent rebases its branch onto a branch that gained files, the Receipt lists only the file the agent edited. | [`#387 a rebase during a turn adds none of the rebased-in files to the Receipt`](../../../packages/agent-app/tests/ledger-files-387.test.ts) |
 | [MUS-SPEC-17-458A](17-usage-cost-and-ledger.md#mus-spec-17-458a) | With two approval requests accepted automatically a turn records 0 approvals; a turn that also shows a card records 1. | [`ledger approvals count only cards shown to the user, never Full-access auto-accepts`](../../../packages/agent-app/tests/ledger-history.test.ts) |
@@ -305,4 +306,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/hub-components.tsx::#663 a Receipt says estimate when its cost is partial`
 - Environment: DOM suite (linkedom); no network.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-17-398a"></a>
+#### MUS-SPEC-17-398A: Ledger integrity jargon starts behind a details toggle
+
+- Precondition: The ledger has a verified chain.
+- Action: Open the ledger.
+- Expected result: Integrity details are collapsed with a plain-language summary.
+- Test: `packages/agent-app/tests/ui-sweep-dom.tsx::ledger integrity jargon starts behind a details toggle`
+- Environment: Node and linkedom with the real renderer and a fixture bridge; responsive navigation uses a window media-query fixture. No desktop app or network.
+- Known gaps: Does not exercise a live provider or imported history database. Visual layout is checked separately in a browser harness.
 - Evidence: UNVERIFIED

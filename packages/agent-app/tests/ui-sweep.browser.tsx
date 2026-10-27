@@ -1,0 +1,34 @@
+/** Browser-only visual fixture for #398; served by scripts/ui-sweep-preview.mjs. */
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import {installSweepFixture,workspace} from './ui-sweep-fixture';
+import '../src/renderer/styles.css';
+installSweepFixture();
+const {Sidebar}=await import('../src/renderer/components/Sidebar');
+const {MemoryScreen}=await import('../src/renderer/components/MemoryScreen');
+const {ProvidersScreen}=await import('../src/renderer/components/ProvidersScreen');
+const {PluginsScreen}=await import('../src/renderer/components/PluginsScreen');
+const {ProjectsScreen}=await import('../src/renderer/components/ProjectsScreen');
+const {LedgerPage}=await import('../src/renderer/components/HubPages');
+const {TurnHeader}=await import('../src/renderer/components/TurnStatus');
+const {describeTurns}=await import('../src/renderer/components/turnStatusModel');
+const {SpotlightSearchHost,openSpotlightSearch}=await import('../src/renderer/components/SpotlightSearch');
+const {boot,openMemoryScreen,openProvidersTab,openProjectsScreen,openPluginsScreen,getState,setNavHidden}=await import('../src/renderer/store');
+const {refreshWorkspace,openHub}=await import('../src/renderer/hubStore');
+const {openNewChat}=await import('../src/renderer/newChatDraft');
+const {useStore}=await import('../src/renderer/useStore');
+const {installResponsiveNav}=await import('../src/renderer/responsiveNav');
+await boot();await refreshWorkspace();
+const params=new URLSearchParams(location.search),page=params.get('page')??'memory';
+document.documentElement.dataset.theme=params.get('theme')??'dark';
+openNewChat();
+if(page==='memory')openMemoryScreen(undefined);
+else if(page==='providers')openProvidersTab();
+else if(page==='plugins')openPluginsScreen();
+else if(page==='projects')openProjectsScreen();
+else if(page==='ledger')openHub('ledger');
+const rows:any[]=[{kind:'user',id:'u',createdAt:'2026-09-01T00:00:00Z'},{kind:'reasoning',id:'r',createdAt:'2026-09-01T00:00:10Z',status:'completed'},{kind:'assistant',id:'a',createdAt:'2026-09-01T00:00:26Z',status:'completed'},{kind:'notice',id:'n',createdAt:'2026-10-01T00:00:00Z'}];
+const content=page==='plugins'?<PluginsScreen/>:page==='memory'?<MemoryScreen/>:page==='providers'?<ProvidersScreen/>:page==='projects'?<ProjectsScreen onBack={()=>{}} onStartChat={()=>{}}/>:page==='ledger'?<LedgerPage snapshot={workspace as any} nav={{onOpenTask(){},onOpenAgent(){},onOpenChat(){}}}/>:<div style={{padding:40}}><h1>Imported conversation</h1><p>Update the documentation.</p><TurnHeader durationMs={describeTurns(rows,false).turns.get('u')!.durationMs} open={false} onToggle={()=>{}}/><p>The documentation is updated.</p></div>;
+function Harness(){const state=useStore();React.useEffect(()=>installResponsiveNav({navHidden:()=>getState().navHidden,setNavHidden}),[]);return <div style={{display:'flex',height:'100vh'}}><aside hidden={state.navHidden} className="nav" style={{width:260,flexShrink:0}}><Sidebar/></aside><main style={{flex:1,minWidth:0,position:'relative'}}>{content}</main><SpotlightSearchHost/></div>;}
+createRoot(document.getElementById('root')!).render(<Harness/>);
+if(page==='search')setTimeout(openSpotlightSearch,150);

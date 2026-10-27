@@ -16,6 +16,7 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-12-398A](12-projects-orgs-and-tasks.md#mus-spec-12-398a) | The row shows zero tasks without an in-progress badge. | [`a project with zero tasks does not claim work is in progress`](../../../packages/agent-app/tests/ui-sweep-dom.tsx) |
 | [MUS-SPEC-12-683A](12-projects-orgs-and-tasks.md#mus-spec-12-683a) | When the hand-back countdown runs out, the timer callback finishes only once the hand-back has gone through, however long reading the chat takes. | [`#683 plain folder: the countdown's timer callback finishes only when the hand-back is done`](../../../packages/agent-app/tests/checkout-service.test.ts) |
 | [MUS-SPEC-12-462A](12-projects-orgs-and-tasks.md#mus-spec-12-462a) | The run carries a protocol that limits stopping to user-only decisions, tells the agent to poll running work and no longer says not to wait. | [`G40: task runs get the muster_tasks MCP server; the host refuses callers without the token`](../../../packages/agent-app/tests/wave4-task-tools.test.ts) |
 | [MUS-SPEC-12-462B](12-projects-orgs-and-tasks.md#mus-spec-12-462b) | The protocol and the end-of-run line tell the agent to post the handoff comment with task_comment instead of asking. | [`G40: task runs get the muster_tasks MCP server; the host refuses callers without the token`](../../../packages/agent-app/tests/wave4-task-tools.test.ts) |
@@ -365,4 +366,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/branch-tag-same-name.test.ts::a detached HEAD: checkout falls back to the short sha, memory records no branch`
 - Environment: Node test runner; git on PATH; a real repository in a temp folder.
 - Known gaps: On main this file fails to load because readRepoEvidence is not exported, so the red result comes from that; the check-out half answered HEAD on main.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-12-398a"></a>
+#### MUS-SPEC-12-398A: A project with zero tasks does not claim work is in progress
+
+- Precondition: A project has zero tasks and its default state is in_progress.
+- Action: Open the project list.
+- Expected result: The row shows zero tasks without an in-progress badge.
+- Test: `packages/agent-app/tests/ui-sweep-dom.tsx::a project with zero tasks does not claim work is in progress`
+- Environment: Node and linkedom with the real renderer and a fixture bridge; responsive navigation uses a window media-query fixture. No desktop app or network.
+- Known gaps: Does not exercise a live provider or imported history database. Visual layout is checked separately in a browser harness.
 - Evidence: UNVERIFIED
