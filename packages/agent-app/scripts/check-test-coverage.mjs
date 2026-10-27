@@ -15,6 +15,8 @@ const renderer = new Set([...suites.map(name => `tests/${name}.tsx`), ...runners
 const support = {
   'tests/device-noun-dom-body.tsx': 'shared by both platform DOM entry points',
   'tests/virtual-file-source.browser.tsx': 'driven by tests/run-virtual-file-source.mjs',
+  'tests/ui-sweep.browser.tsx': 'browser visual fixture served by scripts/ui-sweep-preview.mjs',
+  'tests/ui-sweep-fixture.ts': 'shared fixture for ui-sweep-dom and the ui-sweep browser fixture',
   'tests/terminal-load-retry-dom.tsx': 'driven by tests/terminal-load-retry.test.ts',
   'tests/dom-check.ts': 'assertion helper used by renderer suites',
   'tests/dom-wait.ts': 'render wait helper used by renderer suites',
