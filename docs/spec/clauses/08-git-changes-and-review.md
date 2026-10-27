@@ -31,8 +31,44 @@ Boundaries:
 | [MUS-SPEC-08-781A](08-git-changes-and-review.md#mus-spec-08-781a) | Reloading saved shell edits restores all changed files and totals without modifying stored rows or revision cursors. | [`reopening a saved shell-edit chat recovers all diffs without rewriting history`](../../../packages/agent-app/tests/stored-shell-patch-781.test.ts) |
 | [MUS-SPEC-08-781B](08-git-changes-and-review.md#mus-spec-08-781b) | Failed, interrupted, running and printed patches remain commands; native changes are untouched and action-only records recover. | [`saved non-edits stay commands and native changes remain intact`](../../../packages/agent-app/tests/stored-shell-patch-781.test.ts) |
 | [MUS-SPEC-08-781C](08-git-changes-and-review.md#mus-spec-08-781c) | Streamed command evidence yields both file diffs before the reply ends, even when completion omits command details. | [`a streamed shell edit appears before the reply ends when completion omits command details`](../../../packages/agent-app/tests/shell-patch-diff-779.test.ts) |
+| [MUS-SPEC-08-781D](08-git-changes-and-review.md#mus-spec-08-781d) | Complete scratch-file review survives separated hunks and renames while rejecting unrelated reads. | [`a scratch chat opens a complete multi-edit renamed file without granting arbitrary file reads`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
+| [MUS-SPEC-08-781E](08-git-changes-and-review.md#mus-spec-08-781e) | Context matching retains whole files and rejects ambiguous or stale placement. | [`contextual shell hunks retain all source and refuse stale or ambiguous placement`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
+| [MUS-SPEC-08-781F](08-git-changes-and-review.md#mus-spec-08-781f) | The production editor renders all unchanged source and both change blocks in both themes. | [`opening a scratch edit renders unchanged source and every changed block in both themes`](../../../packages/agent-app/tests/full-inline-diff-781-dom.tsx) |
 
 ### Refs, dash-named files and submodules
+
+<a id="mus-spec-08-781f"></a>
+#### MUS-SPEC-08-781F: The existing editor displays full scratch files
+
+- Precondition: A scratch-chat edit with two separated change blocks and unchanged header, middle and footer.
+- Action: Expand its existing inline editor in light and dark themes.
+- Expected result: All seven source/change rows, original line numbers and both added/deleted blocks render. There are no missing-context gaps and one scoped read per mount.
+- Test: `packages/agent-app/tests/full-inline-diff-781-dom.tsx::opening a scratch edit renders unchanged source and every changed block in both themes`
+- Environment: Production React component and bridge with deterministic filesystem response, linkedom.
+- Known gaps: Layout and syntax colours require the separate browser evidence.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781d"></a>
+#### MUS-SPEC-08-781D: Scratch chats retain the original whole-file inline review
+
+- Precondition: A non-Git scratch chat renames and edits a file twice, with separated change blocks and unchanged header, middle and footer.
+- Action: Open the recorded file through the chat-scoped read and construct its inline review.
+- Expected result: All source lines remain in order, both original removed lines appear at their positions, and repeated edits reconstruct the pre-turn content. Other chats, unrelated files and symlink escapes cannot use the read.
+- Test: `packages/agent-app/tests/full-inline-diff-781.test.ts::a scratch chat opens a complete multi-edit renamed file without granting arbitrary file reads`
+- Environment: Real service, temporary filesystem and SQLite, deterministic provider events; no live app or network.
+- Known gaps: Historical files no longer on disk cannot supply missing context.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781e"></a>
+#### MUS-SPEC-08-781E: Contextual changes are placed only when unambiguous
+
+- Precondition: A shell patch has multiple context-based change blocks without numbered hunk headers.
+- Action: Reconstruct the complete inline file from its current source, then repeat with changed, duplicated or unanchored source.
+- Expected result: Every unchanged line and deletion is present for a unique match; ambiguous, stale, malformed or unanchored deletions never fabricate a whole-file review.
+- Test: `packages/agent-app/tests/full-inline-diff-781.test.ts::contextual shell hunks retain all source and refuse stale or ambiguous placement`
+- Environment: Node test runner, production editor model.
+- Known gaps: A historical edit without sufficient context intentionally remains an explicitly incomplete patch.
+- Evidence: UNVERIFIED
 
 <a id="mus-spec-08-781a"></a>
 #### MUS-SPEC-08-781A: Saved shell edits recover without replay or database rewrites

@@ -59,4 +59,6 @@ test('saved non-edits stay commands and native changes remain intact', async t =
   const actionsOnly = {...legacy, command: undefined, commandActions: [{type: 'unknown', command}]};
   const action = store.appendItem(chat.id, 'tool', 'shell', 'completed', actionsOnly);
   assert.equal(collectFileChanges([store.item(action.id)!]).length, 2);
+  const earlierRecovery=store.appendItem(chat.id,'tool','shell','completed',{...legacy,type:'fileChange',changes:[{path:join(cwd,'helper.py'),kind:{type:'update'},diff:'-return 1\n+return 2'}]});
+  assert.match(String((store.item(earlierRecovery.id)!.data!.changes as any[])[1].diff),/^@@\n/,'previous recovery retains the original contextual hunk boundaries');
 });
