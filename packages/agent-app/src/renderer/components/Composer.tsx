@@ -19,7 +19,7 @@ import { CaptureSourcePicker, type CaptureResult } from './CaptureSourcePicker';
 import { accessibilityAttachment, utf8Base64 } from '../captureRegion';
 import { ProviderUsageHover, ProviderUsageWarning } from './ProviderUsage';
 import type { ComputerCaptureSource } from '../../shared/domains/computer-protocol';
-import { baseFileName, buildAddRows, buildMentionRows, buildSlashRows, ComposerMenuList, connectorEntries, firstRow, nextRow, pluginLabel, pluginRow, skillRow, skillUsable, type MenuRow } from './ComposerMenu';
+import { baseFileName, buildAddRows, buildMentionRows, buildSlashRows, ComposerMenuList, connectorEntries, firstRow, nextRow, pluginLabel, pluginRow, skillLabel, skillRow, skillUsable, type MenuRow } from './ComposerMenu';
 import { ComposerQuestionPanel, useQuestionFlow } from './ComposerQuestionPanel';
 import { ComposerInfoCard, type InfoView } from './ComposerInfoCard';
 import { useRunningTerminals } from './composerTerminals';
@@ -33,7 +33,7 @@ import { RecordSkill, type SkillDraft } from './RecordSkill';
 import { SKETCH_FILE_NAME, SketchPad, type SketchStroke } from './SketchPad';
 import { ConfirmSheet } from './ConfirmSheet';
 import { ACCESS_OPTIONS, FullAccessConfirm } from './FullAccessConfirm';
-import { COMPOSER_COMMANDS, EFFORT_LABELS, SKILL_RECORDER_PROMPT, followUpAction, skillDraft, terminalText, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, attachmentKey, attachmentName, imageBlindModel, imageBlindWarning, toolBlindModel, toolCapableAlternative, TOOLS_BLIND_NOTICE, chipPayload, chipToken, classifyPaste, configuredAccess, effectiveAccess, findChipRanges, findTokenRanges, formatBytes, insertToken, nextEffort, previewLimit, rankSections, readMentionQuery, readSlashQuery, saveFolderAccess, scoreItem, scoreQueryMatch, INIT_PROMPT, reviewPrompt, pendingQuestionItem, questionDigit, pluginPromptHint, terminalsPillLabel, skipsFullAccessConfirm, setFullAccessSkip, type ChipRange, type ComposerAccess, type ComposerChip, type ComposerCommandId, type TokenVocabulary } from './composerMenus';
+import { COMPOSER_COMMANDS, EFFORT_LABELS, SKILL_RECORDER_PROMPT, followUpAction, skillDraft, terminalText, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, attachmentKey, attachmentName, imageBlindModel, imageBlindWarning, toolBlindModel, toolCapableAlternative, TOOLS_BLIND_NOTICE, chipPayload, chipToken, skillToken, classifyPaste, configuredAccess, effectiveAccess, findChipRanges, findTokenRanges, formatBytes, insertToken, nextEffort, previewLimit, rankSections, readMentionQuery, readSlashQuery, saveFolderAccess, scoreItem, scoreQueryMatch, INIT_PROMPT, reviewPrompt, pendingQuestionItem, questionDigit, pluginPromptHint, terminalsPillLabel, skipsFullAccessConfirm, setFullAccessSkip, type ChipRange, type ComposerAccess, type ComposerChip, type ComposerCommandId, type TokenVocabulary } from './composerMenus';
 import { QueuedMessages } from './QueuedMessages';
 import { CheckoutQueueBanner, isCheckoutQueued, sendWithCheckoutGuard } from './ParallelRunGuard';
 import { StashesPopover, usePromptStash } from './PromptStashes';
@@ -297,7 +297,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   });
   const vocabulary: TokenVocabulary = {
     commands: COMPOSER_COMMANDS.map(command => ({ command: command.command, label: command.label })),
-    skills: skills.filter(skillUsable).map(skill => ({ name: skill.name, id: skill.id, label: skill.displayName ?? skill.name })),
+    skills: skills.filter(skillUsable).map(skill => ({ name: skill.name, id: skill.id, label: skillLabel(skill), ...(skill.claude === 'command' ? { command: true } : {}) })),
     plugins: plugins.map(plugin => ({ name: plugin.name, id: plugin.id, label: pluginLabel(plugin) })),
   };
   /** Picked chips move and delete as units; `tokenRanges` also paints recognised typed `/command`, `$skill` and `@plugin`. */
@@ -362,7 +362,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     replaceRange(range.start, end, '');
   };
   const pluginChip = (plugin: PluginEntry): ComposerChip => ({ token: chipToken('plugin', plugin.name), kind: 'plugin', id: plugin.id, label: pluginLabel(plugin) });
-  const skillChip = (skill: SkillEntry): ComposerChip => ({ token: chipToken('skill', skill.name), kind: 'skill', id: skill.id, label: skill.displayName ?? skill.name });
+  const skillChip = (skill: SkillEntry): ComposerChip => ({ token: skillToken(skill), kind: 'skill', id: skill.id, label: skillLabel(skill) });
   const invokePlugin = (plugin: PluginEntry, range?: { start: number; end: number }) => {
     const next = [plugin.name, ...pluginMru.filter(name => name !== plugin.name)].slice(0, 20);
     setPluginMru(next); writeLocal(PLUGIN_MRU_KEY, next);
@@ -416,8 +416,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   useEffect(() => {
     if (!pickerOpen) return;
     if (state.plugins.phase === 'idle') void loadPlugins();
-    if (state.skills.phase === 'idle') void loadSkills(true, activeFolderPath ? [activeFolderPath] : []);
-  }, [pickerOpen]);
+    void loadSkills(false, activeFolderPath ? [activeFolderPath] : []);
+  }, [pickerOpen, activeFolderPath]);
   useEffect(() => {
     if (menu !== 'plus') return;
     let live = true;
@@ -1009,7 +1009,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     onStash: () => { setMenu(null); void promptStash.stash(); }, stashDisabled: chat.archived || !hasPayload, onStashes: () => { setMenu(null); promptStash.setOpen(true); },
     plugins, onPlugin: plugin => invokePlugin(plugin), onBrowsePlugins: () => { setMenu(null); openPluginsScreen('plugins'); },
     skills, onSkill: skill => insertChip(skillChip(skill)),
-    connectors: connectorEntries(mcpServers, state.plugins.value ?? []), onConnector: connector => insertChip({ token: chipToken(connector.kind, connector.name), kind: connector.kind, id: connector.key, label: connector.name }),
+    connectors: connectorEntries(mcpServers, state.plugins.value ?? []), onConnector: connector => insertChip({ token: chipToken(connector.kind, connector.label), kind: connector.kind, id: connector.key, label: connector.label }),
     queueing: state.followUpMode === 'queue', onQueueing: running || queue.length ? () => {
       const next = state.followUpMode === 'queue' ? 'steer' : 'queue';
       setFollowUpMode(next); setMenu(null); restoreCaret();

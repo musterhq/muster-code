@@ -30,6 +30,29 @@ Boundaries:
 | [MUS-SPEC-14-721E](14-agents-skills-plugins-and-automations.md#mus-spec-14-721e) | A desktop app is driven with no other app's plugin installed: reading it lists its controls, a click answers with only the lines that changed (a changed element once, as its new line), element numbers stay valid across steps and an unknown number is refused. | [`MUS-SPEC-14-721E: an agent drives a desktop app with Muster alone and each step answers with only what changed`](../../../packages/agent-app/tests/computer-mcp.test.ts) |
 | [MUS-SPEC-14-721F](14-agents-skills-plugins-and-automations.md#mus-spec-14-721f) | In a read-only chat the click and type tools are not offered, a click is refused, and the app is unchanged. | [`MUS-SPEC-14-721F: a read-only chat can look at apps but not change them`](../../../packages/agent-app/tests/computer-mcp.test.ts) |
 | [MUS-SPEC-14-721G](14-agents-skills-plugins-and-automations.md#mus-spec-14-721g) | Every agent chat gets the muster_computer server on Codex and Claude Code, a Full access router chat still runs on its own route, and without the helper the old note stays. | [`MUS-SPEC-14-721G: every agent chat gets Muster computer use on every MCP route, without forcing router chats onto Codex`](../../../packages/agent-app/tests/computer-mcp.test.ts) |
+| [MUS-SPEC-14-729A](14-agents-skills-plugins-and-automations.md#mus-spec-14-729a) | Claude Code skills and commands from the user folder and a chat folder are listed with descriptions and argument hints; nested commands read `fe:comp`; non-skill folders are skipped. | [`the skills picker lists Claude Code skills and commands from ~/.claude with their descriptions, nested commands as fe:comp, and skips folders that are not skills`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-729B](14-agents-skills-plugins-and-automations.md#mus-spec-14-729b) | A picked command on a Claude Code chat goes to Claude Code as `/bar <request>`, Claude Code expands it, and one "Ran /bar" row opens to the expansion. | [`a picked command on a Claude Code chat is sent as /bar with the request as its arguments, Claude Code expands it, and the transcript shows "Ran /bar the login flow"`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-729C](14-agents-skills-plugins-and-automations.md#mus-spec-14-729c) | Entries from the user folder show in every chat folder; a folder's own entries only there, and another folder's entry is refused. | [`~/.claude entries show in every folder; a folder's .claude skills and commands only in that folder`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-729D](14-agents-skills-plugins-and-automations.md#mus-spec-14-729d) | A command turned off in Skills & plugins leaves the picker and a send that still names it is refused. | [`a command turned off in Skills & plugins leaves the picker and a send that still names it is refused`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-729E](14-agents-skills-plugins-and-automations.md#mus-spec-14-729e) | Tool calls from connector and plugin servers resolve to that plugin's icon under every name they arrive with, and rows read the tool, not the server plumbing. | [`tool calls from connector and plugin servers resolve to that plugin's icon under every name the coding clients give them`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-729F](14-agents-skills-plugins-and-automations.md#mus-spec-14-729f) | In the `/` picker a Claude Code command reads `/bar` under Commands, after the built-ins, with a Claude Code badge and its argument hint; skills stay under Skills. | [`the / picker lists a Claude Code command as /name under Commands with a Claude Code badge and its argument hint`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
+| [MUS-SPEC-14-729G](14-agents-skills-plugins-and-automations.md#mus-spec-14-729g) | Transcript MCP tool rows show the providing plugin's icon and read "GitHub / search issues"; unbranded servers keep the thin glyph. | [`MCP tool rows show the providing plugin mark; built-in servers keep the generic glyph`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
+| [MUS-SPEC-14-729H](14-agents-skills-plugins-and-automations.md#mus-spec-14-729h) | A picked Claude Code skill on a Claude Code chat is sent as `/foo <request>` and reads "Used foo skill". | [`a picked Claude Code skill on a Claude Code chat is invoked by name too and reads "Used foo skill"`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-729I](14-agents-skills-plugins-and-automations.md#mus-spec-14-729i) | On a chat that does not run Claude Code, a picked command's expansion is inlined with numbered arguments filled. | [`the same command on a chat that does not run Claude Code gets its expansion inlined, with numbered arguments filled`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-729J](14-agents-skills-plugins-and-automations.md#mus-spec-14-729j) | Picking /bar makes a chip that reads `/bar`, closes the picker, and the send carries the command. | [`picking /bar inserts a chip that reads /bar and sends the command structurally`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
+| [MUS-SPEC-14-729K](14-agents-skills-plugins-and-automations.md#mus-spec-14-729k) | Typing `/bar the signup flow` without picking makes the same chip and send; a built-in `/status` keeps its meaning. | [`a hand-typed /bar is recognised as the Claude Code command and sent with it; a built-in /status keeps its own meaning`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
+| [MUS-SPEC-14-729L](14-agents-skills-plugins-and-automations.md#mus-spec-14-729l) | Connectors & MCP rows for plugin servers, apps and user servers named after a plugin show its logo, and the `@mcp` chip leads with it. | [`Connectors & MCP rows carry the plugin mark: a plugin server, its app and a user server named after the plugin`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
+| [MUS-SPEC-14-729M](14-agents-skills-plugins-and-automations.md#mus-spec-14-729m) | Each server in Settings › MCP servers shows its plugin logo or a neutral tile, with the health dot on it. | [`Settings › MCP servers shows each server with its plugin mark or a neutral tile, with the health dot on the mark`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
+| [MUS-SPEC-14-729N](14-agents-skills-plugins-and-automations.md#mus-spec-14-729n) | Opening `/` in a folder chat lists that folder's `.claude` commands even after skills were loaded for another scope. | [`opening / in a folder chat lists that folder's .claude commands even when skills were already loaded for another scope`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
+| [MUS-SPEC-14-729O](14-agents-skills-plugins-and-automations.md#mus-spec-14-729o) | A skill installed for both clients with the same `SKILL.md` is listed once, as the Claude Code skill, and still runs natively; different same-named skills both stay. | [`a skill installed for both clients (~/.agents/skills and ~/.claude/skills, same SKILL.md) is listed once, as the Claude Code skill; a same-named but different skill stays listed twice`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-729P](14-agents-skills-plugins-and-automations.md#mus-spec-14-729p) | A "Ran /bar" row reads like the typed command, carries the picker's slash glyph, and says where the command came from instead of repeating its arguments as raw JSON. | [`a "Ran /bar" row reads like the typed command, carries the slash glyph and says where the command came from`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
+| [MUS-SPEC-14-729Q](14-agents-skills-plugins-and-automations.md#mus-spec-14-729q) | A plugin logo over the icon budget is scaled down and shown, in Skills & plugins and on its MCP server, instead of a monogram | [`a plugin whose logo file is over the icon budget (Computer Use ships a 900 KB, 1024px PNG) still shows its logo, scaled down, in Skills & plugins and on its MCP server`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-729R](14-agents-skills-plugins-and-automations.md#mus-spec-14-729r) | A connector app known only by an opaque id reads as its plugin in the + menu, on its chip and in the message | [`an app known only by an opaque id reads as its plugin in the + menu, on its chip and in the message the agent gets`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
+| [MUS-SPEC-14-729S](14-agents-skills-plugins-and-automations.md#mus-spec-14-729s) | A remote plugin that ships no logo shows the logo Codex lists for it, cached locally, and keeps its monogram when nothing safe is available | [`an installed remote plugin with no logo on disk (Atlassian) shows the logo Codex lists for it, kept in a local cache; unsafe or non-image downloads keep the monogram`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-729T](14-agents-skills-plugins-and-automations.md#mus-spec-14-729t) | A plugin from another marketplace that ships no logo shows the logo an OpenAI catalog lists under its exact name | [`a marketplace plugin with no logo (the Claude marketplace’s linear) shows the logo an OpenAI catalog lists under the same name; other marketplaces, other names and skills keep their monogram`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-729U](14-agents-skills-plugins-and-automations.md#mus-spec-14-729u) | An open + menu redraws a plugin row with its logo when the background refresh caches it. | [`an open + menu redraws Atlassian with its logo when the background refresh caches it`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
+| [MUS-SPEC-14-729V](14-agents-skills-plugins-and-automations.md#mus-spec-14-729v) | An open Skills & plugins screen redraws a catalog card with its borrowed logo when it is cached. | [`an open Skills & plugins screen redraws Linear with the logo borrowed from the OpenAI catalog when it is cached`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
+| [MUS-SPEC-14-729W](14-agents-skills-plugins-and-automations.md#mus-spec-14-729w) | The New chat + menu lists MCP servers and plugin apps with their marks, as a chat's composer does. | [`the New chat + menu lists MCP servers and plugin apps with their marks, and a pick inserts the connector chip`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
 
 ### Claude Code background sub-agents
 
@@ -191,4 +214,259 @@ Boundaries:
 - Test: `packages/agent-app/tests/computer-mcp.test.ts::MUS-SPEC-14-721G: every agent chat gets Muster computer use on every MCP route, without forcing router chats onto Codex`
 - Environment: Node test runner; no desktop needed.
 - Known gaps: OpenCode and Grok get the server through the same overrides but are not checked here.
+- Evidence: UNVERIFIED
+
+### Claude Code skills and commands (#729)
+
+<a id="mus-spec-14-729a"></a>
+#### MUS-SPEC-14-729A: Claude Code skills and commands are listed in the picker
+
+- Precondition: A temporary HOME with ~/.claude/skills/foo/SKILL.md, ~/.claude/commands/bar.md (argument hint `<flow>`), ~/.claude/commands/fe/comp.md, a ~/.claude/skills/synced folder that holds no SKILL.md, and a project folder with its own .claude/skills/house-style and .claude/commands/ship.md.
+- Action: List skills for the project folder.
+- Expected result: foo (skill, "Formats the release notes"), bar (command, argument hint `<flow>`) and fe:comp (command) are listed with provenance `~/.claude` and their Claude Code kind. Nothing from the synced folder is listed.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::the skills picker lists Claude Code skills and commands from ~/.claude with their descriptions, nested commands as fe:comp, and skips folders that are not skills`
+- Environment: Node test runner; the real agent service, provider, Claude Code lane and adapter, with a fake `claude` executable that replays the command it was given and answers; a temporary HOME; no network.
+- Known gaps: Plugin-provided Claude Code skills come through the plugin inventory, not this scan.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729b"></a>
+#### MUS-SPEC-14-729B: A picked command runs as a real Claude Code slash command
+
+- Precondition: As 729A, and a chat on a Claude Code model in the project folder.
+- Action: Pick bar and send `/bar the login flow`.
+- Expected result: Claude Code is launched with the message `/bar the login flow` and `--replay-user-messages`; Muster does not inline the command body as well. The transcript gets one tool row "Ran /bar the login flow" that opens to the expanded body, followed by the answer.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::a picked command on a Claude Code chat is sent as /bar with the request as its arguments, Claude Code expands it, and the transcript shows "Ran /bar the login flow"`
+- Environment: Node test runner; the real agent service, provider, Claude Code lane and adapter, with a fake `claude` executable that replays the command it was given and answers; a temporary HOME; no network.
+- Known gaps: A steer into a running turn, a turn with images and a turn resumed from a fork summary inline the expansion instead. Only the first picked Claude Code entry runs natively.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729c"></a>
+#### MUS-SPEC-14-729C: User entries everywhere, folder entries only in their folder
+
+- Precondition: As 729A, plus a second folder.
+- Action: List skills for both folders, then send the project folder's command from a chat in the other folder.
+- Expected result: foo, bar and fe:comp show in both folders; ship and house-style only in the project folder. The cross-folder send is refused as outside the chat's allowed skill roots.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::~/.claude entries show in every folder; a folder's .claude skills and commands only in that folder`
+- Environment: Node test runner; the real agent service, provider, Claude Code lane and adapter, with a fake `claude` executable that replays the command it was given and answers; a temporary HOME; no network.
+- Known gaps: None.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729d"></a>
+#### MUS-SPEC-14-729D: A turned-off command leaves the picker and cannot be sent
+
+- Precondition: As 729A.
+- Action: Turn bar off in Skills & plugins for the user, list skills, then send with its id.
+- Expected result: bar is no longer listed and the send is refused with "The /bar command is disabled here".
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::a command turned off in Skills & plugins leaves the picker and a send that still names it is refused`
+- Environment: Node test runner; the real agent service, provider, Claude Code lane and adapter, with a fake `claude` executable that replays the command it was given and answers; a temporary HOME; no network.
+- Known gaps: None.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729e"></a>
+#### MUS-SPEC-14-729E: Connector and plugin tool calls resolve to the plugin's icon
+
+- Precondition: A plugin inventory with GitHub, Slack, Google Drive, Figma and Notion plugins, each with its own icon.
+- Action: Resolve the servers and tools the coding clients and Claude Code report (`mcp__codex_apps__github`, `codex_apps` with `google_drive.list_drives`, `plugin_figma_figma`, `claude_ai_Notion` and others), and the row labels for their tools.
+- Expected result: Each resolves to its plugin and that plugin's own icon; the built-in REPL and browser servers resolve to none. Labels drop the shared-server app prefix and a repeated connector name (`_slack_read_channel` reads "read channel").
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::tool calls from connector and plugin servers resolve to that plugin's icon under every name the coding clients give them`
+- Environment: Node test runner; pure functions; no network.
+- Known gaps: Built-in servers with no plugin (node_repl, muster_browser, the computer-use REPL) keep generic glyphs.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729f"></a>
+#### MUS-SPEC-14-729F: The `/` picker shows Claude Code commands as commands
+
+- Precondition: A Claude Code chat whose skill list holds the command bar (argument hint `<flow>`, "Reviews a flow"), the Claude Code skill foo and a personal skill review.
+- Action: Type `/`.
+- Expected result: /bar sits under Commands after the built-in commands, with the Claude Code badge, the slash-command glyph and "<flow> · Reviews a flow". foo and review stay under Skills, foo badged Claude Code and review Personal; bar is not listed twice.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::the / picker lists a Claude Code command as /name under Commands with a Claude Code badge and its argument hint`
+- Environment: Real Composer, ToolCard and McpServers in a DOM suite (linkedom); fake app bridge with a plugin inventory carrying image icons; no network.
+- Known gaps: Not checked in the New chat screen, which uses the same helpers.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729g"></a>
+#### MUS-SPEC-14-729G: Transcript tool rows show the plugin's own icon and name
+
+- Precondition: A GitHub plugin and a Figma plugin with image icons.
+- Action: Render tool rows from `mcp__codex_apps__github` (search_issues), `codex_apps` (figma.get_screenshot), postgres (run_query) and a failed `plugin_figma_figma` (get_metadata).
+- Expected result: The GitHub and Figma rows show their logos and read "GitHub / search issues", "Figma / get screenshot" and "Figma / get metadata", with the raw server and tool in the tooltip. postgres keeps the thin glyph and its raw name.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::MCP tool rows show the providing plugin mark; built-in servers keep the generic glyph`
+- Environment: Real Composer, ToolCard and McpServers in a DOM suite (linkedom); fake app bridge with a plugin inventory carrying image icons; no network.
+- Known gaps: Pixel rendering and both themes are checked from screenshots, not in this suite.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729h"></a>
+#### MUS-SPEC-14-729H: A picked Claude Code skill runs natively too
+
+- Precondition: As 729B.
+- Action: Pick foo and send `Draft the notes $foo`.
+- Expected result: Claude Code is launched with `/foo Draft the notes`. The tool row reads "Used foo skill" and opens to the skill body.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::a picked Claude Code skill on a Claude Code chat is invoked by name too and reads "Used foo skill"`
+- Environment: Node test runner; the real agent service, provider, Claude Code lane and adapter, with a fake `claude` executable that replays the command it was given and answers; a temporary HOME; no network.
+- Known gaps: As 729B.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729i"></a>
+#### MUS-SPEC-14-729I: Other chats get the command inlined
+
+- Precondition: As 729A, and a chat on a model that does not run Claude Code.
+- Action: Pick fe:comp and send `/fe:comp Button tailwind`.
+- Expected result: Claude Code is not launched. The request carries "Selected command: /fe:comp" and the expansion "Build the Button component with tailwind styling." inside command-instructions.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::the same command on a chat that does not run Claude Code gets its expansion inlined, with numbered arguments filled`
+- Environment: Node test runner; the real agent service, provider, Claude Code lane and adapter, with a fake `claude` executable that replays the command it was given and answers; a temporary HOME; no network.
+- Known gaps: None.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729j"></a>
+#### MUS-SPEC-14-729J: A picked command becomes a `/bar` chip and is sent with it
+
+- Precondition: As 729F.
+- Action: Pick /bar from the picker and press Send.
+- Expected result: The chip reads `/bar` (kind skill), the picker closes, and chat.send carries the command's id.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::picking /bar inserts a chip that reads /bar and sends the command structurally`
+- Environment: Real Composer, ToolCard and McpServers in a DOM suite (linkedom); fake app bridge with a plugin inventory carrying image icons; no network.
+- Known gaps: None.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729k"></a>
+#### MUS-SPEC-14-729K: A hand-typed `/bar` is recognised
+
+- Precondition: As 729F.
+- Action: Type `/bar the signup flow` and send; then type `/status now`.
+- Expected result: The chip reads `/bar`; the send text is `/bar the signup flow` with the command's id. `/status` is drawn as the built-in command.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::a hand-typed /bar is recognised as the Claude Code command and sent with it; a built-in /status keeps its own meaning`
+- Environment: Real Composer, ToolCard and McpServers in a DOM suite (linkedom); fake app bridge with a plugin inventory carrying image icons; no network.
+- Known gaps: A Claude Code command named like a built-in (for example review) is only reachable by picking it.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729l"></a>
+#### MUS-SPEC-14-729L: Connectors & MCP rows and chips show the plugin's icon
+
+- Precondition: A GitHub plugin (server and app) and a Figma plugin with image icons; user MCP servers github and postgres.
+- Action: Open the + menu, then pick github.
+- Expected result: github, GitHub and figma show their logos; postgres keeps the server glyph. The `@mcp:github` chip leads with the GitHub logo.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::Connectors & MCP rows carry the plugin mark: a plugin server, its app and a user server named after the plugin`
+- Environment: Real Composer, ToolCard and McpServers in a DOM suite (linkedom); fake app bridge with a plugin inventory carrying image icons; no network.
+- Known gaps: None.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729m"></a>
+#### MUS-SPEC-14-729M: Settings › MCP servers shows the plugin's icon
+
+- Precondition: As 729L.
+- Action: Open Settings › MCP servers.
+- Expected result: github shows the GitHub logo and postgres a neutral server tile, each with the health dot in its corner.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::Settings › MCP servers shows each server with its plugin mark or a neutral tile, with the health dot on the mark`
+- Environment: Real Composer, ToolCard and McpServers in a DOM suite (linkedom); fake app bridge with a plugin inventory carrying image icons; no network.
+- Known gaps: None.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729n"></a>
+#### MUS-SPEC-14-729N: The `/` picker reads the chat's own folder
+
+- Precondition: A chat in a folder whose `.claude/commands` holds `deploy.md`; the skills list was already loaded without that folder (at start-up, from Skills & plugins or from another chat).
+- Action: Type `/` in that chat's composer.
+- Expected result: The picker asks for this chat's folder and lists `/deploy` under Commands. The New chat screen does the same for its selected folder.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::opening / in a folder chat lists that folder's .claude commands even when skills were already loaded for another scope`
+- Environment: Real Composer and store in a DOM suite (linkedom); fake app bridge whose skill list depends on the folders asked for; no network.
+- Known gaps: The New chat screen is covered by the dogfood pass, not by this suite.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729o"></a>
+#### MUS-SPEC-14-729O: A skill installed for both clients is listed once
+
+- Precondition: `foo` has the same `SKILL.md` under `~/.agents/skills` and `~/.claude/skills`; `twin` exists in both with different content.
+- Action: List skills; send `$foo the notes` on a Claude Code chat with the listed `foo`.
+- Expected result: `foo` is listed once, as the Claude Code skill, and Claude Code receives `/foo the notes`. Both `twin` entries stay listed.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::a skill installed for both clients (~/.agents/skills and ~/.claude/skills, same SKILL.md) is listed once, as the Claude Code skill; a same-named but different skill stays listed twice`
+- Environment: Real service, provider adapter, router Claude Code lane and Claude Code adapter with a fake `claude` executable and a temporary home; no network.
+- Known gaps: None.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729p"></a>
+#### MUS-SPEC-14-729P: A command row reads like the command that was typed
+
+- Precondition: A Claude Code chat whose transcript has the row for `/bar the login flow`, run from the folder's `.claude/commands/bar.md`.
+- Action: Look at the row, hover it, then open it.
+- Expected result: The row reads "Ran /bar the login flow" with the same slash glyph the picker uses. Hovering shows the command's source and file. Opened, it shows `/bar the login flow`, the expansion under "Expanded prompt", and a Source entry; the arguments are not repeated as raw JSON.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::a "Ran /bar" row reads like the typed command, carries the slash glyph and says where the command came from`
+- Environment: Real ToolCard in a DOM suite (linkedom) with a recorded command row; no network.
+- Known gaps: A skill row keeps the "Used foo skill" wording and the skill glyph.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729q"></a>
+#### MUS-SPEC-14-729Q: A large plugin logo still shows
+
+- Precondition: An installed plugin whose manifest logo is a raster file over the 256 KB icon budget (Computer Use ships a 923 KB, 1024px PNG), and an MCP server with the plugin's name.
+- Action: Open Skills & plugins (Plugins and MCP tabs), the composer's connector menu, and a transcript with one of the server's tool calls.
+- Expected result: Every one of those places shows the plugin's own logo, scaled to 128px, not a "CU" monogram. Raster logos up to 8 MB and 4096px are scaled; anything larger, or a logo that cannot be decoded, still falls back to the monogram. SVG logos keep their own budget and are never rasterised.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::a plugin whose logo file is over the icon budget (Computer Use ships a 900 KB, 1024px PNG) still shows its logo, scaled down, in Skills & plugins and on its MCP server`
+- Environment: Real agent service and plugin discovery against a temporary ~/.codex plugin cache with a 1 MB PNG; the app's downscaler stands in for Electron's nativeImage. Live check in an isolated Muster instance with the real Computer Use plugin.
+- Known gaps: Scaling runs in the app process; a runtime started without the app (CLI tests) keeps the monogram for oversized logos.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729r"></a>
+#### MUS-SPEC-14-729R: A connector app reads by name, never by id
+
+- Precondition: An installed remote connector plugin (Atlassian) whose only app is named by its opaque id, `app-6a83901dde988191b3f3cefdcc19acfa`, and which ships no logo.
+- Action: Open the composer's + menu, pick the app under Connectors & MCP, then send.
+- Expected result: The row reads "Atlassian" with the App badge, the plugin's description ("Jira, Confluence, Loom, & more") and the plugin's mark (its logo once MUS-SPEC-14-729S has cached it, else its monogram). The chip and the message the agent gets read `@app:Atlassian`; the raw id appears nowhere. Apps with real names keep them.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::an app known only by an opaque id reads as its plugin in the + menu, on its chip and in the message the agent gets`
+- Environment: Real Composer in a DOM suite (linkedom); fake app bridge whose plugin inventory includes the Atlassian app; no network.
+- Known gaps: None.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729s"></a>
+#### MUS-SPEC-14-729S: A remote plugin without a logo file still shows its logo
+
+- Precondition: An installed remote plugin (Atlassian, `app-6a83901dde988191b3f3cefdcc19acfa@openai-curated-remote`) whose manifest has no `logo` or `composerIcon` and whose cache folder has no images, while Codex's `plugin/list` gives it `composerIconUrl` and `logoUrlDark`.
+- Action: Start Muster, wait for the background refresh (20 s after launch), then open the + menu, Skills & plugins, Settings › MCP servers and a transcript with one of its tool calls.
+- Expected result: Every one of those places shows Atlassian's logo, with the dark variant in the dark theme, and an open menu redraws when the logo arrives. Only absolute https URLs are fetched, at most 2 MB each; the bytes must be a PNG, JPEG, GIF, WebP or safe SVG, and then go through the same checks and scaling as a logo file on disk. Plugins that are not installed are skipped. Logos are kept under the data dir and shown offline; the list is read again after a week (after six hours when a try failed). A plugin with no usable logo keeps its monogram.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::an installed remote plugin with no logo on disk (Atlassian) shows the logo Codex lists for it, kept in a local cache; unsafe or non-image downloads keep the monogram`
+- Environment: Real agent service and plugin discovery against a temporary ~/.codex plugin cache; an injected `plugin/list` answer and fetch stand in for the Codex app-server and the CDN. Live check in an isolated Muster instance against the real Codex app-server and the installed Atlassian plugin.
+- Known gaps: Needs a working Codex CLI (on PATH or bundled with a desktop app) to read `plugin/list`; without one, plugins with no logo file keep their monogram.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729t"></a>
+#### MUS-SPEC-14-729T: A marketplace plugin without a logo borrows its brand's logo
+
+- Precondition: A Claude marketplace source lists plugins `linear`, `gitlab` and `firebase` with no logo in their manifests or folders, and Codex's `plugin/list` has `linear@openai-curated-remote` (and the others) with a logo, not installed.
+- Action: Open Skills & plugins › Discover and wait a few seconds.
+- Expected result: Linear, GitLab and Firebase show their logos, the open screen redraws when they arrive, and an MCP server those plugins bring carries the same mark. Only plugin packages are matched, by their exact name, and only against catalogs whose marketplace is `openai-*`; a name only a third-party catalog lists, and a skill of the same name, keep their monogram. Each name is looked up once and cached with the logos of MUS-SPEC-14-729S (same https, size and image checks, refreshed weekly); names asked for before the first refresh ride along with it, later ones get one short coalesced lookup.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::a marketplace plugin with no logo (the Claude marketplace’s linear) shows the logo an OpenAI catalog lists under the same name; other marketplaces, other names and skills keep their monogram`
+- Environment: Real agent service, a local Claude marketplace and skills folder as sources; an injected `plugin/list` answer and fetch stand in for the Codex app-server and the CDN. DOM check `tests/claude-skills-729-components.tsx` for the open screen redrawing. Live check in an isolated Muster instance against the real Claude marketplace and Codex catalog.
+- Known gaps: A plugin whose name differs from its brand's catalog entry (discord, telegram, context7, terraform today) keeps its monogram; so do plugins no catalog lists with a logo.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729u"></a>
+#### MUS-SPEC-14-729U: An open + menu picks up a newly cached logo
+
+- Precondition: The + menu is open and lists Atlassian under Connectors & MCP with its monogram.
+- Action: The background refresh of MUS-SPEC-14-729S caches Atlassian's logo and the runtime sends `pluginIconsChanged`.
+- Expected result: Plugins are read again once; the menu stays open and the Atlassian row now shows the logo.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::an open + menu redraws Atlassian with its logo when the background refresh caches it`
+- Environment: Real Composer and PluginsScreen in a DOM suite (linkedom); fake app bridge that replays a `pluginIconsChanged` event; no network.
+- Known gaps: Pixel rendering and both themes are checked from screenshots, not in this suite.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729v"></a>
+#### MUS-SPEC-14-729V: An open Skills & plugins screen picks up a borrowed logo
+
+- Precondition: Skills & plugins › Discover is open and shows the Claude marketplace's linear card with its monogram.
+- Action: MUS-SPEC-14-729T caches Linear's logo and the runtime sends `pluginIconsChanged`.
+- Expected result: The catalog is read again once and the Linear card shows the logo without leaving the screen.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::an open Skills & plugins screen redraws Linear with the logo borrowed from the OpenAI catalog when it is cached`
+- Environment: Real Composer and PluginsScreen in a DOM suite (linkedom); fake app bridge that replays a `pluginIconsChanged` event; no network.
+- Known gaps: Pixel rendering and both themes are checked from screenshots, not in this suite.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-729w"></a>
+#### MUS-SPEC-14-729W: The New chat + menu lists connectors with their marks
+
+- Precondition: A user MCP server named after an installed plugin (github), a server no plugin brings (postgres), and plugins that bring a server (figma) and an app known only by an opaque id (Atlassian).
+- Action: Open the + menu on the New chat screen, then pick the Atlassian row.
+- Expected result: A Connectors & MCP section lists github, postgres, GitHub, figma and Atlassian, in that order. A server a plugin already brings is not listed twice. github and figma show their plugin logos, postgres shows the generic server glyph, and each row has an MCP or App badge. Picking Atlassian closes the menu and inserts an `@app:` chip that wears the Atlassian mark and puts `@app:Atlassian` in the draft.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::the New chat + menu lists MCP servers and plugin apps with their marks, and a pick inserts the connector chip`
+- Environment: Real NewChatScreen in a DOM suite (linkedom); fake app bridge answering `mcp.servers.list` and `plugins.inventory`; no network.
+- Known gaps: Pixel rendering and both themes are checked from screenshots, not in this suite.
 - Evidence: UNVERIFIED

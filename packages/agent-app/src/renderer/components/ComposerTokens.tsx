@@ -4,6 +4,7 @@ import type { PluginEntry, SkillEntry } from '../../shared/protocol';
 import { tokenStyle, type TokenKind } from '../agentIdentity';
 import { contextSourceLine, contextTypeLabel, type ContextChip, type ContextChipType } from '../composerContext';
 import { PluginIcon } from './PluginIcon';
+import { mcpMark } from '../mcpIcons';
 import type { ChipRange } from './composerMenus';
 
 export const CONTEXT_ICONS: Record<ContextChipType, LucideIcon> = { file: FileText, folder: Folder, chat: MessagesSquare, terminal: SquareTerminal, quote: Quote, selection: TextSelect, plugin: Puzzle, skill: Sparkles, memory: Brain, review: MessageSquareCode, image: ImageIcon };
@@ -21,10 +22,13 @@ export function ChipMirror({ text, ranges, selected, plugins, mirror, hint }: { 
     if (range.start > at) parts.push(text.slice(at, range.start));
     const { chip } = range, token = text.slice(range.start, range.end);
     const plugin = chip.kind === 'plugin' ? plugins.find(entry => entry.id === chip.id) : undefined;
-    parts.push(<span key={`${range.start}:${index}`} data-testid="token-chip" data-index={index} data-kind={chip.kind}
+    // #729: an @mcp:/@app: chip a plugin brings wears that plugin's mark in place of its "@", like a plugin chip.
+    const mark = chip.kind === 'mcp' || chip.kind === 'app' ? mcpMark(plugins, chip.label) : undefined;
+    const lead = plugin || chip.kind === 'plugin' ? { icon: plugin?.icon, name: chip.label, seed: token.slice(1), brandColor: plugin?.brandColor } : mark ? { icon: mark.icon, name: mark.plugin, seed: mark.plugin, brandColor: mark.brandColor } : undefined;
+    parts.push(<span key={`${range.start}:${index}`} data-testid="token-chip" data-index={index} data-kind={chip.kind} data-plugin={mark?.plugin}
       className={`token-chip is-${chip.kind}${selected.start === range.start && selected.end === range.end ? ' is-selected' : ''}`}
-      style={tokenStyle(chip.kind as TokenKind, chip.id, plugin?.brandColor)}>
-      {chip.kind === 'plugin' ? <><span className="token-chip-lead">{token[0]}<PluginIcon icon={plugin?.icon} name={chip.label} seed={token.slice(1)} brandColor={plugin?.brandColor} size={14} /></span>{token.slice(1)}</> : token}
+      style={tokenStyle(chip.kind as TokenKind, chip.id, plugin?.brandColor ?? mark?.brandColor)}>
+      {lead ? <><span className="token-chip-lead">{token[0]}<PluginIcon icon={lead.icon} name={lead.name} seed={lead.seed} brandColor={lead.brandColor} size={14} /></span>{token.slice(1)}</> : token}
     </span>);
     at = range.end;
   });
@@ -40,9 +44,10 @@ export function TokenCard({ range, plugins, skills, left, top }: { range: ChipRa
   const { chip } = range;
   const plugin = chip.kind === 'plugin' ? plugins.find(entry => entry.id === chip.id) : undefined;
   const skill = chip.kind === 'skill' ? skills.find(entry => entry.id === chip.id) : undefined;
+  const owner = chip.kind === 'mcp' || chip.kind === 'app' ? mcpMark(plugins, chip.label)?.plugin : undefined;
   const detail = plugin ? [plugin.shortDescription, plugin.skills.length ? `Skills: ${plugin.skills.join(', ')}` : '', plugin.mcpServers.length ? `MCP: ${plugin.mcpServers.map(server => server.name).join(', ')}` : '', plugin.apps.length ? `Apps: ${plugin.apps.map(app => app.name).join(', ')}` : ''].filter(Boolean)
     : skill ? [skill.shortDescription ?? '', skill.provenance].filter(Boolean)
-      : chip.kind === 'command' ? ['Runs when chosen from the / menu'] : chip.kind === 'chat' ? [] : [chip.id];
+      : chip.kind === 'command' ? ['Runs when chosen from the / menu'] : chip.kind === 'chat' ? [] : chip.kind === 'mcp' || chip.kind === 'app' ? [owner ? `From ${owner}` : ''].filter(Boolean) : [chip.id];
   return <div className="token-card" role="tooltip" style={{ left, top, ...tokenStyle(chip.kind as TokenKind, chip.id, plugin?.brandColor) } as React.CSSProperties}>
     <span className="token-card-kind">{TOKEN_LABELS[chip.kind]}{plugin?.version ? ` · v${plugin.version}` : ''}</span>
     <strong>{chip.label}</strong>

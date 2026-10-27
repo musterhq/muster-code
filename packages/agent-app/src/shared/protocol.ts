@@ -112,7 +112,12 @@ export interface ProviderInfo { id: string; driver?: string; bindingId?: string;
 /** Read-only local skill inventory. Skills are inspected, never installed or executed here. */
 export interface SkillEntry { id: string; name: string; provenance: string; path: string; readme: string | null; readError: string | null;
   /** From agents/openai.yaml `interface` or SKILL.md front matter; absent on older runtimes. */
-  displayName?: string; shortDescription?: string; icon?: ItemIcon; pluginId?: string }
+  displayName?: string; shortDescription?: string; icon?: ItemIcon; pluginId?: string;
+  /** #729: a Claude Code skill (`.claude/skills/<name>/SKILL.md`) or command (`.claude/commands/<name>.md`); `name` is how
+   *  Claude Code invokes it (`/<name>`), nested commands as `dir:name`. */
+  claude?: 'skill' | 'command';
+  /** A Claude Code command's `argument-hint` front matter, e.g. `<file> [focus]`. */
+  argumentHint?: string }
 /** Metadata-only installed plugin inventory. Executable config and secrets never cross into the renderer. */
 export interface PluginEntry { id:string; name:string; version:string; provenance:string; path:string; skills:string[]; mcpServers:Array<{name:string;transport:'local'|'remote'|'unknown'}>; apps:Array<{name:string;id:string;required:boolean;category?:string;/** EXT-10: plugin-relative .html entry rendered in a sandboxed frame. */ui?:string}>; readError:string|null;
   /** From `.codex-plugin/plugin.json` `interface`; icon is the composerIcon/logo (sanitized) or a monogram. */

@@ -38,7 +38,9 @@ import {createEntry, moveFile} from './file-operations.ts';
 import { isElicitationRequest, elicitationPolicy, elicitationResult, elicitationText, elicitationServer } from '../shared/computer-use.ts';
 import { isCompactCommand } from '../shared/compact-command.ts';
 import { createProviderAdapter, NO_LIVE_SESSION, ProviderPreDispatchError, type ProviderAdapter, type ProviderResult } from './provider.ts';
-import { discoverPlugins, discoverSkills, invokedPluginContext, resolveAttachedSkill, resolveInvokedPlugins } from './plugin-library.ts';
+import { commandArguments, commandBody, discoverPlugins, discoverSkills, expandClaudeCommand, invokedPluginContext, resolveAttachedSkill, resolveInvokedPlugins, selectedSkillBlock, setIconDownscaler, type IconDownscaler } from './plugin-library.ts';
+import { onBrandWanted, refreshRemotePluginIcons, setRemoteIconStore, type RemoteIconOptions } from './remote-plugin-icons.ts';
+import { CLAUDE_COMMAND_EVENT } from './adapters/claude-code.ts';
 import {providerAccessPolicy} from './provider-run-lifecycle.ts';
 import {parseKillIntent, userProcessThreat, type UserProcessTarget, type UserProcessThreat} from './user-process-guard.ts';
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
@@ -140,7 +142,10 @@ export function userProcessNote(groups: readonly UserProcessGroup[], cwd: string
 }
 const PROVIDER_LISTING_WAIT_MS = 15_000;
 export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; userProcesses?: () => readonly UserProcessGroup[]; userProcessTargets?: () => Promise<readonly UserProcessTarget[]>; provider?: ProviderAdapter; reconcileProvider?: (input: ReconciliationInput) => Promise<ReconciliationResult>; domains?: readonly DomainFactory[];
-  /** Serve the ask_user MCP server to CLI routes (default: on outside tests). */ askUserTools?: boolean }) {
+  /** Serve the ask_user MCP server to CLI routes (default: on outside tests). */ askUserTools?: boolean;
+  /** #729: scales plugin logos that are over the icon budget (the app passes Electron's nativeImage). */ downscaleIcon?: IconDownscaler;
+  /** #729: fetch logos Codex lists for remote plugins that ship none (default: on outside tests). */ remotePluginIcons?: RemoteIconOptions | false }) {
+  setIconDownscaler(options.downscaleIcon);
   applyPendingRestore(options.dataDir);
   setProviderListingStore(join(options.dataDir, 'provider-listings'));
   const store = new AgentStore(options.dataDir);
@@ -250,6 +255,19 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (event.type === 'projectChanged' && event.seq === undefined) { try { event = {...event, seq: projectFeed.append(event.projectId, event.taskId)}; } catch { /* An unsequenced event still reloads; the next replay resets. */ } }
     options.onEvent(event);
   };
+  setRemoteIconStore(join(options.dataDir, 'plugin-icons'));
+  const remoteIcons = options.remotePluginIcons ?? (process.env.NODE_TEST_CONTEXT ? false : {});
+  const refreshRemoteIcons = () => { if (remoteIcons && !disposed) void refreshRemotePluginIcons(remoteIcons).then(changed => { if (changed) emit({type: 'pluginIconsChanged'}); }, () => undefined); };
+  let remoteIconsStarted = false, brandTopUp: ReturnType<typeof setTimeout> | undefined;
+  const remoteIconTimer = remoteIcons ? setTimeout(() => { remoteIconsStarted = true; refreshRemoteIcons(); }, remoteIcons.delayMs ?? 20_000) : undefined;
+  remoteIconTimer?.unref?.();
+  // Brand names asked for before the first refresh ride along with it; later ones get a short, coalesced top-up.
+  onBrandWanted(remoteIcons ? () => {
+    if (!remoteIconsStarted || disposed) return;
+    if (brandTopUp) clearTimeout(brandTopUp);
+    brandTopUp = setTimeout(refreshRemoteIcons, remoteIcons.topUpDelayMs ?? 3_000);
+    brandTopUp.unref?.();
+  } : null);
   /** PER-05: agent tool output beyond the in-memory tail, pageable through processes.outputPage({itemId}). */
   const toolOutputLog = new OutputLog(join(options.dataDir, 'output-logs'));
   const toolOutputLogged = new Set<string>();
@@ -660,7 +678,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     validateRunnableModel(chat.model,chat.providerId);
     const project = chat.projectId ? store.snapshot().projects.find(p => p.id === chat.projectId) : undefined;
     const context = project ? `Project: ${project.name}\nShared goal: ${project.goal || '(not set)'}` : '';
-    const skillContext = [...attachedSkills.map(entry => `Selected skill: ${entry.name} (${entry.provenance})\n\nApply these user-selected skill instructions to the current request:\n<skill-instructions>\n${entry.content}\n</skill-instructions>`), invokedPluginContext(plugins)].filter(Boolean).join('\n\n');
+    const skillContext = [...attachedSkills.map(entry => selectedSkillBlock(entry, prompt)), invokedPluginContext(plugins)].filter(Boolean).join('\n\n');
+    // #729: the first picked Claude Code skill or command; a Claude Code run sends it as `/<name> <request>` for Claude Code to expand.
+    const claudeEntry = attachedSkills.find(entry => entry.claude);
+    const nativeSkillContext = claudeEntry ? [...attachedSkills.filter(entry => entry !== claudeEntry).map(entry => selectedSkillBlock(entry, prompt)), invokedPluginContext(plugins)].filter(Boolean).join('\n\n') : '';
     const defaultCwd = folder ? canonicalFolderPath(folder.path) : join(options.dataDir, 'scratch', chatId);
     const cwd = await domainHooks.runEnvironment(chat, defaultCwd);
     if (folder || cwd !== defaultCwd) { if (!(await fs.stat(cwd)).isDirectory()) throw new Error('Selected folder is unavailable.'); }
@@ -790,6 +811,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         let threadReset = false;
         const request = [prompt, fileLines].filter(Boolean).join('\n\n');
         const contextualPrompt = preamble ? `${preamble}\n\nCurrent user request:\n${request}` : request;
+        // A slash command must be the whole message, so its turn's context moves to the system prompt. A fork's digest
+        // has to stay in the thread and images ride in the message, so those turns keep the inlined form.
+        const claudeCommand = claudeEntry && !digest && !images.length ? {text: [`/${claudeEntry.name}`, commandArguments(prompt, claudeEntry.name)].filter(Boolean).join(' '),
+          context: [sent(projectBlock), nativeSkillContext, ...contributed.blocks.map(sent), sent(ownershipBlock), runOptions.turnContext, fileLines].filter(Boolean).join('\n\n')} : undefined;
+        /** The transcript shows the command’s run once, when Claude Code reports it expanded the command. */
+        let nativeCommandRan = false;
         let retryNotice: TimelineItem | undefined;
         let retryReason = 'admission' as 'admission' | 'transient';
         let retryDetail: string | undefined;
@@ -797,6 +824,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const attempt = () => run.stopped ? Promise.resolve(stoppedBeforeDispatch) : provider.run({ chat: {...chat,providerTurnId:undefined,recovery:undefined}, cwd, prompt: contextualPrompt,
           ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) || pluginReloads.wantsConnectors(chatId) ? {connectorsRequested: true} : {}),
           ...(runOptions.configOverrides ? {configOverrides: runOptions.configOverrides as Record<string, string | number | boolean | string[]>} : {}), ...(runOptions.developerInstructions ? {developerInstructions: runOptions.developerInstructions} : {}),
+          ...(claudeCommand ? {claudeCommand} : {}),
           onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
           onThreadReady: (threadId, driver) => { persistIdentity(threadId, undefined, driver); void nativeQueue.flushStranded(chatId); },
           // The saved provider thread is gone (pruned or deleted): the fresh one gets the earlier conversation and the
@@ -820,6 +848,14 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             // A subagent inside a CLI provider (Claude Code Task): its rows live in its own transcript, never in the parent's.
             const ownThread = store.chat(chatId)?.providerThreadId, child = claudeChildThread(params, ownThread);
             if (child) { const row = claudeChildRow(method, params); if (row) store.upsertSubagentItem(chatId, child, row); return; }
+            if (method === CLAUDE_COMMAND_EVENT) {
+              if (!claudeEntry || params.name !== claudeEntry.name || nativeCommandRan) return;
+              nativeCommandRan = true; seal();
+              const args = typeof params.args === 'string' ? params.args : '';
+              const output = claudeEntry.claude === 'command' ? expandClaudeCommand(claudeEntry.content, args) : commandBody(claudeEntry.content).trim();
+              store.appendItem(chatId, 'tool', `/${claudeEntry.name}`, 'completed', {type: 'claudeCommand', kind: claudeEntry.claude, name: `/${claudeEntry.name}`, arguments: args, source: claudeEntry.provenance, path: claudeEntry.path, output});
+              scheduleTimeline(chatId); return;
+            }
             if (method === TOOLS_UNAVAILABLE_EVENT) { store.appendItem(chatId, 'notice', `${chat.model} can’t run commands or edit files through this route, so it answered without tools. Use “Switch to…” in the composer to pick a model with tools.`, 'completed', {kind: 'tools-unavailable', model: chat.model}); scheduleTimeline(chatId); return; }
             if (method === HISTORY_WINDOW_EVENT) { if (typeof params.retainedUserTurns === 'number') retainedTurns = params.retainedUserTurns; return; }
             const compactionItem = params.item && typeof params.item === 'object' && (params.item as Record<string, unknown>).type === 'contextCompaction';
@@ -1075,7 +1111,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         }
         if (result.threadId) persistIdentity(result.threadId,result.turnId,result.driver);
         // Only a turn the provider actually took delivered its context blocks to the thread.
-        if (result.status === 'completed' && result.dispatchState !== 'not-dispatched' && !compactedInRun) contextLedger.delivered(chatId, store.chat(chatId)?.providerThreadId, threadReset ? staticBlocks : [...pendingBlocks], retainedTurns);
+        if (result.status === 'completed' && result.dispatchState !== 'not-dispatched' && !compactedInRun && !result.nativeCommand) contextLedger.delivered(chatId, store.chat(chatId)?.providerThreadId, threadReset ? staticBlocks : [...pendingBlocks], retainedTurns);
         else if (result.dispatchState !== 'not-dispatched') contextLedger.forget(chatId);
         if (recovery) store.appendItem(chatId,'notice',recovery.reason,recovery.kind,{recovery,providerThreadId:store.chat(chatId)?.providerThreadId,providerTurnId:store.chat(chatId)?.providerTurnId});
         // #448: a limited turn that never started re-runs its own prompt at reset, so it is not also handed back as a draft (sent twice).
@@ -1350,7 +1386,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   async function steerNow(chat: Chat, message: string, requestId: string, chips: {skillIds?: string[]; pluginIds?: string[]; effort?: ReasoningEffort}): Promise<{steered: boolean; reason?: string}> {
     const chatId = chat.id, run = runs.get(chatId);
     if (!run || run.stopped || !provider.steer) return {steered:false};
-    const instructions = await chipInstructions(chat, chips);
+    const instructions = await chipInstructions(chat, chips, message);
     const outcome = await provider.steer(chatId, instructions ? `${instructions}\n\nCurrent user request:\n${message}` : message);
     if (outcome !== true) return typeof outcome === 'object' ? {steered:false, reason:outcome.refused} : {steered:false};
     // Effort cannot change inside a live turn; it applies from the next one.
@@ -1363,10 +1399,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     timeline(chatId);
     return {steered:true};
   }
-  async function chipInstructions(chat: Chat, chips: {skillIds?: string[]; pluginIds?: string[]}): Promise<string> {
+  async function chipInstructions(chat: Chat, chips: {skillIds?: string[]; pluginIds?: string[]}, request = ''): Promise<string> {
     const folder = chat.folderId ? store.folder(chat.folderId) : undefined;
     const skills = (await Promise.all((chips.skillIds ?? []).map(skillId => resolveAttachedSkill(skillId, folder ? [folder.path] : [])))).filter(entry => entry !== null);
-    return [...skills.map(entry => `Selected skill: ${entry.name} (${entry.provenance})\n\nApply these user-selected skill instructions to the current request:\n<skill-instructions>\n${entry.content}\n</skill-instructions>`), invokedPluginContext(await resolveInvokedPlugins(chips.pluginIds ?? []))].filter(Boolean).join('\n\n');
+    return [...skills.map(entry => selectedSkillBlock(entry, request)), invokedPluginContext(await resolveInvokedPlugins(chips.pluginIds ?? []))].filter(Boolean).join('\n\n');
   }
   const touchesFiles = (item: TimelineItem) => item.kind === 'tool' && (item.data?.type === 'fileChange' || (Array.isArray(item.data?.changes) && item.data.changes.length > 0));
   /** Replace-in-place is offered only when nothing is running and no later work edited files: files are never rewound. */
@@ -2312,6 +2348,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (disposal) return disposal;
     closing = true;
     if (snoozeTimer) clearTimeout(snoozeTimer);
+    if (remoteIconTimer) clearTimeout(remoteIconTimer);
+    if (brandTopUp) clearTimeout(brandTopUp);
+    onBrandWanted(null);
     if (archiveTimer) clearInterval(archiveTimer);
     for (const timer of resumeTimers.values()) clearTimeout(timer); resumeTimers.clear();
     disposal = (async () => {

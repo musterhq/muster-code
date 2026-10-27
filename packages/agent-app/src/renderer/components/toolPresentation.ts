@@ -1,8 +1,8 @@
 import {computerAction,type ComputerAction} from '../../shared/computer-use.ts';
 import {countPatch,itemPatches} from '../patchModel.ts';
-export type ToolKind = 'read' | 'edit' | 'search' | 'list' | 'command' | 'subagent' | 'mcp' | 'computer' | 'generic';
+export type ToolKind = 'read' | 'edit' | 'search' | 'list' | 'command' | 'subagent' | 'mcp' | 'computer' | 'skill' | 'generic';
 export interface FileStat {path:string;adds:number;dels:number}
-export interface ToolPresentation {kind:ToolKind;verb:string;runningVerb:string;subject:string;paths?:string[];/** Reads that only looked at images (Codex "Viewed 4 images"). */images?:string[];files?:FileStat[];adds?:number;dels?:number;plan?:boolean;/** The plan's own markdown text (ExitPlanMode, or a native plan item) when it wasn't submitted as a steps array. */planText?:string;computer?:ComputerAction}
+export interface ToolPresentation {kind:ToolKind;verb:string;runningVerb:string;subject:string;paths?:string[];/** Reads that only looked at images (Codex "Viewed 4 images"). */images?:string[];files?:FileStat[];adds?:number;dels?:number;plan?:boolean;/** The plan's own markdown text (ExitPlanMode, or a native plan item) when it wasn't submitted as a steps array. */planText?:string;computer?:ComputerAction;/** #729: a Claude Code slash command, shown with the picker's slash glyph. */slash?:boolean}
 const string=(value:unknown):string=>typeof value==='string'?value:'';
 const objects=(value:unknown):Record<string,unknown>[]=>Array.isArray(value)?value.filter(v=>v&&typeof v==='object'):[];
 export function classifyTool(data:Record<string,unknown>|undefined):ToolPresentation {
@@ -17,6 +17,8 @@ export function classifyTool(data:Record<string,unknown>|undefined):ToolPresenta
  if(type==='fileChange'){const files=fileStats(data),paths=files.map(file=>file.path);return {kind:'edit',verb:'Edited',runningVerb:'Editing',subject:paths.join(', ')||subject,paths,files,adds:files.reduce((n,file)=>n+file.adds,0),dels:files.reduce((n,file)=>n+file.dels,0)};}
  if(type==='fileRead'){const path=string(data?.path)||subject;return path?readOf([path]):{kind:'read',verb:'Read',runningVerb:'Reading',subject};}
  if(type==='imageView'){const path=string(data?.path)||subject;return {kind:'read',verb:'Viewed image',runningVerb:'Viewing image',subject:path,paths:path?[path]:[],images:path?[path]:[]};}
+ // #729: Claude Code ran a picked command ("Ran /bar") or skill ("Used foo skill"); its output is what the command expanded to.
+ if(type==='claudeCommand'){const name=string(data?.name).replace(/^\//,'')||subject.replace(/^\//,'');return data?.kind==='skill'?{kind:'skill',verb:'Used',runningVerb:'Using',subject:`${name} skill`}:{kind:'skill',verb:'Ran',runningVerb:'Running',subject:[`/${name}`,string(data?.arguments).trim()].filter(Boolean).join(' '),slash:true};}
  if(type==='webSearch')return {kind:'search',verb:'Searched',runningVerb:'Searching',subject:string(data?.query)||subject};
  if(type==='todoList'||type==='plan'||PLAN_TOOLS.has(string(data?.tool))||PLAN_TOOLS.has(subject)){
   const steps=planSteps(data),text=steps.length?undefined:planText(data);

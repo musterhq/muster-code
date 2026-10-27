@@ -48,6 +48,8 @@ export function claudeArgs(input: AdapterRunInput, sessionId: string): string[] 
     ...(alias && alias !== 'default' ? ['--model', alias] : []),
     ...(input.reasoningEffort ? ['--effort', input.reasoningEffort] : []),
     ...(input.resumeThreadId ? ['--resume', input.resumeThreadId] : ['--session-id', sessionId]),
+    // #729: a `/command` turn asks Claude Code to echo what it expanded, which the transcript shows as the command's run.
+    ...(input.prompt?.startsWith('/') ? ['--replay-user-messages'] : []),
     ...(input.instructions ? ['--append-system-prompt', input.instructions] : [])];
 }
 
@@ -116,6 +118,17 @@ export const claudeTaskState = (status: unknown): 'completed' | 'failed' | 'inte
 /** The subagent's own final report without the harness's hand-back frame around it. */
 const handBack = (content: string): string => { const at = content.indexOf('The report follows:\n'); return (at < 0 ? content : content.slice(at + 20)).replace(/^ {2}/gm, '').replace(/\nagentId: [\s\S]*$/, '').trim(); };
 
+/** #729: a Claude Code skill or command ran; `name` is without its slash. */
+export const CLAUDE_COMMAND_EVENT = 'muster/claudeCommand';
+/** The replayed message Claude Code expanded as a command: `<command-name>/bar</command-name>` with its `<command-args>`. */
+export function claudeCommandRun(event: Record<string, unknown>): {name: string; args: string} | null {
+  const message = event.message && typeof event.message === 'object' ? (event.message as {content?: unknown}).content : undefined;
+  const body = typeof message === 'string' ? message : resultText(message);
+  const name = /<command-name>\/?([^<\s]{1,200})<\/command-name>/.exec(body)?.[1];
+  if (!name) return null;
+  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(body)?.[1] ?? '';
+  return {name, args: args.slice(0, 32768)};
+}
 /** The turn's stdin: the plain prompt, or with images one stream-json user message whose
  *  image content blocks carry the attachment bytes (the model sees them directly). */
 export const claudeUserMessage = (text: string): string => JSON.stringify({type: 'user', message: {role: 'user', content: [{type: 'text', text}]}}) + '\n';
@@ -261,6 +274,8 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
         if (type === 'system' && event.subtype === 'init') { accept(); return; }
         accept();
         if (type === 'control_request') { void askPermission(event); return; }
+        // #729: Claude Code echoes the message it expanded as a command; nothing else in a replay is new.
+        if (type === 'user' && event.isReplay === true) { const command = claudeCommandRun(event); if (command) input.onEvent(CLAUDE_COMMAND_EVENT, command); return; }
         // Work after a result means the unanswered steer started another turn: its result will follow.
         if (grace && (type === 'assistant' || type === 'stream_event' || type === 'user')) { clearTimeout(grace); grace = undefined; }
         if (type === 'system' && (event.subtype === 'task_started' || event.subtype === 'task_notification')) {

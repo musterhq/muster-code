@@ -51,7 +51,8 @@ export interface ExtensionsCommands {
   'extensions.skills.save': { input: LocalSkillDraft & { previousName?: string }; output: LocalSkill };
   'extensions.skills.restore': { input: { name: string; historyId: string }; output: LocalSkill };
 }
-export type ExtensionsEvent = never;
+/** #729: logos for remote plugins arrived or changed; plugin marks should be read again. */
+export type ExtensionsEvent = { type: 'pluginIconsChanged' };
 export const EXTENSIONS_COMMANDS = {
   'extensions.sources.list': true, 'extensions.sources.add': true, 'extensions.sources.sync': true, 'extensions.sources.remove': true,
   'extensions.catalog': true, 'extensions.inventory': true, 'extensions.review': true, 'extensions.install': true, 'extensions.installed': true, 'extensions.update': true,
@@ -72,10 +73,11 @@ export function isEnabled(rows: readonly ExtensionEnablement[], extensionId: str
 export type SkillTier = 'folder' | 'user' | 'global';
 /** Folder skills shadow user skills, which shadow globally installed (marketplace) skills with the same name. */
 export const SKILL_TIER_RANK: Record<SkillTier, number> = { folder: 0, user: 1, global: 2 };
-export function skillTier(provenance: string): SkillTier { return provenance.startsWith('.agents/skills (') ? 'folder' : provenance.startsWith('extension:') ? 'global' : 'user'; }
+export function skillTier(provenance: string): SkillTier { return /^\.(?:agents\/skills|claude\/skills|claude\/commands) \(/.test(provenance) ? 'folder' : provenance.startsWith('extension:') ? 'global' : 'user'; }
 /** `source:name`; the source is the root label without its path noise. */
 export function qualifiedSkillName(entry: { name: string; provenance: string }): string {
-  const source = entry.provenance.startsWith('extension:') ? entry.provenance.slice(10) : entry.provenance.replace(/^\.agents\/skills \((.*)\)$/, '$1').replace(/^~\//, '').replace(/\/skills$/, '');
+  // Claude Code entries (#729) keep `.claude` in the source so a folder's `.claude/skills/foo` and `.agents/skills/foo` stay apart.
+  const source = entry.provenance.startsWith('extension:') ? entry.provenance.slice(10) : entry.provenance.replace(/^\.agents\/skills \((.*)\)$/, '$1').replace(/^\.claude\/(skills|commands) \((.*)\)$/, (_match, kind: string, folder: string) => kind === 'skills' ? `${folder}/.claude` : `${folder}/.claude/commands`).replace(/^~\//, '').replace(/\/skills$/, '');
   return `${source}:${entry.name}`;
 }
 /** For each skill id, the qualified name of the entry that wins its bare name, when that is not the entry itself. */

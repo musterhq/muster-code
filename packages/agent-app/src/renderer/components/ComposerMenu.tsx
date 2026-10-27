@@ -1,7 +1,8 @@
 import { isWebHost } from '../webHost.ts';
-import {AppWindow,Archive,ArchiveRestore,AtSign,Boxes,BookmarkPlus,CircleDot,Folder,FolderKanban,Goal,Lightbulb,ListOrdered,Monitor,Paperclip,PenLine,Server,Sparkles,SquarePen,SquareTerminal} from 'lucide-react';
+import {AppWindow,Archive,ArchiveRestore,AtSign,Boxes,BookmarkPlus,CircleDot,Folder,FolderKanban,Goal,Lightbulb,ListOrdered,Monitor,Paperclip,PenLine,Server,Sparkles,SquarePen,SquareSlash,SquareTerminal} from 'lucide-react';
 import React, { useEffect, useRef } from 'react';
-import type {FileEntry,PluginEntry,SkillEntry} from '../../shared/protocol';
+import type {FileEntry,ItemIcon,PluginEntry,SkillEntry} from '../../shared/protocol';
+import {mcpMark} from '../mcpIcons';
 import {MAX_ATTACHED_SKILL_BYTES} from '../../shared/protocol';
 import {previewLimit,rankSections,scoreItem,scoreQueryMatch} from './composerMenus';
 import {fileVisual} from './fileVisual';
@@ -57,11 +58,13 @@ export const skillScore = (skill: SkillEntry, query: string): number | null => {
   const a = scoreItem(skill.displayName ?? skill.name, skill.shortDescription, query), b = scoreQueryMatch(skill.name, query);
   return a === null ? b : b === null ? a : Math.min(a, b);
 };
-export const skillBadge = (skill: SkillEntry): string => skill.pluginId ? 'Plugin' : skill.provenance.startsWith('.agents') ? 'Repo' : skill.name.startsWith('.') ? 'System' : 'Personal';
+export const skillBadge = (skill: SkillEntry): string => skill.claude ? 'Claude Code' : skill.pluginId ? 'Plugin' : skill.provenance.startsWith('.agents') ? 'Repo' : skill.name.startsWith('.') ? 'System' : 'Personal';
+/** #729: a Claude Code command reads the way it is typed there (`/fe:comp`); skills keep their name. */
+export const skillLabel = (skill: SkillEntry): string => skill.claude === 'command' ? `/${skill.name}` : skill.displayName ?? skill.name;
 export function skillRow(skill: SkillEntry, score: number, run: () => void): MenuRow {
   const usable = skillUsable(skill);
-  return { key: `skill:${skill.id}`, section: 'Skills', label: skill.displayName ?? skill.name, description: usable ? skill.shortDescription ?? skill.provenance : skill.readError ?? 'Empty or over the 48 KB skill limit',
-    icon: skill.icon ? <PluginIcon icon={skill.icon} name={skill.displayName ?? skill.name} shape="skill" /> : <Sparkles size={15} className="is-skill" />, badge: skillBadge(skill), disabled: !usable, score, run };
+  return { key: `skill:${skill.id}`, section: 'Skills', label: skillLabel(skill), ...(skill.claude === 'command' ? {mono: true} : {}), description: usable ? [skill.argumentHint, skill.shortDescription ?? skill.provenance].filter(Boolean).join(' · ') : skill.readError ?? 'Empty or over the 48 KB skill limit',
+    icon: skill.icon ? <PluginIcon icon={skill.icon} name={skill.displayName ?? skill.name} shape="skill" /> : skill.claude === 'command' ? <span className="composer-command-tile is-claude-command" style={{ '--h': 18 } as React.CSSProperties}><SquareSlash size={12} /></span> : <Sparkles size={15} className="is-skill" />, badge: skillBadge(skill), disabled: !usable, score, run };
 }
 export function pluginRow(plugin: PluginEntry, score: number, run: () => void): MenuRow {
   return { key: `plugin:${plugin.id}`, section: 'Plugins', label: pluginLabel(plugin), description: plugin.shortDescription ?? plugin.provenance,
@@ -70,8 +73,10 @@ export function pluginRow(plugin: PluginEntry, score: number, run: () => void): 
 
 /** `/`: usable skills, ranked in with the caller's own Commands rows (never plugins — those belong to @ and +). */
 export function buildSlashRows(query: string, skills: readonly SkillEntry[], onSkill: (skill: SkillEntry) => void, commandRows: MenuRow[]): MenuRow[] {
-  const rows = skills.filter(skillUsable).flatMap(skill => { const score = skillScore(skill, query); return score === null ? [] : [skillRow(skill, score, () => onSkill(skill))]; }).slice(0, 30);
-  return rankSections([{ title: 'Skills', rows }, { title: 'Commands', rows: commandRows }]).flatMap(section => section.rows.map(row => ({ ...row, section: section.title })));
+  const picked = skills.filter(skillUsable).flatMap(skill => { const score = skillScore(skill, query); return score === null ? [] : [{ skill, row: skillRow(skill, score, () => onSkill(skill)) }]; }).slice(0, 30);
+  // #729: a Claude Code command is a command, so it lists with the built-in ones (after them) rather than under Skills.
+  const rows = picked.filter(entry => entry.skill.claude !== 'command').map(entry => entry.row), claude = picked.filter(entry => entry.skill.claude === 'command').map(entry => entry.row);
+  return rankSections([{ title: 'Skills', rows }, { title: 'Commands', rows: [...commandRows, ...claude] }]).flatMap(section => section.rows.map(row => ({ ...row, section: section.title })));
 }
 
 /** `@`: files, folders and plugins (plus any caller-supplied extra sections, e.g. Recent chats or Tools). */
@@ -115,15 +120,18 @@ export interface AddRowInput<T extends { key: string; label: string } = { key: s
   /** CR-15: Codex's "Turn on queueing" / "Turn off queueing" (the Follow-up behavior setting, from the composer). */
   queueing?: boolean; onQueueing?(): void;
 }
-export interface ConnectorEntry { key: string; kind: 'mcp' | 'app'; name: string; description: string }
+export interface ConnectorEntry { key: string; kind: 'mcp' | 'app'; /** The server or app's own name (deduplication). */ name: string; /** What the row, chip and `@app:` token read: an app known only by an opaque id reads as its plugin. */ label: string; description: string; /** #729: the providing plugin's mark; absent for a server no plugin brings. */ icon?: ItemIcon; brandColor?: string; plugin?: string }
 /** The + menu's connector rows: user/detected MCP servers, then servers and apps plugins bring (deduplicated by name). */
+/** Remote connector apps arrive named by id (`app-6a83901dde988191b3f3cefdcc19acfa`), which nobody can read. */
+const opaqueAppId = (name: string): boolean => /^(?:asdk_)?app[-_][0-9a-f]{16,}$/i.test(name);
 export function connectorEntries(servers: readonly { id: string; name: string; transport: string; enabled: boolean }[], plugins: readonly PluginEntry[]): ConnectorEntry[] {
   const seen = new Set<string>(), out: ConnectorEntry[] = [];
   const add = (entry: ConnectorEntry) => { const id = `${entry.kind}:${entry.name.toLowerCase()}`; if (seen.has(id)) return; seen.add(id); out.push(entry); };
-  for (const server of servers) if (server.enabled) add({ key: `mcp:${server.id}`, kind: 'mcp', name: server.name, description: server.transport === 'http' ? 'Streamable HTTP' : server.transport === 'stdio' ? 'stdio' : server.transport });
+  for (const server of servers) if (server.enabled) { const mark = mcpMark(plugins, server.name); add({ key: `mcp:${server.id}`, kind: 'mcp', name: server.name, label: server.name, description: server.transport === 'http' ? 'Streamable HTTP' : server.transport === 'stdio' ? 'stdio' : server.transport, ...(mark ? { icon: mark.icon, brandColor: mark.brandColor, plugin: mark.plugin } : {}) }); }
   for (const plugin of plugins) {
-    for (const server of plugin.mcpServers) add({ key: `mcp:${plugin.id}:${server.name}`, kind: 'mcp', name: server.name, description: `${server.transport} · ${pluginLabel(plugin)}` });
-    for (const app of plugin.apps) add({ key: `app:${plugin.id}:${app.id}`, kind: 'app', name: app.name, description: app.category ? `${app.category} · ${pluginLabel(plugin)}` : pluginLabel(plugin) });
+    for (const server of plugin.mcpServers) add({ key: `mcp:${plugin.id}:${server.name}`, kind: 'mcp', name: server.name, label: server.name, description: `${server.transport} · ${pluginLabel(plugin)}`, icon: plugin.icon, brandColor: plugin.brandColor, plugin: pluginLabel(plugin) });
+    for (const app of plugin.apps) { const opaque = opaqueAppId(app.name); add({ key: `app:${plugin.id}:${app.id}`, kind: 'app', name: app.name, label: opaque ? pluginLabel(plugin) : app.name,
+      description: opaque ? plugin.shortDescription ?? app.category ?? 'App' : app.category ? `${app.category} · ${pluginLabel(plugin)}` : pluginLabel(plugin), icon: plugin.icon, brandColor: plugin.brandColor, plugin: pluginLabel(plugin) }); }
   }
   return out;
 }
@@ -159,8 +167,8 @@ export function buildAddRows<T extends { key: string; label: string }>(input: Ad
   return [
     ...add.flatMap(keep),
     ...pluginSection,
-    ...(input.onConnector ? (input.connectors ?? []).map(connector => ({ key: `connector:${connector.key}`, section: 'Connectors & MCP', label: connector.name, description: connector.description,
-      icon: connector.kind === 'mcp' ? <Server size={15} className="is-hued" style={{ '--h': 190 } as React.CSSProperties} /> : <AppWindow size={15} className="is-hued" style={{ '--h': 28 } as React.CSSProperties} />,
+    ...(input.onConnector ? (input.connectors ?? []).map(connector => ({ key: `connector:${connector.key}`, section: 'Connectors & MCP', label: connector.label, description: connector.description,
+      icon: connector.plugin ? <PluginIcon icon={connector.icon} name={connector.plugin} brandColor={connector.brandColor} size={15} /> : connector.kind === 'mcp' ? <Server size={15} className="is-hued" style={{ '--h': 190 } as React.CSSProperties} /> : <AppWindow size={15} className="is-hued" style={{ '--h': 28 } as React.CSSProperties} />,
       badge: connector.kind === 'mcp' ? 'MCP' : 'App', score: 0, run: () => input.onConnector!(connector) } satisfies MenuRow)).flatMap(keep).slice(0, MENU_LIMIT) : []),
     ...input.skills.filter(skillUsable).map(skill => skillRow(skill, 0, () => input.onSkill(skill))).flatMap(keep).slice(0, MENU_LIMIT),
   ];
