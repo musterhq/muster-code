@@ -149,7 +149,7 @@ async function codexRegistry(t: TestContext, version: string, options: {badInteg
 }
 
 // Spec: MUS-SPEC-03-721H (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-721h)
-test('MUS-SPEC-03-721H: on a machine with no Codex, npm or Node, one click installs a Codex that runs', {skip: !codexTriple() && 'no Codex build for this platform'}, async t => {
+test('MUS-SPEC-03-721H: on a machine with no Codex, npm or Node, one click installs a Codex that runs', {skip: process.platform === 'win32' ? 'the stand-in binary is a shell script' : !codexTriple() && 'no Codex build for this platform'}, async t => {
   const root = await directory(t), home = await directory(t);
   const {registry, requests} = await codexRegistry(t, '0.70.0');
   const env: NodeJS.ProcessEnv = {PATH: '', npm_config_registry: registry, MUSTER_APP_ROOTS: await directory(t)};
@@ -167,7 +167,7 @@ test('MUS-SPEC-03-721H: on a machine with no Codex, npm or Node, one click insta
 });
 
 // Spec: MUS-SPEC-03-721I (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-721i)
-test('MUS-SPEC-03-721I: a download that fails its checksum installs nothing', {skip: !codexTriple() && 'no Codex build for this platform'}, async t => {
+test('MUS-SPEC-03-721I: a download that fails its checksum installs nothing', {skip: process.platform === 'win32' ? 'the stand-in binary is a shell script' : !codexTriple() && 'no Codex build for this platform'}, async t => {
   const root = await directory(t), home = await directory(t);
   const {registry} = await codexRegistry(t, '0.70.0', {badIntegrity: true});
   const env: NodeJS.ProcessEnv = {PATH: '', npm_config_registry: registry, MUSTER_APP_ROOTS: await directory(t)};
