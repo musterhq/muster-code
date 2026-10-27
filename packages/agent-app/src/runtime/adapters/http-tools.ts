@@ -11,6 +11,7 @@ import type {AdapterRunInput} from './types.ts';
 import {BROWSER_TOOL_SPECS, type McpToolResult} from '../../main/agent-tools/browser-tools.ts';
 import {BROWSER_MCP, browserNote} from '../../shared/computer-use.ts';
 import {ASK_MCP, ASK_USER_SPEC, ASK_USER_TOOL} from '../ask-user.ts';
+import {writeWorkspaceFile} from '../workspace-write.ts';
 
 /**
  * Tools for OpenAI-compatible HTTP routes (a local OmniRoute or Ollama server, an API key route, a saved connection).
@@ -127,78 +128,13 @@ async function resolvePath(raw: unknown, ctx: ToolContext): Promise<Resolved> {
   }
   return {path: join(base, ...parts), base, confined: true};
 }
-/**
- * Writes through a handle opened without following links. The parent folders are made one at a time, each lstat-ed (a link or a
- * folder that is not really inside the working folder is refused, and a folder this call just made that landed outside is removed
- * again); after opening, the handle must be the very file (device and inode) that lstat sees under the real parent, and the file
- * must still really lie inside the folder. A file this call created elsewhere is removed.
- */
+/** Workspace writes walk pinned directory handles; no creating syscall resolves a checked parent by path. */
 async function writeConfined(resolved: Resolved, content: string): Promise<void> {
   const {path, base, confined} = resolved;
   if (!confined) { await fs.mkdir(dirname(path), {recursive: true}); await fs.writeFile(path, content, 'utf8'); return; }
   const parts = relative(base, path).split(sep).filter(Boolean);
-  const name = parts.pop();
-  if (!name) throw new Error('A file path is required.');
-  let realParent = base;
-  for (const part of parts) {
-    const next = join(realParent, part);
-    let info = await fs.lstat(next).catch(error => { if (missing(error)) return undefined; throw error; });
-    let made: {dev: number; ino: number} | undefined;
-    if (!info) {
-      const created = await fs.mkdir(next).then(() => true, error => { if ((error as NodeJS.ErrnoException)?.code !== 'EEXIST') throw error; return false; });
-      info = await fs.lstat(next);
-      if (created) made = {dev: info.dev, ino: info.ino};
-    }
-    if (info.isSymbolicLink() || !info.isDirectory()) throw new Error(`${relative(base, next)} is not a plain folder; links are not followed outside Full access.`);
-    const real = await fs.realpath(next);
-    if (!isInsidePath(base, real)) {
-      // A swap of the parent let a folder land outside: remove it only if it is the empty folder this call made.
-      const seen = made && await fs.lstat(real).catch(() => undefined);
-      if (seen && made && seen.dev === made.dev && seen.ino === made.ino) await fs.rmdir(real).catch(() => {});
-      throw new Error('That location leads outside the working folder.');
-    }
-    realParent = real;
-  }
-  const file = join(realParent, name);
-  const before = await fs.lstat(file).catch(error => { if (missing(error)) return undefined; throw error; });
-  const existed = before !== undefined;
-  const noFollow = typeof fsc.O_NOFOLLOW === 'number' ? fsc.O_NOFOLLOW : 0;
-  const handle = await fs.open(file, fsc.O_WRONLY | fsc.O_CREAT | noFollow, 0o644);
-  // Where the open really put the file, read straight away: a racer can swap a folder on the way for a link and back again,
-  // so the name alone may no longer lead to it by the time cleanup runs.
-  const landed = await Promise.all([fs.realpath(file).catch(() => undefined), fs.realpath(dirname(file)).then(dir => join(dir, name), () => undefined)]);
-  // Cleanup removes only the file this call created: the inode the handle holds, where it landed or where the name leads
-  // now. A path that holds some other file (a racer swapped in a link) is never unlinked. Content is written only after the
-  // open file is proven to be inside the folder, so a file a racer redirected elsewhere is empty.
-  let ours: {dev: number; ino: number} | undefined;
-  const removeOurs = async () => {
-    if (existed || !ours) return;
-    const places = new Set([...landed, await fs.realpath(file).catch(() => undefined)].filter((place): place is string => !!place && !isInsidePath(base, place)));
-    for (const stray of places) {
-      const seen = await fs.lstat(stray).catch(() => undefined);
-      if (seen && !seen.isSymbolicLink() && seen.dev === ours.dev && seen.ino === ours.ino) await fs.unlink(stray).catch(() => {});
-    }
-  };
-  try {
-    const info = await handle.stat();
-    ours = {dev: info.dev, ino: info.ino};
-    if (!info.isFile()) throw new Error('That is not a regular file.');
-    if (existed && info.nlink > 1) throw new Error('That file has other hard links, so it is not changed outside Full access.');
-    // On Windows O_NOFOLLOW is 0: this is what covers the last component there.
-    const named = await fs.lstat(file).catch(() => undefined);
-    if (!named || named.isSymbolicLink() || named.dev !== info.dev || named.ino !== info.ino) throw new Error('That file changed while it was being opened, so it was not written.');
-    const real = await fs.realpath(file);
-    if (!isInsidePath(base, real)) throw new Error('That file leads outside the working folder.');
-    await handle.truncate(0);
-    await handle.writeFile(content, 'utf8');
-  } catch (error) {
-    await handle.close().catch(() => {});
-    await removeOurs();
-    throw error;
-  }
-  await handle.close();
-  const after = await fs.realpath(file).catch(() => undefined);
-  if (after && !isInsidePath(base, after)) { await removeOurs(); throw new Error('That file ended up outside the working folder and was removed.'); }
+  if (!parts.length) throw new Error('A file path is required.');
+  await writeWorkspaceFile(base, parts, content);
 }
 
 /** At most `limit` bytes of a regular file, never the whole thing. */
