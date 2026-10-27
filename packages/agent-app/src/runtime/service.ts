@@ -976,7 +976,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               const details = toolEventDetails(item), startedAt = toolStarted.get(itemId);
               if (finished && startedAt !== undefined) { toolStarted.delete(itemId); if (!(typeof details.durationMs === 'number' && details.durationMs > 0)) details.durationMs = Date.now() - startedAt; }
               else if (finished && !(typeof details.durationMs === 'number' && details.durationMs > 0) && typeof previous?.data?.durationMs === 'number') details.durationMs = previous.data.durationMs;
-              const shellChanges = finished ? shellPatchChanges(item) : [];
+              // Completion events may omit the command and contain only an output
+              // suffix. Use the accumulated evidence, not just the final packet.
+              const patchEvidence = {...previous?.data, ...item, aggregatedOutput: output};
+              let shellChanges = finished && status === 'completed' ? shellPatchChanges(patchEvidence) : [];
+              if (finished && status === 'completed' && !shellChanges.length && streamed !== output)
+                shellChanges = shellPatchChanges({...patchEvidence, aggregatedOutput: streamed});
               const metadata = {...details,providerItemId:itemId,type:shellChanges.length ? 'fileChange' : type || previous?.data?.type,...(shellChanges.length ? {changes:shellChanges} : {}),name:label,output,outputTruncated:buffered.truncated,...(childThread ? {threadId:childThread} : {}),...(finished ? {awaitingApproval:undefined} : {})};
               if (!local) { local = store.appendItem(chatId, 'tool', body, status, metadata).id; toolIds.set(itemId, local); }
               else store.updateItem(local, body, status, {...store.item(local)?.data,...metadata});
