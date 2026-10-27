@@ -35,6 +35,8 @@ export function describeTurns(rows:readonly TranscriptEntry[],running:boolean):{
     if(row.kind==='user'){finish(false);current={id:row.id,row:index,end:index,durationMs:null,complete:false,work:0};turns.set(row.id,current);live=false;latest=time(row.createdAt);latestAt=row.createdAt;rowTurn[index]=row.id;continue;}
     rowTurn[index]=current?.id;if(!current)continue;
     current.end=index;if(row.kind==='activity'||row.kind==='reasoning')current.work++;if(busy(row))live=true;
+    // Import and stop notices are stamped when recorded, not when the turn did its work.
+    if(row.kind==='notice')continue;
     const at=rowEnd(row),ms=time(at);if(ms>latest){latest=ms;latestAt=at;}
   }
   finish(true);

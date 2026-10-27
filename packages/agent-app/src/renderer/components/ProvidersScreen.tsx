@@ -15,7 +15,8 @@ import { CliMaintenance } from './CliMaintenance';
 import { device } from '../../shared/device-noun.ts';
 import { AddProviderPanel } from './AddProviderPanel';
 
-const statusLabel = (p: ProviderInfo) => p.available ? 'Ready for chats' : p.status === 'configured' ? 'Profile detected · unavailable for chats' : p.status === 'installed' ? 'Installed · sign-in not detected' : p.status === 'error' ? 'Needs attention' : p.status === 'not-detected' ? 'Not detected' : 'Unavailable';
+const gatewayUnchecked = (p: ProviderInfo) => p.available && p.codex?.kind === 'gateway' && !p.checkedAt;
+const statusLabel = (p: ProviderInfo) => gatewayUnchecked(p) ? 'Not checked yet' : p.available ? 'Ready for chats' : p.status === 'configured' ? 'Profile detected · unavailable for chats' : p.status === 'installed' ? 'Installed · sign-in not detected' : p.status === 'error' ? 'Needs attention' : p.status === 'not-detected' ? 'Not detected' : 'Unavailable';
 /** A real brand glyph when the provider is recognized (Codex/OpenAI, Claude, Anthropic, OpenCode, Ollama, …);
  * otherwise the previous status-shaped glyph, so an unbranded custom endpoint still reads as custom/ready/unset. */
 const providerIcon = (p: ProviderInfo) => providerBrand(p.id, p.name, p.endpoint) ? <ProviderLogo id={p.id} name={p.name} endpoint={p.endpoint} size={18}/> : p.custom ? <Server size={18}/> : p.available ? <Sparkles size={18}/> : <ShieldCheck size={18}/>;
@@ -237,13 +238,14 @@ function ProviderCard({ provider: p }: {provider: ProviderInfo}) {
   async function check() {if(checking.current)return;checking.current=true;setBusy(true);setError('');try {await invoke('providers.check',{id:p.id}); await loadProviders(true);} catch(e) {setError(errorText(e,'Connection check failed.'));} finally {checking.current=false;setBusy(false);}}
   async function remove() {setBusy(true);setError('');try {await invoke('providers.remove',{id:p.id}); await loadProviders(true);} catch(e) {setError(errorText(e,'Could not remove connection.'));} finally {setBusy(false);}}
   return <article className="settings-provider">
-    <div className="settings-provider-top"><div className="provider-symbol" aria-hidden="true">{providerIcon(p)}</div><div className="provider-heading"><h2>{p.name}</h2><span className="provider-source">{p.source ?? 'Local configuration'}{defaultModel?.providerId === p.id ? ' · default for new chats' : ''}</span></div><span className={`connection-status ${p.available ? 'is-ready' : ''}`}>{statusLabel(p)}</span></div>
+    <div className="settings-provider-top"><div className="provider-symbol" aria-hidden="true">{providerIcon(p)}</div><div className="provider-heading"><h2>{p.name}</h2><span className="provider-source">{p.source ?? 'Local configuration'}{defaultModel?.providerId === p.id ? ' · default for new chats' : ''}</span></div><span className={`connection-status ${p.available && !gatewayUnchecked(p) ? 'is-ready' : ''}`}>{statusLabel(p)}</span></div>
     <p className="provider-detail">{p.detail ?? p.error ?? 'Configured locally. Subscription and usage limits have not been verified.'}</p>
     {kind && <IdentityField provider={p} kind={kind}/>}
     {p.endpoint && <div className="connection-address">{p.endpoint}</div>}
     {p.apiKeyEnv && <div className="provider-source">Credentials from <code>{p.apiKeyEnv}</code></div>}
     {p.checkedAt && <div className="provider-source">Last checked {new Date(p.checkedAt).toLocaleString()}</div>}
-    <div className="provider-catalog"><span className="provider-catalog-label">Model catalog</span>{p.models.length > 0 ? <><span className="provider-catalog-state">{p.available ? 'Available to select in chats' : 'Discovered · not available to chats'}</span><button type="button" className="provider-model-toggle" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}><ChevronDown size={13} style={{transform:expanded?'rotate(180deg)':undefined}}/>{p.models.length} {p.models.length === 1 ? 'model' : 'models'}</button>{expanded && <ul className="settings-models">{p.models.map(m=><li key={m.id}>{m.name}</li>)}</ul>}</> : <span className="provider-catalog-state">No runnable model catalog reported</span>}</div>
+    <div className="provider-catalog"><span className="provider-catalog-label">Model catalog</span>{p.models.length > 0 ? <><span className="provider-catalog-state">{p.available ? 'Available to select in chats' : 'Discovered · not available to chats'}</span><button type="button" className="provider-model-toggle" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}><ChevronDown size={13} style={{transform:expanded?'rotate(180deg)':undefined}}/>{p.models.length} {p.models.length === 1 ? 'chat model' : 'chat models'}</button>{expanded && <ul className="settings-models">{p.models.map(m=><li key={m.id}>{m.name}</li>)}</ul>}</> : <span className="provider-catalog-state">No runnable model catalog reported</span>}</div>
+    {!!p.excludedModels?.length && <p className="provider-source">Excluded from chats: {p.excludedModels.map(model => model.name).join(' · ')}</p>}
     {p.installUrl && !p.available && <div className="provider-actions"><button type="button" className="settings-button secondary" onClick={()=>void invoke('link.open',{url:p.installUrl!}).catch(e=>setError(errorText(e,'Could not open the link.')))}><ExternalLink size={13}/>How to install</button>{p.loginCommand && p.status!=='not-detected' && <span className="provider-source">Sign in: <code>{p.loginCommand}</code></span>}</div>}
     {reportsUsage(p) && p.status !== 'not-detected' && <UsageSection provider={p}/>}
     {p.custom && <SecretField provider={p}/>}
@@ -280,7 +282,7 @@ export function ProvidersScreen() {
     {providers.phase==='error' && <p role="alert" className="settings-error">{providers.error}</p>}
     {providers.phase==='loading' && !list.length && <p role="status">Looking for local connections…</p>}
     <ProviderAccounts/>
-    {ready.length>0 && <div className="provider-group"><h2 className="settings-section-label">Ready for chats</h2>{ready.map(p=><ProviderCard key={p.id} provider={p}/>)}</div>}
+    {ready.length>0 && <div className="provider-group"><h2 className="settings-section-label">Configured for chats</h2>{ready.map(p=><ProviderCard key={p.id} provider={p}/>)}</div>}
     {localProfiles.length>0 && <div className="provider-group"><h2 className="settings-section-label">Detected accounts and profiles</h2>{localProfiles.map(p=><ProviderCard key={p.id} provider={p}/>)}</div>}
     {custom.length>0 && <div className="provider-group"><h2 className="settings-section-label">Compatible endpoints</h2>{custom.map(p=><ProviderCard key={p.id} provider={p}/>)}</div>}
     {absent.length>0 && <div className="provider-group"><h2 className="settings-section-label">Supported providers not detected</h2><p className="provider-group-help">These options are shown for clarity. They are not signed in or connected on {device().lower}.</p>{absent.map(p=><ProviderCard key={p.id} provider={p}/>)}</div>}

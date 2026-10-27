@@ -23,6 +23,7 @@ Boundaries:
 | [MUS-SPEC-02-386E](02-turns-streaming-and-queue.md#mus-spec-02-386e) | One existing-style checklist holds the latest parent steps and statuses. The child plan does not overwrite it. | [`live native plan updates show one checklist with current steps and ignore a child thread`](../../../packages/agent-app/tests/mid-turn-recovery-386.test.ts) |
 | [MUS-SPEC-02-386F](02-turns-streaming-and-queue.md#mus-spec-02-386f) | An unresolved 503 never arms either automatic continuation or the older limit-resume path. Rejected credentials, quota refusals and normal final replies keep their existing handling; empty failures still get a notice. | [`uncertain, auth, no-activity and normal final replies never get a mid-turn continuation; empty failure gets a notice`](../../../packages/agent-app/tests/mid-turn-recovery-386.test.ts) |
 | [MUS-SPEC-02-386G](02-turns-streaming-and-queue.md#mus-spec-02-386g) | A matching native terminal failure after tool activity gets a countdown, then continues the same thread and saves its final reply. | [`a terminal native failure is classified and continued through the real provider adapter`](../../../packages/agent-app/tests/mid-turn-recovery-386.test.ts) |
+| [MUS-SPEC-02-398A](02-turns-streaming-and-queue.md#mus-spec-02-398a) | The header reads Worked for 26s. | [`an imported turn displays its work duration without the import gap`](../../../packages/agent-app/tests/ui-sweep-dom.tsx) |
 | [MUS-SPEC-02-387A](02-turns-streaming-and-queue.md#mus-spec-02-387a) | A tool row the provider started and never finished is interrupted, with its output kept, when the turn completes. | [`#387 a tool the provider never closed is shown as Stopped once a completed turn settles`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
 | [MUS-SPEC-02-387B](02-turns-streaming-and-queue.md#mus-spec-02-387b) | The same row is interrupted when the turn fails. | [`#387 a tool the provider never closed is shown as Stopped once a failed turn settles`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
 | [MUS-SPEC-02-387C](02-turns-streaming-and-queue.md#mus-spec-02-387c) | A tool row left running when the app closed mid-turn is interrupted when Muster restarts. | [`#387 a tool row left running when Muster closed is Stopped after restart`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
@@ -765,4 +766,14 @@ Boundaries:
 - Test: `packages/agent-app/tests/mid-turn-recovery-386.test.ts::a terminal native failure is classified and continued through the real provider adapter`
 - Environment: Node test runner; real service and provider adapter, fake native transport and fake timers.
 - Known gaps: No live provider or desktop app.
+
+<a id="mus-spec-02-398a"></a>
+#### MUS-SPEC-02-398A: An imported turn displays its work duration without the import gap
+
+- Precondition: A completed 26-second turn has an import notice a month later.
+- Action: Render its folded turn header.
+- Expected result: The header reads Worked for 26s.
+- Test: `packages/agent-app/tests/ui-sweep-dom.tsx::an imported turn displays its work duration without the import gap`
+- Environment: Node and linkedom with the real renderer and a fixture bridge; responsive navigation uses a window media-query fixture. No desktop app or network.
+- Known gaps: Does not exercise a live provider or imported history database. Visual layout is checked separately in a browser harness.
 - Evidence: UNVERIFIED

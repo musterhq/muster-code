@@ -43,10 +43,12 @@ export const split = new Set([
   'limit-resume-dom',
   'ime-enter-dom',
   'sandbox-honesty-dom',
+  'ui-sweep-dom',
 ]);
 
 /** tests/*.tsx files that are deliberately not suites, with the reason. */
 export const excluded = {
+  'ui-sweep.browser': 'browser-only visual fixture served by scripts/ui-sweep-preview.mjs',
   'virtual-file-source.browser': 'needs real Chrome layout (scroll and row heights): built and run by tests/run-virtual-file-source.mjs, not by the linkedom renderer suites',
   'device-noun-dom-body': 'shared body imported by the device-noun-dom-win32 and device-noun-dom-linux entry files; it cannot run on its own',
   'terminal-load-retry-dom': 'built and run by tests/terminal-load-retry.test.ts, which the node test job already runs',

@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - A temporary provider failure after work has started now gets up to two automatic continuations on the same thread, with a countdown and a notice for each failure. A turn that ends after a tool call without replying gets one chance to finish, and live plan updates show their checklist (#386).
+- UI fixes from the 0.3.11 sweep (#398). Only one sidebar item is highlighted at a time, and Memory is highlighted while it is open. Two folders with the same name now show their parent folder in the sidebar and in search. Memory suggestions start as one line you can expand to edit. A turn's time no longer counts an import notice added later, so it no longer reads hundreds of hours. A gateway that hasn't been checked says Not checked yet instead of Ready. An empty project no longer shows In progress. The sidebar folds away below 960px.
 - Workspace writes and edits can no longer leave empty files or folders outside the chat’s folder when another process swaps a parent folder for a link (#710).
 - Chats on router models keep their sub-agents, file edits and MCP tools after you ask for a connector such as Figma or Google Drive. Muster now loads only the connectors the chat named instead of every connector's tools, which the router cut off past 128 (#756).
 - MCP credentials stay out of process command lines, saved API keys are cleared when their endpoint changes host, and release builds require a signing identity and pinned build actions (#406).
