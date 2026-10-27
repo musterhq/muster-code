@@ -83,6 +83,16 @@ export async function responseError(response: Response, label: string): Promise<
   return `${label} returned HTTP ${response.status}${message ? `: ${message}` : '.'}`;
 }
 
+/** Bounded excerpts keep both the setup and the outcome, including a command's final test summary. */
+export function headAndTail(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const note = '\n[... middle omitted to save space ...]\n';
+  let head = Math.floor((max - note.length) / 2), tail = text.length - (max - note.length - head);
+  if (/[\uD800-\uDBFF]/.test(text[head - 1] ?? '')) head--;
+  if (/[\uDC00-\uDFFF]/.test(text[tail] ?? '')) tail++;
+  return text.slice(0, head) + note + text.slice(tail);
+}
+
 /** Stateless HTTP providers need the prior turns resent. Bounded per conversation; when a
  * directory is given each thread is also saved there (0600) so a restart can continue it. */
 export type ChatMessage = {role: 'user' | 'assistant'; content: string};
