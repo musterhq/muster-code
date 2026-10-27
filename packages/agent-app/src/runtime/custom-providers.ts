@@ -70,7 +70,8 @@ export class CustomProviders {
     if (input.id !== undefined && !previous) throw new Error('Connection no longer exists.');
     const changedOrigin = Boolean(previous && new URL(previous.endpoint).origin !== new URL(endpoint).origin);
     // The environment binding belongs to the old origin too; do not fall back to it after clearing the key.
-    const boundKeyEnv = changedOrigin ? '' : apiKeyEnv;
+    // A name entered in the same save is a new binding for the new origin and is kept.
+    const boundKeyEnv = changedOrigin && apiKeyEnv === previous!.apiKeyEnv ? '' : apiKeyEnv;
     this.cancel(id);
     this.db.exec('BEGIN');
     try {

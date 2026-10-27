@@ -67,8 +67,12 @@ test('editing a provider endpoint never sends its old stored key to the new orig
     assert.equal(requests.at(-1)!.authorization, null, 'host and port changes do not reuse a stored key');
     assert.equal(secrets.status(row.id).stored, false);
     assert.equal(store.connections()[0]!.apiKeyEnv, '', 'clearing the key cannot fall back to its old environment binding');
+    store.save({id: row.id, name: 'Provider', endpoint, apiKeyEnv: 'PROVIDER_KEY'});
     secrets.set(row.id, secret);
   }
+  store.save({id: row.id, name: 'Provider', endpoint: 'https://other.example/v1', apiKeyEnv: 'OTHER_KEY'});
+  assert.equal(store.connections()[0]!.apiKeyEnv, 'OTHER_KEY', 'a new environment name entered with the new host is kept');
+  assert.equal(secrets.status(row.id).stored, false, 'the stored key is still cleared');
   secrets.close();
   store.save({id: row.id, name: 'Provider', endpoint: 'https://reopened.example/v1'});
   const reopened = new SecretStore(dir, () => box); t.after(() => reopened.close());
