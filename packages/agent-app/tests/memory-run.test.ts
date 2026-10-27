@@ -27,7 +27,7 @@ const core = {
 
 const box = {isEncryptionAvailable: () => true, encryptString: (text: string) => Buffer.from(`enc:${[...text].reverse().join('')}`), decryptString: (data: Buffer) => [...data.toString().slice(4)].reverse().join('')};
 
-async function fixture(t: TestContext, options: {client?: Partial<HindsightClientLike>; env?: Record<string, string | undefined>; entries?: MemoryEntry[]; fetch?: typeof fetch} = {}) {
+async function fixture(t: TestContext, options: {client?: Partial<HindsightClientLike>; env?: Record<string, string | undefined>; entries?: MemoryEntry[]; fetch?: typeof fetch; sessionOnly?: boolean} = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), 'muster-memory-run-'));
   const store = new AgentStore(dataDir);
   t.after(async () => { store.close(); await rm(dataDir, {recursive: true, force: true}); });
@@ -56,11 +56,11 @@ async function fixture(t: TestContext, options: {client?: Partial<HindsightClien
     reflect: async () => ({bankId: 'bank', text: 'answer'}),
     ...options.client,
   } as HindsightClientLike;
-  const domain = createMemoryDomainWith({env: options.env ?? {HINDSIGHT_API_URL: 'http://memory.local'}, identity, core, createClient: () => client, secretBox: () => box, recallTimeoutMs: 150, fetch: options.fetch})(context);
+  const domain = createMemoryDomainWith({env: options.env ?? {HINDSIGHT_API_URL: 'http://memory.local'}, identity, core, createClient: () => client, secretBox: () => options.sessionOnly ? undefined : box, recallTimeoutMs: 150, fetch: options.fetch})(context);
   t.after(() => domain.dispose?.());
   const call = async (command: string, input: Record<string, unknown> = {}): Promise<any> => domain.handlers[command]!(input);
   /** A second domain over the same database and data dir — an app restart. The first stops listening. */
-  const restart = () => { domain.dispose?.(); const next = createMemoryDomainWith({env: options.env ?? {HINDSIGHT_API_URL: 'http://memory.local'}, identity, core, createClient: () => client, secretBox: () => box, recallTimeoutMs: 150, fetch: options.fetch})(context); t.after(() => next.dispose?.()); return next; };
+  const restart = () => { domain.dispose?.(); const next = createMemoryDomainWith({env: options.env ?? {HINDSIGHT_API_URL: 'http://memory.local'}, identity, core, createClient: () => client, secretBox: () => options.sessionOnly ? undefined : box, recallTimeoutMs: 150, fetch: options.fetch})(context); t.after(() => next.dispose?.()); return next; };
   return {dataDir, store, folder, chat, entries, added, retained, events, runtime, call, restart};
 }
 
@@ -358,4 +358,27 @@ test('memory context goes out again after a compaction or a provider change', as
   assert.deepEqual(ledger.pending('c', 'thread-2', [block]), [block], 'a new provider thread gets it');
   ledger.forget('c'); // a provider change forgets the chat's ledger (service.ts), so even a reused thread id is re-sent
   assert.deepEqual(ledger.pending('c', 'thread-1', [block]), [block], 'switching back to an older thread id does not trust the stale ledger');
+});
+
+// Spec: MUS-SPEC-19-406D (docs/spec/clauses/19-security-and-redaction.md#mus-spec-19-406d)
+test('editing the memory endpoint never sends the old key to a different origin', async t => {
+  for (const sessionOnly of [false, true]) {
+    const requests: {url: string; authorization: string | null}[] = [];
+    const f = await fixture(t, {env: {}, sessionOnly, fetch: async (url, init) => { requests.push({url: String(url), authorization: new Headers(init?.headers).get('authorization')}); return Response.json({}); }});
+    const settings = {autoRecall: true, autoRetain: 'ask'};
+    await f.call('memory.config.set', {...settings, endpoint: 'https://memory.example/v1', apiKey: 'memory-private-406'});
+    await f.call('memory.config.set', {...settings, endpoint: 'https://memory.example/v2'});
+    await f.call('memory.config.test');
+    assert.equal(requests.at(-1)!.authorization, 'Bearer memory-private-406', 'same-origin path edits keep the key');
+    for (const endpoint of ['https://other.example', 'https://other.example:8443', 'http://other.example:8443']) {
+      const view = await f.call('memory.config.set', {...settings, endpoint});
+      await f.call('memory.config.test');
+      assert.equal(requests.at(-1)!.authorization, null, 'host, port and scheme changes do not reuse the old key');
+      assert.equal(view.hasApiKey, false);
+      await f.call('memory.config.set', {...settings, endpoint, apiKey: 'memory-private-406'});
+    }
+    await f.call('memory.config.set', {...settings, endpoint: 'https://replacement.example', apiKey: 'new-private-406'});
+    await f.call('memory.config.test');
+    assert.equal(requests.at(-1)!.authorization, 'Bearer new-private-406', 'an explicitly supplied replacement key belongs to the new endpoint');
+  }
 });

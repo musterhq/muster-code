@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { ProviderInfo } from '../shared/protocol.ts';
 import { registerProviderDataDir } from './provider-instances.ts';
-import { activeSecretStore, type SecretStore } from './secret-store.ts';
+import { activeSecretStore, SecretStore } from './secret-store.ts';
 
 export const CUSTOM_CHAT_ONLY = 'Shell and file tools';
 export interface CustomConnection { id: string; name: string; endpoint: string; apiKeyEnv: string; models: {id:string;name:string}[]; checkedAt: string | null }
@@ -66,13 +66,24 @@ export class CustomProviders {
     if (typeof apiKeyEnv !== 'string' || (apiKeyEnv && !/^[A-Z][A-Z0-9_]{1,127}$/.test(apiKeyEnv))) throw new Error('Enter an environment variable name, not the API key itself.');
     const id = input.id === undefined ? `custom_${randomUUID()}` : input.id;
     if (typeof id !== 'string' || !/^custom_[a-zA-Z0-9-]+$/.test(id)) throw new Error('Invalid connection.');
-    if (input.id !== undefined && !this.db.prepare('SELECT id FROM connections WHERE id=?').get(id)) throw new Error('Connection no longer exists.');
+    const previous = this.db.prepare('SELECT * FROM connections WHERE id=?').get(id) as Connection | undefined;
+    if (input.id !== undefined && !previous) throw new Error('Connection no longer exists.');
+    const changedOrigin = Boolean(previous && new URL(previous.endpoint).origin !== new URL(endpoint).origin);
+    // The environment binding belongs to the old origin too; do not fall back to it after clearing the key.
+    const boundKeyEnv = changedOrigin ? '' : apiKeyEnv;
     this.cancel(id);
+    this.db.exec('BEGIN');
     try {
-      if (input.id === undefined) this.db.prepare('INSERT INTO connections VALUES (?,?,?,?,?,NULL)').run(id, input.name.trim(), endpoint, apiKeyEnv, '[]');
-      else this.db.prepare('UPDATE connections SET name=?,endpoint=?,apiKeyEnv=?,models=CASE WHEN endpoint=? AND apiKeyEnv=? THEN models ELSE ? END,checkedAt=CASE WHEN endpoint=? AND apiKeyEnv=? THEN checkedAt ELSE NULL END WHERE id=?').run(input.name.trim(),endpoint,apiKeyEnv,endpoint,apiKeyEnv,'[]',endpoint,apiKeyEnv,id);
+      if (input.id === undefined) this.db.prepare('INSERT INTO connections VALUES (?,?,?,?,?,NULL)').run(id, input.name.trim(), endpoint, boundKeyEnv, '[]');
+      else this.db.prepare('UPDATE connections SET name=?,endpoint=?,apiKeyEnv=?,models=CASE WHEN endpoint=? AND apiKeyEnv=? THEN models ELSE ? END,checkedAt=CASE WHEN endpoint=? AND apiKeyEnv=? THEN checkedAt ELSE NULL END WHERE id=?').run(input.name.trim(),endpoint,boundKeyEnv,endpoint,boundKeyEnv,'[]',endpoint,boundKeyEnv,id);
+      if (changedOrigin) {
+        // Settings can open before the providers domain; clear persisted keys in that case too.
+        const active = activeSecretStore(), secrets = active ?? new SecretStore(this.dataDir);
+        try { secrets.clear(id); } finally { if (!active) secrets.close(); }
+      }
+      this.db.exec('COMMIT');
     }
-    catch (error) { if (String(error).includes('UNIQUE')) throw new Error('That endpoint is already configured.'); throw new Error('Could not save this connection.'); }
+    catch (error) { this.db.exec('ROLLBACK'); if (String(error).includes('UNIQUE')) throw new Error('That endpoint is already configured.'); throw new Error('Could not save this connection.'); }
     return this.rows().find(row => row.id === id)!;
   }
   remove(id: string): void { this.cancel(id); this.db.prepare('DELETE FROM connections WHERE id=?').run(id); activeSecretStore()?.clear(id); }
