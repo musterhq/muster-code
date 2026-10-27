@@ -31,7 +31,6 @@ Boundaries:
 | [MUS-SPEC-01-569A](01-chat-and-composer.md#mus-spec-01-569a) | Searching "checklist" in a message holding "İzmir" returns a highlight range that covers "checklist". | [`the index returns a correct highlight for such a message`](../../../packages/agent-app/tests/chat-search-casefold.test.ts) |
 | [MUS-SPEC-01-569B](01-chat-and-composer.md#mus-spec-01-569b) | In "İİİİ İstanbul deploy notes" the one highlight covers "deploy". | [`a snippet after a dotted capital I highlights the matched word itself`](../../../packages/agent-app/tests/chat-search-casefold.test.ts) |
 | [MUS-SPEC-01-569C](01-chat-and-composer.md#mus-spec-01-569c) | In a 200-"İ" message the snippet window holds "needle" and the highlight covers it. | [`a long message: the window is centred on the match, not shifted by earlier dotted capitals`](../../../packages/agent-app/tests/chat-search-casefold.test.ts) |
-
 | [MUS-SPEC-01-403A](01-chat-and-composer.md#mus-spec-01-403a) | Generated titles keep question marks, exclamation marks, periods, colons, slashes, hashes and quotation marks through send and completion. | [`sending a first message keeps punctuation in its generated sidebar title`](../../../packages/agent-app/tests/sidebar-chrome-403-dom.tsx) |
 | [MUS-SPEC-01-403B](01-chat-and-composer.md#mus-spec-01-403b) | New chat remembers the last selected project folder, avoids broad home folders and submits in the displayed folder. | [`New chat returns to the last project after a folderless or Documents chat`](../../../packages/agent-app/tests/sidebar-chrome-403-dom.tsx) |
 | [MUS-SPEC-01-403C](01-chat-and-composer.md#mus-spec-01-403c) | A single turn leaves no stray minimap dash; multi-turn ticks jump to their matching user row and disappear when the conversation shrinks. | [`a one-turn transcript has no lone minimap dash and later turns remain reachable`](../../../packages/agent-app/tests/sidebar-chrome-403-dom.tsx) |
@@ -238,7 +237,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/sidebar-chrome-403-dom.tsx::sending a first message keeps punctuation in its generated sidebar title`
 - Environment: The renderer bridge uses the real AgentStore title lifecycle with a scripted send; no external provider.
 - Known gaps: No external provider or native desktop; browser screenshots cover both themes separately.
-- Evidence: UNVERIFIED
+- Evidence: `~/.muster-work/review/403/red-on-main.txt` (four workflows fail on origin/main `66231c31`); `green-focused-final.txt` (four pass, plus sidebar and timeline regressions); `{before,after}-{chat,draft}-{light,dark}.png` (isolated browser).
 
 <a id="mus-spec-01-403b"></a>
 #### MUS-SPEC-01-403B: New chat remembers the last selected project folder, avoids broad home folders and submits in the displayed folder.
@@ -249,7 +248,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/sidebar-chrome-403-dom.tsx::New chat returns to the last project after a folderless or Documents chat`
 - Environment: DOM suite with a fake runtime and in-memory browser storage; no desktop or filesystem writes.
 - Known gaps: No external provider or native desktop; browser screenshots cover both themes separately.
-- Evidence: UNVERIFIED
+- Evidence: `~/.muster-work/review/403/red-on-main.txt` (four workflows fail on origin/main `66231c31`); `green-focused-final.txt` (four pass, plus sidebar and timeline regressions); `{before,after}-{chat,draft}-{light,dark}.png` (isolated browser).
 
 <a id="mus-spec-01-403c"></a>
 #### MUS-SPEC-01-403C: A single turn leaves no stray minimap dash; multi-turn ticks jump to their matching user row and disappear when the conversation shrinks.
@@ -260,7 +259,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/sidebar-chrome-403-dom.tsx::a one-turn transcript has no lone minimap dash and later turns remain reachable`
 - Environment: DOM suite rendering the real Timeline with virtualized layout measurements.
 - Known gaps: No external provider or native desktop; browser screenshots cover both themes separately.
-- Evidence: UNVERIFIED
+- Evidence: `~/.muster-work/review/403/red-on-main.txt` (four workflows fail on origin/main `66231c31`); `green-focused-final.txt` (four pass, plus sidebar and timeline regressions); `{before,after}-{chat,draft}-{light,dark}.png` (isolated browser).
 
 <a id="mus-spec-01-403d"></a>
 #### MUS-SPEC-01-403D: Duplicate chat names show distinct visible suffix hints, including same-folder chats; unique names stay plain.
@@ -271,4 +270,4 @@ Boundaries:
 - Test: `packages/agent-app/tests/sidebar-chrome-403-dom.tsx::duplicate sidebar chat names get distinct suffixes without renaming them`
 - Environment: DOM suite rendering the real Sidebar; no provider or desktop.
 - Known gaps: No external provider or native desktop; browser screenshots cover both themes separately.
-- Evidence: UNVERIFIED
+- Evidence: `~/.muster-work/review/403/red-on-main.txt` (four workflows fail on origin/main `66231c31`); `green-focused-final.txt` (four pass, plus sidebar and timeline regressions); `{before,after}-{chat,draft}-{light,dark}.png` (isolated browser).

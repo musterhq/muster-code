@@ -33,7 +33,7 @@ window.muster={subscribe(fn:any){listeners.add(fn);return()=>{listeners.delete(f
   if(command==='app.snapshot')return snapshot();
   if(command==='chat.timeline')return {items:[],revision:0};
   if(command==='chat.create'){const chat=durable.createChat({model:'fixture',mode:'agent'});chats=[...chats,{...chat,...input}];emit();return chats.at(-1);}
-  if(command==='chat.send'){durable.recordSend(input.id,`request-${input.id}`,input.text);chats=chats.map(chat=>chat.id===input.id?{...chat,...durable.chat(input.id)}:chat);emit();return {runId:`run-${input.id}`,replay:false};}
+  if(command==='chat.send'){durable.recordSend(input.id,`request-${input.id}`,input.text);chats=chats.map(chat=>chat.id===input.id?{...chat,...durable.chat(input.id),folderId:chat.folderId,projectId:chat.projectId}:chat);emit();return {runId:`run-${input.id}`,replay:false};}
   if(command==='chat.contextTelemetry')return {usedTokens:null,windowTokens:null,source:null,compacted:false,updatedAt:null};
   if(command==='chat.defaults')return {providerId:'fixture',model:'fixture',source:'runtime'};
   if(command==='providers.list')return [{id:'fixture',name:'Fixture',available:true,models:[{id:'fixture',name:'Fixture'}]}];
@@ -65,7 +65,7 @@ await check('sending a first message keeps punctuation in its generated sidebar 
     const id=store.getState().activeChatId!;
     assert.equal(row(id).querySelector('.chat-title')?.textContent,prompt,'provisional title keeps punctuation');
     durable.appendItem(id,'assistant','Done.','completed');durable.updateChat(id,{status:'completed'});durable.settleTitle(id);
-    chats=chats.map(chat=>chat.id===id?{...chat,...durable.chat(id)}:chat);emit();await delay(40);
+    chats=chats.map(chat=>chat.id===id?{...chat,...durable.chat(id),folderId:chat.folderId,projectId:chat.projectId}:chat);emit();await delay(40);
     assert.equal(row(id).querySelector('.chat-title')?.textContent,prompt,'settled title keeps punctuation');
     durable.updateChat(id,{title:'My title: "keep it!"'});durable.settleTitle(id);
     assert.equal(durable.chat(id)!.title,'My title: "keep it!"','a rename still wins');
@@ -77,6 +77,7 @@ await check('New chat returns to the last project after a folderless or Document
   assert.equal(target(),'Start in: Launch','folderless chat retains the last selected project');
   await send('Build a release');
   assert.deepEqual(calls.filter(call=>call.command==='chat.create').at(-1)!.input,{folderId:'alpha',projectId:'project'},'send uses the folder shown');
+  assert.equal(store.activeChat()?.folderId,'alpha','the created chat stays in the displayed folder');
   await store.selectChat('work');await store.selectChat('documents');await newChat();
   assert.equal(target(),'Start in: Launch','Documents never becomes the implicit default');
   drafts.closeNewChat();await store.selectChat('beta-work');await store.selectChat('plain');await newChat();
