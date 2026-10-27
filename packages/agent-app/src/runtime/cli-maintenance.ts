@@ -8,9 +8,12 @@
  * A managed version is activated by pointing MUSTER_<TOOL>_COMMAND at its binary for this process.
  */
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import type { CliStatus, CliTool, CliUpdateResult } from '../shared/domains/providers-protocol.ts';
 import { cliSpawn, locateCli } from './adapters/shared.ts';
 
@@ -35,6 +38,16 @@ export function compareVersions(a: string, b: string): number {
   return !x[4] ? 1 : !y[4] ? -1 : x[4] < y[4] ? -1 : 1;
 }
 
+/** #721: the Codex build for this machine, as published in @openai/codex's per-platform packages. */
+export function codexTarget(platform: string = process.platform, arch: string = process.arch): { suffix: string; triple: string; exe: string } | null {
+  const triple = ({ 'darwin-arm64': 'aarch64-apple-darwin', 'darwin-x64': 'x86_64-apple-darwin', 'linux-arm64': 'aarch64-unknown-linux-musl', 'linux-x64': 'x86_64-unknown-linux-musl', 'win32-arm64': 'aarch64-pc-windows-msvc', 'win32-x64': 'x86_64-pc-windows-msvc' } as Record<string, string>)[`${platform}-${arch}`];
+  return triple ? { suffix: `${platform}-${arch}`, triple, exe: platform === 'win32' ? 'codex.exe' : 'codex' } : null;
+}
+const registryUrl = (env: NodeJS.ProcessEnv) => (env.npm_config_registry || env.NPM_CONFIG_REGISTRY || 'https://registry.npmjs.org').replace(/\/+$/, '');
+const registryPath = (pkg: string) => pkg.replace('/', '%2f');
+/** The system tar (bsdtar on macOS and Windows 10+, GNU tar on Linux); found without PATH so a bare environment still has it. */
+const systemTar = (env: NodeJS.ProcessEnv) => process.platform === 'win32' ? join(env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : ['/usr/bin/tar', '/bin/tar'].find(existsSync) ?? 'tar';
+
 interface ToolState { current: string | null; previous: string | null; pending: { version: string; requestedAt: string } | null; latest: string | null; checkedAt: string | null; lastError?: string }
 type State = Partial<Record<CliTool, ToolState>>;
 const EMPTY: ToolState = { current: null, previous: null, pending: null, latest: null, checkedAt: null };
@@ -45,9 +58,9 @@ export interface CliMaintenanceDeps {
   home?: string;
   /** Chats with a run in flight; updates wait until this is zero. */
   activeSessions(): number;
-  /** Published version of an npm package. The default runs `npm view <pkg> version`. */
+  /** Published version of an npm package. The default asks the registry directly. */
   latestVersion?(pkg: string): Promise<string>;
-  /** Installs pkg@version under prefix. The default runs `npm install --prefix`. */
+  /** Installs pkg@version under prefix. The default downloads Codex's native build from the registry and runs `npm install --prefix` for the others. */
   install?(pkg: string, version: string, prefix: string): Promise<void>;
   /** `--version` of a binary; null when it cannot run. */
   version?(path: string): Promise<string | null>;
@@ -55,6 +68,7 @@ export interface CliMaintenanceDeps {
   onActivate?(tool: CliTool): void;
   onChange?(status: CliStatus): void;
   now?(): number;
+  fetch?: typeof fetch;
 }
 
 const run = (file: string, args: string[], timeout: number): Promise<string> => new Promise((resolve, reject) => {
@@ -63,8 +77,36 @@ const run = (file: string, args: string[], timeout: number): Promise<string> => 
 
 export function createCliMaintenance(deps: CliMaintenanceDeps) {
   const env = deps.env ?? process.env, home = deps.home ?? homedir(), now = deps.now ?? Date.now;
-  const latestVersion = deps.latestVersion ?? (async (pkg: string) => { const version = extractVersion(await run('npm', ['view', pkg, 'version'], 20_000)); if (!version) throw new Error('The registry did not report a version.'); return version; });
-  const install = deps.install ?? (async (pkg: string, version: string, prefix: string) => { await run('npm', ['install', '--prefix', prefix, '--no-audit', '--no-fund', '--loglevel=error', `${pkg}@${version}`], 10 * 60_000); });
+  const http = deps.fetch ?? globalThis.fetch;
+  const registryJson = async (path: string): Promise<Record<string, unknown>> => {
+    const response = await http(`${registryUrl(env)}/${path}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(20_000) });
+    if (!response.ok) throw new Error(`The registry answered ${response.status} for ${decodeURIComponent(path)}.`);
+    return await response.json() as Record<string, unknown>;
+  };
+  // Read straight from the registry, so a machine without npm (or Node) can still check and install.
+  const latestVersion = deps.latestVersion ?? (async (pkg: string) => { const version = extractVersion(String((await registryJson(`${registryPath(pkg)}/latest`)).version ?? '')); if (!version) throw new Error('The registry did not report a version.'); return version; });
+  /** #721: Codex's own native build for this machine, verified against the registry's checksum. Needs neither npm nor Node. */
+  async function installCodex(version: string, prefix: string) {
+    const target = codexTarget();
+    if (!target) throw new Error(`Codex has no build for ${process.platform}-${process.arch}.`);
+    const meta = await registryJson(`${registryPath('@openai/codex')}/${encodeURIComponent(`${version}-${target.suffix}`)}`);
+    const dist = (meta.dist ?? {}) as { tarball?: unknown; integrity?: unknown };
+    const integrity = typeof dist.integrity === 'string' ? /^sha512-(.+)$/.exec(dist.integrity)?.[1] : undefined;
+    if (typeof dist.tarball !== 'string' || !integrity) throw new Error('The registry did not list a download with a checksum.');
+    const response = await http(dist.tarball, { signal: AbortSignal.timeout(10 * 60_000) });
+    if (!response.ok || !response.body) throw new Error(`The download answered ${response.status}.`);
+    const archive = join(prefix, 'codex.tgz'), hash = createHash('sha512');
+    await pipeline(Readable.fromWeb(response.body as import('node:stream/web').ReadableStream), async function* (chunks) { for await (const chunk of chunks) { hash.update(chunk as Buffer); yield chunk; } }, createWriteStream(archive, { mode: 0o600 }));
+    if (hash.digest('base64') !== integrity) throw new Error('The download failed its checksum.');
+    const destination = join(prefix, 'node_modules', '@openai', `codex-${target.suffix}`);
+    mkdirSync(destination, { recursive: true, mode: 0o700 });
+    await run(systemTar(env), ['-xzf', archive, '-C', destination, '--strip-components=1'], 5 * 60_000);
+    rmSync(archive, { force: true });
+  }
+  const install = deps.install ?? (async (pkg: string, version: string, prefix: string) => {
+    if (pkg === CLI_TOOLS.codex.pkg) return installCodex(version, prefix);
+    await run('npm', ['install', '--prefix', prefix, '--no-audit', '--no-fund', '--loglevel=error', `${pkg}@${version}`], 10 * 60_000);
+  });
   const readVersion = deps.version ?? (async (path: string) => { try { return (await run(path, ['--version'], 5_000)).trim().split('\n')[0]!.slice(0, 120) || null; } catch { return null; } });
   const stateFile = join(deps.root, 'state.json');
   const original = new Map<CliTool, string | undefined>((Object.keys(CLI_TOOLS) as CliTool[]).map(tool => [tool, env[CLI_TOOLS[tool].envVar]]));
@@ -81,7 +123,12 @@ export function createCliMaintenance(deps: CliMaintenanceDeps) {
     renameSync(temp, stateFile);
   };
   const prefix = (name: CliTool, version: string) => join(deps.root, name, version);
-  const binary = (name: CliTool, version: string) => join(prefix(name, version), 'node_modules', '.bin', CLI_TOOLS[name].bin);
+  const binary = (name: CliTool, version: string) => {
+    // Codex runs as its native binary (from Muster's download, or the platform package npm installed), not through the Node wrapper.
+    const target = name === 'codex' ? codexTarget() : null;
+    const native = target && join(prefix(name, version), 'node_modules', '@openai', `codex-${target.suffix}`, 'vendor', target.triple, 'bin', target.exe);
+    return native && existsSync(native) ? native : join(prefix(name, version), 'node_modules', '.bin', CLI_TOOLS[name].bin);
+  };
   const activate = (name: CliTool) => {
     const current = tool(name).current, variable = CLI_TOOLS[name].envVar;
     if (current && existsSync(binary(name, current))) env[variable] = binary(name, current);
