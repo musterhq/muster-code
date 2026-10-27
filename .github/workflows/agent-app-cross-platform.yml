@@ -78,6 +78,10 @@ jobs:
           MUSTER_SKIP_NATIVE_REBUILD: "1"
         run: npm ci --no-audit --no-fund
 
+      # Builds the standalone helper too: the path/tool tests below run before the full app build.
+      - name: Workspace write confinement
+        run: node --experimental-transform-types --test tests/workspace-write-race-710.test.ts tests/write-confined-347.test.ts
+
       - name: Windows path and agent tool tests (#319)
         # The \\?\ folder spellings and the shell tool's working directory only exist on a Windows runner.
         if: matrix.os == 'windows'

@@ -27,6 +27,9 @@ Boundaries:
 | [MUS-SPEC-19-575C](19-security-and-redaction.md#mus-spec-19-575c) | Four long inputs of repeated secret words each redact in under 400 ms. | [`a long run of secret words stays linear`](../../../packages/agent-app/tests/sanitize-bughunt.test.ts) |
 | [MUS-SPEC-19-577A](19-security-and-redaction.md#mus-spec-19-577a) | Clone URLs with a token as the username are refused. | [`clone URLs whose username is a token are rejected`](../../../packages/agent-app/tests/clone-url-token.test.ts) |
 | [MUS-SPEC-19-674A](19-security-and-redaction.md#mus-spec-19-674a) | Values under key names longer than 70 characters are redacted. | [`a secret whose key name is longer than 70 characters is redacted`](../../../packages/agent-app/tests/secret-redaction-long-names.test.ts) |
+| [MUS-SPEC-19-710A](19-security-and-redaction.md#mus-spec-19-710a) | A folder swapped for a link at the file open creates no file outside, even temporarily empty. | [`a workspace write raced at file creation leaves no empty file outside`](../../../packages/agent-app/tests/workspace-write-race-710.test.ts) |
+| [MUS-SPEC-19-710B](19-security-and-redaction.md#mus-spec-19-710b) | A folder swapped at parent creation creates no empty folder outside. | [`a workspace write raced at parent creation leaves no folder outside`](../../../packages/agent-app/tests/workspace-write-race-710.test.ts) |
+| [MUS-SPEC-19-710C](19-security-and-redaction.md#mus-spec-19-710c) | An edit raced at its write open creates nothing outside and keeps an existing outside file unchanged. | [`a workspace edit raced at file open leaves nothing outside and preserves outside files`](../../../packages/agent-app/tests/workspace-write-race-710.test.ts) |
 
 ### Known secret values
 
@@ -162,4 +165,39 @@ Boundaries:
 - Test: `packages/agent-app/tests/secret-redaction-long-names.test.ts::a secret whose key name is longer than 70 characters is redacted`
 - Environment: Node test runner; no network.
 - Known gaps: Unit test of the redactor. It does not export a chat or save a memory. The time-limit test in the same file passes on main, so it is not linked.
+- Evidence: UNVERIFIED
+
+### Workspace writes
+
+<a id="mus-spec-19-710a"></a>
+#### MUS-SPEC-19-710A: A workspace write raced at file creation leaves no empty file outside
+
+- Precondition: A Workspace chat folder has a plain subfolder d beside a separate outside folder. The requested file does not exist.
+- Action: Run write_file with new content while a racer swaps d for a link to the outside folder at the file open and restores it before cleanup.
+- Expected result: A folder swapped for a link at the file open creates no file outside, even temporarily empty. A successful call writes the requested content inside the chat folder.
+- Test: `packages/agent-app/tests/workspace-write-race-710.test.ts::a workspace write raced at file creation leaves no empty file outside`
+- Environment: Node test runner; real temporary folders; filesystem/child-process hooks force the race at the mutation boundary; the native helper is built locally when present.
+- Known gaps: Does not cover a process able to move a pinned directory outside the workspace or to add hard links after the handle check; that process already has access outside. No desktop UI is involved.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-710b"></a>
+#### MUS-SPEC-19-710B: A workspace write raced at parent creation leaves no folder outside
+
+- Precondition: A Workspace chat folder has a plain subfolder d beside a separate outside folder. The requested file does not exist.
+- Action: Run write_file with new content while a racer swaps d for a link to the outside folder at parent creation and restores it before cleanup.
+- Expected result: A folder swapped at parent creation creates no empty folder outside. A successful call writes the requested content inside the chat folder.
+- Test: `packages/agent-app/tests/workspace-write-race-710.test.ts::a workspace write raced at parent creation leaves no folder outside`
+- Environment: Node test runner; real temporary folders; filesystem/child-process hooks force the race at the mutation boundary; the native helper is built locally when present.
+- Known gaps: Does not cover a process able to move a pinned directory outside the workspace or to add hard links after the handle check; that process already has access outside. No desktop UI is involved.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-710c"></a>
+#### MUS-SPEC-19-710C: A workspace edit raced at file open leaves nothing outside and preserves outside files
+
+- Precondition: A Workspace chat folder has a plain subfolder d beside a separate outside folder. The file d/x.txt contains before; outside/keep.txt contains keep.
+- Action: Run edit_file replacing before with after while a racer swaps d for a link to the outside folder at the file open and restores it before cleanup.
+- Expected result: An edit raced at its write open creates nothing outside and keeps an existing outside file unchanged. A successful call writes the requested content inside the chat folder; a refused edit keeps the original content.
+- Test: `packages/agent-app/tests/workspace-write-race-710.test.ts::a workspace edit raced at file open leaves nothing outside and preserves outside files`
+- Environment: Node test runner; real temporary folders; filesystem/child-process hooks force the race at the mutation boundary; the native helper is built locally when present.
+- Known gaps: Does not cover a process able to move a pinned directory outside the workspace or to add hard links after the handle check; that process already has access outside. No desktop UI is involved.
 - Evidence: UNVERIFIED
