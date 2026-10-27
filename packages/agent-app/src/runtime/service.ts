@@ -10,7 +10,8 @@ import { promises as fs, existsSync, mkdirSync, copyFileSync, statSync } from 'n
 import { basename, join } from 'node:path';
 import { rescanProviderListings, setProviderListingStore } from './provider-instances.ts';
 import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, QueuedMessage, ChatFallback, TimelineItem, WakeReason } from '../shared/protocol.ts';
-import { CONTEXT_OVERFLOW, musterCompactAt, withUserWindow } from '../shared/context-window.ts';
+import { CONTEXT_OVERFLOW, musterCompactAt, reportedWindowFor, withUserWindow } from '../shared/context-window.ts';
+import { modelKey } from '../shared/model-catalog.ts';
 import type { PendingAttentionSummary, AttentionRequest } from '../shared/attention-protocol.ts';
 import { discoverLocalProviders } from './provider-discovery.ts';
 import { homedir } from 'node:os';
@@ -594,7 +595,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const telemetry = store.contextTelemetry(chat.id);
     if (telemetry.compacted || telemetry.usedTokens === null || compactions.has(chat.id)) return false;
     const model = withUserWindow(route.models.find(entry => entry.id === chat.model), domainHooks.contextWindowOverride(route.id, chat.model));
-    const {at, window} = musterCompactAt(effectiveDriver(route.driver, chat), model, telemetry.windowTokens, telemetry.usedTokens);
+    const {at, window} = musterCompactAt(effectiveDriver(route.driver, chat), model, reportedWindowFor(telemetry, modelKey(chat.providerId ?? '', chat.model)), telemetry.usedTokens);
     if (telemetry.usedTokens < at || !store.timeline(chat.id).some(item => item.kind === 'user')) return false;
     const used = `${Math.round(telemetry.usedTokens / 1000)}K of ${Math.round(window.tokens / 1000)}K tokens`;
     const row = store.appendItem(chat.id, 'notice', `Compacting context before this message (${used} in use)…`, 'running', {kind:'compaction', status:'running', auto:true});
@@ -794,10 +795,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         let retryReason = 'admission' as 'admission' | 'transient';
         let retryDetail: string | undefined;
         const stoppedBeforeDispatch: ProviderResult = {status:'failed',finalMessage:'',dispatchState:'not-dispatched',recovery:{kind:'cancelled',retryable:false,reason:'Stopped before the request was sent.'}};
+        // #739: this run's model; the window its events report belongs to it, and only its own earlier report caps it.
+        const runModel = modelKey(chat.providerId ?? '', chat.model), engineWindow = reportedWindowFor(store.contextTelemetry(chatId), runModel);
         const attempt = () => run.stopped ? Promise.resolve(stoppedBeforeDispatch) : provider.run({ chat: {...chat,providerTurnId:undefined,recovery:undefined}, cwd, prompt: contextualPrompt,
           ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) || pluginReloads.wantsConnectors(chatId) ? {connectorsRequested: true} : {}),
           ...(runOptions.configOverrides ? {configOverrides: runOptions.configOverrides as Record<string, string | number | boolean | string[]>} : {}), ...(runOptions.developerInstructions ? {developerInstructions: runOptions.developerInstructions} : {}),
-          ...(store.contextTelemetry(chatId).windowTokens ? {engineWindow: store.contextTelemetry(chatId).windowTokens!} : {}),
+          ...(engineWindow ? {engineWindow} : {}),
           onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
           onThreadReady: (threadId, driver) => { persistIdentity(threadId, undefined, driver); void nativeQueue.flushStranded(chatId); },
           // The saved provider thread is gone (pruned or deleted): the fresh one gets the earlier conversation and the
@@ -815,7 +818,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           onTurnAccepted: identity => persistIdentity(identity.threadId,identity.turnId,identity.driver),
           onEvent(method, params) {
             if (disposed) return;
-            const telemetry = isForeignThreadEvent(params, store.chat(chatId)?.providerThreadId) ? null : applyProviderEvent(store.contextTelemetry(chatId), method, params);
+            const telemetry = isForeignThreadEvent(params, store.chat(chatId)?.providerThreadId) ? null : applyProviderEvent(store.contextTelemetry(chatId), method, params, undefined, runModel);
             if (telemetry) { store.setContextTelemetry(chatId, telemetry); emit({ type: 'contextTelemetry', chatId, telemetry }); }
             domainHooks.providerEvent({ chat, method, params });
             // A subagent inside a CLI provider (Claude Code Task): its rows live in its own transcript, never in the parent's.

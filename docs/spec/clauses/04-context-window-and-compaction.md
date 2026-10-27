@@ -10,7 +10,7 @@ What the user can do:
 Boundaries:
 - Muster compacts a chat on its own only when the window size is declared (set by the user, a model catalog, a router listing or the provider). It never compacts on a guess.
 - The meter and the compaction trigger always use the same window.
-- When the engine reports a smaller window than the catalog or router listing, the engine's window is used: it is the one the model really runs with.
+- When the engine reports a window clearly smaller than the catalog or router listing (under 95% of it), the engine's window is used: it is the one the model really runs with. A report counts only for the model that made it.
 - Which models exist and their prices are clause [03](03-providers-models-and-accounts.md). Token counts and cost are clause [17](17-usage-cost-and-ledger.md).
 
 ## Acceptance cases
@@ -24,6 +24,8 @@ Boundaries:
 | [MUS-SPEC-04-2C](04-context-window-and-compaction.md#mus-spec-04-2c) | Through a running chat on a router model with no listed window, three turns at 300K tokens each complete on the same thread with no automatic compaction and no compaction request. | [`#668 a router combo with no listed window keeps working at 300K tokens: no automatic compaction, turns complete`](../../../packages/agent-app/tests/compaction-426.test.ts) |
 | [MUS-SPEC-04-5A](04-context-window-and-compaction.md#mus-spec-04-5a) | Through a running Codex chat on a model listed at 1M that Codex runs at 258,400, the meter reads 58% at 151K, marks compaction at 85% of 258,400, and Muster compacts once the chat passes 95% of 258,400. | [`#739 a Codex chat on a router model listed at 1M that Codex runs at 258,400: the meter reads the real fill and Muster compacts before the window is full`](../../../packages/agent-app/tests/engine-window-739.test.ts) |
 | [MUS-SPEC-04-5B](04-context-window-and-compaction.md#mus-spec-04-5b) | Codex is launched with a compaction point of 85% of the window it reported when that window is smaller than ours, and keeps 850K when it took the 1M window. | [`#739 the compaction point Codex is launched with is never above the window Codex reported`](../../../packages/agent-app/tests/engine-window-739.test.ts) |
+| [MUS-SPEC-04-5C](04-context-window-and-compaction.md#mus-spec-04-5c) | After a chat switches models, the window the old model reported no longer sets the meter, the launch or Muster's trigger; it applies again, after a restart too, when the chat switches back. | [`#739 a window one model reported never caps the model the chat switches to, and it is back when the chat switches back`](../../../packages/agent-app/tests/engine-window-739.test.ts) |
+| [MUS-SPEC-04-5D](04-context-window-and-compaction.md#mus-spec-04-5d) | For a report of 950,000 (Codex took 1M) and of 258,400, the meter marks compaction at the same point Codex is launched with. | [`#739 when Codex adopts the listed window the meter and the launch agree on one compaction point`](../../../packages/agent-app/tests/engine-window-739.test.ts) |
 | [MUS-SPEC-04-3A](04-context-window-and-compaction.md#mus-spec-04-3a) | On an observed window the meter reads "at least N" with no percentage and no compaction point; a default estimate is labelled as one. | [`#668 meter: observed usage reads "at least N" with no percentage; a default estimate is labelled and never compacts`](../../../packages/agent-app/tests/context-window-668.test.ts) |
 | [MUS-SPEC-04-4A](04-context-window-and-compaction.md#mus-spec-04-4a) | Saved per-model windows keep only valid sizes on valid model keys; invalid sizes are refused with a plain message. | [`#668 the policy keeps valid windows per model and drops the rest`](../../../packages/agent-app/tests/context-window-668.test.ts) |
 | [MUS-SPEC-04-4B](04-context-window-and-compaction.md#mus-spec-04-4b) | The Settings field accepts 1M, 1.5m, 200k and 1,000,000, and rejects text that is not a size. | [`#668 the Settings field reads 1M, 200k and 1,000,000`](../../../packages/agent-app/tests/context-window-668.test.ts) |
@@ -35,7 +37,7 @@ Boundaries:
 
 - Precondition: A model has a catalog window of 200K, a provider report of 400K, observed usage of 900K, and the user has set 1M for it.
 - Action: Resolve the window for that model, then remove each source in turn. Then resolve a 200K catalog window with a 64K report, and a 1M listed window with a 258,400 report.
-- Expected result: The user's 1M wins over everything. Without it, the order is catalog, router listing, provider report, observed usage, then the 128K default, and each result names its source. A report smaller than the catalog or listing wins: 64K and 258,400, both marked as reported.
+- Expected result: The user's 1M wins over everything. Without it, the order is catalog, router listing, provider report, observed usage, then the 128K default, and each result names its source. A report under 95% of the catalog or listing wins: 64K and 258,400, both marked as reported.
 - Test: `packages/agent-app/tests/context-window-668.test.ts::#668 resolver order: override > catalog > listing > reported > observed > default`
 - Environment: Node test runner; no provider or network.
 - Known gaps: Calls the shared resolver directly, not through a running chat. MUS-SPEC-04-2B ties it to the meter and the trigger.
@@ -109,6 +111,28 @@ Boundaries:
 - Test: `packages/agent-app/tests/engine-window-739.test.ts::#739 the compaction point Codex is launched with is never above the window Codex reported`
 - Environment: Node test runner; the provider adapter with a fake Codex core that records launch overrides.
 - Known gaps: Does not run the Codex binary, so it does not show Codex honouring the limit.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-04-5c"></a>
+#### MUS-SPEC-04-5C: A reported window belongs to the model that reported it
+
+- Precondition: A Codex chat with two router models listed at 1M. Codex runs advisor at 258,400 and says so; wide reports usage without a window, as Claude Code and HTTP routes do.
+- Action: Send on advisor at 151K, switch the chat to wide, send two messages at 300K, switch back to advisor, restart Muster and read the meter.
+- Expected result: On advisor the meter reads 58%. After the switch it reads 15% of 1M, wide's launch carries no reported window, 300K reads 30% and nothing compacts. Back on advisor after the restart the window is 258,400 again and the meter reads 100%.
+- Test: `packages/agent-app/tests/engine-window-739.test.ts::#739 a window one model reported never caps the model the chat switches to, and it is back when the chat switches back`
+- Environment: Node test runner; the agent service with a fake provider, reopened on the same data directory; no network.
+- Known gaps: Uses a fake provider; the meter is checked through its view model, not the rendered composer.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-04-5d"></a>
+#### MUS-SPEC-04-5D: The meter marks the point Codex compacts at
+
+- Precondition: A Codex route whose model is listed at 1M.
+- Action: Launch with a last report of 950,000, then of 258,400, and read the meter with each report.
+- Expected result: For 950,000 the meter keeps the 1M window and both the meter and the launch say 850,000. For 258,400 both say 219,640.
+- Test: `packages/agent-app/tests/engine-window-739.test.ts::#739 when Codex adopts the listed window the meter and the launch agree on one compaction point`
+- Environment: Node test runner; the provider adapter with a fake Codex core that records launch overrides, and the meter's view model.
+- Known gaps: Does not run the Codex binary.
 - Evidence: UNVERIFIED
 
 ### What the meter says

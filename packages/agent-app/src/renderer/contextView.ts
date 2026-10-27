@@ -1,17 +1,18 @@
 import type { ContextTelemetry } from '../shared/protocol';
-import { compactionThreshold, effectiveContextWindow, proactiveCompaction, type ModelWindowInfo } from '../shared/context-window.ts';
+import { compactionThreshold, effectiveContextWindow, proactiveCompaction, reportedWindowFor, type ModelWindowInfo } from '../shared/context-window.ts';
 
 /**
  * The meter's view, on the same basis as Muster's compaction trigger (#426): the window is the model's own (catalog or
  * JSON, then the router's listing, then what the provider reports, then a default), so 100% means that model is full.
  * Before any report the declared window gives an 'Estimated' state with nothing used.
  */
-export function contextView(telemetry: ContextTelemetry, model?: number | ModelWindowInfo) {
+/** @param key the chat's model (`provider::model`); a window another model reported is ignored (#739). */
+export function contextView(telemetry: ContextTelemetry, model?: number | ModelWindowInfo, key?: string) {
   const info: ModelWindowInfo | undefined = typeof model === 'number' ? {contextWindow: model} : model;
   const declared = typeof info?.contextWindow === 'number' && info.contextWindow > 0;
   const estimated = telemetry.source === null && telemetry.usedTokens === null && telemetry.windowTokens === null && declared;
   const usedTokens = estimated ? 0 : telemetry.usedTokens;
-  const window = effectiveContextWindow(info, telemetry.windowTokens, usedTokens);
+  const window = effectiveContextWindow(info, reportedWindowFor(telemetry, key), usedTokens);
   // A default window is only a basis for a reported usage, never shown on its own.
   const windowTokens = window.source === 'default' && usedTokens === null ? null : window.tokens;
   // An observed window is only a floor (at least this many tokens), so there is no honest percentage or remainder.

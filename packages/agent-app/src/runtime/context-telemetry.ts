@@ -86,6 +86,8 @@ export function applyProviderEvent(
   method: string,
   params: unknown,
   now: () => string = () => new Date().toISOString(),
+  /** #739: the model (`provider::model`) of the turn that produced this event; a window it reports is tagged with it. */
+  windowModel?: string,
 ): ContextTelemetry | null {
   if (method === 'thread/compacted') {
     return { ...prev, compacted: true, source: 'live', updatedAt: now() };
@@ -125,5 +127,6 @@ export function applyProviderEvent(
     compacted: used === null ? prev.compacted : false,
     updatedAt: now(),
     ...(breakdown ? { breakdown } : prev.breakdown && used === null ? { breakdown: prev.breakdown } : {}),
+    ...(window !== null ? (windowModel ? { windowModel } : {}) : prev.windowModel ? { windowModel: prev.windowModel } : {}),
   };
 }
