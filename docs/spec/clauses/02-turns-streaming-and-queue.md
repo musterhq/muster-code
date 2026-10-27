@@ -24,6 +24,8 @@ Boundaries:
 | [MUS-SPEC-02-386F](02-turns-streaming-and-queue.md#mus-spec-02-386f) | An unresolved 503 never arms either automatic continuation or the older limit-resume path. Rejected credentials, quota refusals and normal final replies keep their existing handling; empty failures still get a notice. | [`uncertain, auth, no-activity and normal final replies never get a mid-turn continuation; empty failure gets a notice`](../../../packages/agent-app/tests/mid-turn-recovery-386.test.ts) |
 | [MUS-SPEC-02-386G](02-turns-streaming-and-queue.md#mus-spec-02-386g) | A matching native terminal failure after tool activity gets a countdown, then continues the same thread and saves its final reply. | [`a terminal native failure is classified and continued through the real provider adapter`](../../../packages/agent-app/tests/mid-turn-recovery-386.test.ts) |
 | [MUS-SPEC-02-398A](02-turns-streaming-and-queue.md#mus-spec-02-398a) | The header reads Worked for 26s. | [`an imported turn displays its work duration without the import gap`](../../../packages/agent-app/tests/ui-sweep-dom.tsx) |
+| [MUS-SPEC-02-762A](02-turns-streaming-and-queue.md#mus-spec-02-762a) | A reply whose stream stops partway is saved as the full completed text, once, with no repeated part. | [`a reply whose stream stops partway is saved with the full completed text, once`](../../../packages/agent-app/tests/stream-reconcile-762.test.ts) |
+| [MUS-SPEC-02-762B](02-turns-streaming-and-queue.md#mus-spec-02-762b) | A streamed piece without an item id does not stop a later reply that only arrived as completed text from being saved; the streamed reply appears once. | [`a piece with no item id does not stop later completed replies from being saved`](../../../packages/agent-app/tests/stream-reconcile-762.test.ts) |
 | [MUS-SPEC-02-387A](02-turns-streaming-and-queue.md#mus-spec-02-387a) | A tool row the provider started and never finished is interrupted, with its output kept, when the turn completes. | [`#387 a tool the provider never closed is shown as Stopped once a completed turn settles`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
 | [MUS-SPEC-02-387B](02-turns-streaming-and-queue.md#mus-spec-02-387b) | The same row is interrupted when the turn fails. | [`#387 a tool the provider never closed is shown as Stopped once a failed turn settles`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
 | [MUS-SPEC-02-387C](02-turns-streaming-and-queue.md#mus-spec-02-387c) | A tool row left running when the app closed mid-turn is interrupted when Muster restarts. | [`#387 a tool row left running when Muster closed is Stopped after restart`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
@@ -777,4 +779,26 @@ Boundaries:
 - Test: `packages/agent-app/tests/ui-sweep-dom.tsx::an imported turn displays its work duration without the import gap`
 - Environment: Node and linkedom with the real renderer and a fixture bridge; responsive navigation uses a window media-query fixture. No desktop app or network.
 - Known gaps: Does not exercise a live provider or imported history database. Visual layout is checked separately in a browser harness.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-762a"></a>
+#### MUS-SPEC-02-762A: A reply cut short while streaming is saved whole
+
+- Precondition: A chat on a provider that streams replies in pieces.
+- Action: The provider streams the first part of a reply, then completes the item with the full text.
+- Expected result: The transcript has one reply with the full completed text; the part already streamed is not repeated.
+- Test: `packages/agent-app/tests/stream-reconcile-762.test.ts::a reply whose stream stops partway is saved with the full completed text, once`
+- Environment: Node with the real agent service and a fake provider sending the coding client's message events. No desktop app or network.
+- Known gaps: A completed text that rewrites (not extends) the streamed text keeps what streamed.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-762b"></a>
+#### MUS-SPEC-02-762B: A streamed piece without an item id does not hide later replies
+
+- Precondition: A chat on a provider that streams replies in pieces.
+- Action: The provider streams a reply whose pieces carry no item id and completes it, then completes a second reply it never streamed.
+- Expected result: Both replies are saved, each once.
+- Test: `packages/agent-app/tests/stream-reconcile-762.test.ts::a piece with no item id does not stop later completed replies from being saved`
+- Environment: Node with the real agent service and a fake provider sending the coding client's message events. No desktop app or network.
+- Known gaps: None beyond 762A.
 - Evidence: UNVERIFIED
