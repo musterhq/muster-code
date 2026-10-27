@@ -10,7 +10,10 @@ export type PromptContributor = (input: { chat: Chat; folder?: Folder; project?:
 export interface RunOptions { reasoningEffort?: ReasoningEffort; configOverrides?: Record<string, unknown>; developerInstructions?: string;
   /** Notes for this turn only (a goal's token budget). Sent with the message, so a per-turn change never alters the
    *  developer instructions that key the warm app-server. */
-  turnContext?: string }
+  turnContext?: string;
+  /** The domain follows up itself when the run ends after a tool call without a reply (a task run's comment backstop),
+   *  so the chat does not also ask the agent to finish. */
+  ownsSilentEnd?: boolean }
 export type RunOptionsContributor = (chat: Chat) => Promise<RunOptions | null>;
 export interface RunStarted { chat: Chat; runId: string; cwd: string }
 export interface RunSettled { chat: Chat; runId: string; status: ChatStatus }

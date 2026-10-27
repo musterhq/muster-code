@@ -55,7 +55,7 @@ import { createNativeThreadBridge } from './codex-native.ts';
 import { createNativeTurnObserver } from './native-turns.ts';
 import { createNativeQueueMirror } from './native-queue.ts';
 import { ChatAttachments, attachedFileLines } from './attachments.ts';
-import { admissionRetryText, asSentence, retryClock, withAdmissionRetry } from './admission-retry.ts';
+import { admissionRetryText, asSentence, RETRY_AFTER_CAP_MS, retryClock, waitForRetry, withAdmissionRetry } from './admission-retry.ts';
 import { ContextLedger, HISTORY_WINDOW_EVENT, TOOLS_UNAVAILABLE_EVENT, requestsConnectors, requestedConnectorNames, type ContextBlock } from './context-budget.ts';
 import { createDomainHooks } from './domains/hooks.ts';
 import { createDomains } from './domains/index.ts';
@@ -744,6 +744,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const run: ActiveRun = {cwd, stopped: false, retry: new AbortController(), prompt}; runs.set(chatId, run); state(); timeline(chatId);
     let segment: TimelineItem | undefined;
     let producedAssistant = false;
+    let attemptActivity = false, lastWasTool = false, assistantText = '';
+    let lastAssistantText = '';
+    let planRow: TimelineItem | undefined;
     const toolIds = new Map<string, string>();
     /** Local start time per provider tool item, for a measured duration. */
     const toolStarted = new Map<string, number>();
@@ -763,7 +766,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const append = (kind: 'assistant' | 'reasoning', delta: string) => {
       if (disposed || !runs.has(chatId) || !delta) return;
       if (reconnectNotice) reconnected();
-      if (kind === 'assistant') producedAssistant = true;
+      attemptActivity = true;
+      if (kind === 'assistant') { producedAssistant = true; assistantText += delta; lastAssistantText = lastWasTool || segment?.kind !== 'assistant' ? delta : lastAssistantText + delta; lastWasTool = false; }
       if (segment && segment.kind !== kind) seal();
       if (!segment) segment = store.appendItem(chatId, kind, '', 'running');
       // Rewriting the whole growing text on every delta made a long reply O(n²) in SQLite writes; the text is
@@ -827,11 +831,14 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // #739: this run's model; the window its events report belongs to it, and only its own earlier report caps it.
         const runModel = modelKey(chat.providerId ?? '', chat.model), engineWindow = reportedWindowFor(store.contextTelemetry(chatId), runModel);
         const contextWindow = effectiveContextWindow(withUserWindow(selectedProvider.models.find(entry => entry.id === chat.model), domainHooks.contextWindowOverride(selectedProvider.id, chat.model)), engineWindow, store.contextTelemetry(chatId).usedTokens).tokens;
-        const attempt = () => run.stopped ? Promise.resolve(stoppedBeforeDispatch) : provider.run({ chat: {...chat,providerTurnId:undefined,recovery:undefined}, cwd, prompt: contextualPrompt,
+        let continuationPrompt: string | undefined;
+        const attempt = () => {
+          producedAssistant = false; attemptActivity = false; lastWasTool = false; assistantText = ''; lastAssistantText = '';
+          return run.stopped ? Promise.resolve(stoppedBeforeDispatch) : provider.run({ chat: {...(continuationPrompt ? store.chat(chatId)! : chat),providerTurnId:undefined,recovery:undefined}, cwd, prompt: continuationPrompt ?? contextualPrompt,
           contextWindow,
           ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) || pluginReloads.wantsConnectors(chatId) ? {connectorsRequested: true, connectorNames: [...requestedConnectorNames(prompt), ...pluginReloads.connectorNames(chatId)]} : {}),
           ...(runOptions.configOverrides ? {configOverrides: runOptions.configOverrides as Record<string, string | number | boolean | string[]>} : {}), ...(runOptions.developerInstructions ? {developerInstructions: runOptions.developerInstructions} : {}),
-          ...(claudeCommand ? {claudeCommand} : {}),
+          ...(!continuationPrompt && claudeCommand ? {claudeCommand} : {}),
           ...(engineWindow ? {engineWindow} : {}),
           onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
           onThreadReady: (threadId, driver) => { persistIdentity(threadId, undefined, driver); void nativeQueue.flushStranded(chatId); },
@@ -876,6 +883,16 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             }
             if (method === 'thread/compacted') { seal(); if (settledByItem) settledByItem = false; else if (!absorbAcceptedReport(chatId)) compactionCompleted(chatId); compactedInRun = true; }
             const ownRun = runs.get(chatId) === run, parentThread0 = store.chat(chatId)?.providerThreadId, parentEvent = !(typeof params.threadId === 'string' && parentThread0 && params.threadId !== parentThread0);
+            if (method === 'turn/plan/updated') {
+              if (!ownRun || !parentEvent || !Array.isArray(params.plan)) return;
+              const plan = params.plan.filter(step => step && typeof step === 'object' && typeof step.step === 'string').slice(0, 100);
+              if (!plan.length) return;
+              seal();
+              const data = {type:'plan', name:'update_plan', plan, ...(typeof params.explanation === 'string' ? {explanation:params.explanation} : {})};
+              if (planRow) store.updateItem(planRow.id, 'Plan', 'completed', data);
+              else planRow = store.appendItem(chatId, 'tool', 'Plan', 'completed', data);
+              scheduleTimeline(chatId); return;
+            }
             if (method === 'error') {
               // Codex retries a dropped model connection itself (willRetry): say so instead of looking stuck.
               if (!ownRun || !parentEvent || params.willRetry !== true) return;
@@ -920,6 +937,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             const itemId = String(item.id ?? params.itemId ?? '');
             if (!itemId) return;
             if (method === 'item/started' || method === 'item/completed') {
+              if (ownRun && parentEvent && !['plan', 'todoList'].includes(type)) { attemptActivity = true; lastWasTool = true; }
               if (!toolIds.has(itemId)) seal();
               const finished = method.endsWith('completed');
               const status = !finished ? 'running' : item.status === 'failed' || item.error != null || item.success === false || (typeof item.exitCode === 'number' && item.exitCode !== 0) ? 'failed' : item.status === 'interrupted' ? 'interrupted' : item.status === 'cancelled' || item.status === 'declined' ? 'cancelled' : 'completed';
@@ -1071,6 +1089,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             return {decision: threat && decision === 'acceptForSession' ? 'accept' : decision};
           },
         });
+        };
         const retried = await withAdmissionRetry(attempt, {signal: run.retry.signal, onWait(wait) {
           if (disposed) return;
           retryReason = wait.reason ?? 'admission';
@@ -1096,7 +1115,65 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         if (disposed) return;
         seal();
         reconnected(result.status === 'completed' ? 'completed' : 'failed');
-        if (!producedAssistant && result.finalMessage) store.appendItem(chatId, 'assistant', result.finalMessage, 'completed');
+        // A continuation is a new provider turn on the saved thread, never a replay of the user's request.
+        // Only confirmed terminal outcomes may continue: an unknown turn must still go through recovery checking.
+        let continuations = 0, finishUp = false, turnRecoveryHandled = false;
+        let turnRetry: TimelineItem | undefined;
+        for (;;) {
+          seal();
+          if (result.threadId) persistIdentity(result.threadId, result.turnId, result.driver);
+          const final = result.finalMessage.trim();
+          // Some providers repeat the pre-tool commentary as finalMessage; that is not a reply after the tool.
+          if (final && (!producedAssistant || (final !== assistantText.trim() && final !== lastAssistantText.trim()))) {
+            store.appendItem(chatId, 'assistant', result.finalMessage, 'completed'); lastWasTool = false;
+          }
+          const current = store.chat(chatId);
+          const background = provider.hasActiveWork?.(chatId) === true;
+          const canContinue = !run.stopped && !closing && !disposed && !!current?.providerThreadId && !background
+            && !store.timeline(chatId).some(item => item.kind === 'approval' && item.status === 'pending');
+          const code = result.failure?.statusCode;
+          const transient = result.status === 'failed' && result.dispatchState !== 'not-dispatched' && result.dispatchState !== 'unknown' && result.recovery?.kind === 'failed'
+            && !result.recovery.auth && attemptActivity && limitClass(`${result.errorMessage ?? ''} ${result.recovery.reason}`) !== 'quota' && (code !== undefined ? code === 429 || (code >= 500 && code <= 599) : /\b(?:429|5\d\d)\b/.test(`${result.errorMessage ?? ''} ${result.recovery.reason}`));
+          const silent = result.status === 'completed' && lastWasTool && !result.nativeCommand && !background && !runOptions.ownsSilentEnd;
+          if (silent && !run.stopped && (!canContinue || finishUp)) {
+            result = {...result, status:'failed', recovery:{kind:'failed', retryable:false, reason:'Agent stopped without replying. Send Continue to resume.'}};
+            break;
+          }
+          if (!canContinue || (!transient && !silent)) break;
+          if (transient) {
+            turnRecoveryHandled = true;
+            if (continuations >= 2) break;
+            const delayMs = Math.max(1_000, result.failure?.retryAfterMs ?? [5_000, 10_000][continuations]!);
+            if (delayMs > RETRY_AFTER_CAP_MS) { result = {...result, recovery:{...result.recovery!, reason:`${asSentence(result.recovery!.reason)} The provider asked to wait until ${retryClock(Math.min(Date.now() + delayMs, 8.64e15))}.`}}; break; }
+            store.appendItem(chatId, 'notice', result.recovery!.reason, 'failed', {recovery:result.recovery, providerThreadId:current!.providerThreadId, providerTurnId:current!.providerTurnId});
+            const data = {kind:'turn-retry', attempt:continuations + 1, max:2, retryAt:new Date(Date.now() + delayMs).toISOString()};
+            const text = `The provider stopped after starting work. Continuing in ${Math.ceil(delayMs / 1000)}s (attempt ${continuations + 1}/2).`;
+            if (turnRetry) store.updateItem(turnRetry.id, text, 'running', data);
+            else turnRetry = store.appendItem(chatId, 'notice', text, 'running', data);
+            timeline(chatId);
+            if (!(await waitForRetry(delayMs, run.retry.signal))) {
+              result = {...result, recovery:{kind:'cancelled', retryable:false, reason:'Stopped while waiting to continue.'}};
+              break;
+            }
+            continuations++;
+            continuationPrompt = 'Continue from where you stopped. Check the current state before repeating any tool action, and finish with a reply to the user.';
+          } else {
+            finishUp = true;
+            store.appendItem(chatId, 'notice', 'The agent stopped after a tool call without replying. Asking it to finish once.', 'completed', {kind:'finish-up'});
+            continuationPrompt = 'Continue from where you stopped. Your last turn ended after a tool call without a reply. Finish the task and give the user a final summary.';
+          }
+          // The old turn has ended, so no tool from it should keep spinning during the next turn.
+          store.settleToolItems(chatId); toolIds.clear(); toolStarted.clear(); reasoningStreamed.clear(); messageStreamed.clear(); anonymousMessageDelta = false;
+          if (turnRetry) store.updateItem(turnRetry.id, 'Continuing on the same thread…', 'completed', {...store.item(turnRetry.id)?.data, retryAt:null});
+          result = await attempt();
+          if (disposed) return;
+        }
+        reconnected(result.status === 'completed' ? 'completed' : 'failed');
+        if (turnRetry) {
+          const cancelled = run.stopped || result.recovery?.kind === 'cancelled';
+          const failed = result.status === 'failed' && !cancelled;
+          store.updateItem(turnRetry.id, cancelled ? 'Stopped while waiting to continue.' : failed ? `Stopped after ${continuations} automatic continuations.` : `Continued on the same thread after ${continuations} automatic ${continuations === 1 ? 'try' : 'tries'}.`, cancelled ? 'cancelled' : failed ? 'failed' : 'completed', {...store.item(turnRetry.id)?.data, retryAt:null});
+        }
         // The provider's own words are kept (S36): an adapter that reports a failure with a message (rate_limited, auth…)
         // settled that attempt as failed, which Inbox and Pulse explain in a plain sentence and which may be run again.
         // A failure with no message at all stays unconfirmed (recovery-needed).
@@ -1113,8 +1190,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         }
         // #448: a provider usage or rate limit. Its own refusal ended the turn, so it is settled (never "may still be running"),
         // and the chat waits for the reset to continue.
-        if (recovery && recovery.kind !== 'cancelled' && !run.stopped && isUsageLimit(`${said} ${recovery.kind === 'recovery-needed' ? '' : recovery.reason}`)) {
-          if (recovery.kind === 'recovery-needed') recovery = {kind:'failed', retryable:false, reason:`The provider attempt failed: ${said}`};
+        if (!turnRecoveryHandled && result.dispatchState !== 'unknown' && recovery && recovery.kind !== 'recovery-needed' && recovery.kind !== 'cancelled' && !run.stopped && isUsageLimit(`${said} ${recovery.reason}`)) {
           run.limit = {text:`${said} ${recovery.reason}`, ...(result.failure?.retryAfterMs ? {retryAfterMs:result.failure.retryAfterMs} : {}), notDispatched: result.dispatchState === 'not-dispatched', prompt, attachmentIds};
         }
         if (result.threadId) persistIdentity(result.threadId,result.turnId,result.driver);

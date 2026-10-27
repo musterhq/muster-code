@@ -1161,7 +1161,8 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       overrides[`mcp_servers.${TASK_MCP}.env.MUSTER_CHAT_TOKEN`] = taskToolHost().chatToken(chat.id);
       overrides[`mcp_servers.${TASK_MCP}.tool_timeout_sec`] = 60;
     } catch { /* the tools are optional: a run without them still works through fenced blocks */ }
-    return Object.keys(overrides).length ? { configOverrides: overrides } : null;
+    // The project's comment setting decides what follows a silent run (ask, notice or nothing), never the chat's own finish-up.
+    return { ...(Object.keys(overrides).length ? { configOverrides: overrides } : {}), ownsSilentEnd: true };
   }
   /** Before a task run: say, in the activity feed, which identity its commits carry. Nothing is written to any git config. */
   async function prepareDispatch(task: ProjectTask, cwd: string | null): Promise<void> {
