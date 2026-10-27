@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-import { suites, split as SPLIT } from './renderer-suites.mjs';
+import { suites, runners, split as SPLIT } from './renderer-suites.mjs';
 let failed = 0;
 // DOM suites drive React through linkedom with real timers; a loaded CI runner occasionally starves the first
 // render past a suite's waits. A failing suite gets one clean re-run in a fresh process: a real regression fails
@@ -27,4 +27,5 @@ for (const name of suites) {
   // without a cap that exhausted a 24 GB machine. Fail fast instead.
   if (!runSuite(name, outfile)) failed++;
 }
+for (const file of runners) if (!runSuite(file, path.join(root, file))) failed++;
 process.exitCode = failed ? 1 : 0;
