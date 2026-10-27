@@ -106,6 +106,7 @@ const builds = [
   },
   // The muster_browser MCP server Codex spawns per chat (Electron as node); it only forwards to main's local bridge.
   { ...common, entryPoints: [src('main', 'agent-tools', 'browser-mcp.ts')], outfile: dist('main', 'browser-mcp.cjs'), platform: 'node', format: 'cjs', target: 'node22' },
+  { ...common, entryPoints: [src('main', 'agent-tools', 'computer-mcp.ts')], outfile: dist('main', 'computer-mcp.cjs'), platform: 'node', format: 'cjs', target: 'node22' },
   {
     ...common,
     entryPoints: [src('preload', 'index.ts')],
@@ -184,6 +185,7 @@ function copyRendererStatic() {
 }
 
 execFileSync(process.execPath,[path.join(root,'scripts/build-quick-look.mjs')],{stdio:'inherit'});
+execFileSync(process.execPath,[path.join(root,'scripts/build-computer-helper.mjs')],{stdio:'inherit'});
 copyRendererStatic();
 mkdirSync(dist('runtime', 'resources'), {recursive: true});
 // One generic launcher: the route (profile file or config.toml provider) comes from the user's own Codex config.

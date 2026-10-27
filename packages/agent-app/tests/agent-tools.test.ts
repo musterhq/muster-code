@@ -17,7 +17,7 @@ function fakeHost(options:{attached?:boolean;results?:unknown[]}={}) {
   const results=options.results??[];
   let open=false,url='about:blank';
   const page:AgentPage={attached:options.attached??true,fill:true,state:()=>({owner:'o',url,title:'Fixture'} as never),contents:{
-    executeJavaScriptInIsolatedWorld:(_world,list)=>{scripts.push(list[0]!.code);return Promise.resolve(results.length?results.shift():{url,title:'Fixture',outline:'- button "Send" [ref=e1]',text:'hello'});},
+    executeJavaScriptInIsolatedWorld:(_world,list)=>{scripts.push(list[0]!.code);if(list[0]!.code.includes('__musterCursor'))return Promise.resolve(true);return Promise.resolve(results.length?results.shift():{url,title:'Fixture',outline:'- button "Send" [ref=e1]',text:'hello'});},
     sendInputEvent:event=>{events.push(event);},insertText:text=>{typed.push(text);return Promise.resolve();},isLoading:()=>false,getZoomFactor:()=>1,
   }};
   const host:AgentBrowserHost={has:()=>open,open:target=>{open=true;if(target)url=target;return page.state();},page:()=>page,back:()=>page.state(),reload:()=>page.state(),console:()=>[{level:'error',message:'boom',source:'app.js',line:3,at:1}],screenshot:async()=>({dataUrl:'data:image/jpeg;base64,/9j/AAAA',width:640,height:400})};

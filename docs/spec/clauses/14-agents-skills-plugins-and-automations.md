@@ -27,6 +27,9 @@ Boundaries:
 | [MUS-SPEC-14-651B](14-agents-skills-plugins-and-automations.md#mus-spec-14-651b) | Two agents asked the same thing get "(2)" and "(3)"; a prompt with no readable task falls back to "Agent N". | [`names stay unique within a chat, and an unreadable prompt falls back to Agent N plus its first distinctive words`](../../../packages/agent-app/tests/subagent-names-651.test.ts) |
 | [MUS-SPEC-14-651C](14-agents-skills-plugins-and-automations.md#mus-spec-14-651c) | The transcript announces three differently named sub-agents started together and each finished once, even though every prompt opens the same way. | [`three parallel sub-agents with the same location clause show three distinct rows in the transcript`](../../../packages/agent-app/tests/subagent-names-651.test.ts) |
 | [MUS-SPEC-14-651E](14-agents-skills-plugins-and-automations.md#mus-spec-14-651e) | With three finished agents the panel lists three different names and its header reads "0 running 3 completed", not "0 completed 3 reported back". | [`three finished sub-agents with one location clause list three distinct names and read three completed`](../../../packages/agent-app/tests/subagent-components.tsx) |
+| [MUS-SPEC-14-721E](14-agents-skills-plugins-and-automations.md#mus-spec-14-721e) | A desktop app is driven with no other app's plugin installed: reading it lists its controls, a click answers with only the lines that changed (a changed element once, as its new line), element numbers stay valid across steps and an unknown number is refused. | [`MUS-SPEC-14-721E: an agent drives a desktop app with Muster alone and each step answers with only what changed`](../../../packages/agent-app/tests/computer-mcp.test.ts) |
+| [MUS-SPEC-14-721F](14-agents-skills-plugins-and-automations.md#mus-spec-14-721f) | In a read-only chat the click and type tools are not offered, a click is refused, and the app is unchanged. | [`MUS-SPEC-14-721F: a read-only chat can look at apps but not change them`](../../../packages/agent-app/tests/computer-mcp.test.ts) |
+| [MUS-SPEC-14-721G](14-agents-skills-plugins-and-automations.md#mus-spec-14-721g) | Every agent chat gets the muster_computer server on Codex and Claude Code, a Full access router chat still runs on its own route, and without the helper the old note stays. | [`MUS-SPEC-14-721G: every agent chat gets Muster computer use on every MCP route, without forcing router chats onto Codex`](../../../packages/agent-app/tests/computer-mcp.test.ts) |
 
 ### Claude Code background sub-agents
 
@@ -153,4 +156,39 @@ Boundaries:
 - Test: `packages/agent-app/tests/subagent-components.tsx::three finished sub-agents with one location clause list three distinct names and read three completed`
 - Environment: DOM suite built with esbuild and run with Node and linkedom; the real panel component and store; the bridge is a fixture.
 - Known gaps: The card still tells "Reported back" from "Completed" on its own badge; only the header folds them.
+- Evidence: UNVERIFIED
+
+### Muster computer use (#721)
+
+<a id="mus-spec-14-721e"></a>
+#### MUS-SPEC-14-721E: An agent drives a desktop app with Muster alone, one small answer per step
+
+- Precondition: macOS with Accessibility allowed for the runner. No other desktop app's computer-use plugin is involved. A fixture app with a notes field, an "Add one" button and a "Count 0" label is built from `tests/fixtures/computer-use/fixture-app.swift`.
+- Action: Over stdio, start the shipped `dist/main/computer-mcp.cjs` with the shipped `dist/main/muster-computer` helper. Read the app, click "Add one" by element number, type into Notes, click again, then click element 9999.
+- Expected result: The server names itself muster_computer and lists nine tools. Reading the app shows the button and "Count 0". The click answers within 3 s, after the app settles, with "Changed:" followed only by the label's new line ("Count 1"). It does not repeat the old value or the unchanged button line. The transcript names the step "Clicked “Add one” in MusterFixture", not an element number or the app's path. The typed text shows in the next answer. The second click with the same number gives "Count 2". Element 9999 is refused with an error.
+- Test: `packages/agent-app/tests/computer-mcp.test.ts::MUS-SPEC-14-721E: an agent drives a desktop app with Muster alone and each step answers with only what changed`
+- Environment: Node test runner on macOS with a real AppKit app and the real helper. Skipped when Accessibility is not granted, unless `MUSTER_REQUIRE_COMPUTER_E2E=1`.
+- Known gaps: Windows and Linux backends are not built yet. CI macOS runners have no Accessibility grant, so this runs on a developer Mac.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-721f"></a>
+#### MUS-SPEC-14-721F: A read-only chat can look at apps but not change them
+
+- Precondition: The same fixture app and shipped server as 721E, started with `MUSTER_COMPUTER_READ_ONLY=1` (what a read-only chat gets).
+- Action: List the tools, read the app, then call click on "Add one".
+- Expected result: click and type_text are not in the tool list. The click is refused with a message that the chat is read-only. Reading the app again still shows "Count 0".
+- Test: `packages/agent-app/tests/computer-mcp.test.ts::MUS-SPEC-14-721F: a read-only chat can look at apps but not change them`
+- Environment: As 721E.
+- Known gaps: None.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-721g"></a>
+#### MUS-SPEC-14-721G: Every agent chat gets Muster computer use, on every MCP route
+
+- Precondition: A computer-use launcher file exists, as main writes it on macOS when the helper ships.
+- Action: Build the turn options for a workspace agent chat and a read-only one, pass them through the Claude Code route, check whether a Full access router chat may stay on its route, and build them once more with the launcher missing.
+- Expected result: The Codex options register `mcp_servers.muster_computer` with the chat id and the read-only flag (0, then 1). The notes name muster_computer and no longer send the model to another app's plugin. The Claude Code route receives the server. A Full access router chat is still allowed on its own route. A muster_computer tool call shows as computer use in the transcript. Without the launcher the previous note is kept.
+- Test: `packages/agent-app/tests/computer-mcp.test.ts::MUS-SPEC-14-721G: every agent chat gets Muster computer use on every MCP route, without forcing router chats onto Codex`
+- Environment: Node test runner; no desktop needed.
+- Known gaps: OpenCode and Grok get the server through the same overrides but are not checked here.
 - Evidence: UNVERIFIED
