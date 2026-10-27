@@ -117,3 +117,65 @@ test('PRO-11: a failed install changes nothing and reports why; state survives a
   assert.ok(restarted.activated.includes('opencode'));
   await assert.rejects(restarted.cli.update('codex', 'latest-ish'), /No published version/);
 });
+
+const codexTriple = (): string | null => ({'darwin-arm64': 'aarch64-apple-darwin', 'darwin-x64': 'x86_64-apple-darwin', 'linux-arm64': 'aarch64-unknown-linux-musl', 'linux-x64': 'x86_64-unknown-linux-musl'} as Record<string, string>)[`${process.platform}-${process.arch}`] ?? null;
+
+/** A local npm registry serving @openai/codex: `latest` and one platform package whose tarball holds the native binary. */
+async function codexRegistry(t: TestContext, version: string, options: {badIntegrity?: boolean} = {}) {
+  const {createServer} = await import('node:http');
+  const {createHash} = await import('node:crypto');
+  const {execFileSync} = await import('node:child_process');
+  const work = await directory(t), triple = codexTriple()!, platform = `${process.platform}-${process.arch}`;
+  const vendor = join(work, 'package', 'vendor', triple);
+  await mkdir(join(vendor, 'bin'), {recursive: true});
+  await writeFile(join(vendor, 'bin', 'codex'), `#!/bin/sh\necho "codex-cli ${version}"\n`); await chmod(join(vendor, 'bin', 'codex'), 0o755);
+  await writeFile(join(vendor, 'codex-package.json'), JSON.stringify({layoutVersion: 1, version, target: triple, entrypoint: 'bin/codex'}));
+  await writeFile(join(work, 'package', 'package.json'), JSON.stringify({name: '@openai/codex', version: `${version}-${platform}`}));
+  execFileSync('tar', ['-czf', join(work, 'p.tgz'), '-C', work, 'package']);
+  const tarball = readFileSync(join(work, 'p.tgz'));
+  const integrity = `sha512-${createHash('sha512').update(options.badIntegrity ? Buffer.from('other') : tarball).digest('base64')}`;
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    const url = decodeURIComponent(request.url ?? ''); requests.push(url);
+    const base = `http://127.0.0.1:${(server.address() as {port: number}).port}`;
+    if (url === '/@openai/codex/latest') return void response.end(JSON.stringify({version}));
+    if (url === `/@openai/codex/${version}-${platform}`) return void response.end(JSON.stringify({version: `${version}-${platform}`, dist: {tarball: `${base}/p.tgz`, integrity}}));
+    if (url === '/p.tgz') return void response.end(tarball);
+    response.statusCode = 404; response.end('{}');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+  return {registry: `http://127.0.0.1:${(server.address() as {port: number}).port}`, requests};
+}
+
+// Spec: MUS-SPEC-03-721H (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-721h)
+test('MUS-SPEC-03-721H: on a machine with no Codex, npm or Node, one click installs a Codex that runs', {skip: process.platform === 'win32' ? 'the stand-in binary is a shell script' : !codexTriple() && 'no Codex build for this platform'}, async t => {
+  const root = await directory(t), home = await directory(t);
+  const {registry, requests} = await codexRegistry(t, '0.70.0');
+  const env: NodeJS.ProcessEnv = {PATH: '', npm_config_registry: registry, MUSTER_APP_ROOTS: await directory(t)};
+  const cli = createCliMaintenance({root, env, home, activeSessions: () => 0});
+  const before = await cli.status('codex');
+  assert.equal(before.installed.path, null, 'nothing to borrow: no Codex on PATH and no other app');
+  const result = await cli.update('codex');
+  assert.equal(result.outcome, 'updated', result.status.lastError ?? '');
+  assert.equal(result.status.installed.version, '0.70.0', 'the installed Codex runs and reports its version');
+  assert.equal(result.status.installed.managed, true);
+  assert.equal(env.MUSTER_CODEX_COMMAND, result.status.installed.path, 'chats now run this Codex');
+  assert.match(readFileSync(env.MUSTER_CODEX_COMMAND!, 'utf8'), /codex-cli 0\.70\.0/, 'the command is the native binary itself, so no Node is needed to start it');
+  assert.ok(existsSync(join(env.MUSTER_CODEX_COMMAND!, '..', '..', 'codex-package.json')), 'the binary keeps its package layout beside it');
+  assert.ok(requests.includes('/@openai/codex/latest') && requests.includes('/p.tgz'));
+});
+
+// Spec: MUS-SPEC-03-721I (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-721i)
+test('MUS-SPEC-03-721I: a download that fails its checksum installs nothing', {skip: process.platform === 'win32' ? 'the stand-in binary is a shell script' : !codexTriple() && 'no Codex build for this platform'}, async t => {
+  const root = await directory(t), home = await directory(t);
+  const {registry} = await codexRegistry(t, '0.70.0', {badIntegrity: true});
+  const env: NodeJS.ProcessEnv = {PATH: '', npm_config_registry: registry, MUSTER_APP_ROOTS: await directory(t)};
+  const cli = createCliMaintenance({root, env, home, activeSessions: () => 0});
+  const result = await cli.update('codex');
+  assert.equal(result.outcome, 'failed');
+  assert.match(result.status.lastError ?? '', /Update to 0\.70\.0 failed; nothing changed\..*checksum/i);
+  assert.equal(result.status.installed.path, null);
+  assert.equal(env.MUSTER_CODEX_COMMAND, undefined);
+  assert.equal(existsSync(join(root, 'codex', '0.70.0')), false, 'the partial download is removed');
+});

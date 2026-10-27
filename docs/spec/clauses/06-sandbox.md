@@ -18,6 +18,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-06-742A](06-sandbox.md#mus-spec-06-742a) | A restored command with a recorded process group is cancelled precisely while its sandbox keeps running. | [`history keeps the last runs with output tails and shows interrupted work as ended after restart`](../../../packages/agent-app/tests/scoped-computers.test.ts) |
 | [MUS-SPEC-06-665A](06-sandbox.md#mus-spec-06-665a) | The route check says which providers can be sandboxed: Codex, Claude Code, OpenCode and Grok yes; HTTP chat, Anthropic, Gemini CLI and Cursor CLI no; an unknown provider is not refused. | [`#652 route gating: only routes that load the sandbox tools can be sandboxed`](../../../packages/agent-app/tests/sandbox-honesty.test.ts) |
 | [MUS-SPEC-06-665B](06-sandbox.md#mus-spec-06-665b) | The sandbox domain rejects "sandbox" for a Gemini CLI chat with the unsupported-route message and changes nothing, then accepts it for a Claude Code chat. | [`#652 the runtime refuses to sandbox a chat whose model cannot load the sandbox tools`](../../../packages/agent-app/tests/sandbox-honesty.test.ts) |
 | [MUS-SPEC-06-665C](06-sandbox.md#mus-spec-06-665c) | Leaving the sandbox sets exactly the chosen access level; Full without its acknowledgement is rejected, and Full with the sandbox kept on is rejected. | [`#653 leaving the sandbox to raise access sets the chosen level, and Full still needs its acknowledgement`](../../../packages/agent-app/tests/sandbox-honesty.test.ts) |
@@ -163,4 +164,15 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/sandbox-honesty-dom.tsx::a sandbox chat on a model whose tools cannot use the sandbox is warned, and the Sandbox choice is disabled with the reason`
 - Environment: DOM suite (`linkedom`); the app's calls are faked.
 - Known gaps: The calls are faked. Whether the model's tools run is MUS-SPEC-06-665B and 665J.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-06-742a"></a>
+#### MUS-SPEC-06-742A: A restored running command is cancelled without stopping its sandbox
+
+- Precondition: A running sandbox command whose process group is present in its durable record.
+- Action: Open a new scoped computer manager and cancel the previous command.
+- Expected result: The previous process group is killed, its receipt says cancelled, and the sandbox remains running.
+- Test: `packages/agent-app/tests/scoped-computers.test.ts::history keeps the last runs with output tails and shows interrupted work as ended after restart`
+- Environment: Node test runner with an in-memory sandbox backend and durable temporary records.
+- Known gaps: This does not exercise a real Docker process group.
 - Evidence: UNVERIFIED
