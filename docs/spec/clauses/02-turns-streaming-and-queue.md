@@ -766,6 +766,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/mid-turn-recovery-386.test.ts::a terminal native failure is classified and continued through the real provider adapter`
 - Environment: Node test runner; real service and provider adapter, fake native transport and fake timers.
 - Known gaps: No live provider or desktop app.
+- Evidence: UNVERIFIED
 
 <a id="mus-spec-02-398a"></a>
 #### MUS-SPEC-02-398A: An imported turn displays its work duration without the import gap
