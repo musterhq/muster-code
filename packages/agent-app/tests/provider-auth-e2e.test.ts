@@ -94,8 +94,12 @@ async function codexHome(t: {after(fn: () => Promise<void>): void}, router: Mock
     await writeFile(join(root, 'mock.json'), codexCatalog(['claude/claude-opus-4.1', 'codex/gpt-5.6-terra']));
     await writeFile(join(codex, 'mock-gateway.config.toml'), `model = "claude/claude-opus-4.1"\nmodel_provider = "mockroute"\nmodel_catalog_json = "${join(root, 'mock.json')}"\n${table}`);
   }
-  // #740: Muster started from a Muster shell inherits that shell's Codex profile; no route may launch with it.
-  const env = {...process.env, CODEX_HOME: codex, HOME: home, MUSTER_CODEX_COMMAND: codexBin!, MUSTER_PROVIDER_NODE: process.execPath, MUSTER_CODEX_PROFILE: 'inherited-from-parent'};
+  // #740: Muster started from a Muster shell inherits that shell's Codex profile, and the launcher spawns Codex
+  // with Muster's own environment; no route may launch with that profile.
+  const inherited = process.env.MUSTER_CODEX_PROFILE;
+  process.env.MUSTER_CODEX_PROFILE = 'inherited-from-parent';
+  t.after(async () => { if (inherited === undefined) delete process.env.MUSTER_CODEX_PROFILE; else process.env.MUSTER_CODEX_PROFILE = inherited; });
+  const env = {...process.env, CODEX_HOME: codex, HOME: home, MUSTER_CODEX_COMMAND: codexBin!, MUSTER_PROVIDER_NODE: process.execPath};
   delete (env as Record<string, string | undefined>).OPENAI_API_KEY;
   return {root, home, codex, cwd, env};
 }
