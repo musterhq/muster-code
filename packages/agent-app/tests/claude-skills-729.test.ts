@@ -5,7 +5,7 @@
 // Code lane and the Claude Code adapter with a fake `claude` executable and a temporary home; no network.
 import assert from 'node:assert/strict';
 import {test, type TestContext} from 'node:test';
-import {mkdtemp, mkdir, rm, writeFile, chmod, readFile, realpath, symlink, unlink} from 'node:fs/promises';
+import {mkdtemp, mkdir, rm, writeFile, chmod, readFile, realpath, symlink, unlink, stat} from 'node:fs/promises';
 import {existsSync, promises as fsPromises} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -423,13 +423,14 @@ test('a marketplace plugin with no logo (the Claude marketplace’s linear) show
   await service.invoke('extensions.sources.add', {kind: 'local', path: market});
   await service.invoke('extensions.sources.add', {kind: 'local', path: skills});
   for (let i = 0; i < 50 && lists === 0; i++) await delay(20);
+  // Mark the event stream before asking: with no delays the background lookup can finish while the catalog call returns.
+  const mark = events.length;
   const before = await service.invoke('extensions.catalog', undefined);
   const pkg = (catalog: typeof before, name: string, kind = 'plugin') => catalog.find(entry => entry.name === name && entry.kind === kind);
   assert.notEqual(pkg(before, 'linear')?.icon?.kind, 'image', 'before the lookup Linear has no logo of its own');
-  events.length = 0;
-  for (let i = 0; i < 100 && !events.includes('pluginIconsChanged'); i++) await delay(20);
-  assert.ok(events.includes('pluginIconsChanged'), 'the asked-for names are looked up in the background and the app is told to redraw');
-  const after = await service.invoke('extensions.catalog', undefined);
+  let after = before;
+  for (let i = 0; i < 150 && !(events.slice(mark).includes('pluginIconsChanged') && pkg(after, 'linear')?.icon?.kind === 'image'); i++) { await delay(20); after = await service.invoke('extensions.catalog', undefined); }
+  assert.ok(events.slice(mark).includes('pluginIconsChanged'), 'the asked-for names are looked up in the background and the app is told to redraw');
   assert.deepEqual(pkg(after, 'linear')?.icon, {kind: 'image', dataUrl: `data:image/png;base64,${logo.toString('base64')}`}, 'Linear shows the logo the OpenAI catalog lists for linear');
   assert.notEqual(pkg(after, 'homebrew-thing')?.icon?.kind, 'image', 'a name only a third-party catalog lists is not borrowed');
   assert.notEqual(pkg(after, 'gitlab', 'skill')?.icon?.kind, 'image', 'a skill is not a brand’s plugin: it keeps its monogram');
@@ -506,6 +507,37 @@ test('a logo URL that redirects to plain http is never fetched over http; an htt
   assert.ok(!fetched.some(url => url.startsWith('http:')), `nothing is requested over http; requested ${fetched.join(', ')}`);
   assert.equal(icon('app-downgrade')?.kind, 'monogram', 'a logo behind an http redirect keeps the monogram');
   assert.equal(icon('app-hop')?.kind, 'image', 'a relative https redirect is followed');
+});
+
+// Spec: MUS-SPEC-14-732I (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-732i)
+test('a command folder swapped for a link to an outside folder while it is read is refused, even if every check sees the folder restored', {skip: process.platform !== 'darwin' && 'needs O_NOFOLLOW_ANY (macOS)'}, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'muster-732i-')), saved = process.env.HOME, originalRealpath = fsPromises.realpath, originalLstat = fsPromises.lstat;
+  process.env.HOME = join(root, 'home');
+  const commands = join(root, 'home', '.claude', 'commands'), outside = join(root, 'outside');
+  await mkdir(join(commands, 'team'), {recursive: true}); await mkdir(outside);
+  await writeFile(join(commands, 'team', 'review.md'), 'TEAM-REVIEW-BODY\n');
+  await writeFile(join(outside, 'review.md'), 'SECRET-OUTSIDE-THE-COMMANDS-FOLDER\n');
+  const inside = await realpath(join(commands, 'team', 'review.md')), secretStat = await stat(join(outside, 'review.md'));
+  t.after(async () => { fsPromises.realpath = originalRealpath; fsPromises.lstat = originalLstat; if (saved === undefined) delete process.env.HOME; else process.env.HOME = saved; await rm(root, {recursive: true, force: true}); });
+  // The racer keeps team/ as a link to the outside folder, but restores it whenever the reader resolves or lstats the path.
+  await rm(join(commands, 'team'), {recursive: true}); await symlink(outside, join(commands, 'team'));
+  fsPromises.realpath = (async (...args: Parameters<typeof originalRealpath>) => String(args[0]) === inside ? inside : originalRealpath(...args)) as typeof originalRealpath;
+  fsPromises.lstat = (async (...args: Parameters<typeof originalLstat>) => String(args[0]) === inside ? secretStat : originalLstat(...args)) as typeof originalLstat;
+  const listed = (await discoverSkills([])).find(entry => entry.name === 'team:review');
+  assert.doesNotMatch(listed?.readme ?? '', /SECRET/, 'the picker never shows the outside file');
+  const attached = await resolveAttachedSkill(inside, []);
+  assert.doesNotMatch(attached?.content ?? '', /SECRET/, 'a run never gets the outside file');
+});
+
+// Spec: MUS-SPEC-14-732J (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-732j)
+test('an inlined command keeps a quoted argument whole, splitting its arguments the way Claude Code does', async t => {
+  const h: H = await harness(t);
+  const chat = await h.chat('gpt-5.6-terra', h.tree.project);
+  const comp = pick(await h.skills(h.tree.project), 'fe:comp', 'command');
+  await h.send(chat.id, `/fe:comp "Button primary" 'tailwind v4'`, [comp.id]);
+  assert.equal((await h.snapshot(chat.id)).status, 'completed');
+  const prompt = String(h.codex[0]?.prompt ?? '');
+  assert.match(prompt, /<command-instructions>\nBuild the Button primary component with tailwind v4 styling\.\n<\/command-instructions>/, prompt.slice(prompt.indexOf('<command-instructions>'), prompt.indexOf('</command-instructions>') + 24));
 });
 
 // Spec: MUS-SPEC-14-732C (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-732c)

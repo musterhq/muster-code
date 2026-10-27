@@ -1,5 +1,6 @@
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, protocol, screen, session, shell, clipboard, systemPreferences } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, protocol, screen, session, shell, clipboard, systemPreferences } from 'electron';
 import {execFile} from 'node:child_process';
+import {downscaleIcon} from './icon-downscale.ts';
 import {BrowserSessionVault} from './browser-session-vault.ts';
 import {PLUGIN_SCHEME,PluginUiRegistry} from './plugin-ui.ts';
 import {applyThemeSource,themeFromSettingsResult,windowBackground} from './theme';
@@ -46,13 +47,6 @@ import {electronSecretBox} from '../runtime/memory-context.ts';
 import {ServerSignInWindows} from './server-signin-window.ts';
 import { device } from '../shared/device-noun.ts';
 
-/** #729: a plugin logo over the icon budget, scaled to fit `edge` (crisp at every size the app draws it). */
-function downscaleIcon(bytes: Buffer, edge: number): Buffer | null {
-  const image = nativeImage.createFromBuffer(bytes);
-  if (image.isEmpty()) return null;
-  const { width, height } = image.getSize();
-  return image.resize(width >= height ? { width: Math.min(edge, width), quality: 'best' } : { height: Math.min(edge, height), quality: 'best' }).toPNG();
-}
 
 app.setName('Muster Agent');
 {const store=passwordStoreSwitch(process.env,process.argv);if(store)app.commandLine.appendSwitch('password-store',store);}

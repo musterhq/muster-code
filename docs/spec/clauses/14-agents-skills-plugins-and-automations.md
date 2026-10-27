@@ -61,6 +61,9 @@ Boundaries:
 | [MUS-SPEC-14-732F](14-agents-skills-plugins-and-automations.md#mus-spec-14-732f) | A logo the browser cannot draw falls back to the monogram on its row; a light and dark pair keeps the variant that still draws. | [`a logo the browser cannot draw falls back to the monogram on its row; a pair keeps the variant that still draws`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
 | [MUS-SPEC-14-732G](14-agents-skills-plugins-and-automations.md#mus-spec-14-732g) | A hand-typed /name shared by a Claude Code skill and a command attaches the skill, as Claude Code would run it | [`a hand-typed /foo, when a Claude Code skill and a command share the name, attaches the skill Claude Code would run`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
 | [MUS-SPEC-14-732H](14-agents-skills-plugins-and-automations.md#mus-spec-14-732h) | When only the dark-theme logo draws, light theme gets the monogram instead of a logo it cannot show | [`when only the dark-theme logo still draws, it shows in dark theme and the light theme gets the monogram`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
+| [MUS-SPEC-14-732I](14-agents-skills-plugins-and-automations.md#mus-spec-14-732i) | A command folder swapped for a link to an outside folder while a command is read is refused, even if every check sees it restored | [`a command folder swapped for a link to an outside folder while it is read is refused, even if every check sees the folder restored`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-732J](14-agents-skills-plugins-and-automations.md#mus-spec-14-732j) | An inlined command keeps a quoted argument whole in $0, $1…, as Claude Code splits them | [`an inlined command keeps a quoted argument whole, splitting its arguments the way Claude Code does`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-732K](14-agents-skills-plugins-and-automations.md#mus-spec-14-732k) | The app's real image scaler shrinks a large plugin logo so it shows; an undecodable one keeps the monogram | [`a plugin logo over the icon budget is scaled by the app's real image scaler and shown; one it cannot decode keeps the monogram`](../../../packages/agent-app/tests/large-logo-729.electron.ts) |
 
 ### Claude Code background sub-agents
 
@@ -409,8 +412,8 @@ Boundaries:
 - Action: Open Skills & plugins (Plugins and MCP tabs), the composer's connector menu, and a transcript with one of the server's tool calls.
 - Expected result: Every one of those places shows the plugin's own logo, scaled to 128px, not a "CU" monogram. Raster logos up to 8 MB and 4096px are scaled; anything larger, or a logo that cannot be decoded, still falls back to the monogram. SVG logos keep their own budget and are never rasterised.
 - Test: `packages/agent-app/tests/claude-skills-729.test.ts::a plugin whose logo file is over the icon budget (Computer Use ships a 900 KB, 1024px PNG) still shows its logo, scaled down, in Skills & plugins and on its MCP server`
-- Environment: Real agent service and plugin discovery against a temporary ~/.codex plugin cache with a 1 MB PNG; the app's downscaler stands in for Electron's nativeImage. Live check in an isolated Muster instance with the real Computer Use plugin.
-- Known gaps: Electron's nativeImage is replaced by a stand-in scaler in this test, and is exercised only by the live check (screenshots in the PR). The test checks the scaled logo on the plugin and on its MCP server mark; drawing those marks on rows is 729E, 729G, 729L and 729M. The 4096px dimension limit has no fixture (a valid PNG that size is too large to build in the test). The rejection paths are covered: a raster over 8 MB, one the scaler cannot decode, and an SVG over its own budget all keep the monogram, and only the decodable raster reaches the scaler.
+- Environment: Real agent service and plugin discovery against a temporary ~/.codex plugin cache with a 1 MB PNG. The test uses a stand-in scaler; 732K runs the app's real downscaler on Electron's nativeImage. Live check in an isolated Muster instance with the real Computer Use plugin.
+- Known gaps: The Node test checks the scaled logo on the plugin and on its MCP server mark; drawing those marks on rows is 729E, 729G, 729L and 729M. The 4096px dimension limit has no fixture (a valid PNG that size is too large to build in the test). The rejection paths are covered: a raster over 8 MB, one the scaler cannot decode, and an SVG over its own budget all keep the monogram, and only the decodable raster reaches the scaler.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-14-729r"></a>
@@ -487,7 +490,7 @@ Boundaries:
 - Expected result: Neither the picker nor the attached command ever contains the secret: the file is opened without following a link and must still be the file that passed the check. An untouched command still reads normally.
 - Test: `packages/agent-app/tests/claude-skills-729.test.ts::a command file swapped for a symlink right after it is checked is not read through the link, in the picker or when a run attaches it`
 - Environment: Real discovery and attachment against a temporary home; `fs.promises.realpath` wrapped to swap the file at that moment.
-- Known gaps: Swapping a parent folder back and forth between the open and the checks is not closed. Node has no `openat`, so each path component cannot be opened without following links. A static parent link is caught by the containment check. The race needs a process already running as the user, and that process can read the outside file directly, so it gains nothing.
+- Known gaps: Swapping a parent folder for a link is closed on macOS by 732I. On Linux only the last component is opened without following links (there is no O_NOFOLLOW_ANY and Node has no `openat`); a static parent link is still caught by the containment check, and the race needs a process already running as the user, which can read the outside file directly.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-14-732b"></a>
@@ -565,4 +568,37 @@ Boundaries:
 - Test: `packages/agent-app/tests/claude-skills-729-components.tsx::when only the dark-theme logo still draws, it shows in dark theme and the light theme gets the monogram`
 - Environment: Real PluginIcon in a DOM suite (linkedom); the error event is dispatched on the image.
 - Known gaps: linkedom does not apply the theme CSS; the classes that select one per theme are checked, and screenshots cover the drawn result.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-732i"></a>
+#### MUS-SPEC-14-732I: A command folder swapped for a link while it is read is refused
+
+- Precondition: `~/.claude/commands/fe/comp.md` exists, and an outside folder holds a `comp.md` with a secret.
+- Action: While the command is read, `fe` is swapped for a link to the outside folder, and every containment check before and after still sees the real folder.
+- Expected result: The read is refused and the secret never reaches the picker or a run. The file is opened with O_NOFOLLOW_ANY, which refuses a link in any part of the path. An untouched command still reads.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::a command folder swapped for a link to an outside folder while it is read is refused, even if every check sees the folder restored`
+- Environment: Real discovery against a temporary home; `realpath` and `lstat` wrapped so the checks see the folder restored while the open sees the link. macOS only.
+- Known gaps: Skipped off macOS; Linux has no O_NOFOLLOW_ANY (see 732A).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-732j"></a>
+#### MUS-SPEC-14-732J: A quoted command argument stays whole
+
+- Precondition: `~/.claude/commands/fe/comp.md` reads `Build the $0 component with $1 styling.`
+- Action: Send `/fe:comp "Button primary" 'tailwind v4'`.
+- Expected result: The run gets `Build the Button primary component with tailwind v4 styling.`: `$0` is `Button primary` and `$1` is `tailwind v4`, without quotes, as Claude Code splits them (0-based). `$ARGUMENTS` is the text as typed.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::an inlined command keeps a quoted argument whole, splitting its arguments the way Claude Code does`
+- Environment: Real agent service on a Codex route (inlined, not native); the prompt the fake coding client receives is checked.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-732k"></a>
+#### MUS-SPEC-14-732K: The real image scaler shrinks a large logo
+
+- Precondition: An installed plugin whose logo is a 512px PNG of about 1 MB (over the 256 KB budget), and another whose logo is a PNG that cannot be decoded.
+- Action: List the installed plugins with the app's own downscaler, as the Electron main process wires it.
+- Expected result: The first plugin carries its logo as a 128×128 PNG within 256 KB; the undecodable one keeps the monogram.
+- Test: `packages/agent-app/tests/large-logo-729.electron.ts::a plugin logo over the icon budget is scaled by the app's real image scaler and shown; one it cannot decode keeps the monogram`
+- Environment: Runs inside Electron (`npm run test:electron`) with the real nativeImage and the real agent service against a temporary ~/.codex plugin cache.
+- Known gaps: The 4096px limit has no fixture (see 729Q).
 - Evidence: UNVERIFIED

@@ -18,6 +18,7 @@
     "typecheck:parity": "node scripts/typecheck-parity.mjs",
     "test": "node --max-old-space-size=1536 --experimental-transform-types --import ./tests/pin-device-platform.mjs --test 'tests/*.test.ts'",
     "test:renderer": "node scripts/test-renderer.mjs",
+    "test:electron": "node scripts/test-electron.mjs",
     "rebuild:native": "node scripts/postinstall.mjs --force",
     "postinstall": "node scripts/postinstall.mjs",
     "vendor:sync": "node scripts/vendor-sync.mjs",

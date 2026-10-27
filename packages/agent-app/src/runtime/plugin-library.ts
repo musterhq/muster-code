@@ -57,11 +57,14 @@ async function readSkill(dir: string, root: string): Promise<{ readme: string | 
 
 /**
  * Reads a file already resolved inside `root` without following a link swapped in after that check: the open refuses a
- * symlink, and the opened file must still be the one at the resolved path inside the root. Null when it is not a regular
+ * symlink (on macOS in any path component), and the opened file must still be the one at the resolved path inside the root. Null when it is not a regular
  * file, has moved out of the root, or (unless `truncate`) is over `max` bytes.
  */
+// macOS refuses a link in ANY component at open time (O_NOFOLLOW_ANY), which closes a parent folder swapped for a link between
+// the checks and the open; `resolved` is already a realpath, so a genuine path has no links to refuse.
+const OPEN_NO_LINKS = process.platform === 'darwin' ? constants.O_RDONLY | 0x20000000 : constants.O_RDONLY | constants.O_NOFOLLOW;
 async function readContainedText(resolved: string, root: string, max: number, truncate = false): Promise<string | null> {
-  const handle = await fs.open(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const handle = await fs.open(resolved, OPEN_NO_LINKS);
   try {
     const opened = await handle.stat();
     if (!opened.isFile() || (!truncate && opened.size > max)) return null;
@@ -262,12 +265,30 @@ async function commandEntry(path: string, name: string, source: SkillRoot, root:
 export function commandBody(text: string): string { return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, ''); }
 /**
  * What Claude Code sends for `/<name> <args>` (checked against Claude Code 2.1): the body without front matter, `$ARGUMENTS`
- * as the whole argument string, `$ARGUMENTS[N]` and `$N` as zero-based words, and with no placeholder the arguments
+ * as the whole argument string, `$ARGUMENTS[N]` and `$N` as zero-based words split shell-style (a quoted phrase is one word), and with no placeholder the arguments
  * appended as `ARGUMENTS: <args>`.
  */
+/** Arguments split the way a shell would: whitespace separates, '…' and "…" keep a phrase whole, a backslash escapes. */
+function commandWords(args: string): string[] {
+  const words: string[] = [];
+  let word = '', started = false, quote: string | null = null;
+  for (let index = 0; index < args.length; index++) {
+    const char = args[index];
+    if (quote) {
+      if (char === quote) quote = null;
+      else if (char === '\\' && quote === '"' && /["\\$`]/.test(args[index + 1] ?? '')) word += args[++index];
+      else word += char;
+    } else if (/\s/.test(char)) { if (started) { words.push(word); word = ''; started = false; } }
+    else if (char === '"' || char === "'") { quote = char; started = true; }
+    else if (char === '\\' && index + 1 < args.length) { word += args[++index]; started = true; }
+    else { word += char; started = true; }
+  }
+  if (started) words.push(word);
+  return words;
+}
 export function expandClaudeCommand(text: string, args: string): string {
   const body = commandBody(text).replace(/\s+$/, '');
-  const words = args.trim() ? args.trim().split(/\s+/) : [];
+  const words = commandWords(args);
   const placeholder = /\$ARGUMENTS|\$\d/.test(body);
   const filled = body.replace(/\$ARGUMENTS\[(\d+)\]|\$ARGUMENTS|\$(\d+)/g, (_match, index?: string, position?: string) => index !== undefined || position !== undefined ? words[Number(index ?? position)] ?? '' : args.trim());
   return placeholder || !args.trim() ? filled : `${filled}\n\nARGUMENTS: ${args.trim()}`;
