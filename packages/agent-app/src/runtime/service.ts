@@ -847,6 +847,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           // context blocks the old thread already held, and the user is told.
           onThreadReset(_previousThreadId, reason) {
             if (disposed || runs.get(chatId) !== run) return undefined;
+            // #767: a copy of the thread keeps the whole conversation and the context it already held; nothing to seed.
+            if (reason === 'forked') {
+              store.appendItem(chatId, 'notice', 'The provider refused to continue this conversation, so it continues in a copy of this conversation with its full history.', 'completed', {kind: 'thread-reset'});
+              scheduleTimeline(chatId);
+              return undefined;
+            }
             threadReset = true;
             const items = store.timeline(chatId);
             let last = items.length - 1;
