@@ -85,7 +85,7 @@ before(async () => {
 after(async () => {
   socket?.close();
   if (chrome) { chrome.kill(); await new Promise(resolve => chrome!.once('exit', resolve)); }
-  if (profile) rmSync(profile, {recursive: true, force: true});
+  if (profile) rmSync(profile, {recursive: true, force: true, maxRetries: 20, retryDelay: 100});
 });
 
 // Spec: MUS-SPEC-09-721A (docs/spec/clauses/09-browser-and-previews.md#mus-spec-09-721a)
