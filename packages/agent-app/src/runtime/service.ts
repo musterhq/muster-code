@@ -38,7 +38,7 @@ import {createEntry, moveFile} from './file-operations.ts';
 import { isElicitationRequest, elicitationPolicy, elicitationResult, elicitationText, elicitationServer } from '../shared/computer-use.ts';
 import { isCompactCommand } from '../shared/compact-command.ts';
 import { createProviderAdapter, NO_LIVE_SESSION, ProviderPreDispatchError, type ProviderAdapter, type ProviderResult } from './provider.ts';
-import { commandArguments, commandBody, discoverPlugins, discoverSkills, expandClaudeCommand, invokedPluginContext, resolveAttachedSkill, resolveInvokedPlugins, selectedSkillBlock, setIconDownscaler, type IconDownscaler } from './plugin-library.ts';
+import { claudeReachesByName, commandArguments, commandBody, discoverPlugins, discoverSkills, expandClaudeCommand, invokedPluginContext, resolveAttachedSkill, resolveInvokedPlugins, selectedSkillBlock, setIconDownscaler, type IconDownscaler } from './plugin-library.ts';
 import { onBrandWanted, refreshRemotePluginIcons, setRemoteIconStore, type RemoteIconOptions } from './remote-plugin-icons.ts';
 import { CLAUDE_COMMAND_EVENT } from './adapters/claude-code.ts';
 import {providerAccessPolicy} from './provider-run-lifecycle.ts';
@@ -679,8 +679,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const project = chat.projectId ? store.snapshot().projects.find(p => p.id === chat.projectId) : undefined;
     const context = project ? `Project: ${project.name}\nShared goal: ${project.goal || '(not set)'}` : '';
     const skillContext = [...attachedSkills.map(entry => selectedSkillBlock(entry, prompt)), invokedPluginContext(plugins)].filter(Boolean).join('\n\n');
-    // #729: the first picked Claude Code skill or command; a Claude Code run sends it as `/<name> <request>` for Claude Code to expand.
-    const claudeEntry = attachedSkills.find(entry => entry.claude);
+    // #729: the first picked Claude Code skill or command that Claude Code reaches by its name; a Claude Code run sends it as
+    // `/<name> <request>` for Claude Code to expand. One a same-named skill or personal entry shadows is inlined, as picked.
+    let claudeEntry: (typeof attachedSkills)[number] | undefined;
+    for (const entry of attachedSkills) if (entry.claude && await claudeReachesByName(entry, folder ? [folder.path] : [])) { claudeEntry = entry; break; }
     const nativeSkillContext = claudeEntry ? [...attachedSkills.filter(entry => entry !== claudeEntry).map(entry => selectedSkillBlock(entry, prompt)), invokedPluginContext(plugins)].filter(Boolean).join('\n\n') : '';
     const defaultCwd = folder ? canonicalFolderPath(folder.path) : join(options.dataDir, 'scratch', chatId);
     const cwd = await domainHooks.runEnvironment(chat, defaultCwd);

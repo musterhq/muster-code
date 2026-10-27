@@ -70,10 +70,11 @@ const {ToolCard}=await import('../src/renderer/components/ToolCard');
 const {McpServers}=await import('../src/renderer/components/McpServers');
 const {PluginsScreen}=await import('../src/renderer/components/PluginsScreen');
 const {NewChatScreen}=await import('../src/renderer/components/NewChatScreen');
+const {PluginIcon}=await import('../src/renderer/components/PluginIcon');
 const {useStore}=await import('../src/renderer/useStore');
 const store=await import('../src/renderer/store');
 const errors:unknown[]=[],root=createRoot(document.getElementById('root')!,{onUncaughtError:error=>errors.push(error)});
-let generation=0,view:'composer'|'tools'|'settings'|'command'|'plugins'|'newchat'='composer';
+let generation=0,view:'composer'|'tools'|'settings'|'command'|'plugins'|'newchat'|'icons'='composer';
 const toolItem=(id:string,server:string,tool:string,status='completed')=>({id,chatId:'chat',kind:'tool',text:'',status,createdAt:'',data:{type:'mcpToolCall',server,tool,status}});
 const commandItem={id:'c1',chatId:'chat',kind:'tool',text:'/bar',status:'completed',createdAt:'',data:{type:'claudeCommand',kind:'command',name:'/bar',arguments:'the login flow',source:'.claude/commands (workspace)',path:'/workspace/.claude/commands/bar.md',output:'Review the login flow'}};
 const tools=[toolItem('t1','mcp__codex_apps__github','search_issues'),toolItem('t2','codex_apps','figma.get_screenshot'),toolItem('t3','postgres','run_query'),toolItem('t4','plugin_figma_figma','get_metadata','failed')];
@@ -83,6 +84,7 @@ function Harness(){const state=useStore();if(!state.snapshot)return null;
   if(view==='command')return <div className="tools"><ToolCard item={commandItem as any}/></div>;
   if(view==='plugins')return <PluginsScreen/>;
   if(view==='newchat')return <NewChatScreen/>;
+  if(view==='icons')return <div className="icons"><span className="pair"><PluginIcon name="Atlassian" icon={{kind:'image',dataUrl:'data:image/png;base64,TElHSFQ=',darkDataUrl:'data:image/png;base64,REFSSw=='}}/></span><div className="tools">{tools.slice(0,1).map(item=><ToolCard key={item.id} item={item as any}/>)}</div></div>;
   return <Composer key={generation} chat={state.snapshot.chats[0]}/>;}
 const render=async()=>{root.render(<Harness/>);await delay(60);};
 const byTest=(id:string)=>document.querySelector(`[data-testid="${id}"]`) as HTMLElement|null;
@@ -277,6 +279,23 @@ await check('the New chat + menu lists MCP servers and plugin apps with their ma
   assert.ok(!document.querySelector('.composer-plus-popover'),'the menu closes');
   const {getNewChatDraft}=await import('../src/renderer/newChatDraft');
   assert.match(getNewChatDraft().text,/@app:Atlassian/,'the agent gets the app by name');
+});
+
+// Spec: MUS-SPEC-14-732F (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-732f)
+await check('a logo the browser cannot draw falls back to the monogram on its row; a pair keeps the variant that still draws',async()=>{
+  view='icons';await render();
+  const fail=async(image:Element|null|undefined)=>{assert.ok(image,'the logo is drawn first');image!.dispatchEvent(new window.Event('error'));await delay(40);};
+  const glyph=()=>document.querySelector('.tools .tool-row-head > .tool-glyph');
+  await fail(glyph()?.querySelector('img.item-icon'));
+  assert.ok(!glyph()?.querySelector('img'),'the broken GitHub logo is gone from the tool row');
+  assert.equal(glyph()?.querySelector('.item-monogram')?.textContent?.trim().length?true:false,true,'the row shows the GitHub monogram instead');
+  const pair=()=>Array.from(document.querySelectorAll('.pair img.item-icon'));
+  assert.equal(pair().length,2,'a logo with a dark variant draws both, one per theme');
+  await fail(pair().find(image=>image.classList.contains('is-theme-dark')));
+  assert.deepEqual(pair().map(image=>[image.getAttribute('src'),image.classList.contains('is-theme-light')]),[['data:image/png;base64,TElHSFQ=',false]],'the light logo stays and now shows in both themes');
+  await fail(pair()[0]);
+  assert.equal(pair().length,0);
+  assert.ok(document.querySelector('.pair .item-monogram'),'with neither variant drawable the monogram shows');
 });
 
 assert.deepEqual(errors,[]);

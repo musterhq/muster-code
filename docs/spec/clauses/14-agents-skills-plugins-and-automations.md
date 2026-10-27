@@ -53,6 +53,12 @@ Boundaries:
 | [MUS-SPEC-14-729U](14-agents-skills-plugins-and-automations.md#mus-spec-14-729u) | An open + menu redraws a plugin row with its logo when the background refresh caches it. | [`an open + menu redraws Atlassian with its logo when the background refresh caches it`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
 | [MUS-SPEC-14-729V](14-agents-skills-plugins-and-automations.md#mus-spec-14-729v) | An open Skills & plugins screen redraws a catalog card with its borrowed logo when it is cached. | [`an open Skills & plugins screen redraws Linear with the logo borrowed from the OpenAI catalog when it is cached`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
 | [MUS-SPEC-14-729W](14-agents-skills-plugins-and-automations.md#mus-spec-14-729w) | The New chat + menu lists MCP servers and plugin apps with their marks, as a chat's composer does. | [`the New chat + menu lists MCP servers and plugin apps with their marks, and a pick inserts the connector chip`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
+| [MUS-SPEC-14-732A](14-agents-skills-plugins-and-automations.md#mus-spec-14-732a) | A command file swapped for a symlink right after it is checked is not read through the link, in the picker or when a run attaches it. | [`a command file swapped for a symlink right after it is checked is not read through the link, in the picker or when a run attaches it`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-732B](14-agents-skills-plugins-and-automations.md#mus-spec-14-732b) | A logo URL that redirects to plain http is never fetched over http; an https to https redirect still brings the logo. | [`a logo URL that redirects to plain http is never fetched over http; an https to https redirect still brings the logo`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-732C](14-agents-skills-plugins-and-automations.md#mus-spec-14-732c) | An entry Claude Code would not reach by its name (a project command under a personal one, a command under a same-named skill) runs as picked, inlined, not as `/name`. | [`an entry Claude Code would not reach by its name (a project command under a personal one, a command under a same-named skill) runs as picked, inlined, not as /name`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-732D](14-agents-skills-plugins-and-automations.md#mus-spec-14-732d) | A folder whose `.claude/skills` is a link to its `.agents/skills` lists the skill as Claude Code's, and a Claude Code run invokes it by name. | [`a folder whose .claude/skills is a link to its .agents/skills lists the skill as Claude Code's and a Claude Code run invokes it by name`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-732E](14-agents-skills-plugins-and-automations.md#mus-spec-14-732e) | A logo download that fails for a reason that may pass (offline, a 5xx or 429, a timeout) is tried again after six hours, not a week later. A 404 or a non-image is not retried before the weekly refresh. | [`a logo download that fails is tried again after six hours, not a week later`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-732F](14-agents-skills-plugins-and-automations.md#mus-spec-14-732f) | A logo the browser cannot draw falls back to the monogram on its row; a light and dark pair keeps the variant that still draws. | [`a logo the browser cannot draw falls back to the monogram on its row; a pair keeps the variant that still draws`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
 
 ### Claude Code background sub-agents
 
@@ -270,7 +276,7 @@ Boundaries:
 - Expected result: Each resolves to its plugin and that plugin's own icon; the built-in REPL and browser servers resolve to none. Labels drop the shared-server app prefix and a repeated connector name (`_slack_read_channel` reads "read channel").
 - Test: `packages/agent-app/tests/claude-skills-729.test.ts::tool calls from connector and plugin servers resolve to that plugin's icon under every name the coding clients give them`
 - Environment: Node test runner; pure functions; no network.
-- Known gaps: Built-in servers with no plugin (node_repl, muster_browser, the computer-use REPL) keep generic glyphs.
+- Known gaps: Built-in servers with no plugin (node_repl, muster_browser, the computer-use REPL) keep generic glyphs. This case checks name resolution only; the drawn marks on tool rows, connector rows and Settings are 729G, 729L and 729M.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-14-729f"></a>
@@ -402,7 +408,7 @@ Boundaries:
 - Expected result: Every one of those places shows the plugin's own logo, scaled to 128px, not a "CU" monogram. Raster logos up to 8 MB and 4096px are scaled; anything larger, or a logo that cannot be decoded, still falls back to the monogram. SVG logos keep their own budget and are never rasterised.
 - Test: `packages/agent-app/tests/claude-skills-729.test.ts::a plugin whose logo file is over the icon budget (Computer Use ships a 900 KB, 1024px PNG) still shows its logo, scaled down, in Skills & plugins and on its MCP server`
 - Environment: Real agent service and plugin discovery against a temporary ~/.codex plugin cache with a 1 MB PNG; the app's downscaler stands in for Electron's nativeImage. Live check in an isolated Muster instance with the real Computer Use plugin.
-- Known gaps: Scaling runs in the app process; a runtime started without the app (CLI tests) keeps the monogram for oversized logos.
+- Known gaps: Scaling runs in the app process; a runtime started without the app (CLI tests) keeps the monogram for oversized logos. The test checks the scaled logo on the plugin and its MCP server mark in the inventory, not the drawn surfaces; Electron's nativeImage itself is exercised only by the live check (screenshots in the PR).
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-14-729r"></a>
@@ -469,4 +475,70 @@ Boundaries:
 - Test: `packages/agent-app/tests/claude-skills-729-components.tsx::the New chat + menu lists MCP servers and plugin apps with their marks, and a pick inserts the connector chip`
 - Environment: Real NewChatScreen in a DOM suite (linkedom); fake app bridge answering `mcp.servers.list` and `plugins.inventory`; no network.
 - Known gaps: Pixel rendering and both themes are checked from screenshots, not in this suite.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-732a"></a>
+#### MUS-SPEC-14-732A: A command file swapped for a link after it is checked is not read through it
+
+- Precondition: `~/.claude/commands/swap.md` exists, and a file outside the commands folder holds a secret.
+- Action: Between the last containment check and the read, the command file is replaced by a symlink to the secret (the test swaps it when the path is resolved for the second time). Then the picker lists commands and a run attaches `swap`.
+- Expected result: Neither the picker nor the attached command ever contains the secret: the file is opened without following a link and must still be the file that passed the check. An untouched command still reads normally.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::a command file swapped for a symlink right after it is checked is not read through the link, in the picker or when a run attaches it`
+- Environment: Real discovery and attachment against a temporary home; `fs.promises.realpath` wrapped to swap the file at that moment.
+- Known gaps: A swap of a parent folder, rather than the file, is caught by the check after opening but has no separate test.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-732b"></a>
+#### MUS-SPEC-14-732B: A logo redirect to plain http is never followed
+
+- Precondition: Two installed remote plugins with no logo on disk: one's logo URL redirects to an `http:` URL, the other's redirects (relative Location) to another https URL.
+- Action: The background logo refresh runs.
+- Expected result: No request is ever made over http. The plugin behind the http redirect keeps its monogram; the https-redirected one shows its logo.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::a logo URL that redirects to plain http is never fetched over http; an https to https redirect still brings the logo`
+- Environment: Real service and refresh; a fake fetch that follows redirects itself unless asked for `redirect: 'manual'`, as fetch does; no network.
+- Known gaps: None.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-732c"></a>
+#### MUS-SPEC-14-732C: An entry Claude Code would not reach by its name runs as picked
+
+- Precondition: A personal and a project command both named `bar`; a personal skill and a personal command both named `foo`. Claude Code runs a skill over a command of the same name, and a personal entry over a project's.
+- Action: On a Claude Code chat, send with each of the four entries picked.
+- Expected result: The project `bar` and the `foo` command are inlined with their own text filled in, never sent as `/bar` or `/foo`. The personal `bar` and the `foo` skill, which Claude Code does reach, are still sent as `/bar the API` and `/foo the notes`.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::an entry Claude Code would not reach by its name (a project command under a personal one, a command under a same-named skill) runs as picked, inlined, not as /name`
+- Environment: Real service, provider adapter and router Claude lane with a fake `claude` executable; temporary home and folder.
+- Known gaps: Enterprise-managed and plugin-namespaced entries are not listed by Muster, so they are not ranked.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-732d"></a>
+#### MUS-SPEC-14-732D: A linked .claude/skills folder still runs its skills natively
+
+- Precondition: A folder with `.agents/skills/shared-notes/SKILL.md`, and `.claude/skills` a symlink to `.agents/skills`.
+- Action: List the folder's skills, then send `the notes $shared-notes` with it picked on a Claude Code chat.
+- Expected result: The skill is listed once, as a Claude Code skill, and Claude Code receives `/shared-notes the notes`.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::a folder whose .claude/skills is a link to its .agents/skills lists the skill as Claude Code's and a Claude Code run invokes it by name`
+- Environment: Real service and Claude lane with a fake `claude` executable; temporary folder.
+- Known gaps: None.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-732e"></a>
+#### MUS-SPEC-14-732E: A failed logo download is retried after six hours
+
+- Precondition: An installed remote plugin with no logo on disk whose listed logo URL answers 503.
+- Action: Launch three times: at the start, one hour later (the URL now serves the logo), and seven hours later.
+- Expected result: The first launch tries the download once. One hour later nothing is tried again and the monogram stays. Seven hours later the download is tried again, the app is told the marks changed, and the plugin shows its logo.
+- Test: `packages/agent-app/tests/claude-skills-729.test.ts::a logo download that fails is tried again after six hours, not a week later`
+- Environment: Real service and refresh with an injected clock and fake fetch; no network.
+- Known gaps: The 404 and non-image cases are covered by 729S's check that a fresh cache is not refreshed on every launch.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-732f"></a>
+#### MUS-SPEC-14-732F: A logo that cannot be drawn falls back to the monogram
+
+- Precondition: A tool row whose server's plugin has a logo, and a plugin mark with light and dark variants.
+- Action: The browser reports an error loading the tool row's logo, then the dark variant, then the light one.
+- Expected result: The tool row shows the plugin's monogram in place of the broken logo. After the dark variant fails, the light logo shows in both themes. After both fail, the monogram shows.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::a logo the browser cannot draw falls back to the monogram on its row; a pair keeps the variant that still draws`
+- Environment: Real ToolCard and PluginIcon in a DOM suite (linkedom); the error event is dispatched on the image.
+- Known gaps: A real undecodable file is not decoded in this suite; screenshots cover the drawn result.
 - Evidence: UNVERIFIED

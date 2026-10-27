@@ -23,6 +23,7 @@ const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024;
 const MAX_PLUGINS = 200;
 const LIST_TIMEOUT_MS = 90_000;
 const FETCH_TIMEOUT_MS = 15_000;
+const MAX_REDIRECTS = 5;
 /** Brand names ever looked up. Past this, new names are not queued (never evicted, so nothing is looked up twice). */
 const MAX_BRANDS = 1024;
 const BRAND_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -119,11 +120,22 @@ function imageExtension(bytes: Buffer): string | null {
   return null;
 }
 
-async function download(url: string, fetchImpl: typeof fetch): Promise<{ bytes: Buffer; ext: string } | null> {
+/** The image, null when the URL gives nothing usable, or 'retry' when it may work later (offline, a 5xx or 429, a timeout). */
+async function download(url: string, fetchImpl: typeof fetch): Promise<{ bytes: Buffer; ext: string } | null | 'retry'> {
   try {
-    const response = await fetchImpl(url, { redirect: 'follow', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    // Redirects are followed by hand so every hop is checked to be https before it is requested.
+    const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    let current = url, response = await fetchImpl(current, { redirect: 'manual', signal });
+    for (let hop = 0; response.status >= 300 && response.status < 400; hop++) {
+      const location = response.headers.get('location');
+      await response.body?.cancel().catch(() => undefined);
+      if (!location || hop >= MAX_REDIRECTS) return null;
+      current = new URL(location, current).href;
+      if (!current.startsWith('https:')) return null;
+      response = await fetchImpl(current, { redirect: 'manual', signal });
+    }
+    if (response.status >= 500 || response.status === 429) return 'retry';
     if (!response.ok || !response.body) return null;
-    if (response.url && !response.url.startsWith('https:')) return null;
     if (Number(response.headers.get('content-length') ?? 0) > MAX_DOWNLOAD_BYTES) return null;
     const chunks: Buffer[] = []; let size = 0;
     for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
@@ -133,7 +145,7 @@ async function download(url: string, fetchImpl: typeof fetch): Promise<{ bytes: 
     }
     const bytes = Buffer.concat(chunks), ext = imageExtension(bytes);
     return ext ? { bytes, ext } : null;
-  } catch { return null; }
+  } catch { return 'retry'; }
 }
 
 /** One `plugin/list` call over a short-lived `codex app-server`. */
@@ -210,7 +222,8 @@ async function refresh(options: RemoteIconOptions): Promise<boolean> {
   try { listing = await (options.listPlugins ?? listInstalledPlugins)(); }
   catch { await fs.writeFile(join(dir, 'failed-at'), String(now)).catch(() => undefined); return false; }
   const fetchImpl = options.fetch ?? fetch;
-  let changed = false;
+  let changed = false, retry = false;
+  const failedBrands = new Set<string>();
   const fill = async (key: string, variants: LogoUrls, prior: IndexEntry | undefined): Promise<IndexEntry> => {
     const entry: IndexEntry = {};
     for (const variant of ['light', 'dark'] as const) {
@@ -219,6 +232,12 @@ async function refresh(options: RemoteIconOptions): Promise<boolean> {
       const before = prior?.[variant];
       if (before?.url === url && existsSync(join(dir, before.file))) { entry[variant] = before; continue; }
       const image = await download(url, fetchImpl);
+      if (image === 'retry') {
+        retry = true;
+        if (key.startsWith('brand:')) failedBrands.add(key.slice(6));
+        if (before && existsSync(join(dir, before.file))) entry[variant] = before;
+        continue;
+      }
       if (!image) continue;
       const file = `${createHash('sha256').update(`${key}\0${variant}`).digest('hex').slice(0, 32)}${image.ext}`;
       const temp = join(dir, `.${file}.${process.pid}.tmp`);
@@ -233,9 +252,9 @@ async function refresh(options: RemoteIconOptions): Promise<boolean> {
     const entry = await fill(key, variants, current?.icons[key]);
     if (entry.light || entry.dark) icons[key] = entry;
   }
-  const checked = [...new Set([...(current?.brandsChecked ?? []), ...pending])];
+  const checked = () => [...new Set([...(current?.brandsChecked ?? []), ...pending])].filter(name => !failedBrands.has(name));
   const brands: Record<string, IndexEntry> = stale ? {} : { ...(current.brands ?? {}) };
-  for (const [name, variants] of brandIconUrls(listing, new Set(stale ? checked : pending))) {
+  for (const [name, variants] of brandIconUrls(listing, new Set(stale ? checked() : pending))) {
     const entry = await fill(`brand:${name}`, variants, current?.brands?.[name]);
     if (entry.light || entry.dark) brands[name] = entry;
   }
@@ -246,11 +265,13 @@ async function refresh(options: RemoteIconOptions): Promise<boolean> {
       for (const file of [entry.light?.file, entry.dark?.file]) if (file && !kept.has(file)) await fs.rm(join(dir, file), { force: true });
     }
   }
-  for (const name of pending) wanted.delete(name);
-  const next: IconIndex = { version: 1, checkedAt: stale ? now : current.checkedAt, icons, brands, brandsChecked: checked };
+  for (const name of pending) if (!failedBrands.has(name)) wanted.delete(name);
+  // A download that may work later keeps the cache due (a weekly refresh) or the name unlooked-up, so it is tried again after RETRY_MS.
+  const next: IconIndex = { version: 1, checkedAt: stale && !retry ? now : current?.checkedAt ?? 0, icons, brands, brandsChecked: checked() };
   const temp = join(dir, `.index.${process.pid}.tmp`);
   await fs.writeFile(temp, JSON.stringify(next)); await fs.rename(temp, join(dir, 'index.json'));
-  await fs.rm(join(dir, 'failed-at'), { force: true });
+  if (retry) await fs.writeFile(join(dir, 'failed-at'), String(now));
+  else await fs.rm(join(dir, 'failed-at'), { force: true });
   index = next;
   return changed;
 }

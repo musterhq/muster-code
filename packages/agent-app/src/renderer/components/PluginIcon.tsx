@@ -13,14 +13,18 @@ export function monogramFontSize(size: number): number {
 }
 
 export function PluginIcon({ icon, name, seed = name, brandColor, shape = 'square', size = 16, className }: { icon?: ItemIcon; name: string; seed?: string; brandColor?: string; shape?: 'square' | 'skill' | 'round'; size?: number; className?: string }): React.ReactElement {
-  const value = icon ?? monogram(name, seed, brandColor);
+  // A logo the browser cannot draw (a truncated or undecodable file) drops out: a pair keeps the variant that still draws, else the monogram.
+  const [broken, setBroken] = React.useState<ReadonlySet<string>>(() => new Set());
+  const drawable = icon?.kind === 'image' ? [icon.dataUrl, icon.darkDataUrl].filter((src): src is string => !!src && !broken.has(src)) : [];
+  const value = icon && (icon.kind !== 'image' || drawable.length) ? icon : monogram(name, seed, brandColor);
   const extra = className ? ` ${className}` : '';
   if (value.kind === 'image') {
     const tone = `${value.monochrome ? ' is-monochrome' : ''}${value.monochromeLight ? ' is-monochrome-light' : ''}`;
-    const image = (src: string, className: string) => <img className={`item-icon is-${shape}${className}${extra}`} src={src} alt="" aria-hidden="true" draggable={false} width={size} height={size} style={{ width: size, height: size }} />;
+    const onError = (src: string) => () => setBroken(previous => new Set(previous).add(src));
+    const image = (src: string, className: string) => <img key={src} className={`item-icon is-${shape}${className}${extra}`} src={src} alt="" aria-hidden="true" draggable={false} width={size} height={size} style={{ width: size, height: size }} onError={onError(src)} />;
     // CS-C3-2: a manifest dark logo is its own <img>; CSS shows exactly one of the pair for the current theme.
-    if (value.darkDataUrl) return <>{image(value.dataUrl, `${tone} is-theme-light`)}{image(value.darkDataUrl, ' is-theme-dark')}</>;
-    return image(value.dataUrl, tone);
+    if (drawable.length === 2) return <>{image(value.dataUrl, `${tone} is-theme-light`)}{image(value.darkDataUrl!, ' is-theme-dark')}</>;
+    return image(drawable[0], drawable[0] === value.dataUrl ? tone : '');
   }
   return <span className={`item-icon item-monogram is-${shape}${extra}`} aria-hidden="true" style={{ '--h': value.hue, width: size, height: size, fontSize: monogramFontSize(size) } as React.CSSProperties}>{value.text}</span>;
 }

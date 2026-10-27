@@ -50,15 +50,28 @@ async function readSkill(dir: string, root: string): Promise<{ readme: string | 
   const path = await contained(join(dir, 'SKILL.md'), root);
   if (!path) return { readme: null, readError: null };
   try {
-    const stat = await fs.stat(path);
-    if (!stat.isFile()) return { readme: null, readError: null };
-    const handle = await fs.open(path, 'r');
-    try {
-      const buffer = Buffer.alloc(MAX_README);
-      const { bytesRead } = await handle.read(buffer, 0, MAX_README, 0);
-      return { readme: buffer.subarray(0, bytesRead).toString('utf8'), readError: null };
-    } finally { await handle.close(); }
+    const read = await readContainedText(path, root, MAX_README, true);
+    return read === null ? { readme: null, readError: null } : { readme: read, readError: null };
   } catch (error) { return { readme: null, readError: error instanceof Error ? error.message : String(error) }; }
+}
+
+/**
+ * Reads a file already resolved inside `root` without following a link swapped in after that check: the open refuses a
+ * symlink, and the opened file must still be the one at the resolved path inside the root. Null when it is not a regular
+ * file, has moved out of the root, or (unless `truncate`) is over `max` bytes.
+ */
+async function readContainedText(resolved: string, root: string, max: number, truncate = false): Promise<string | null> {
+  const handle = await fs.open(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile() || (!truncate && opened.size > max)) return null;
+    if (await contained(resolved, root) !== resolved) return null;
+    const now = await fs.lstat(resolved);
+    if (now.dev !== opened.dev || now.ino !== opened.ino) return null;
+    const buffer = Buffer.alloc(Math.min(max, opened.size));
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } finally { await handle.close(); }
 }
 
 const MAX_ICON_BYTES = 256 * 1024;
@@ -235,8 +248,8 @@ async function commandEntry(path: string, name: string, source: SkillRoot, root:
     if (!safe) return null;
     const stat = await fs.stat(safe);
     if (!stat.isFile()) return null;
-    readme = stat.size > MAX_README ? null : await fs.readFile(safe, 'utf8');
-    if (readme === null) readError = 'Over the 64 KB command limit';
+    readme = stat.size > MAX_README ? null : await readContainedText(safe, root, MAX_README);
+    if (readme === null) readError = stat.size > MAX_README ? 'Over the 64 KB command limit' : 'The command file changed while it was read';
   } catch (error) { readError = error instanceof Error ? error.message : String(error); }
   const front = frontMatter(readme);
   const body = commandBody(readme ?? '');
@@ -316,6 +329,7 @@ export async function resolveAttachedSkill(skillId: string, folderPaths: string[
   if (!skillId || skillId.length > 4096 || skillId.includes('\0')) return null;
   const leaf = basename(skillId);
   if (!leaf || leaf === '.' || leaf === '..') return null;
+  let generic: (SkillEntry & { content: string; digest: string }) | null = null;
   for (const source of ROOTS(folderPaths)) {
     let root: string;
     try { root = await fs.realpath(source.path); } catch { continue; }
@@ -328,6 +342,8 @@ export async function resolveAttachedSkill(skillId: string, folderPaths: string[
       return { ...skill, content: skill.readme, digest: createHash('sha256').update(skill.readme, 'utf8').digest('hex') };
     }
     if (source.only && leaf !== source.only) continue;
+    // A folder whose .claude/skills links to its .agents/skills reaches one skill through both; listing keeps the Claude Code row.
+    if (generic && !source.claude) continue;
     const candidate = await contained(join(root, leaf), root);
     if (!candidate || candidate !== skillId) continue;
     try { if (!(await fs.stat(candidate)).isDirectory()) continue; } catch { continue; }
@@ -335,9 +351,34 @@ export async function resolveAttachedSkill(skillId: string, folderPaths: string[
     if (read.readError || !read.readme?.trim() || Buffer.byteLength(read.readme, 'utf8') > MAX_ATTACHED_SKILL_BYTES) return null;
     const skill = { id: candidate, name: source.name ?? leaf, provenance: source.provenance, path: candidate, readme: read.readme, readError: null, content: read.readme, digest: createHash('sha256').update(read.readme, 'utf8').digest('hex'), ...(source.claude ? { claude: source.claude } : {}) };
     if (skillGate && !skillGate(skill, folderPaths)) throw new Error(`The ${skill.name} skill is disabled here. Enable it in Skills & plugins or remove its chip.`);
-    return skill;
+    if (source.claude) return skill;
+    generic ??= skill;
   }
-  return null;
+  return generic;
+}
+
+/**
+ * #729: whether Claude Code's `/<name>` reaches this entry. Claude Code takes a skill over a command of the same name, and a
+ * personal one (~/.claude) over a project's, so a picked entry that loses is not sent by name: it runs inlined, as picked.
+ */
+export async function claudeReachesByName(entry: { id: string; name: string; claude?: 'skill' | 'command' }, folderPaths: string[] = []): Promise<boolean> {
+  if (!entry.claude) return false;
+  const roots = ROOTS(folderPaths).filter(source => source.claude);
+  for (const source of [...roots.filter(root => root.claude === 'skill'), ...roots.filter(root => root.claude === 'command')]) {
+    let root: string;
+    try { root = await fs.realpath(source.path); } catch { continue; }
+    if (source.claude === 'skill') {
+      if (entry.name.includes(':')) continue;
+      const dir = await contained(join(root, entry.name), root);
+      const readme = dir ? await contained(join(dir, 'SKILL.md'), root) : null;
+      try { if (!readme || !(await fs.stat(readme)).isFile()) continue; } catch { continue; }
+      return dir === entry.id;
+    }
+    const file = await contained(join(root, ...entry.name.split(':')) + '.md', root);
+    try { if (!file || !(await fs.stat(file)).isFile()) continue; } catch { continue; }
+    return file === entry.id;
+  }
+  return false;
 }
 
 function record(value: unknown): Record<string, unknown> | null {

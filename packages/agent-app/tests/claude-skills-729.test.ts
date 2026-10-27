@@ -5,8 +5,8 @@
 // Code lane and the Claude Code adapter with a fake `claude` executable and a temporary home; no network.
 import assert from 'node:assert/strict';
 import {test, type TestContext} from 'node:test';
-import {mkdtemp, mkdir, rm, writeFile, chmod, readFile, realpath} from 'node:fs/promises';
-import {existsSync} from 'node:fs';
+import {mkdtemp, mkdir, rm, writeFile, chmod, readFile, realpath, symlink, unlink} from 'node:fs/promises';
+import {existsSync, promises as fsPromises} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomUUID, randomFillSync} from 'node:crypto';
@@ -19,6 +19,7 @@ import {claudeCodeAdapter} from '../src/runtime/adapters/claude-code.ts';
 import {registerChatTokenIssuer} from '../src/runtime/governance/chat-binding.ts';
 import {BACKGROUND_MCP} from '../src/runtime/background-agent-tools.ts';
 import {extensionsOptions} from '../src/runtime/domains/extensions.ts';
+import {discoverSkills, resolveAttachedSkill} from '../src/runtime/plugin-library.ts';
 import {qualifiedSkillName} from '../src/shared/domains/extensions-protocol.ts';
 import {mcpMark, mcpServerNames, mcpToolLabel} from '../src/renderer/mcpIcons.ts';
 import {classifyTool} from '../src/renderer/components/toolPresentation.ts';
@@ -417,4 +418,155 @@ test('a marketplace plugin with no logo (the Claude marketplace’s linear) show
   const listsNow = lists;
   await service.invoke('extensions.catalog', undefined); await delay(100);
   assert.equal(lists, listsNow, 'a name looked up once is not looked up again');
+});
+
+// Spec: MUS-SPEC-14-732A (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-732a)
+test('a command file swapped for a symlink right after it is checked is not read through the link, in the picker or when a run attaches it', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'muster-732a-')), saved = process.env.HOME, original = fsPromises.realpath;
+  process.env.HOME = join(root, 'home');
+  const commands = join(root, 'home', '.claude', 'commands');
+  await mkdir(commands, {recursive: true});
+  const secret = join(root, 'secret.txt');
+  await writeFile(secret, 'SECRET-OUTSIDE-THE-COMMANDS-FOLDER\n');
+  await writeFile(join(commands, 'swap.md'), 'SWAP-BODY\n');
+  const target = await realpath(join(commands, 'swap.md'));
+  t.after(async () => { fsPromises.realpath = original; if (saved === undefined) delete process.env.HOME; else process.env.HOME = saved; await rm(root, {recursive: true, force: true}); });
+  // The swap lands between the last containment check (the second time the file's path is resolved) and the read.
+  let seen = 0;
+  const armSwap = () => { seen = 0; };
+  fsPromises.realpath = (async (...args: Parameters<typeof original>) => {
+    const resolved = await original(...args);
+    if (resolved === target && ++seen === 2) { await unlink(target); await symlink(secret, target); }
+    return resolved;
+  }) as typeof original;
+  armSwap();
+  const listed = (await discoverSkills([])).find(entry => entry.name === 'swap');
+  assert.doesNotMatch(listed?.readme ?? '', /SECRET/, 'the picker never shows the file the link points at');
+  await unlink(target); await writeFile(target, 'SWAP-BODY\n'); armSwap();
+  const attached = await resolveAttachedSkill(target, []);
+  assert.doesNotMatch(attached?.content ?? '', /SECRET/, 'a run never gets the file the link points at');
+  fsPromises.realpath = original;
+  await unlink(target); await writeFile(target, 'SWAP-BODY\n');
+  assert.equal((await resolveAttachedSkill(target, []))?.content, 'SWAP-BODY\n', 'an untouched command still reads');
+});
+
+// Spec: MUS-SPEC-14-732B (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-732b)
+test('a logo URL that redirects to plain http is never fetched over http; an https to https redirect still brings the logo', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'muster-732b-')), saved = process.env.HOME;
+  process.env.HOME = join(root, 'home');
+  const cache = join(root, 'home', '.codex', 'plugins', 'cache', 'openai-curated-remote');
+  for (const name of ['app-downgrade', 'app-hop']) {
+    const dir = join(cache, name, '1.0.0'); await mkdir(join(dir, '.codex-plugin'), {recursive: true});
+    await writeFile(join(dir, '.codex-plugin', 'plugin.json'), JSON.stringify({name, version: '1.0.0', interface: {displayName: name}}));
+  }
+  const logo = png(64, false);
+  const redirects: Record<string, string> = {'https://files.example/downgrade.png': 'http://files.example/logo.png', 'https://files.example/hop.png': '/cdn/logo.png'};
+  const served: Record<string, Buffer> = {'http://files.example/logo.png': logo, 'https://files.example/cdn/logo.png': logo};
+  const fetched: string[] = [];
+  // Behaves like fetch: `redirect: 'follow'` (the default) follows Location itself; `manual` hands the 3xx back.
+  const fakeFetch = (async (url: string, init?: RequestInit) => {
+    let current = String(url);
+    for (let hop = 0; hop < 5; hop++) {
+      fetched.push(current);
+      const next = redirects[current];
+      if (!next) break;
+      if (init?.redirect === 'manual') return new Response(null, {status: 302, headers: {location: next}});
+      current = new URL(next, current).href;
+    }
+    const body = served[current];
+    return body ? new Response(new Uint8Array(body), {status: 200, headers: {'content-type': 'image/png'}}) : new Response('missing', {status: 404});
+  }) as typeof fetch;
+  const row = (name: string, logoUrl: string) => ({id: `${name}@openai-curated-remote`, name, installed: true, source: {type: 'remote'}, interface: {displayName: name, logoUrl}});
+  const listing = {marketplaces: [{name: 'openai-curated-remote', plugins: [row('app-downgrade', 'https://files.example/downgrade.png'), row('app-hop', 'https://files.example/hop.png')]}]};
+  const events: string[] = [];
+  const service = createAgentService({dataDir: root, onEvent(event) { events.push(event.type); }, remotePluginIcons: {delayMs: 0, listPlugins: async () => listing, fetch: fakeFetch}});
+  t.after(async () => { await service.dispose(); if (saved === undefined) delete process.env.HOME; else process.env.HOME = saved; await rm(root, {recursive: true, force: true}); });
+  for (let i = 0; i < 100 && !events.includes('pluginIconsChanged'); i++) await delay(20);
+  const inventory = await service.invoke('plugins.inventory', undefined);
+  const icon = (name: string) => inventory.find(entry => entry.name === name)?.icon;
+  assert.ok(!fetched.some(url => url.startsWith('http:')), `nothing is requested over http; requested ${fetched.join(', ')}`);
+  assert.equal(icon('app-downgrade')?.kind, 'monogram', 'a logo behind an http redirect keeps the monogram');
+  assert.equal(icon('app-hop')?.kind, 'image', 'a relative https redirect is followed');
+});
+
+// Spec: MUS-SPEC-14-732C (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-732c)
+test('an entry Claude Code would not reach by its name (a project command under a personal one, a command under a same-named skill) runs as picked, inlined, not as /name', async t => {
+  const h: H = await harness(t);
+  await writeFile(join(h.tree.project, '.claude', 'commands', 'bar.md'), 'PROJECT-BAR-BODY: check $ARGUMENTS the project way.\n');
+  await writeFile(join(h.tree.home, '.claude', 'commands', 'foo.md'), 'FOO-COMMAND-BODY: list $ARGUMENTS.\n');
+  await h.folderId(h.tree.project);
+  const skills = await h.skills(h.tree.project);
+  const bars = skills.filter(entry => entry.name === 'bar' && entry.claude === 'command');
+  assert.equal(bars.length, 2, 'both bar commands are listed');
+  const projectBar = bars.find(entry => entry.provenance.startsWith('.claude/commands'))!, personalBar = bars.find(entry => entry.provenance === '~/.claude/commands')!;
+  const runs = async (entry: SkillEntry, text: string) => {
+    const chat = await h.chat('cc/claude-opus-5-5', h.tree.project);
+    const before = (await h.launches()).length;
+    await h.send(chat.id, text, [entry.id]);
+    const launches = await h.launches();
+    assert.equal(launches.length, before + 1, 'Claude Code ran the turn');
+    return {prompt: launches.at(-1)!.prompt, system: flag(launches.at(-1)!.argv, '--append-system-prompt') ?? ''};
+  };
+  const project = await runs(projectBar, '/bar the API');
+  assert.doesNotMatch(project.prompt, /^\/bar/, 'Claude Code would run the personal bar for /bar, so the project one is not sent by name');
+  assert.match(project.prompt + project.system, /PROJECT-BAR-BODY: check the API the project way\./, 'the picked project command is what runs');
+  const personal = await runs(personalBar, '/bar the API');
+  assert.equal(personal.prompt, '/bar the API', 'the personal bar is the one Claude Code reaches, so it still runs natively');
+  const fooCommand = pick(skills, 'foo', 'command'), fooSkill = pick(skills, 'foo', 'skill');
+  const command = await runs(fooCommand, '/foo the changes');
+  assert.doesNotMatch(command.prompt, /^\/foo/, 'a skill named foo wins /foo in Claude Code, so the command is not sent by name');
+  assert.match(command.prompt + command.system, /FOO-COMMAND-BODY: list the changes\./);
+  const skill = await runs(fooSkill, 'the notes $foo');
+  assert.equal(skill.prompt, '/foo the notes', 'the skill is what /foo reaches');
+});
+
+// Spec: MUS-SPEC-14-732D (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-732d)
+test('a folder whose .claude/skills is a link to its .agents/skills lists the skill as Claude Code\'s and a Claude Code run invokes it by name', async t => {
+  const h: H = await harness(t);
+  const shared = join(h.tree.other, '.agents', 'skills');
+  await mkdir(join(shared, 'shared-notes'), {recursive: true});
+  await writeFile(join(shared, 'shared-notes', 'SKILL.md'), '---\nname: shared-notes\ndescription: Shared by both clients\n---\nSHARED-BODY\n');
+  await mkdir(join(h.tree.other, '.claude'), {recursive: true});
+  await symlink(shared, join(h.tree.other, '.claude', 'skills'));
+  await h.folderId(h.tree.other);
+  const listed = (await h.skills(h.tree.other)).filter(entry => entry.name === 'shared-notes');
+  assert.equal(listed.length, 1, 'listed once');
+  assert.equal(listed[0].claude, 'skill', 'as the Claude Code skill');
+  const chat = await h.chat('cc/claude-opus-5-5', h.tree.other);
+  await h.send(chat.id, 'the notes $shared-notes', [listed[0].id]);
+  const [run] = await h.launches();
+  assert.equal(run?.prompt, '/shared-notes the notes', 'Claude Code runs it by name');
+});
+
+// Spec: MUS-SPEC-14-732E (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-732e)
+test('a logo download that fails is tried again after six hours, not a week later', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'muster-732e-')), saved = process.env.HOME;
+  process.env.HOME = join(root, 'home');
+  const dir = join(root, 'home', '.codex', 'plugins', 'cache', 'openai-curated-remote', 'app-atlassian', '1.0.0');
+  await mkdir(join(dir, '.codex-plugin'), {recursive: true});
+  await writeFile(join(dir, '.codex-plugin', 'plugin.json'), JSON.stringify({name: 'app-atlassian', version: '1.0.0', interface: {displayName: 'Atlassian'}}));
+  const listing = {marketplaces: [{name: 'openai-curated-remote', plugins: [{id: 'app-atlassian@openai-curated-remote', name: 'app-atlassian', installed: true, source: {type: 'remote'}, interface: {displayName: 'Atlassian', logoUrl: 'https://files.example/atlassian.png'}}]}]};
+  const logo = png(64, false), start = Date.now(), hour = 60 * 60 * 1000;
+  let up = false, fetches = 0;
+  const fakeFetch = (async () => { fetches++; return up ? new Response(new Uint8Array(logo), {status: 200, headers: {'content-type': 'image/png'}}) : new Response('busy', {status: 503}); }) as typeof fetch;
+  const services: ReturnType<typeof createAgentService>[] = [];
+  t.after(async () => { for (const service of services) await service.dispose(); if (saved === undefined) delete process.env.HOME; else process.env.HOME = saved; await rm(root, {recursive: true, force: true}); });
+  const launch = async (at: number) => {
+    const events: string[] = [];
+    const service = createAgentService({dataDir: root, onEvent(event) { events.push(event.type); }, remotePluginIcons: {delayMs: 0, now: () => at, listPlugins: async () => listing, fetch: fakeFetch}});
+    services.push(service);
+    await delay(300);
+    return {service, events};
+  };
+  await launch(start);
+  assert.equal(fetches, 1, 'the first launch tries the download');
+  const icon = async (service: ReturnType<typeof createAgentService>) => (await service.invoke('plugins.inventory', undefined)).find(entry => entry.name === 'app-atlassian')?.icon?.kind;
+  up = true;
+  const soon = await launch(start + hour);
+  assert.equal(fetches, 1, 'within six hours of a failure nothing is tried again');
+  assert.equal(await icon(soon.service), 'monogram');
+  const later = await launch(start + 7 * hour);
+  assert.equal(fetches, 2, 'after six hours the failed download is tried again');
+  assert.ok(later.events.includes('pluginIconsChanged'), 'and the app is told');
+  assert.equal(await icon(later.service), 'image', 'Atlassian shows its logo');
 });
