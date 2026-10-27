@@ -16,6 +16,7 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-14-398A](14-agents-skills-plugins-and-automations.md#mus-spec-14-398a) | Marketplace cards show their source name without a repeated runtime prefix; the full provenance stays in a tooltip. | [`marketplace cards show the source name and keep full provenance in a tooltip`](../../../packages/agent-app/tests/ui-sweep-dom.tsx) |
 | [MUS-SPEC-14-382A](14-agents-skills-plugins-and-automations.md#mus-spec-14-382a) | After 31 minutes with no report the sub-agent still reads running, the chat run is still open and Claude Code input is open; Stop then interrupts Claude Code, the sub-agent reads interrupted and the run ends as Stopped. | [`Claude Code background sub-agent: no 30 minute cut-off while it is still running`](../../../packages/agent-app/tests/claude-background-382.test.ts) |
 | [MUS-SPEC-14-480A](14-agents-skills-plugins-and-automations.md#mus-spec-14-480a) | An MCP server added mid-run stops the running chat once, re-sends its last message through the queue with the new server in its tools, leaves the queue unpaused and adds one notice. | [`an MCP server added mid-run restarts the running chat once and re-sends its prompt through the queue with the new tools`](../../../packages/agent-app/tests/plugin-reload.test.ts) |
 | [MUS-SPEC-14-480B](14-agents-skills-plugins-and-automations.md#mus-spec-14-480b) | An idle chat whose last message asked for the plugin gets it re-sent; an idle chat on another topic and a running chat doing unrelated work are not stopped or re-sent. | [`an MCP server added mid-run restarts the running chat once and re-sends its prompt through the queue with the new tools`](../../../packages/agent-app/tests/plugin-reload.test.ts) |
@@ -601,4 +602,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/large-logo-729.electron.ts::a plugin logo over the icon budget is scaled by the app's real image scaler and shown; one it cannot decode keeps the monogram`
 - Environment: Runs inside Electron (`npm run test:electron`) with the real nativeImage and the real agent service against a temporary ~/.codex plugin cache.
 - Known gaps: The 4096px limit has no fixture (see 729Q).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-398a"></a>
+#### MUS-SPEC-14-398A: Marketplace cards show a concise source with full provenance available
+
+- Precondition: A marketplace source is labelled Codex: local-marketplace and offers an uninstalled Notes plugin.
+- Action: Open Skills & plugins and select Discover.
+- Expected result: The Notes card shows local-marketplace with the full source label in its tooltip, and offers Install.
+- Test: `packages/agent-app/tests/ui-sweep-dom.tsx::marketplace cards show the source name and keep full provenance in a tooltip`
+- Environment: Node and linkedom with the real PluginsScreen and fixture bridge; no network.
+- Known gaps: Real marketplace sources are not synced; layout is checked in the browser fixture.
 - Evidence: UNVERIFIED

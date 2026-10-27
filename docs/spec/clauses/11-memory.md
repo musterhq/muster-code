@@ -15,6 +15,7 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-11-398A](11-memory.md#mus-spec-11-398a) | All 20 start compact with source and summary; only the selected suggestion opens its editor; remembering removes that suggestion. | [`memory suggestions start as compact source rows and expand for review`](../../../packages/agent-app/tests/ui-sweep-dom.tsx) |
 | [MUS-SPEC-11-471A](11-memory.md#mus-spec-11-471a) | A memory suggestion row is left out of the transcript rows while other notices stay. | [`memory offers stay out of the transcript (they live in the Memory inbox)`](../../../packages/agent-app/tests/activity.test.ts) |
 | [MUS-SPEC-11-471B](11-memory.md#mus-spec-11-471b) | Five finished runs in one chat leave one listed suggestion in the Memory inbox, all five are recorded, and a restart does not reset the limit. | [`many turns in one chat list at most one offer per day, the rest are held, and the throttle survives a restart`](../../../packages/agent-app/tests/memory-run.test.ts) |
 | [MUS-SPEC-11-467A](11-memory.md#mus-spec-11-467a) | A Personal rule and a Personal note about the user both reach a chat in a folder. | [`folder chats still get Personal directives and Personal facts the user already gave`](../../../packages/agent-app/tests/memory-run.test.ts) |
@@ -104,4 +105,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/branch-tag-same-name.test.ts::checkout and memory name the branch when a tag shares its name`
 - Environment: Node test runner; git on PATH; a real repository in a temp folder.
 - Known gaps: Reads the evidence function only. It does not save a memory. The same test covers check-out (MUS-SPEC-12-673A).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-11-398a"></a>
+#### MUS-SPEC-11-398A: Memory suggestions start as compact source rows and expand for review
+
+- Precondition: Memory has 20 pending suggestions with long transcripts.
+- Action: Open Memory, expand one suggestion and remember it.
+- Expected result: All 20 start compact with source and summary; only the selected suggestion opens its editor; remembering removes that suggestion.
+- Test: `packages/agent-app/tests/ui-sweep-dom.tsx::memory suggestions start as compact source rows and expand for review`
+- Environment: Node and linkedom with the real renderer and a fixture bridge; responsive navigation uses a window media-query fixture. No desktop app or network.
+- Known gaps: Does not exercise a live provider or imported history database. Visual layout is checked separately in a browser harness.
 - Evidence: UNVERIFIED

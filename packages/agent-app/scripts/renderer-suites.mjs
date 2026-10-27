@@ -1,5 +1,6 @@
 // The renderer (DOM) suites run by scripts/test-renderer.mjs, in order. Each sets up its own linkedom globals.
 export const suites = [
+  'ui-sweep-dom',
   'renderer-lifecycle',
   'nav-history-screens-dom',
   'folder-default-model',
@@ -101,6 +102,7 @@ export const suites = [
 /** Suites that open Base UI menus/portals get a split build: their `await import()` of UI code stays a separate
  * chunk, so Base UI is evaluated after the suite installs its linkedom globals (not on its SSR no-op paths). */
 export const split = new Set([
+  'ui-sweep-dom',
   'orgs-dom',
   'org-sidebar-pages-dom',
   'markdown-table-dom',
@@ -134,6 +136,7 @@ export const split = new Set([
 
 /** tests/*.tsx files that are deliberately not suites, with the reason. */
 export const excluded = {
+  'ui-sweep.browser': 'browser-only visual fixture served by scripts/ui-sweep-preview.mjs',
   'virtual-file-source.browser': 'needs real Chrome layout (scroll and row heights): built and run by tests/run-virtual-file-source.mjs, not by the linkedom renderer suites',
   'device-noun-dom-body': 'shared body imported by the device-noun-dom-win32 and device-noun-dom-linux entry files; it cannot run on its own',
   'terminal-load-retry-dom': 'built and run by tests/terminal-load-retry.test.ts, which the node test job already runs',

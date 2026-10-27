@@ -78,7 +78,7 @@ export const MAX_CHAT_RESULTS = 9;
 /** The muted right-aligned label: the chat's project name, else its folder name, else "Personal chat". */
 export function chatLocationName(
   chat: Pick<Chat, 'folderId' | 'projectId'>,
-  folders: readonly Pick<Folder, 'id' | 'name'>[],
+  folders: readonly Pick<Folder, 'id' | 'name' | 'path'>[],
   projects: readonly Pick<Project, 'id' | 'name'>[],
 ): string {
   if (chat.projectId) {
@@ -87,7 +87,7 @@ export function chatLocationName(
   }
   if (chat.folderId) {
     const folder = folders.find((f) => f.id === chat.folderId);
-    if (folder) return folder.name;
+    if (folder) return folders.filter(item => item.name === folder.name).length > 1 ? `${folder.name} · ${folder.path.replace(/[\\/][^\\/]+[\\/]?$/, '')}` : folder.name;
   }
   return 'Personal chat';
 }

@@ -177,10 +177,11 @@ function PackageCard({ card, busy, failed, onOpen, onInstall, onUpdate, onManage
     : installed ? (onManage ? <button type="button" className="plugins-card-action is-manage" onClick={event => { event.stopPropagation(); onManage(); }} aria-label={`Manage ${pkg.displayName}`} title={card.installedAs?.kind === 'codex' ? 'Installed in Codex' : 'Installed'}>Manage</button> : <span className="plugins-card-state is-ok"><Check size={12} />Installed</span>)
     : !pkg.compatibility.supported ? <span className="plugins-card-state" title={pkg.compatibility.unsupported.join('\n')}>Unsupported</span>
     : <button type="button" className="plugins-card-action" onClick={event => { event.stopPropagation(); onInstall(); }} aria-label={`Install ${pkg.displayName}`}><Plus size={13} /></button>;
-  const provenance = [pkg.publisher, card.sources.join(', ')].filter(Boolean).join(' · ');
+  const fullProvenance = [pkg.publisher, card.sources.join(', ')].filter(Boolean).join(' · ');
+  const provenance = [pkg.publisher, card.sources.map(source => source.replace(/^Codex:\s*/, '')).join(', ')].filter(Boolean).join(' · ');
   return <div className={`plugins-card${installed ? ' is-installed' : ''}`} role="button" tabIndex={0} aria-label={`${pkg.displayName}${installed ? ', installed' : ''}`} onClick={onOpen} onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(); } }}>
     <ItemTile icon={card.icon} name={pkg.displayName} seed={pkg.id} shape={pkg.kind === 'skill' ? 'skill' : 'square'} size={36} />
-    <span className="plugins-card-text"><strong>{pkg.displayName}</strong><small>{pkg.description ?? (pkg.kind === 'skill' ? 'Skill' : 'Plugin')}</small><em>{installed && <span className="plugins-card-installed"><Check size={11} />Installed{card.installedAs?.kind === 'codex' ? ' in Codex' : ''}</span>}{installed && provenance ? ' · ' : ''}{provenance}{failed ? ' · install failed' : ''}</em></span>
+    <span className="plugins-card-text"><strong>{pkg.displayName}</strong><small>{pkg.description ?? (pkg.kind === 'skill' ? 'Skill' : 'Plugin')}</small><em title={fullProvenance}>{installed && <span className="plugins-card-installed"><Check size={11} />Installed{card.installedAs?.kind === 'codex' ? ' in Codex' : ''}</span>}{installed && provenance ? ' · ' : ''}{provenance}{failed ? ' · install failed' : ''}</em></span>
     {action}
   </div>;
 }

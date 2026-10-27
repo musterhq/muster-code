@@ -16,6 +16,8 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-03-398B](03-providers-models-and-accounts.md#mus-spec-03-398b) | A gateway reports non-chat exclusions alongside its live chat list. | [`a gateway catalog reports the non-chat models omitted from its live list`](../../../packages/agent-app/tests/codex-catalog-merge-588.test.ts) |
+| [MUS-SPEC-03-398A](03-providers-models-and-accounts.md#mus-spec-03-398a) | The card says Not checked yet, labels chat models, and reports the excluded models. | [`an unprobed gateway says not checked yet and explains its model count`](../../../packages/agent-app/tests/ui-sweep-dom.tsx) |
 | [MUS-SPEC-03-1A](03-providers-models-and-accounts.md#mus-spec-03-1a) | All four turns complete without reconnecting; one request per turn with valid credentials; real counters preserved. | [`router usage compatibility: two independent chats complete successive turns without reconnecting`](../../../packages/agent-app/tests/router-usage-workflow.test.ts) |
 | [MUS-SPEC-03-1B](03-providers-models-and-accounts.md#mus-spec-03-1b) | The first turn completes and the truncated one fails, on the same thread. | [`router usage compatibility: a genuinely truncated stream still fails`](../../../packages/agent-app/tests/router-usage-workflow.test.ts) |
 | [MUS-SPEC-03-1C](03-providers-models-and-accounts.md#mus-spec-03-1c) | 404 without the private path; nothing forwarded; the real request is forwarded unchanged. | [`router bridge: a request without the private path prefix is refused and never forwarded`](../../../packages/agent-app/tests/responses-compat.test.ts) |
@@ -597,4 +599,26 @@ Boundaries:
 - Test: `packages/agent-app/tests/provider-auth-e2e.test.ts::(b) a Codex config.toml provider with [auth] command: models listed and a chat answered with the command’s token`
 - Environment: Node test runner; the real Codex binary against a local mock router; skipped when no Codex binary is installed.
 - Known gaps: Covers a provider route; a profile route clears the inherited provider the same way but has no case of its own.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-398a"></a>
+#### MUS-SPEC-03-398A: An unprobed gateway says not checked yet and explains its model count
+
+- Precondition: A local gateway profile is runnable but has no reachability check; its catalog includes non-chat exclusions.
+- Action: Open Accounts & providers.
+- Expected result: The card says Not checked yet, labels chat models, and reports the excluded models.
+- Test: `packages/agent-app/tests/ui-sweep-dom.tsx::an unprobed gateway says not checked yet and explains its model count`
+- Environment: Node and linkedom with the real renderer and a fixture bridge; responsive navigation uses a window media-query fixture. No desktop app or network.
+- Known gaps: Does not exercise a live provider or imported history database. Visual layout is checked separately in a browser harness.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-398b"></a>
+#### MUS-SPEC-03-398B: A gateway explains non-chat models omitted from its catalog
+
+- Precondition: A gateway profile has a catalog; its live endpoint returns two chat models and one image model.
+- Action: Discover providers and wait for the live listing.
+- Expected result: Both chat models are selectable and one non-chat exclusion is reported for the provider card.
+- Test: `packages/agent-app/tests/codex-catalog-merge-588.test.ts::a gateway catalog reports the non-chat models omitted from its live list`
+- Environment: Node runner; profile files in a temporary directory, fixture model-list response, no network or CLI execution.
+- Known gaps: Reads the provider view consumed by the renderer; the provider-card DOM is covered by MUS-SPEC-03-398A.
 - Evidence: UNVERIFIED
