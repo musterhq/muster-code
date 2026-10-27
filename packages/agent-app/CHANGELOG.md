@@ -3,7 +3,9 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
-## Unreleased
+## 0.3.16
+
+Chats on your own router keep their sub-agents and tools when you use a connector, Codex and computer use no longer need another app or npm on the Mac, your Claude Code skills and commands show up in Muster, and long chats compact at the right time.
 
 - Chat titles keep their punctuation, New chat returns to your last project folder, matching chat names get a small suffix, and one-turn chats no longer show a stray minimap dash (#403).
 - A temporary provider failure after work has started now gets up to two automatic continuations on the same thread, with a countdown and a notice for each failure. A turn that ends after a tool call without replying gets one chance to finish, and live plan updates show their checklist (#386).
