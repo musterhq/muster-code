@@ -154,11 +154,39 @@ function reverseContextPatch(after:string,patch:string):string|undefined {
   return lines.join(crlf?'\r\n':'\n')+(newline?(crlf?'\r\n':'\n'):'');
 }
 
-/** The whole post-edit file with the turn's changes woven in: every line, removed lines back in place. */
-export function fileEditorModel(after:string,patches:readonly string[]):EditorModel|undefined {
-  const before=reconstructBefore(after,patches);
-  if(before===undefined)return undefined;
-  const cumulative=buildCumulativeFileDiff(before,after);
+/** The file a turn created, rebuilt forward from nothing by its own patches: an add carries every line. */
+function createdFile(patches:readonly string[]):string|undefined {
+  let text='';
+  for(const patch of patches){
+    try{
+      const parsed=parsePatch(patch);
+      if(parsed.length!==1||!parsed[0].hunks.length)return undefined;
+      const result=applyPatch(text,parsed[0]);
+      if(result===false)return undefined;
+      text=result;
+    }catch{return undefined;}
+  }
+  return text;
+}
+
+/** A file the edit created, as the whole file with every line added. The patches carry it all, so nothing is read. */
+export function createdFileModel(patches:readonly string[]):EditorModel|undefined {
+  const built=patches.length?createdFile(patches):undefined;
+  if(built===undefined)return undefined;
+  const cumulative=buildCumulativeFileDiff('',built);
+  return cumulative.state==='unavailable'?undefined:editorFromFile(cumulative.rows);
+}
+
+/**
+ * The whole file as this edit left it, with the edit's changes woven in: every line, removed lines back in place.
+ * `later` are the patches the chat applied to the same file after this edit, oldest first: they are undone from
+ * what is on disk now, so an earlier edit of a file edited again still opens whole.
+ */
+export function fileEditorModel(after:string,patches:readonly string[],options:{later?:readonly string[]}={}):EditorModel|undefined {
+  const left=options.later?.length?reconstructBefore(after,options.later):after;
+  const before=left===undefined?undefined:reconstructBefore(left,patches);
+  if(left===undefined||before===undefined)return undefined;
+  const cumulative=buildCumulativeFileDiff(before,left);
   return cumulative.state==='unavailable'?undefined:editorFromFile(cumulative.rows);
 }
 

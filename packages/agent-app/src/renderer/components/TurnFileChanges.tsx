@@ -7,7 +7,7 @@ import {splitChangeTotals} from '../changeCounts';
 import {useDisclosure} from './useDisclosure';
 import {basename,resolveToolPath,uniqueFileLabels} from './toolPresentation';
 import {normalizeChange} from '../patchModel';
-import {collectFileChanges,mergeReviewFiles,type FileChangeEntry} from '../turnFileChanges';
+import {collectFileChanges,LaterEditsContext,laterEditsKey,mergeReviewFiles,type FileChangeEntry} from '../turnFileChanges';
 import {getState,openChangesTab,openDiff,openFile} from '../store';
 import {useStoreSelector} from '../useStore';
 import {useLatestTurnFiles} from '../reviewState';
@@ -73,10 +73,15 @@ export function EditedFileRow({entry,chatId,scope,defaultOpen=false,inline=true,
 
 /** The expanded file: the latest turn's live review (Keep/Undo per change) when the folder has a baseline, else the whole file with the edits in place. */
 function EditedFileBody({entry,chatId,to,latest,onReview}:{entry:FileChangeEntry;chatId:string;to?:{folderId:string;path:string};latest:boolean;onReview?:()=>void}) {
+  const last=entry.patches.at(-1);
+  // What the chat did to this file after the turn's last edit of it, and its name now.
+  const after=React.useContext(LaterEditsContext).get(last?laterEditsKey(last.itemId,last.path):'');
+  const now=after?.path??entry.movePath??entry.path;
+  const here=after&&now!==(entry.movePath??entry.path)?target(chatId,now):to;
   const reviewed=useFileReview({chatId,folderId:to?.folderId,path:to?.path,enabled:latest&&!!to,running:false});
   const patches=useMemo(()=>filePatches(entry),[entry]);
   return <div className="edited-file-body">
-    <FileChangeView path={entry.movePath??entry.path} kind={entry.kind} target={to} edit={entry.patches.length?{chatId,itemId:entry.patches.at(-1)!.itemId}:undefined} patches={patches} reviewed={reviewed} truncated={entry.patches.some(patch=>patch.truncated)} onReview={onReview}/>
+    <FileChangeView path={entry.movePath??entry.path} kind={entry.kind} target={here} edit={last?{chatId,itemId:last.itemId,readPath:now}:undefined} later={after?.patches} patches={patches} reviewed={reviewed} truncated={entry.patches.some(patch=>patch.truncated)} onReview={onReview}/>
   </div>;
 }
 

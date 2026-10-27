@@ -7,7 +7,7 @@ import { HindsightService } from './hindsight-service.ts';
 import { MemoryConfigStore, MemoryTombstones, electronSecretBox } from './memory-context.ts';
 import { createHash } from 'node:crypto';
 import { promises as fs, existsSync, mkdirSync, copyFileSync, statSync } from 'node:fs';
-import { basename, join, resolve, relative } from 'node:path';
+import { basename, dirname, join, resolve, relative } from 'node:path';
 import { rescanProviderListings, setProviderListingStore } from './provider-instances.ts';
 import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, QueuedMessage, ChatFallback, TimelineItem, WakeReason } from '../shared/protocol.ts';
 import { CONTEXT_OVERFLOW, effectiveContextWindow, musterCompactAt, reportedWindowFor, withUserWindow } from '../shared/context-window.ts';
@@ -2260,20 +2260,31 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'files.search': return searchFiles(folderFor(p.folderId).path, text(p.path ?? '', 'path'), text(p.query,'query',256));
       case 'files.read': return readFile(folderFor(p.folderId).path, text(p.path,'path'));
       case 'files.chatEdit': {
+        // The file one of this chat's own edit rows recorded, wherever it is (a worktree, a sibling checkout, scratch):
+        // the inline diff needs the whole file to place the edit. Nothing else is readable through this command.
         const chat=chatFor(text(p.chatId,'chatId')),item=store.item(text(p.itemId,'itemId'));
         if(!item||item.chatId!==chat.id||item.kind!=='tool'||item.data?.type!=='fileChange'||!['running','completed'].includes(item.status??''))throw new Error('No recorded edit in this chat.');
         const root=chat.folderId?folderFor(chat.folderId).path:join(options.dataDir,'scratch',chat.id);
         const cwd=typeof item.data.cwd==='string'?item.data.cwd:root;
         const path=resolve(cwd,text(p.path,'path'));
-        const changes=Array.isArray(item.data.changes)?item.data.changes:[];
-        const recorded=changes.some(change=>{
-          if(!change||typeof change!=='object')return false;
+        const recorded=new Set<string>();
+        for(const change of Array.isArray(item.data.changes)?item.data.changes:[]){
+          if(!change||typeof change!=='object')continue;
           const kind=change.kind&&typeof change.kind==='object'?change.kind:{};
-          const recordedPath=change.movePath??change.move_path??kind.move_path??kind.movePath??change.path;
-          return typeof recordedPath==='string'&&resolve(cwd,recordedPath)===path;
-        });
-        if(!recorded)throw new Error('The requested file was not recorded as edited.');
-        return readFile(root,relative(root,path));
+          for(const name of [change.path,change.movePath,change.move_path,kind.move_path,kind.movePath])if(typeof name==='string')recorded.add(resolve(cwd,name));
+        }
+        // The row's own file, or the name a later edit row of this chat renamed it to.
+        const renamed=store.timeline(chat.id).some(row=>row.kind==='tool'&&row.data?.type==='fileChange'&&Array.isArray(row.data.changes)&&row.data.changes.some(change=>{
+          if(!change||typeof change!=='object')return false;
+          const rowCwd=typeof row.data?.cwd==='string'?row.data.cwd:root,kind=change.kind&&typeof change.kind==='object'?change.kind:{};
+          const from=typeof change.path==='string'?resolve(rowCwd,change.path):'',to=[change.movePath,change.move_path,kind.move_path,kind.movePath].find(name=>typeof name==='string');
+          return typeof to==='string'&&resolve(rowCwd,to)===path&&recorded.has(from);
+        }));
+        if(!recorded.has(path)&&!renamed)throw new Error('The requested file was not recorded as edited.');
+        // Read from the file's own folder and never through a link at the file: a link swapped in for it (even to a
+        // file next to it) is refused at open, and resolveInside refuses folders that lead elsewhere.
+        const folder=await fs.realpath(dirname(path));
+        return readFile(folder,basename(path),{noFollow:true});
       }
       case 'files.document': return readDocument(folderFor(p.folderId).path,text(p.path,'path'));
       case 'files.workbook': return readWorkbook(folderFor(p.folderId).path,text(p.path,'path'));

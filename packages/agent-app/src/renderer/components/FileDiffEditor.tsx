@@ -3,7 +3,7 @@ import {Check,ChevronsUpDown,ChevronsDownUp,Undo2} from 'lucide-react';
 import {codeLanguageFromPath} from './codeLanguage';
 import {useHighlightedTokens} from './HighlightedCode';
 import {inlineWordSpans,layerSpans} from '../diffModel';
-import {collapseEditor,editorFromFile,editorFromPatch,fileEditorModel,hunkStarts,type EditorLine,type EditorModel,type EditorRow} from '../diffEditorModel';
+import {collapseEditor,createdFileModel,editorFromFile,editorFromPatch,fileEditorModel,hunkStarts,type EditorLine,type EditorModel,type EditorRow} from '../diffEditorModel';
 import {buildCumulativeFileDiff} from '../inlineFileDiffModel';
 import {normalizeChange} from '../patchModel';
 import {invoke} from '../bridge';
@@ -159,21 +159,25 @@ export function useFileReview({chatId,folderId,path,enabled,running}:{chatId:str
  * in place. `stale` means the file changed after these patches (they no longer apply
  * in reverse), so the caller falls back to the patch's own lines and says so.
  */
-export function useFileWithEdits({folderId,path,edit,patches,deleted=false,enabled}:{folderId?:string;path?:string;edit?:{chatId:string;itemId:string};patches:readonly string[];deleted?:boolean;enabled:boolean}):{model?:EditorModel;stale:boolean;loading:boolean} {
+export function useFileWithEdits({folderId,path,edit,patches,later=[],deleted=false,created=false,enabled}:{folderId?:string;path?:string;edit?:{chatId:string;itemId:string};patches:readonly string[];later?:readonly string[];deleted?:boolean;created?:boolean;enabled:boolean}):{model?:EditorModel;stale:boolean;loading:boolean} {
   const [source,setSource]=useState<{key:string;text:string|null}>();
-  const key=patches.join('\u0000');
-  const requestKey=JSON.stringify([folderId,path,edit?.chatId,edit?.itemId,key,deleted]);
+  const key=patches.join('\u0000'),laterKey=later.join('\u0000');
+  // A file the edit created is whole in its own patches: no read, and it opens even when the file is gone now.
+  const ownModel=useMemo(()=>enabled&&created?createdFileModel(patches):undefined,[enabled,created,key]);
+  const reading=enabled&&!ownModel;
+  const requestKey=JSON.stringify([folderId,path,edit?.chatId,edit?.itemId,key,laterKey,deleted]);
   const text=source?.key===requestKey?source.text:undefined;
   useEffect(()=>{
-    if(!enabled||(!folderId&&!edit)||!path||!patches.length){setSource(undefined);return;}
+    if(!reading||(!folderId&&!edit)||!path||!patches.length){setSource(undefined);return;}
     if(deleted){setSource({key:requestKey,text:''});return;}
     let live=true;setSource(undefined);
     const read=folderId?invoke('files.read',{folderId,path}):invoke('files.chatEdit',{...edit!,path});
-    read.then(value=>{if(live)setSource({key:requestKey,text:value.truncated?null:value.text});},()=>{if(live)setSource({key:requestKey,text:null});});
+    read.then(value=>{if(live)setSource({key:requestKey,text:value&&!value.truncated&&typeof value.text==='string'?value.text:null});},()=>{if(live)setSource({key:requestKey,text:null});});
     return()=>{live=false;};
-  },[enabled,requestKey]);
-  const model=useMemo(()=>enabled&&typeof text==='string'?fileEditorModel(text,patches):undefined,[enabled,text,key]);
-  return {model,stale:enabled&&text!==undefined&&!model,loading:enabled&&text===undefined&&!!patches.length};
+  },[reading,requestKey]);
+  const readModel=useMemo(()=>reading&&typeof text==='string'?fileEditorModel(text,patches,{later}):undefined,[reading,text,key,laterKey]);
+  const model=ownModel??readModel;
+  return {model,stale:reading&&text!==undefined&&!model,loading:reading&&text===undefined&&!!patches.length};
 }
 
 /** Keep all / Undo all for a reviewed file, shown above its editor (the row above already names the file). */
@@ -191,12 +195,14 @@ export function DiffEditorActions({review}:{review:EditorReview}):React.ReactEle
 export interface FilePatchView {label?:string;diff:string;adds:number;dels:number}
 /**
  * One file's change as an editor: the live review when given; otherwise the whole
- * post-edit file read from disk with the patches woven back in; otherwise (the file
- * changed again since, or is outside the folders) the patches' own lines, labelled.
+ * file as this edit left it, read from disk with the chat's later edits undone and
+ * this edit's patches woven back in; otherwise the patches' own lines, labelled.
  */
-export function FileChangeView({path,kind,target,edit,patches,reviewed,truncated=false,onReview,maxHeight}:{path:string;kind?:string;target?:{folderId:string;path:string};edit?:{chatId:string;itemId:string};patches:readonly FilePatchView[];reviewed?:{model:EditorModel;review:EditorReview};truncated?:boolean;onReview?:()=>void;/** null: no inner scroll (a pane that scrolls itself). */maxHeight?:number|null}):React.ReactElement {
+export function FileChangeView({path,kind,target,edit,patches,later,reviewed,truncated=false,onReview,maxHeight}:{path:string;kind?:string;/** The file in a chat folder, under its name now. */target?:{folderId:string;path:string};/** The edit row this shows; `readPath` is the file's name now when it is outside every folder. */edit?:{chatId:string;itemId:string;readPath?:string};patches:readonly FilePatchView[];/** Patches the chat applied to this file after this edit, oldest first (`laterEdits`). */later?:readonly string[];reviewed?:{model:EditorModel;review:EditorReview};truncated?:boolean;onReview?:()=>void;/** null: no inner scroll (a pane that scrolls itself). */maxHeight?:number|null}):React.ReactElement {
   const diffs=useMemo(()=>patches.map(patch=>normalizeChange({path:path||'file',diff:patch.diff,...(kind?{kind}:{})})?.patch??patch.diff),[patches,path,kind]);
-  const file=useFileWithEdits({folderId:target?.folderId,path:target?.path??path,edit,patches:diffs,deleted:kind==='delete',enabled:!reviewed&&!!(target||edit)&&!truncated});
+  const laterDiffs=useMemo(()=>(later??[]).map(diff=>normalizeChange({path:path||'file',diff})?.patch??diff),[later,path]);
+  const request=edit?{chatId:edit.chatId,itemId:edit.itemId}:undefined;
+  const file=useFileWithEdits({folderId:target?.folderId,path:target?.path??edit?.readPath??path,edit:request,patches:diffs,later:laterDiffs,deleted:kind==='delete',created:kind==='add',enabled:!reviewed&&!!(target||edit)&&!truncated});
   const name=path.split('/').filter(Boolean).at(-1)??path;
   if(reviewed)return <div className="fde-card">{reviewed.model.hunks.length>0&&<DiffEditorActions review={reviewed.review}/>}<DiffEditorView model={reviewed.model} path={path} folderId={target?.folderId} review={reviewed.review} maxHeight={maxHeight}/></div>;
   if(file.model)return <DiffEditorView model={file.model} path={path} folderId={target?.folderId} maxHeight={maxHeight}/>;

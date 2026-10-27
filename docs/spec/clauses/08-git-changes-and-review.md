@@ -34,6 +34,9 @@ Boundaries:
 | [MUS-SPEC-08-781D](08-git-changes-and-review.md#mus-spec-08-781d) | Complete scratch-file review survives separated hunks and renames while rejecting unrelated reads. | [`a scratch chat opens a complete multi-edit renamed file without granting arbitrary file reads`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
 | [MUS-SPEC-08-781E](08-git-changes-and-review.md#mus-spec-08-781e) | Context matching retains whole files and rejects ambiguous or stale placement. | [`contextual shell hunks retain all source and refuse stale or ambiguous placement`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
 | [MUS-SPEC-08-781F](08-git-changes-and-review.md#mus-spec-08-781f) | The production editor renders all unchanged source and both change blocks in both themes. | [`opening a scratch edit renders unchanged source and every changed block in both themes`](../../../packages/agent-app/tests/full-inline-diff-781-dom.tsx) |
+| [MUS-SPEC-08-781G](08-git-changes-and-review.md#mus-spec-08-781g) | A file created in one turn and edited in a later one still opens whole in the first turn. | [`a file created in one turn and edited in a later one still opens whole in the first turn`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
+| [MUS-SPEC-08-781H](08-git-changes-and-review.md#mus-spec-08-781h) | Every edit of a file the chat edited again opens whole, also across a rename. | [`every edit of a file the chat edited again later opens as the whole file, also across a rename`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
+| [MUS-SPEC-08-781I](08-git-changes-and-review.md#mus-spec-08-781i) | An edit outside the chat's folder opens whole; a file next to it and a swapped-in link are refused. | [`a chat in one folder opens the whole file it edited in a worktree outside that folder, and nothing else there`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
 
 ### Refs, dash-named files and submodules
 
@@ -46,6 +49,39 @@ Boundaries:
 - Test: `packages/agent-app/tests/full-inline-diff-781-dom.tsx::opening a scratch edit renders unchanged source and every changed block in both themes`
 - Environment: Production React component and bridge with deterministic filesystem response, linkedom.
 - Known gaps: Layout and syntax colours require the separate browser evidence.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781g"></a>
+#### MUS-SPEC-08-781G: A file created in one turn stays whole after a later turn edits it
+
+- Precondition: A turn creates a file with a shell `apply_patch`; a later turn in the same chat changes it.
+- Action: Expand the first turn's edit, then the later turn's edit.
+- Expected result: The first turn shows the whole file it created, every line added, built from its own patch without reading the disk (so it still opens if the file is gone); the later turn shows the whole current file with its change in place. An update patch that no longer applies is not shown as a whole file.
+- Test: `packages/agent-app/tests/full-inline-diff-781.test.ts::a file created in one turn and edited in a later one still opens whole in the first turn`
+- Environment: Node test runner; stored shell rows recovered as the store reads them, the transcript's patch normalisation and the production diff model.
+- Known gaps: Rendering of the editor is covered by MUS-SPEC-08-781F.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781h"></a>
+#### MUS-SPEC-08-781H: Every edit of a file the chat edited again opens whole, also across a rename
+
+- Precondition: A chat edits one file three times: an edit, then an edit that also renames it, then an edit under the new name.
+- Action: Expand each of the three edits.
+- Expected result: Each shows the whole file as that edit left it, with its own change in place: the chat's later edits to the file are undone from what is on disk now, and the first edit reads the file under its new name. Without the later edits the first edit cannot be placed, which is the snippet-only bug.
+- Test: `packages/agent-app/tests/full-inline-diff-781.test.ts::every edit of a file the chat edited again later opens as the whole file, also across a rename`
+- Environment: Node test runner; stored shell rows, `laterEdits` over the whole chat and the production diff model.
+- Known gaps: A file changed outside the chat after its edits (by the user or another tool) still shows the recorded patch, labelled.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781i"></a>
+#### MUS-SPEC-08-781I: An edit outside the chat's folder opens whole, and only that file is readable
+
+- Precondition: A chat in one folder whose model edits a file in a worktree outside that folder; another file sits next to it.
+- Action: Open the edit's inline diff, then ask for the file next to it, then replace the edited file with a link to that file and ask again.
+- Expected result: The edited file is read whole and the diff is complete. The file next to it is refused because no edit recorded it, and a link put in place of the edited file is refused rather than followed.
+- Test: `packages/agent-app/tests/full-inline-diff-781.test.ts::a chat in one folder opens the whole file it edited in a worktree outside that folder, and nothing else there`
+- Environment: Node test runner; the agent service with a fake provider; temp folders.
+- Known gaps: None known.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-08-781d"></a>
