@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- A reply whose stream stops partway is saved with its full text, and a streamed piece without an id no longer hides later replies (#762).
 - When a router refuses to continue a conversation, the chat carries on in a copy of it with the full history, instead of restarting from a short summary that lost the context (#767).
 - Unanswered permissions now decline, Stop ends tool process trees, and startup leaves reused process IDs alone (#407).
 - Chat titles keep their punctuation, New chat returns to your last project folder, matching chat names get a small suffix, and one-turn chats no longer show a stray minimap dash (#403).

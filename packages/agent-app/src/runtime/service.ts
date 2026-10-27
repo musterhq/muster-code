@@ -752,10 +752,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const toolStarted = new Map<string, number>();
     /** Provider reasoning items whose text arrived as deltas; their completion must not repeat it. */
     const reasoningStreamed = new Set<string>();
-    /** Assistant message items whose text arrived as deltas. One that completes without any is written whole, so a
-     *  final answer the provider never streamed is not lost behind an earlier streamed message. */
-    const messageStreamed = new Set<string>();
-    let anonymousMessageDelta = false;
+    /** Text each assistant message item streamed as deltas. On completion the item's full text is reconciled with it:
+     *  one that never streamed is written whole, and one whose stream stopped early gets the missing remainder. */
+    const messageStreamed = new Map<string, string>();
+    /** Deltas without an item id belong to the message that completes next. */
+    let anonymousMessageText = '';
     /** "Reconnecting…" while the provider retries its model connection (Codex `error` with willRetry). */
     let reconnectNotice: TimelineItem | undefined;
     const reconnected = (status: 'completed' | 'failed' = 'completed') => {
@@ -912,11 +913,20 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               scheduleTimeline(chatId); return;
             }
             if (reconnectNotice && ownRun && method.startsWith('item/')) reconnected();
-            if (method === 'item/agentMessage/delta' && parentEvent) { if (typeof params.itemId === 'string' && params.itemId) messageStreamed.add(params.itemId); else anonymousMessageDelta = true; }
-            if (method === 'item/completed' && ownRun && parentEvent && !anonymousMessageDelta) {
+            if (method === 'item/agentMessage/delta' && parentEvent) {
+              const piece = typeof params.delta === 'string' ? params.delta : '';
+              if (typeof params.itemId === 'string' && params.itemId) messageStreamed.set(params.itemId, (messageStreamed.get(params.itemId) ?? '') + piece);
+              else anonymousMessageText += piece;
+            }
+            if (method === 'item/completed' && ownRun && parentEvent) {
               const message = params.item && typeof params.item === 'object' ? params.item as Record<string, unknown> : undefined;
-              if (message?.type === 'agentMessage' && typeof message.id === 'string' && message.id && !messageStreamed.has(message.id) && typeof message.text === 'string' && message.text.trim()) {
-                messageStreamed.add(message.id); seal(); append('assistant', message.text); seal(); return;
+              if (message?.type === 'agentMessage' && typeof message.id === 'string' && message.id && typeof message.text === 'string') {
+                const streamed = messageStreamed.get(message.id) ?? anonymousMessageText;
+                anonymousMessageText = '';
+                messageStreamed.set(message.id, message.text);
+                if (!streamed) { if (message.text.trim()) { seal(); append('assistant', message.text); seal(); } return; }
+                if (message.text.length > streamed.length && message.text.startsWith(streamed)) append('assistant', message.text.slice(streamed.length));
+                return;
               }
             }
             const item = params.item && typeof params.item === 'object' ? params.item as Record<string, unknown> : params;
@@ -1169,7 +1179,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             continuationPrompt = 'Continue from where you stopped. Your last turn ended after a tool call without a reply. Finish the task and give the user a final summary.';
           }
           // The old turn has ended, so no tool from it should keep spinning during the next turn.
-          store.settleToolItems(chatId); toolIds.clear(); toolStarted.clear(); reasoningStreamed.clear(); messageStreamed.clear(); anonymousMessageDelta = false;
+          store.settleToolItems(chatId); toolIds.clear(); toolStarted.clear(); reasoningStreamed.clear(); messageStreamed.clear(); anonymousMessageText = '';
           if (turnRetry) store.updateItem(turnRetry.id, 'Continuing on the same thread…', 'completed', {...store.item(turnRetry.id)?.data, retryAt:null});
           result = await attempt();
           if (disposed) return;
