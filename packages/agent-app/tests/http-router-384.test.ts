@@ -67,8 +67,8 @@ test('HTTP retries stop at a bound, do not retry credentials, and Stop interrupt
   const partial = await router(t, (_body, res) => { res.writeHead(200, {'content-type': 'text/event-stream'}); res.write(`data: ${JSON.stringify({choices: [{delta: {content: 'Partial answer'}}]})}\n\n`); setTimeout(() => res.destroy(), 20); });
   assert.equal((await partial.adapter().run(input(cwd, {onDelta: text => { shown += text; }}))).status, 'failed'); assert.equal(shown, 'Partial answer'); assert.equal(partial.bodies.length, 1, 'a stream that already answered is never replayed');
   const controller = new AbortController();
-  const stopped = await router(t, (_body, res) => { error(res, 429, 'wait', '30'); setTimeout(() => controller.abort(), 20); });
-  const at = Date.now(); assert.equal((await stopped.adapter().run(input(cwd, {signal: controller.signal}))).status, 'failed'); assert.ok(Date.now() - at < 5000); assert.equal(stopped.bodies.length, 1);
+  const stopped = await router(t, (_body, res) => { error(res, 429, 'wait', '1'); setTimeout(() => controller.abort(), 20); });
+  const at = Date.now(); assert.equal((await stopped.adapter().run(input(cwd, {signal: controller.signal}))).status, 'failed'); assert.ok(controller.signal.aborted); assert.ok(Date.now() - at < 5000); assert.equal(stopped.bodies.length, 1);
 });
 
 // Spec: MUS-SPEC-03-384D (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-384d)

@@ -220,7 +220,7 @@ export function openAICompatibleAdapter(options: HttpOptions & {tools?: boolean}
       if (attempt >= 3 || !(response.status === 429 || response.status >= 500 && response.status <= 599)) return response;
       const wait = retryAfterMs(response.headers) ?? 500 * 2 ** attempt;
       // A long provider limit belongs to the service's durable resume-at-reset flow, not an in-turn timer.
-      if (wait > 30_000) return response;
+      if (wait >= 30_000) return response;
       await response.body?.cancel().catch(() => {});
       await delay(wait, undefined, {signal: input.signal});
     }

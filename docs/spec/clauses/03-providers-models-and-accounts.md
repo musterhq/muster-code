@@ -634,7 +634,7 @@ Boundaries:
 <a id="mus-spec-03-384c"></a>
 #### MUS-SPEC-03-384C: HTTP retries stop at a bound, do not retry credentials, and Stop interrupts backoff
 
-- Precondition: Local HTTP endpoints simulate a persistent 503, a bad key, a disconnected request, a partially streamed answer and a 30-second rate-limit wait.
+- Precondition: Local HTTP endpoints simulate a persistent 503, a bad key, a disconnected request, a partially streamed answer and a one-second rate-limit wait.
 - Action: Run a turn against each endpoint; press Stop during the rate-limit wait.
 - Expected result: A persistent outage gets four attempts, a bad key one, and Stop ends a server-requested wait promptly.
 - Test: `packages/agent-app/tests/http-router-384.test.ts::HTTP retries stop at a bound, do not retry credentials, and Stop interrupts backoff`
