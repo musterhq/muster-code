@@ -159,7 +159,7 @@ export function findChipRanges(text:string,chips:readonly ComposerChip[]):ChipRa
   return ranges.sort((a,b)=>a.start-b.start).filter((range,index,all)=>index===0||range.start>=all[index-1].end);
 }
 /** Names the composer recognises in typed text without a pick: `/command`, `$skill`, `@plugin`. */
-export interface TokenVocabulary {commands?:readonly {command:string;label:string}[];skills?:readonly {name:string;id:string;label:string;/** A Claude Code command, recognised as `/name` (a built-in command of the same name wins). */command?:boolean}[];plugins?:readonly {name:string;id:string;label:string}[]}
+export interface TokenVocabulary {commands?:readonly {command:string;label:string}[];skills?:readonly {name:string;id:string;label:string;/** A Claude Code command, recognised as `/name` (a built-in command of the same name wins). */command?:boolean;/** A Claude Code skill, also reached as `/name`; it wins a name it shares with a command, as in Claude Code. */claudeSkill?:boolean}[];plugins?:readonly {name:string;id:string;label:string}[]}
 /** Chips for typed tokens that name a known command, skill or plugin (so `$pdf` typed by hand still attaches it). */
 export function implicitChips(text:string,vocab:TokenVocabulary):ComposerChip[]{
   const found=new Map<string,ComposerChip>();
@@ -167,7 +167,7 @@ export function implicitChips(text:string,vocab:TokenVocabulary):ComposerChip[]{
     const [,sigil,name]=match,token=`${sigil}${name}`;
     if(found.has(token))continue;
     const builtin=sigil==='/'?vocab.commands?.find(entry=>entry.command===name):undefined;
-    const claudeCommand=sigil==='/'&&!builtin?vocab.skills?.find(entry=>entry.command&&entry.name===name):undefined;
+    const claudeCommand=sigil==='/'&&!builtin?vocab.skills?.find(entry=>entry.claudeSkill&&entry.name===name)??vocab.skills?.find(entry=>entry.command&&entry.name===name):undefined;
     const hit=sigil==='/'?builtin??claudeCommand:sigil==='$'?vocab.skills?.find(entry=>!entry.command&&entry.name===name):vocab.plugins?.find(entry=>entry.name===name);
     if(!hit)continue;
     found.set(token,builtin?{token,kind:'command',id:name,label:hit.label}:{token,kind:sigil==='@'?'plugin':'skill',id:(hit as {id:string}).id,label:hit.label});

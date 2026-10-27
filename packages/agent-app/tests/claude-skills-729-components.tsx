@@ -48,7 +48,7 @@ let catalog:any[]=[linearPkg];
   if(command==='chat.timeline')return {items:[],revision:1};
   if(command==='providers.list')return [{id:'claude',name:'Claude',available:true,models:[{id:'m',name:'Model M'}]}];
   if(command==='plugins.list')return (input?.folderPaths??[]).includes('/workspace')?[...skills,deploy]:skills;
-  if(command==='plugins.inventory')return plugins;
+  if(command==='plugins.inventory')return plugins.slice();
   if(command==='mcp.servers.list'||command==='mcp.servers.detect')return servers;
   if(command==='mcp.hooks.list')return [];
   if(command==='extensions.sources.list')return [{id:'src',kind:'local',path:'/m',label:'Claude market',addedAt:''}];
@@ -74,12 +74,14 @@ const {PluginIcon}=await import('../src/renderer/components/PluginIcon');
 const {useStore}=await import('../src/renderer/useStore');
 const store=await import('../src/renderer/store');
 const errors:unknown[]=[],root=createRoot(document.getElementById('root')!,{onUncaughtError:error=>errors.push(error)});
-let generation=0,view:'composer'|'tools'|'settings'|'command'|'plugins'|'newchat'|'icons'='composer';
+let toolset:any[]=[];
+let generation=0,view:'composer'|'toolset'|'tools'|'settings'|'command'|'plugins'|'newchat'|'icons'='composer';
 const toolItem=(id:string,server:string,tool:string,status='completed')=>({id,chatId:'chat',kind:'tool',text:'',status,createdAt:'',data:{type:'mcpToolCall',server,tool,status}});
 const commandItem={id:'c1',chatId:'chat',kind:'tool',text:'/bar',status:'completed',createdAt:'',data:{type:'claudeCommand',kind:'command',name:'/bar',arguments:'the login flow',source:'.claude/commands (workspace)',path:'/workspace/.claude/commands/bar.md',output:'Review the login flow'}};
 const tools=[toolItem('t1','mcp__codex_apps__github','search_issues'),toolItem('t2','codex_apps','figma.get_screenshot'),toolItem('t3','postgres','run_query'),toolItem('t4','plugin_figma_figma','get_metadata','failed')];
 function Harness(){const state=useStore();if(!state.snapshot)return null;
   if(view==='tools')return <div className="tools">{tools.map(item=><ToolCard key={item.id} item={item as any}/>)}</div>;
+  if(view==='toolset')return <div className="toolset">{toolset.map(item=><ToolCard key={item.id} item={item as any}/>)}</div>;
   if(view==='settings')return <McpServers/>;
   if(view==='command')return <div className="tools"><ToolCard item={commandItem as any}/></div>;
   if(view==='plugins')return <PluginsScreen/>;
@@ -279,6 +281,52 @@ await check('the New chat + menu lists MCP servers and plugin apps with their ma
   assert.ok(!document.querySelector('.composer-plus-popover'),'the menu closes');
   const {getNewChatDraft}=await import('../src/renderer/newChatDraft');
   assert.match(getNewChatDraft().text,/@app:Atlassian/,'the agent gets the app by name');
+});
+
+// Spec: MUS-SPEC-14-729E (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-729e)
+await check('tool rows from connector and plugin servers draw that plugin\'s logo and read the tool, under every name the coding clients give them',async()=>{
+  const extra=[['slack','Slack'],['google-drive','Google Drive'],['notion','Notion']].map(([name,displayName])=>({id:`/cache/c/${name}/1`,name,version:'1',provenance:'c',path:`/cache/c/${name}/1`,skills:[],mcpServers:name==='notion'?[{name,transport:'remote'}]:[],apps:[{name,id:`connector_${name}`,required:false}],readError:null,displayName,icon:{kind:'image',dataUrl:`data:image/png;base64,${Buffer.from(name).toString('base64')}`}}));
+  plugins.push(...extra);
+  try{
+    await store.loadPlugins(true);
+    toolset=[toolItem('e1','mcp__codex_apps__github','_create_pull_request'),toolItem('e2','mcp__codex_apps__slack','_slack_read_channel'),toolItem('e3','codex_apps','google_drive.list_drives'),toolItem('e4','plugin_figma_figma','get_design_context'),toolItem('e5','claude_ai_Notion','search'),toolItem('e6','mcp__node_repl','js'),toolItem('e7','muster_browser','browser_click')];
+    view='toolset';await render();
+    const rows=Array.from(document.querySelectorAll('.toolset .tool-row-head'));
+    assert.equal(rows.length,7);
+    const iconOf=(name:string)=>(plugins.find(entry=>entry.name===name) as any).icon.dataUrl;
+    const drawn=rows.map(row=>{const glyph=row.querySelector('.tool-glyph');return [glyph?.getAttribute('data-plugin')??null,glyph?.querySelector('img.item-icon')?.getAttribute('src')??null];});
+    assert.deepEqual(drawn,[['GitHub',iconOf('github')],['Slack',iconOf('slack')],['Google Drive',iconOf('google-drive')],['Figma',iconOf('figma')],['Notion',iconOf('notion')],[null,null],[null,null]],JSON.stringify(drawn));
+    const text=rows.map(row=>row.textContent??'');
+    for(const [index,subject] of [[0,'GitHub / create pull request'],[1,'Slack / read channel'],[2,'Google Drive / list drives'],[4,'Notion / search']] as const)assert.ok(text[index].includes(subject),`row ${index} reads "${subject}": ${text[index]}`);
+    assert.ok(!text.slice(0,5).some(line=>/codex_apps|plugin_figma|claude_ai_/.test(line)),'no server plumbing on the rows');
+  }finally{plugins.splice(plugins.length-extra.length,extra.length);await store.loadPlugins(true);view='composer';}
+});
+
+// Spec: MUS-SPEC-14-732G (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-732g)
+await check('a hand-typed /foo, when a Claude Code skill and a command share the name, attaches the skill Claude Code would run',async()=>{
+  const command={id:'/h/.claude/commands/foo.md',name:'foo',provenance:'~/.claude',path:'/h/.claude/commands/foo.md',readme:'FOO COMMAND',readError:null,shortDescription:'Foo command',claude:'command'};
+  skills.unshift(command as any);
+  try{
+    view='composer';await store.loadSkills(true,['/workspace']);
+    await setDraft('/foo the notes');
+    const chip=document.querySelector('[data-testid="token-chip"]');
+    assert.equal(chip?.textContent,'/foo');
+    (byTest('composer-primary') as HTMLButtonElement).click();await delay(60);
+    const send=calls.filter(call=>call.command==='chat.send').at(-1)!;
+    assert.deepEqual(send.input.skillIds??[send.input.skillId],['/h/.claude/skills/foo'],'the skill wins its name, as in Claude Code');
+  }finally{skills.shift();await store.loadSkills(true,['/workspace']);}
+});
+
+// Spec: MUS-SPEC-14-732H (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-732h)
+await check('when only the dark-theme logo still draws, it shows in dark theme and the light theme gets the monogram',async()=>{
+  view='icons';await render();
+  const pair=()=>Array.from(document.querySelectorAll('.pair .item-icon'));
+  const light=pair().find(node=>node.classList.contains('is-theme-light'));
+  assert.ok(light,'the light logo is drawn first');light!.dispatchEvent(new window.Event('error'));await delay(40);
+  const shown=pair().map(node=>[node.tagName.toLowerCase(),node.getAttribute('src'),node.classList.contains('is-theme-dark'),node.classList.contains('is-theme-light')]);
+  assert.deepEqual(shown,[['img','data:image/png;base64,REFSSw==',true,false],['span',null,false,true]],JSON.stringify(shown));
+  assert.ok(pair()[1].classList.contains('item-monogram'));
+  view='composer';generation++;await render();
 });
 
 // Spec: MUS-SPEC-14-732F (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-732f)

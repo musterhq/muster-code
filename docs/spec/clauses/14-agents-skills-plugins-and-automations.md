@@ -34,7 +34,7 @@ Boundaries:
 | [MUS-SPEC-14-729B](14-agents-skills-plugins-and-automations.md#mus-spec-14-729b) | A picked command on a Claude Code chat goes to Claude Code as `/bar <request>`, Claude Code expands it, and one "Ran /bar" row opens to the expansion. | [`a picked command on a Claude Code chat is sent as /bar with the request as its arguments, Claude Code expands it, and the transcript shows "Ran /bar the login flow"`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
 | [MUS-SPEC-14-729C](14-agents-skills-plugins-and-automations.md#mus-spec-14-729c) | Entries from the user folder show in every chat folder; a folder's own entries only there, and another folder's entry is refused. | [`~/.claude entries show in every folder; a folder's .claude skills and commands only in that folder`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
 | [MUS-SPEC-14-729D](14-agents-skills-plugins-and-automations.md#mus-spec-14-729d) | A command turned off in Skills & plugins leaves the picker and a send that still names it is refused. | [`a command turned off in Skills & plugins leaves the picker and a send that still names it is refused`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
-| [MUS-SPEC-14-729E](14-agents-skills-plugins-and-automations.md#mus-spec-14-729e) | Tool calls from connector and plugin servers resolve to that plugin's icon under every name they arrive with, and rows read the tool, not the server plumbing. | [`tool calls from connector and plugin servers resolve to that plugin's icon under every name the coding clients give them`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-729E](14-agents-skills-plugins-and-automations.md#mus-spec-14-729e) | Tool rows from connector and plugin servers draw that plugin's logo under every name they arrive with, and read the tool, not the server plumbing. | [`tool rows from connector and plugin servers draw that plugin's logo and read the tool, under every name the coding clients give them`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
 | [MUS-SPEC-14-729F](14-agents-skills-plugins-and-automations.md#mus-spec-14-729f) | In the `/` picker a Claude Code command reads `/bar` under Commands, after the built-ins, with a Claude Code badge and its argument hint; skills stay under Skills. | [`the / picker lists a Claude Code command as /name under Commands with a Claude Code badge and its argument hint`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
 | [MUS-SPEC-14-729G](14-agents-skills-plugins-and-automations.md#mus-spec-14-729g) | Transcript MCP tool rows show the providing plugin's icon and read "GitHub / search issues"; unbranded servers keep the thin glyph. | [`MCP tool rows show the providing plugin mark; built-in servers keep the generic glyph`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
 | [MUS-SPEC-14-729H](14-agents-skills-plugins-and-automations.md#mus-spec-14-729h) | A picked Claude Code skill on a Claude Code chat is sent as `/foo <request>` and reads "Used foo skill". | [`a picked Claude Code skill on a Claude Code chat is invoked by name too and reads "Used foo skill"`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
@@ -59,6 +59,8 @@ Boundaries:
 | [MUS-SPEC-14-732D](14-agents-skills-plugins-and-automations.md#mus-spec-14-732d) | A folder whose `.claude/skills` is a link to its `.agents/skills` lists the skill as Claude Code's, and a Claude Code run invokes it by name. | [`a folder whose .claude/skills is a link to its .agents/skills lists the skill as Claude Code's and a Claude Code run invokes it by name`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
 | [MUS-SPEC-14-732E](14-agents-skills-plugins-and-automations.md#mus-spec-14-732e) | A logo download that fails for a reason that may pass (offline, a 5xx or 429, a timeout) is tried again after six hours, not a week later. A 404 or a non-image is not retried before the weekly refresh. | [`a logo download that fails is tried again after six hours, not a week later`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
 | [MUS-SPEC-14-732F](14-agents-skills-plugins-and-automations.md#mus-spec-14-732f) | A logo the browser cannot draw falls back to the monogram on its row; a light and dark pair keeps the variant that still draws. | [`a logo the browser cannot draw falls back to the monogram on its row; a pair keeps the variant that still draws`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
+| [MUS-SPEC-14-732G](14-agents-skills-plugins-and-automations.md#mus-spec-14-732g) | A hand-typed /name shared by a Claude Code skill and a command attaches the skill, as Claude Code would run it | [`a hand-typed /foo, when a Claude Code skill and a command share the name, attaches the skill Claude Code would run`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
+| [MUS-SPEC-14-732H](14-agents-skills-plugins-and-automations.md#mus-spec-14-732h) | When only the dark-theme logo draws, light theme gets the monogram instead of a logo it cannot show | [`when only the dark-theme logo still draws, it shows in dark theme and the light theme gets the monogram`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
 
 ### Claude Code background sub-agents
 
@@ -269,14 +271,14 @@ Boundaries:
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-14-729e"></a>
-#### MUS-SPEC-14-729E: Connector and plugin tool calls resolve to the plugin's icon
+#### MUS-SPEC-14-729E: Connector and plugin tool calls draw the plugin's logo
 
-- Precondition: A plugin inventory with GitHub, Slack, Google Drive, Figma and Notion plugins, each with its own icon.
-- Action: Resolve the servers and tools the coding clients and Claude Code report (`mcp__codex_apps__github`, `codex_apps` with `google_drive.list_drives`, `plugin_figma_figma`, `claude_ai_Notion` and others), and the row labels for their tools.
-- Expected result: Each resolves to its plugin and that plugin's own icon; the built-in REPL and browser servers resolve to none. Labels drop the shared-server app prefix and a repeated connector name (`_slack_read_channel` reads "read channel").
-- Test: `packages/agent-app/tests/claude-skills-729.test.ts::tool calls from connector and plugin servers resolve to that plugin's icon under every name the coding clients give them`
-- Environment: Node test runner; pure functions; no network.
-- Known gaps: Built-in servers with no plugin (node_repl, muster_browser, the computer-use REPL) keep generic glyphs. This case checks name resolution only; the drawn marks on tool rows, connector rows and Settings are 729G, 729L and 729M.
+- Precondition: A chat whose plugin inventory has GitHub, Slack, Google Drive, Figma and Notion plugins, each with its own logo.
+- Action: The transcript shows tool calls from the servers the coding clients and Claude Code report: `mcp__codex_apps__github`, `mcp__codex_apps__slack`, `codex_apps` with `google_drive.list_drives`, `plugin_figma_figma`, `claude_ai_Notion`, plus the built-in `mcp__node_repl` and `muster_browser`.
+- Expected result: Each connector or plugin row draws its plugin's own logo and reads "<Plugin> / <tool>" ("GitHub / create pull request", "Slack / read channel", "Google Drive / list drives", "Notion / search"), with no server plumbing on the row. The REPL and browser rows keep their generic glyphs.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::tool rows from connector and plugin servers draw that plugin's logo and read the tool, under every name the coding clients give them`
+- Environment: Real ToolCard in a DOM suite (linkedom); fake app bridge whose plugin inventory carries image logos; no network. The name resolution behind it is also unit-tested in `tests/claude-skills-729.test.ts`.
+- Known gaps: Theme-specific CSS is not evaluated by linkedom; screenshots in both themes cover it.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-14-729f"></a>
@@ -408,7 +410,7 @@ Boundaries:
 - Expected result: Every one of those places shows the plugin's own logo, scaled to 128px, not a "CU" monogram. Raster logos up to 8 MB and 4096px are scaled; anything larger, or a logo that cannot be decoded, still falls back to the monogram. SVG logos keep their own budget and are never rasterised.
 - Test: `packages/agent-app/tests/claude-skills-729.test.ts::a plugin whose logo file is over the icon budget (Computer Use ships a 900 KB, 1024px PNG) still shows its logo, scaled down, in Skills & plugins and on its MCP server`
 - Environment: Real agent service and plugin discovery against a temporary ~/.codex plugin cache with a 1 MB PNG; the app's downscaler stands in for Electron's nativeImage. Live check in an isolated Muster instance with the real Computer Use plugin.
-- Known gaps: Scaling runs in the app process; a runtime started without the app (CLI tests) keeps the monogram for oversized logos. The test checks the scaled logo on the plugin and its MCP server mark in the inventory, not the drawn surfaces; Electron's nativeImage itself is exercised only by the live check (screenshots in the PR).
+- Known gaps: Electron's nativeImage is replaced by a stand-in scaler in this test, and is exercised only by the live check (screenshots in the PR). The test checks the scaled logo on the plugin and on its MCP server mark; drawing those marks on rows is 729E, 729G, 729L and 729M. The 4096px dimension limit has no fixture (a valid PNG that size is too large to build in the test). The rejection paths are covered: a raster over 8 MB, one the scaler cannot decode, and an SVG over its own budget all keep the monogram, and only the decodable raster reaches the scaler.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-14-729r"></a>
@@ -485,7 +487,7 @@ Boundaries:
 - Expected result: Neither the picker nor the attached command ever contains the secret: the file is opened without following a link and must still be the file that passed the check. An untouched command still reads normally.
 - Test: `packages/agent-app/tests/claude-skills-729.test.ts::a command file swapped for a symlink right after it is checked is not read through the link, in the picker or when a run attaches it`
 - Environment: Real discovery and attachment against a temporary home; `fs.promises.realpath` wrapped to swap the file at that moment.
-- Known gaps: A swap of a parent folder, rather than the file, is caught by the check after opening but has no separate test.
+- Known gaps: Swapping a parent folder back and forth between the open and the checks is not closed. Node has no `openat`, so each path component cannot be opened without following links. A static parent link is caught by the containment check. The race needs a process already running as the user, and that process can read the outside file directly, so it gains nothing.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-14-732b"></a>
@@ -541,4 +543,26 @@ Boundaries:
 - Test: `packages/agent-app/tests/claude-skills-729-components.tsx::a logo the browser cannot draw falls back to the monogram on its row; a pair keeps the variant that still draws`
 - Environment: Real ToolCard and PluginIcon in a DOM suite (linkedom); the error event is dispatched on the image.
 - Known gaps: A real undecodable file is not decoded in this suite; screenshots cover the drawn result.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-732g"></a>
+#### MUS-SPEC-14-732G: A typed /name shared by a skill and a command attaches the skill
+
+- Precondition: A Claude Code chat with the personal Claude Code skill foo and a personal Claude Code command foo, the command listed first.
+- Action: Type `/foo the notes` by hand (no pick) and send.
+- Expected result: The `/foo` chip attaches the skill foo, the entry Claude Code itself runs for `/foo`, so the native `/foo` and the attached entry agree.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::a hand-typed /foo, when a Claude Code skill and a command share the name, attaches the skill Claude Code would run`
+- Environment: Real Composer in a DOM suite (linkedom); fake app bridge; no network.
+- Known gaps: An explicit pick of the command is 732C (it is inlined, not sent as /foo).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-732h"></a>
+#### MUS-SPEC-14-732H: A dark-only surviving logo does not vanish in light theme
+
+- Precondition: A plugin mark with light and dark variants.
+- Action: The browser reports an error loading the light variant.
+- Expected result: The dark logo shows in dark theme only, and the light theme shows the monogram. A white dark-theme mark never sits on the light surface.
+- Test: `packages/agent-app/tests/claude-skills-729-components.tsx::when only the dark-theme logo still draws, it shows in dark theme and the light theme gets the monogram`
+- Environment: Real PluginIcon in a DOM suite (linkedom); the error event is dispatched on the image.
+- Known gaps: linkedom does not apply the theme CSS; the classes that select one per theme are checked, and screenshots cover the drawn result.
 - Evidence: UNVERIFIED

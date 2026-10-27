@@ -265,7 +265,7 @@ const plugin = (name: string, displayName: string, servers: string[], apps: stri
   mcpServers: servers.map(server => ({name: server, transport: 'remote' as const})), apps: apps.map(app => ({name: app, id: `connector_${app}`, required: false})), icon: icon(name)});
 const inventory = [plugin('github', 'GitHub', [], ['github']), plugin('google-drive', 'Google Drive', [], ['google-drive']), plugin('figma', 'Figma', ['figma'], ['figma', 'figma_runtime']), plugin('slack', 'Slack', [], ['slack']), plugin('notion', 'Notion', ['notion'], ['notion'])];
 
-// Spec: MUS-SPEC-14-729E (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-729e)
+// Name resolution behind MUS-SPEC-14-729E (the drawn rows are checked in the DOM suite).
 test('tool calls from connector and plugin servers resolve to that plugin\'s icon under every name the coding clients give them', () => {
   const cases: Array<[string, string, string | undefined]> = [
     ['mcp__codex_apps__github', '_create_pull_request', 'GitHub'],
@@ -305,7 +305,7 @@ test('a plugin whose logo file is over the icon budget (Computer Use ships a 900
   await writeFile(join(dir, 'assets', 'app-icon.png'), logo);
   await writeFile(join(dir, '.codex-plugin', 'plugin.json'), JSON.stringify({name: 'computer-use', version: '1.0.1', interface: {displayName: 'Computer Use', logo: './assets/app-icon.png', brandColor: '#0F172A'}}));
   const asked: number[] = [];
-  const service = createAgentService({dataDir: root, onEvent() {}, downscaleIcon(bytes: Buffer, size: number) { asked.push(size); assert.ok(bytes.equals(logo), 'the downscaler gets the logo file'); return scaled; }});
+  const service = createAgentService({dataDir: root, onEvent() {}, downscaleIcon(bytes: Buffer, size: number) { asked.push(size); return bytes.equals(logo) ? scaled : null; }});
   t.after(async () => { await service.dispose(); if (saved === undefined) delete process.env.HOME; else process.env.HOME = saved; await rm(root, {recursive: true, force: true}); });
   const inventory = await service.invoke('plugins.inventory', undefined);
   const plugin = inventory.find(entry => entry.name === 'computer-use');
@@ -313,6 +313,25 @@ test('a plugin whose logo file is over the icon budget (Computer Use ships a 900
   assert.deepEqual(plugin.icon, {kind: 'image', dataUrl: `data:image/png;base64,${scaled.toString('base64')}`}, 'the logo shows, not the CU monogram');
   assert.ok(asked.length === 1 && asked[0] >= 96, `scaled once to a crisp icon size (asked ${asked})`);
   assert.deepEqual(mcpMark(inventory, 'computer-use')?.icon, plugin.icon, 'its MCP server row and tool rows carry the same logo');
+  const install = async (name: string, file: string, bytes: Buffer | string) => {
+    const pluginDir = join(root, 'home', '.codex', 'plugins', 'cache', 'openai-bundled', name, '1.0.0');
+    await mkdir(join(pluginDir, '.codex-plugin'), {recursive: true}); await mkdir(join(pluginDir, 'assets'));
+    await writeFile(join(pluginDir, 'assets', file), bytes);
+    await writeFile(join(pluginDir, '.codex-plugin', 'plugin.json'), JSON.stringify({name, version: '1.0.0', interface: {displayName: name, logo: `./assets/${file}`}}));
+  };
+  const huge = png(1600, true);
+  assert.ok(huge.length > 8 * 1024 * 1024, `the fixture is over the 8 MB source limit (${huge.length} bytes)`);
+  await install('huge-logo', 'logo.png', huge);
+  await install('undecodable-logo', 'logo.png', png(400, true));
+  await install('big-svg', 'logo.svg', `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><!--${'x'.repeat(300 * 1024)}--><rect width="1" height="1"/></svg>`);
+  asked.length = 0;
+  const after = await service.invoke('plugins.inventory', undefined);
+  for (const name of ['huge-logo', 'undecodable-logo', 'big-svg']) {
+    const entry = after.find(item => item.name === name);
+    assert.ok(entry, `${name} is listed`);
+    assert.ok(entry.icon?.kind !== 'image', `${name} keeps its monogram (${entry.icon?.kind})`);
+  }
+  assert.equal(asked.length, 1, `only the decodable-size raster reaches the scaler; the 8 MB one and the SVG never do (asked ${asked.length})`);
 });
 
 // Spec: MUS-SPEC-14-729S (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-729s)

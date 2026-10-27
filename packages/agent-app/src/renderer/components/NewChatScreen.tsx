@@ -147,7 +147,7 @@ export function NewChatScreen():React.ReactElement {
   const folderId=current.target.folderId;
   const folderPath=state.snapshot?.folders.find(folder=>folder.id===folderId)?.path;
   const text=draft.text;
-  const vocabulary={commands:[],skills:skills.filter(skillUsable).map(skill=>({name:skill.name,id:skill.id,label:skillLabel(skill),...(skill.claude==='command'?{command:true}:{})})),plugins:plugins.map(plugin=>({name:plugin.name,id:plugin.id,label:pluginLabel(plugin)}))};
+  const vocabulary={commands:[],skills:skills.filter(skillUsable).map(skill=>({name:skill.name,id:skill.id,label:skillLabel(skill),...(skill.claude==='command'?{command:true}:skill.claude==='skill'?{claudeSkill:true}:{})})),plugins:plugins.map(plugin=>({name:plugin.name,id:plugin.id,label:pluginLabel(plugin)}))};
   const tokenRanges=findTokenRanges(text,chips,vocabulary);
   const slash=popoverBlockedFor(dismissed,text)?null:readSlashQuery(text,caret);
   const mention=slash||popoverBlockedFor(dismissed,text)?null:readMentionQuery(text,caret);

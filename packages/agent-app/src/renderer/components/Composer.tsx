@@ -297,7 +297,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   });
   const vocabulary: TokenVocabulary = {
     commands: COMPOSER_COMMANDS.map(command => ({ command: command.command, label: command.label })),
-    skills: skills.filter(skillUsable).map(skill => ({ name: skill.name, id: skill.id, label: skillLabel(skill), ...(skill.claude === 'command' ? { command: true } : {}) })),
+    skills: skills.filter(skillUsable).map(skill => ({ name: skill.name, id: skill.id, label: skillLabel(skill), ...(skill.claude === 'command' ? { command: true } : skill.claude === 'skill' ? { claudeSkill: true } : {}) })),
     plugins: plugins.map(plugin => ({ name: plugin.name, id: plugin.id, label: pluginLabel(plugin) })),
   };
   /** Picked chips move and delete as units; `tokenRanges` also paints recognised typed `/command`, `$skill` and `@plugin`. */
