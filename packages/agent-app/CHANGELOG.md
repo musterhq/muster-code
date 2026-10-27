@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Workspace writes and edits can no longer leave empty files or folders outside the chat’s folder when another process swaps a parent folder for a link (#710).
 - Chats on router models keep their sub-agents, file edits and MCP tools after you ask for a connector such as Figma or Google Drive. Muster now loads only the connectors the chat named instead of every connector's tools, which the router cut off past 128 (#756).
 - MCP credentials stay out of process command lines, saved API keys are cleared when their endpoint changes host, and release builds require a signing identity and pinned build actions (#406).
 - Chats on API-key and local router routes remember earlier tool results, fit requests to the model's window and retry brief outages without repeating commands. Long command output keeps its opening and final summary, files can be searched and read in pages, and the agent only gets instructions for tools it can use (#384).
