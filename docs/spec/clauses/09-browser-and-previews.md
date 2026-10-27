@@ -28,6 +28,8 @@ Boundaries:
 | [MUS-SPEC-09-721C](09-browser-and-previews.md#mus-spec-09-721c) | Screenshots the agent takes never include the cursor, and a tab nobody can see gets no cursor at all. | [`the model never sees its own cursor, and a page nobody watches pays nothing`](../../../packages/agent-app/tests/agent-cursor.test.ts) |
 | [MUS-SPEC-09-721D](09-browser-and-previews.md#mus-spec-09-721d) | With Reduce motion on, the cursor moves to each target instantly. | [`with Reduce motion on, the cursor jumps instead of gliding`](../../../packages/agent-app/tests/agent-cursor.test.ts) |
 
+| [MUS-SPEC-09-637A](09-browser-and-previews.md#mus-spec-09-637a) | At 1180px with the sidebar and a tall summary visible, the transcript viewport sits below the preview rather than shrinking below 440px; widening restores its height. | [`a narrow window keeps the transcript below the preview without squeezing its text`](../../../packages/agent-app/tests/pip-components.tsx) |
+
 ### Page background
 
 <a id="mus-spec-09-611a"></a>
@@ -63,6 +65,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/pip-reserve.test.ts::the smallest reserve that clears the card: the text ends at the card minus the gap`
 - Environment: Node test runner; no window or network.
 - Known gaps: A unit test of the pure calculation. The other tests in the file cover the no-reserve, left-side and 440px cases, but only this one is linked. MUS-SPEC-09-629A links the screen-level check.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-09-637a"></a>
+#### MUS-SPEC-09-637A: Narrow windows keep the transcript clear of the preview
+
+- Precondition: A running chat has two browser previews, an open sidebar and a tall summary card in a window 1180px wide. Clearing the preview horizontally would leave less than 440px for the transcript.
+- Action: Resize to that narrow window, hide and show the preview, then widen the window again.
+- Expected result: The scrollable transcript viewport starts at least 8px below the entire preview stack, with no extra horizontal reserve. Hiding the preview or widening the window removes the vertical reserve.
+- Test: `packages/agent-app/tests/pip-components.tsx::a narrow window keeps the transcript below the preview without squeezing its text`
+- Environment: DOM suite (`linkedom`); fake layout dimensions, no Electron or network.
+- Known gaps: Layout dimensions are faked. Separate narrow-window screenshots in both themes verify real browser layout.
 - Evidence: UNVERIFIED
 
 ### The agent's tab survives a closed panel

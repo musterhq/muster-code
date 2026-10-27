@@ -23,6 +23,6 @@ test('left-side cards mirror the right side', () => {
   const r = pipReserveFor({left: 0, right: 900, width: 900}, 804, 900, {right: 600, width: 300}, 'left');
   assert.deepEqual(r?.side, 'left');
 });
-test('never squeezes the column below 440px: the card overlaps instead', () => {
+test('never squeezes the column below 440px: the renderer must clear the card vertically', () => {
   assert.equal(pipReserveFor({left: 260, right: 860, width: 600}, 804, 880, {right: 20, width: 300}, 'right'), undefined);
 });
