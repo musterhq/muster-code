@@ -25,7 +25,7 @@ test('explicit connection check reaches a real local server, handles failures, a
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
  const row=await s.invoke('providers.save',{name:'Local fixture',endpoint:`http://127.0.0.1:${server.address().port}/v1`});
  assert.equal(calls,0,'save/discovery must not contact endpoints');
- const result=await s.invoke('providers.check',{id:row.id});assert.equal(result.models[0].id,'fixture-model');assert.ok(result.checkedAt);assert.equal(result.available,false);
+ const result=await s.invoke('providers.check',{id:row.id});assert.equal(result.models[0].id,'fixture-model');assert.ok(result.checkedAt);assert.equal(result.available,true);
  mode='deny';await assert.rejects(s.invoke('providers.check',{id:row.id}),/HTTP 401/);
  mode='redirect';await assert.rejects(s.invoke('providers.check',{id:row.id}),/Could not reach/);
 });
