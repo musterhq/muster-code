@@ -613,4 +613,4 @@ Boundaries:
 - Test: `packages/agent-app/tests/router-subagents-756.test.ts::a router chat that asks for Figma loads only the Figma connector and keeps sub-agents on, turn after turn`
 - Environment: Node test runner; the real service and provider adapter with a fake Codex core; no network.
 - Known gaps: A connector request Muster cannot match to a cached connector (an unknown name, or "Codex apps" in general) still loads the whole catalog, as before.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/756/green.log; exit 0; 1 passed, 0 failed, 0 skipped; commit 1a3ac4fdddd9e638abb3e1d9ffe7d9c04d26f70d
