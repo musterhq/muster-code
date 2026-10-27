@@ -76,7 +76,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/pip-components.tsx::a narrow window keeps the transcript below the preview without squeezing its text`
 - Environment: DOM suite (`linkedom`); fake layout dimensions, no Electron or network.
 - Known gaps: Layout dimensions are faked. Separate narrow-window screenshots in both themes verify real browser layout.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/637/green-pip.txt; exit 0; 2 passed, 0 failed, 0 skipped; commit d84d030210ccc9ce29ea7a7398654a006ab5cee3
 
 ### The agent's tab survives a closed panel
 
