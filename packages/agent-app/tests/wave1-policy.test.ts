@@ -80,7 +80,6 @@ test('C16: the project default policy applies to tasks without their own; a task
   const b = await h.addTask('Own policy: none', { kind: 'agent', id: cto.id });
   await h.s.invoke('project.tasks.policy.set', { projectId: h.project.id, id: b.id, policy: null });
   assert.equal((await h.gov()).policies.length, 0);
-  assert.ok(true);
 });
 
 test('Review fix: an agent never approves its own work', async t => {

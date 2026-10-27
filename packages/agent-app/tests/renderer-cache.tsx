@@ -15,6 +15,9 @@ const store=await import('../src/renderer/store');
 await store.boot();await store.selectChat('chat-0');
 store.openSubagentsTab('chat-0',undefined,'First');
 store.setComposerDraft('chat-0','Keep this draft');
+// Resource tabs are scoped per chat now; each visited workspace has the protected transcript open.
+const {saveWorkspace}=await import('../src/renderer/workspacePersistence');
+for(const chat of chats)saveWorkspace(localStorage,{tabs:store.getState().tabs,activeTabId:store.getState().activeTabId},`chat:${chat.id}|project:|folder:`);
 for(let i=1;i<40;i++)await store.selectChat(`chat-${i}`);
 const count=Object.keys(store.getState().timelines).length;
 assert.ok(count<=10,`40 visited chats retained ${count} timelines`);
