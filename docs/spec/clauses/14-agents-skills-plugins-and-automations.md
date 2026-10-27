@@ -16,6 +16,7 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-14-398A](14-agents-skills-plugins-and-automations.md#mus-spec-14-398a) | Marketplace cards show their source name without a repeated runtime prefix; the full provenance stays in a tooltip. | [`marketplace cards show the source name and keep full provenance in a tooltip`](../../../packages/agent-app/tests/ui-sweep-dom.tsx) |
 | [MUS-SPEC-14-382A](14-agents-skills-plugins-and-automations.md#mus-spec-14-382a) | After 31 minutes with no report the sub-agent still reads running, the chat run is still open and Claude Code input is open; Stop then interrupts Claude Code, the sub-agent reads interrupted and the run ends as Stopped. | [`Claude Code background sub-agent: no 30 minute cut-off while it is still running`](../../../packages/agent-app/tests/claude-background-382.test.ts) |
 | [MUS-SPEC-14-480A](14-agents-skills-plugins-and-automations.md#mus-spec-14-480a) | An MCP server added mid-run stops the running chat once, re-sends its last message through the queue with the new server in its tools, leaves the queue unpaused and adds one notice. | [`an MCP server added mid-run restarts the running chat once and re-sends its prompt through the queue with the new tools`](../../../packages/agent-app/tests/plugin-reload.test.ts) |
 | [MUS-SPEC-14-480B](14-agents-skills-plugins-and-automations.md#mus-spec-14-480b) | An idle chat whose last message asked for the plugin gets it re-sent; an idle chat on another topic and a running chat doing unrelated work are not stopped or re-sent. | [`an MCP server added mid-run restarts the running chat once and re-sends its prompt through the queue with the new tools`](../../../packages/agent-app/tests/plugin-reload.test.ts) |
@@ -64,6 +65,7 @@ Boundaries:
 | [MUS-SPEC-14-732I](14-agents-skills-plugins-and-automations.md#mus-spec-14-732i) | A command folder swapped for a link to an outside folder while a command is read is refused, even if every check sees it restored | [`a command folder swapped for a link to an outside folder while it is read is refused, even if every check sees the folder restored`](../../../packages/agent-app/tests/confined-read-729.test.ts) |
 | [MUS-SPEC-14-732J](14-agents-skills-plugins-and-automations.md#mus-spec-14-732j) | A command's arguments reach the run as typed: a quoted argument stays whole in $0, $1…, its spacing and the command's own name inside it are kept, inlined and native | [`an inlined command keeps a quoted argument whole, splitting its arguments the way Claude Code does`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
 | [MUS-SPEC-14-732K](14-agents-skills-plugins-and-automations.md#mus-spec-14-732k) | The app's real image scaler shrinks a large plugin logo so it shows; an undecodable one keeps the monogram | [`a plugin logo over the icon budget is scaled by the app's real image scaler and shown; one it cannot decode keeps the monogram`](../../../packages/agent-app/tests/large-logo-729.electron.ts) |
+| [MUS-SPEC-14-756A](14-agents-skills-plugins-and-automations.md#mus-spec-14-756a) | On a router model without tool search, a chat that names Figma (then Google Drive) loads only those connectors, keeps sub-agents on and never loads the whole connector catalog; no connector asked means none load; tool search keeps the catalog deferred. | [`a router chat that asks for Figma loads only the Figma connector and keeps sub-agents on, turn after turn`](../../../packages/agent-app/tests/router-subagents-756.test.ts) |
 
 ### Claude Code background sub-agents
 
@@ -602,3 +604,25 @@ Boundaries:
 - Environment: Runs inside Electron (`npm run test:electron`) with the real nativeImage and the real agent service against a temporary ~/.codex plugin cache.
 - Known gaps: The 4096px limit has no fixture (see 729Q).
 - Evidence: UNVERIFIED
+
+<a id="mus-spec-14-398a"></a>
+#### MUS-SPEC-14-398A: Marketplace cards show a concise source with full provenance available
+
+- Precondition: A marketplace source is labelled Codex: local-marketplace and offers an uninstalled Notes plugin.
+- Action: Open Skills & plugins and select Discover.
+- Expected result: The Notes card shows local-marketplace with the full source label in its tooltip, and offers Install.
+- Test: `packages/agent-app/tests/ui-sweep-dom.tsx::marketplace cards show the source name and keep full provenance in a tooltip`
+- Environment: Node and linkedom with the real PluginsScreen and fixture bridge; no network.
+- Known gaps: Real marketplace sources are not synced; layout is checked in the browser fixture.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-756a"></a>
+#### MUS-SPEC-14-756A: A router chat that uses a connector keeps its sub-agents
+
+- Precondition: A Codex route on a router model with no tool search; the Codex home's connector cache lists Figma, GitHub and Google Drive.
+- Action: Send "Check the latest frames in my Figma file and spawn two sub-agents to review them", then "Now open a draft in Google Drive with the summary", then "Thanks, carry on". Separately, send a request that names no connector, and a Figma request on a model with tool search.
+- Expected result: Every launch turns sub-agents on. The first loads only Figma (`apps._default.enabled=false` plus Figma's id); the second adds Google Drive; the follow-up keeps both; GitHub never loads. A chat that names no connector loads none, and a model with tool search gets the catalog deferred with nothing scoped.
+- Test: `packages/agent-app/tests/router-subagents-756.test.ts::a router chat that asks for Figma loads only the Figma connector and keeps sub-agents on, turn after turn`
+- Environment: Node test runner; the real service and provider adapter with a fake Codex core; no network.
+- Known gaps: A connector request Muster cannot match to a cached connector (an unknown name, or "Codex apps" in general) still loads the whole catalog, as before.
+- Evidence: local; ~/.muster-work/review/756/green.log; exit 0; 1 passed, 0 failed, 0 skipped; commit 1a3ac4fdddd9e638abb3e1d9ffe7d9c04d26f70d

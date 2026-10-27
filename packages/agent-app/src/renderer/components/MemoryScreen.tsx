@@ -102,6 +102,8 @@ function MemoryRow({ record, open, onToggle, onDelete, onCorrect, onDeleteDocume
 /** A run lesson the runtime suggested: edit it, then remember or dismiss it. */
 function OfferCard({ offer, onDone }: { offer: MemoryOffer; onDone: (notice: string) => void }): React.ReactElement {
   const [text, setText] = useState(offer.summary);
+  const [expanded, setExpanded] = useState(false);
+  const summary = offer.summary.trim().split(/\n/).find(line => line.trim())?.trim() ?? 'Suggested memory';
   const [busy, setBusy] = useState<'save' | 'dismiss' | null>(null);
   const [error, setError] = useState('');
   const act = async (kind: 'save' | 'dismiss') => {
@@ -116,13 +118,14 @@ function OfferCard({ offer, onDone }: { offer: MemoryOffer; onDone: (notice: str
   return (
     <li className="memory-offer">
       <div className="memory-offer-head"><span>From “{offer.chatTitle}”</span><time dateTime={offer.createdAt} title={exactTime(offer.createdAt)}>{compactAge(offer.createdAt)}</time></div>
-      <textarea aria-label={`Suggested memory from ${offer.chatTitle}`} rows={3} value={text} maxLength={8192} disabled={busy !== null} onChange={event => setText(event.target.value)}
+      <button type="button" className="memory-offer-summary" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{summary.length > 140 ? `${summary.slice(0, 137)}…` : summary}</button>
+      {expanded && <><textarea aria-label={`Suggested memory from ${offer.chatTitle}`} rows={3} value={text} maxLength={8192} disabled={busy !== null} onChange={event => setText(event.target.value)}
         onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void act('save'); } }} />
       {error && <p className="memory-error" role="alert">{error}</p>}
       <div className="new-memory-actions">
         <button type="button" className="settings-button ghost" disabled={busy !== null} onClick={() => void act('dismiss')}>{busy === 'dismiss' ? 'Dismissing…' : 'Dismiss'}</button>
         <button type="button" className="settings-button" disabled={busy !== null || !text.trim()} onClick={() => void act('save')}>{busy === 'save' ? 'Saving…' : 'Remember'}</button>
-      </div>
+      </div></>}
     </li>
   );
 }
@@ -269,7 +272,7 @@ export function MemoryScreen(): React.ReactElement {
   };
   useEffect(() => {
     launcher.current = document.activeElement;
-    back.current?.focus();
+    back.current?.focus({ focusVisible: false } as FocusOptions);
     void load('');
     void invoke('memory.config.get', {}).then(setConfig, () => {});
     let live = true;

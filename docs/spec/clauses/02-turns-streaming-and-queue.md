@@ -16,6 +16,7 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-02-398A](02-turns-streaming-and-queue.md#mus-spec-02-398a) | The header reads Worked for 26s. | [`an imported turn displays its work duration without the import gap`](../../../packages/agent-app/tests/ui-sweep-dom.tsx) |
 | [MUS-SPEC-02-387A](02-turns-streaming-and-queue.md#mus-spec-02-387a) | A tool row the provider started and never finished is interrupted, with its output kept, when the turn completes. | [`#387 a tool the provider never closed is shown as Stopped once a completed turn settles`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
 | [MUS-SPEC-02-387B](02-turns-streaming-and-queue.md#mus-spec-02-387b) | The same row is interrupted when the turn fails. | [`#387 a tool the provider never closed is shown as Stopped once a failed turn settles`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
 | [MUS-SPEC-02-387C](02-turns-streaming-and-queue.md#mus-spec-02-387c) | A tool row left running when the app closed mid-turn is interrupted when Muster restarts. | [`#387 a tool row left running when Muster closed is Stopped after restart`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
@@ -679,4 +680,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/queue-after-crash-579.test.ts::a message queued before a crash is sent once after Continue anyway and Steer`
 - Environment: Node test runner; the agent service with a fake Codex-style provider that keeps its saved queue across a relaunch and sends it when the thread goes idle; no network.
 - Known gaps: The fake app-server models the real one's queue persistence and idle send from its documented methods, not from a live Codex. A provider that keeps no queue of its own never double-sends, and Continue anyway then Steer on it already sent once.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-398a"></a>
+#### MUS-SPEC-02-398A: An imported turn displays its work duration without the import gap
+
+- Precondition: A completed 26-second turn has an import notice a month later.
+- Action: Render its folded turn header.
+- Expected result: The header reads Worked for 26s.
+- Test: `packages/agent-app/tests/ui-sweep-dom.tsx::an imported turn displays its work duration without the import gap`
+- Environment: Node and linkedom with the real renderer and a fixture bridge; responsive navigation uses a window media-query fixture. No desktop app or network.
+- Known gaps: Does not exercise a live provider or imported history database. Visual layout is checked separately in a browser harness.
 - Evidence: UNVERIFIED

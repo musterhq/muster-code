@@ -16,6 +16,7 @@
     "typecheck": "tsc-rs --noEmit -p tsconfig.json",
     "typecheck:tsc": "tsc --noEmit",
     "typecheck:parity": "node scripts/typecheck-parity.mjs",
+    "pretest": "node scripts/build-write-helper.mjs",
     "test": "node --max-old-space-size=1536 --experimental-transform-types --import ./tests/pin-device-platform.mjs --test 'tests/*.test.ts' 'tests/*.test.cjs'",
     "test:renderer": "node scripts/test-renderer.mjs",
     "test:electron": "node scripts/test-electron.mjs",
