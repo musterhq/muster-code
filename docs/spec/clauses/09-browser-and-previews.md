@@ -18,6 +18,7 @@ Boundaries:
 | [MUS-SPEC-09-611A](09-browser-and-previews.md#mus-spec-09-611a) | A newly opened browser tab's view is given a white background colour. | [`web pages use a white background independent of the app theme`](../../../packages/agent-app/tests/browser-workspace.test.ts) |
 | [MUS-SPEC-09-629A](09-browser-and-previews.md#mus-spec-09-629a) | With a live browser preview card on screen, either the card clears the transcript text or the conversation pane has a reserve on that side; a reserve exists only when the card would otherwise cover text. | [`the visible browser preview never covers transcript text`](../../../packages/agent-app/tests/pip-components.tsx) |
 | [MUS-SPEC-09-629B](09-browser-and-previews.md#mus-spec-09-629b) | When a card overlaps the text column, the calculated reserve makes the text end one gap short of the card, in a wide pane and in a pane narrower than the column. | [`the smallest reserve that clears the card: the text ends at the card minus the gap`](../../../packages/agent-app/tests/pip-reserve.test.ts) |
+| [MUS-SPEC-09-637A](09-browser-and-previews.md#mus-spec-09-637a) | At 1180px with the sidebar and a tall summary visible, the transcript viewport sits below the preview rather than shrinking below 440px; widening restores its height. | [`a narrow window keeps the transcript below the preview without squeezing its text`](../../../packages/agent-app/tests/pip-components.tsx) |
 | [MUS-SPEC-09-465A](09-browser-and-previews.md#mus-spec-09-465a) | Taking a picture of a frozen tab wakes it first; a tab whose page was dropped to save memory is recreated; an unknown tab gives nothing. | [`frame() on a frozen tab thaws it and on a discarded tab recreates it`](../../../packages/agent-app/tests/browser-workspace-memory.test.ts) |
 | [MUS-SPEC-09-465B](09-browser-and-previews.md#mus-spec-09-465b) | A tab an agent tool is using is not frozen when the panel closes and is not discarded to make room; once the agent is done it can be frozen and discarded again. | [`a tab an agent tool is using is neither frozen nor discarded by the memory paths`](../../../packages/agent-app/tests/browser-workspace-memory.test.ts) |
 | [MUS-SPEC-09-465C](09-browser-and-previews.md#mus-spec-09-465c) | A lost connection retries read-only browser tools with backoff, never repeats a click, retries a refused connection for any tool, and gives up after three retries. | [`MCP server: connection resets retry read-only tools with backoff but never repeat a click`](../../../packages/agent-app/tests/browser-route-matrix.test.ts) |
@@ -64,6 +65,17 @@ Boundaries:
 - Environment: Node test runner; no window or network.
 - Known gaps: A unit test of the pure calculation. The other tests in the file cover the no-reserve, left-side and 440px cases, but only this one is linked. MUS-SPEC-09-629A links the screen-level check.
 - Evidence: UNVERIFIED
+
+<a id="mus-spec-09-637a"></a>
+#### MUS-SPEC-09-637A: Narrow windows keep the transcript clear of the preview
+
+- Precondition: A running chat has two browser previews, an open sidebar and a tall summary card in a window 1180px wide. Clearing the preview horizontally would leave less than 440px for the transcript.
+- Action: Resize to that narrow window, hide and show the preview, then widen the window again.
+- Expected result: The scrollable transcript viewport starts at least 8px below the entire preview stack, with no extra horizontal reserve. Hiding the preview or widening the window removes the vertical reserve.
+- Test: `packages/agent-app/tests/pip-components.tsx::a narrow window keeps the transcript below the preview without squeezing its text`
+- Environment: DOM suite (`linkedom`); fake layout dimensions, no Electron or network.
+- Known gaps: Layout dimensions are faked. Separate narrow-window screenshots in both themes verify real browser layout.
+- Evidence: local; ~/.muster-work/review/637/green-pip.txt; exit 0; 2 passed, 0 failed, 0 skipped; commit d84d030210ccc9ce29ea7a7398654a006ab5cee3
 
 ### The agent's tab survives a closed panel
 
