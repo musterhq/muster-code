@@ -1132,7 +1132,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           const code = result.failure?.statusCode;
           const transient = result.status === 'failed' && result.dispatchState !== 'not-dispatched' && result.dispatchState !== 'unknown' && result.recovery?.kind === 'failed'
             && !result.recovery.auth && attemptActivity && limitClass(`${result.errorMessage ?? ''} ${result.recovery.reason}`) !== 'quota' && (code !== undefined ? code === 429 || (code >= 500 && code <= 599) : /\b(?:429|5\d\d)\b/.test(`${result.errorMessage ?? ''} ${result.recovery.reason}`));
-          const silent = result.status === 'completed' && lastWasTool && !result.nativeCommand && !background;
+          const silent = result.status === 'completed' && lastWasTool && !result.nativeCommand && !background && !runOptions.ownsSilentEnd;
           if (silent && !run.stopped && (!canContinue || finishUp)) {
             result = {...result, status:'failed', recovery:{kind:'failed', retryable:false, reason:'Agent stopped without replying. Send Continue to resume.'}};
             break;
