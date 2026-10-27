@@ -4,6 +4,7 @@ import { OrgSidebar } from './OrgSidebar';
 import { badgeCount, buildActivity } from '../inboxModel';
 import { NAMES } from '../../shared/workspace-names';
 import { taskWorktreeFolderIds } from '../taskWorktrees';
+import { folderDisplayName } from '../spotlightModel';
 import type { WorkspaceProject, WorkspaceTask } from '../../shared/domains/paperclip-protocol';
 import {
   AlarmClock,
@@ -537,13 +538,13 @@ export function Sidebar(): React.ReactElement {
       </button>
       <div className="nav-toolbar">
         <SidebarInbox screen={state.screen}/>
-        <button type="button" className={`tool-button${draft.open?' is-active':''}`} title={activeFolder?`New chat in ${activeFolder.name} (⌘N)`:'New chat (⌘N)'} aria-keyshortcuts="Meta+N Control+N" aria-current={draft.open?'page':undefined} onClick={newChatHere}>
+        <button type="button" className={`tool-button${draft.open&&state.screen==='work'?' is-active':''}`} title={activeFolder?`New chat in ${activeFolder.name} (⌘N)`:'New chat (⌘N)'} aria-keyshortcuts="Meta+N Control+N" aria-current={draft.open&&state.screen==='work'?'page':undefined} onClick={newChatHere}>
           <SquarePen size={15} /><span>New chat</span>
         </button>
         <button type="button" className="tool-button" title="Search chats (⌘K)" aria-keyshortcuts="Meta+K Control+K" onClick={() => openSpotlightSearch()} aria-haspopup="dialog">
           <Search size={15} /><span>Search chats</span>
         </button>
-        <button type="button" className="tool-button" title="Memory for the current folder" onClick={() => openMemoryScreen(activeChat()?.folderId)}><Brain size={15}/><span>Memory</span></button>
+        <button type="button" className={`tool-button${state.screen==='memory'?' is-active':''}`} aria-current={state.screen==='memory'?'page':undefined} title="Memory for the current folder" onClick={() => openMemoryScreen(activeChat()?.folderId)}><Brain size={15}/><span>Memory</span></button>
         <button type="button" className={`tool-button${state.screen==='automations'?' is-active':''}`} title="Scheduled and file-triggered agent runs" aria-current={state.screen==='automations'?'page':undefined} onClick={openAutomationsScreen}><CalendarClock size={15}/><span>Automations</span>{runningAutomations>0&&<span className="nav-tool-count" aria-label={`${runningAutomations} running`}>{runningAutomations}</span>}</button>
         <HubEntry screen={state.screen} page="ledger" icon={<LedgerIcon size={15}/>} label={NAMES.ledger} title="Every agent turn: receipts, timeline and costs"/>
 
@@ -591,7 +592,7 @@ export function Sidebar(): React.ReactElement {
             <Collapsible.Root className="nav-section" key={folder.id} open={isOpen(gid)} onOpenChange={value=>toggleGroup(gid,value)} data-folder-id={folder.id} {...dropMark}>
               {renamingFolder===folder.id
                 ? <FolderRename folder={folder} done={()=>setRenamingFolder(null)}/>
-                : <GroupHead nested draggable={folderIds.length>1} title={folder.name} tooltip={folder.missing?`${folder.path} — not found`:`${folder.path}${folderIds.length>1?' · drag or ⌥⇧↑/⌥⇧↓ to reorder':''}`} chats={chats} className={folder.missing?'is-missing':''} icon={folder.missing?<TriangleAlert size={13}/>:<FolderOpen size={13}/>} onContextMenu={event=>{event.preventDefault();void folderMenu(folder,event.clientX,event.clientY);}}>
+                : <GroupHead nested draggable={folderIds.length>1} title={folderDisplayName(folder,snapshot.folders)} tooltip={folder.missing?`${folder.path} — not found`:`${folder.path}${folderIds.length>1?' · drag or ⌥⇧↑/⌥⇧↓ to reorder':''}`} chats={chats} className={folder.missing?'is-missing':''} icon={folder.missing?<TriangleAlert size={13}/>:<FolderOpen size={13}/>} onContextMenu={event=>{event.preventDefault();void folderMenu(folder,event.clientX,event.clientY);}}>
                 {folder.missing
                   ? <button type="button" className="nav-relink" title={`${folder.path} was moved or deleted. Choose its new location.`} onClick={()=>void folderMenu(folder,0,0,'relink')}>Relink</button>
                   : <>

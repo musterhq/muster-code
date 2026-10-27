@@ -3,7 +3,7 @@
  * and comes back when the window widens again. The collapse is not persisted, and a manual toggle while
  * narrow takes over (we never re-open a sidebar the user closed, or close one they re-opened).
  */
-export const NAV_AUTO_COLLAPSE_WIDTH = 900;
+export const NAV_AUTO_COLLAPSE_WIDTH = 960;
 
 export function nextAutoNav(input: {narrow: boolean; navHidden: boolean; autoCollapsed: boolean}): {navHidden: boolean; autoCollapsed: boolean} | null {
   if (input.narrow && !input.navHidden && !input.autoCollapsed) return {navHidden: true, autoCollapsed: true};

@@ -17,6 +17,8 @@ const support = {
   'tests/virtual-file-source.browser.tsx': 'driven by tests/run-virtual-file-source.mjs',
   'tests/sidebar-chrome-403.browser.tsx': 'browser review fixture served by tests/serve-sidebar-chrome-403.mjs',
   'tests/serve-sidebar-chrome-403.mjs': 'manual screenshot server for the sidebar chrome review',
+  'tests/ui-sweep.browser.tsx': 'browser visual fixture served by scripts/ui-sweep-preview.mjs',
+  'tests/ui-sweep-fixture.ts': 'shared fixture for ui-sweep-dom and the ui-sweep browser fixture',
   'tests/terminal-load-retry-dom.tsx': 'driven by tests/terminal-load-retry.test.ts',
   'tests/dom-check.ts': 'assertion helper used by renderer suites',
   'tests/dom-wait.ts': 'render wait helper used by renderer suites',

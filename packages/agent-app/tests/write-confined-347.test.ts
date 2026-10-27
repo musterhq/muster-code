@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {test, type TestContext} from 'node:test';
 import {mkdtemp, mkdir, readdir, readFile, rename, rm, symlink, unlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join, relative} from 'node:path';
+import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {executeTool, type ToolContext} from '../src/runtime/adapters/http-tools.ts';
 import {createAgentService} from '../src/runtime/service.ts';
@@ -55,27 +55,20 @@ test('a racer swapping a folder and a link under repeated writes puts no content
     await executeTool(call('write_file', {path: 'top.txt', content: 'PWNED'}), ctx(ws));
   }
   racing = false; await racer;
-  // A swap that lands between the folder check and the open, and is undone before cleanup, can leave an empty file or
-  // folder outside (#710: Node has no open relative to the checked folder). The content is written only after the open
-  // file is proven to be inside, so nothing the writes sent may be found outside, and the existing file stays as it was.
-  const leaked: string[] = [];
-  for (const entry of await readdir(outside, {recursive: true, withFileTypes: true})) {
-    if (!entry.isFile()) continue;
-    const path = join(entry.parentPath, entry.name);
-    if (path !== victim && (await readFile(path, 'utf8')).length) leaked.push(relative(outside, path));
-  }
-  assert.deepEqual(leaked, [], 'no file outside holds anything a write sent');
+  // #710: creating even an empty file/folder outside is forbidden; mutation uses pinned directory handles.
+  assert.deepEqual(await readdir(outside), ['victim.txt'], 'no file or folder is created outside');
   assert.equal(await readFile(victim, 'utf8'), 'keep', 'the file outside is unchanged');
 });
 
 const info: ProviderAdapter['info'] = () => [{id: 'hybrow', name: 'Hybrow', available: true, identityMasked: 'Hidden', models: []}];
 // Spec: MUS-SPEC-05-347C (docs/spec/clauses/05-access-modes-and-approvals.md#mus-spec-05-347c)
 test('a policyOnly flag inside request parameters does not skip the approval card', async t => {
-  const dataDir = await mkdtemp(join(tmpdir(), 'muster-wc347-svc-')); t.after(() => rm(dataDir, {recursive: true, force: true}));
+  const dataDir = await mkdtemp(join(tmpdir(), 'muster-wc347-svc-'));
   const answers: unknown[] = []; let finish!: () => void; const done = new Promise<void>(resolve => { finish = resolve; });
   // The Codex app-server path forwards its parameters as they come; a policyOnly key in them is not the adapter's own say-so.
   const provider: ProviderAdapter = {info, run: async input => { answers.push(await input.onRequest('item/fileChange/requestApproval', {changes: [{path: '/w/notes.txt', kind: 'update'}], policyOnly: true})); finish(); return {status: 'completed', finalMessage: 'done'}; }, stop: async () => true, dispose() {}};
-  const service = createAgentService({dataDir, provider, onEvent() {}}); t.after(() => service.dispose());
+  const service = createAgentService({dataDir, provider, onEvent() {}});
+  t.after(async () => { await service.dispose(); await rm(dataDir, {recursive: true, force: true, maxRetries: 5, retryDelay: 100}); });
   const chat = await service.invoke('chat.create', {});
   await service.invoke('chat.send', {id: chat.id, text: 'go', requestId: randomUUID()});
   let card; for (let i = 0; i < 80 && !card; i++) { await tick(); card = (await service.invoke('chat.select', {id: chat.id})).find(item => item.kind === 'approval' && item.status === 'pending'); }
