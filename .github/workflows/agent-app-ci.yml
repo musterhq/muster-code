@@ -40,9 +40,9 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: packages/agent-app/.nvmrc
           cache: npm
@@ -52,7 +52,7 @@ jobs:
         # Download caches only (never node_modules): keyed on OS, CPU and the locked Electron version.
         shell: bash
         run: echo "version=$(node -p "require(process.env.GITHUB_WORKSPACE + '/packages/agent-app/package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             ~/Library/Caches/electron
