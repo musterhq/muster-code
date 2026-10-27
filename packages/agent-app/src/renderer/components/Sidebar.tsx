@@ -4,6 +4,7 @@ import { OrgSidebar } from './OrgSidebar';
 import { badgeCount, buildActivity } from '../inboxModel';
 import { NAMES } from '../../shared/workspace-names';
 import { taskWorktreeFolderIds } from '../taskWorktrees';
+import { folderDisplayName } from '../spotlightModel';
 import type { WorkspaceProject, WorkspaceTask } from '../../shared/domains/paperclip-protocol';
 import {
   AlarmClock,
@@ -50,6 +51,7 @@ import {ensureArtifactSync, useHiddenSideChats} from '../artifacts';
 import { ARCHIVE_RUNNING_WARNING, type Chat, type Folder } from '../../shared/protocol';
 import {
   activeChat,
+  defaultNewChatTarget,
   openFilesTab,
   openProvidersTab,
   openAppSettings,
@@ -74,7 +76,7 @@ import { readCollapsed, saveCollapsed } from '../sidebarDisclosure';
 import { StatusDot } from './StatusDot';
 import { useActiveNow } from '../windowActivity';
 import { displayStatus } from './runStatus';
-import {chatGroup,compareChats,isChatRunning,isChatSort,newChatTarget,readChatSort,rovingStop,rovingTarget,saveChatSort,selectionReveal,stepReorder,type ChatSort} from '../chatNavigation';
+import {chatGroup,compareChats,isChatRunning,isChatSort,readChatSort,rovingStop,rovingTarget,saveChatSort,selectionReveal,stepReorder,type ChatSort} from '../chatNavigation';
 import {isSnoozed,snoozeLabel} from '../../shared/snooze';
 import {SnoozeSheet} from './SnoozeSheet';
 import {ShareSheet} from './ShareSheet';
@@ -105,12 +107,12 @@ import { device } from '../../shared/device-noun.ts';
 const snapshotChats=(snapshot:AppState['snapshot']):Chat[]=>snapshot?.chats.filter(chat=>!chat.archived)??[];
 const IS_MAC=typeof navigator!=='undefined'&&/mac/i.test(navigator.platform||navigator.userAgent||'');
 
-type RowProps = { chat: Chat; now: number; tabbable: boolean; onFocusRow: (id: string) => void; selected: boolean; selectionMode: boolean; onRowClick: (id: string, event: React.MouseEvent) => void; drag?: ItemDragProps };
+type RowProps = { chat: Chat; titleHint: string; now: number; tabbable: boolean; onFocusRow: (id: string) => void; selected: boolean; selectionMode: boolean; onRowClick: (id: string, event: React.MouseEvent) => void; drag?: ItemDragProps };
 
 const sameDrag=(a?:ItemDragProps,b?:ItemDragProps)=>a===b||(!!a&&!!b&&a.draggable===b.draggable&&a['data-drop']===b['data-drop']&&a['data-dragging']===b['data-dragging']&&a['aria-roledescription']===b['aria-roledescription']);
 /** Rows re-render only when their own chat object, selection or position changes; callbacks are stable (see Sidebar). */
-const ChatRow=React.memo(ChatRowImpl,(a,b)=>a.chat===b.chat&&a.now===b.now&&a.tabbable===b.tabbable&&a.selected===b.selected&&a.selectionMode===b.selectionMode&&a.onFocusRow===b.onFocusRow&&a.onRowClick===b.onRowClick&&sameDrag(a.drag,b.drag));
-function ChatRowImpl({ chat, now, tabbable, onFocusRow, selected, selectionMode, onRowClick, drag }: RowProps): React.ReactElement {
+const ChatRow=React.memo(ChatRowImpl,(a,b)=>a.chat===b.chat&&a.titleHint===b.titleHint&&a.now===b.now&&a.tabbable===b.tabbable&&a.selected===b.selected&&a.selectionMode===b.selectionMode&&a.onFocusRow===b.onFocusRow&&a.onRowClick===b.onRowClick&&sameDrag(a.drag,b.drag));
+function ChatRowImpl({ chat, titleHint, now, tabbable, onFocusRow, selected, selectionMode, onRowClick, drag }: RowProps): React.ReactElement {
   const {summary: processSummary} = useProcessSummary();
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(chat.title);
@@ -203,6 +205,7 @@ function ChatRowImpl({ chat, now, tabbable, onFocusRow, selected, selectionMode,
           <span className="chat-title" dir="auto" title={chat.title}>
             {chat.title}
           </span>
+          {titleHint&&<span className="chat-title-hint" title={titleHint}>{titleHint}</span>}
           {(activeProcesses > 0 || pendingAttention > 0) && <span className="chat-row-status" aria-label={[activeProcesses ? `${plural(activeProcesses, 'local command')} running` : '', pendingAttention ? `${plural(pendingAttention, 'request')} need input` : ''].filter(Boolean).join(', ')} title={[activeProcesses ? `${activeProcesses} running` : '', pendingAttention ? `${pendingAttention} need input` : ''].filter(Boolean).join(' · ')}>
             {activeProcesses > 0 && <span className="chat-running-badge" aria-hidden="true">{activeProcesses}</span>}
             {pendingAttention > 0 && <span className="chat-attention-badge" aria-hidden="true">{pendingAttention}</span>}
@@ -282,8 +285,8 @@ function FolderRename({folder,done}:{folder:Folder;done:()=>void}):React.ReactEl
   }}/></header>;
 }
 
-type RowContext = { now: number; stop: string | null; onFocusRow: (id: string) => void; selection: MultiSelectState; selectionMode: boolean; onRowClick: (id: string, event: React.MouseEvent) => void };
-const rows=(chats:Chat[],context:RowContext,drag?:(id:string)=>ItemDragProps)=>chats.map(chat=><ChatRow key={chat.id} chat={chat} now={context.now} tabbable={context.stop===chat.id} onFocusRow={context.onFocusRow} selected={isSelected(context.selection,chat.id)} selectionMode={context.selectionMode} onRowClick={context.onRowClick} drag={drag?.(chat.id)}/>);
+type RowContext = { titleHints: ReadonlyMap<string,string>; now: number; stop: string | null; onFocusRow: (id: string) => void; selection: MultiSelectState; selectionMode: boolean; onRowClick: (id: string, event: React.MouseEvent) => void };
+const rows=(chats:Chat[],context:RowContext,drag?:(id:string)=>ItemDragProps)=>chats.map(chat=><ChatRow key={chat.id} chat={chat} titleHint={context.titleHints.get(chat.id)??''} now={context.now} tabbable={context.stop===chat.id} onFocusRow={context.onFocusRow} selected={isSelected(context.selection,chat.id)} selectionMode={context.selectionMode} onRowClick={context.onRowClick} drag={drag?.(chat.id)}/>);
 
 /** Re-render row ages once a minute without touching the store. */
 function useMinuteClock():number {
@@ -389,6 +392,19 @@ export function Sidebar(): React.ReactElement {
   // Work locally makes a worktree folder per task; its chat is listed under the task in its org, so the folder stays out of Folders.
   const checkoutFolders=useEventLoad(e=>e.type==='checkoutChanged',()=>invoke('checkout.leases',{}).then(r=>new Set(r.leases.map(l=>l.folderId).filter((id):id is string=>Boolean(id)))).catch(()=>new Set<string>()),[]).data;
   const [projectEdit,setProjectEdit]=useState<{id:string;mode:'edit'|'rename'|'archive'}|null>(null);
+  const titleHints=useMemo(()=>{
+    const hints=new Map<string,string>(),groups=new Map<string,Chat[]>();
+    for(const chat of snapshot?.chats??[]){
+      const key=JSON.stringify([chat.title,chat.archived]);
+      const group=groups.get(key);if(group)group.push(chat);else groups.set(key,[chat]);
+    }
+    const folders=new Map(snapshot?.folders.map(folder=>[folder.id,folder.name]));
+    const projects=new Map(snapshot?.projects.map(project=>[project.id,project.name]));
+    for(const group of groups.values())if(group.length>1){
+      group.sort((a,b)=>a.id.localeCompare(b.id)).forEach((chat,index)=>hints.set(chat.id,`#${index+1} · ${projects.get(chat.projectId??'')??folders.get(chat.folderId??'')??'Chat'}`));
+    }
+    return hints;
+  },[snapshot?.chats,snapshot?.folders,snapshot?.projects]);
   if (!snapshot) {
     return <ResourceState kind="loading" compact label="Loading chats" rows={5}/>;
   }
@@ -480,7 +496,7 @@ export function Sidebar(): React.ReactElement {
     setDeleteBusy(false);setConfirmDelete(false);setSelection(previous=>keepSelected(previous,failed));
   };
   rowClickRef.current=handleRowClick;
-  const context:RowContext={now,stop:rovingStop(visible,focusedRow,state.activeChatId),onFocusRow:setFocusedRow,selection,selectionMode:selection.selected.size>0,onRowClick:stableRowClick};
+  const context:RowContext={titleHints,now,stop:rovingStop(visible,focusedRow,state.activeChatId),onFocusRow:setFocusedRow,selection,selectionMode:selection.selected.size>0,onRowClick:stableRowClick};
   const onNavKey=(event:React.KeyboardEvent<HTMLDivElement>)=>{
     const target=event.target as HTMLElement;
     // ⌥⇧↑/⌥⇧↓: the keyboard equivalent of dragging a pinned chat or a folder one step (same result as the drop).
@@ -511,7 +527,7 @@ export function Sidebar(): React.ReactElement {
     if(!next)return;
     event.preventDefault();focusRow(next);
   };
-  const activeFolder=draft.open?undefined:snapshot.folders.find(folder=>folder.id===newChatTarget(activeChat(),snapshot).folderId);
+  const activeFolder=draft.open?undefined:snapshot.folders.find(folder=>folder.id===defaultNewChatTarget().folderId);
 
   return (
     <div className="nav-inner">
@@ -522,13 +538,13 @@ export function Sidebar(): React.ReactElement {
       </button>
       <div className="nav-toolbar">
         <SidebarInbox screen={state.screen}/>
-        <button type="button" className={`tool-button${draft.open?' is-active':''}`} title={activeFolder?`New chat in ${activeFolder.name} (⌘N)`:'New chat (⌘N)'} aria-keyshortcuts="Meta+N Control+N" aria-current={draft.open?'page':undefined} onClick={newChatHere}>
+        <button type="button" className={`tool-button${draft.open&&state.screen==='work'?' is-active':''}`} title={activeFolder?`New chat in ${activeFolder.name} (⌘N)`:'New chat (⌘N)'} aria-keyshortcuts="Meta+N Control+N" aria-current={draft.open&&state.screen==='work'?'page':undefined} onClick={newChatHere}>
           <SquarePen size={15} /><span>New chat</span>
         </button>
         <button type="button" className="tool-button" title="Search chats (⌘K)" aria-keyshortcuts="Meta+K Control+K" onClick={() => openSpotlightSearch()} aria-haspopup="dialog">
           <Search size={15} /><span>Search chats</span>
         </button>
-        <button type="button" className="tool-button" title="Memory for the current folder" onClick={() => openMemoryScreen(activeChat()?.folderId)}><Brain size={15}/><span>Memory</span></button>
+        <button type="button" className={`tool-button${state.screen==='memory'?' is-active':''}`} aria-current={state.screen==='memory'?'page':undefined} title="Memory for the current folder" onClick={() => openMemoryScreen(activeChat()?.folderId)}><Brain size={15}/><span>Memory</span></button>
         <button type="button" className={`tool-button${state.screen==='automations'?' is-active':''}`} title="Scheduled and file-triggered agent runs" aria-current={state.screen==='automations'?'page':undefined} onClick={openAutomationsScreen}><CalendarClock size={15}/><span>Automations</span>{runningAutomations>0&&<span className="nav-tool-count" aria-label={`${runningAutomations} running`}>{runningAutomations}</span>}</button>
         <HubEntry screen={state.screen} page="ledger" icon={<LedgerIcon size={15}/>} label={NAMES.ledger} title="Every agent turn: receipts, timeline and costs"/>
 
@@ -576,7 +592,7 @@ export function Sidebar(): React.ReactElement {
             <Collapsible.Root className="nav-section" key={folder.id} open={isOpen(gid)} onOpenChange={value=>toggleGroup(gid,value)} data-folder-id={folder.id} {...dropMark}>
               {renamingFolder===folder.id
                 ? <FolderRename folder={folder} done={()=>setRenamingFolder(null)}/>
-                : <GroupHead nested draggable={folderIds.length>1} title={folder.name} tooltip={folder.missing?`${folder.path} — not found`:`${folder.path}${folderIds.length>1?' · drag or ⌥⇧↑/⌥⇧↓ to reorder':''}`} chats={chats} className={folder.missing?'is-missing':''} icon={folder.missing?<TriangleAlert size={13}/>:<FolderOpen size={13}/>} onContextMenu={event=>{event.preventDefault();void folderMenu(folder,event.clientX,event.clientY);}}>
+                : <GroupHead nested draggable={folderIds.length>1} title={folderDisplayName(folder,snapshot.folders)} tooltip={folder.missing?`${folder.path} — not found`:`${folder.path}${folderIds.length>1?' · drag or ⌥⇧↑/⌥⇧↓ to reorder':''}`} chats={chats} className={folder.missing?'is-missing':''} icon={folder.missing?<TriangleAlert size={13}/>:<FolderOpen size={13}/>} onContextMenu={event=>{event.preventDefault();void folderMenu(folder,event.clientX,event.clientY);}}>
                 {folder.missing
                   ? <button type="button" className="nav-relink" title={`${folder.path} was moved or deleted. Choose its new location.`} onClick={()=>void folderMenu(folder,0,0,'relink')}>Relink</button>
                   : <>

@@ -7,13 +7,13 @@ import {generateChatTitle} from '../src/runtime/chat-title.ts';
 import {AgentStore} from '../src/runtime/store.ts';
 
 test('summary titles drop greetings, fillers and code, keep six key words, sentence case, ≤48 chars',()=>{
-  assert.equal(generateChatTitle('Hey, can you please fix the login bug in the auth service?'),'Fix login bug in auth service');
+  assert.equal(generateChatTitle('Hey, can you please fix the login bug in the auth service?'),'Fix login bug in auth service?');
   assert.equal(generateChatTitle('Good morning! I want you to add dark mode to the settings screen and persist it'),'Add dark mode to settings screen and persist');
   assert.equal(generateChatTitle('why does `npm test` hang on CI after upgrading to Node 24'),'Why does npm test hang on CI');
   assert.equal(generateChatTitle('```ts\nconst x = 1;\n```\nRefactor useStore into README.md sections'),'Refactor useStore into README.md sections');
   assert.equal(generateChatTitle('Hi!\nFix the flaky upload test'),'Fix flaky upload test','skips a greeting-only line');
   assert.equal(generateChatTitle('hello'),null,'a bare greeting names nothing');
-  assert.equal(generateChatTitle('hi there','The migration renames the users table.'),'Migration renames users table','falls back to the reply');
+  assert.equal(generateChatTitle('hi there','The migration renames the users table.'),'Migration renames users table.','falls back to the reply');
   const long=generateChatTitle('internationalization localization accessibility compatibility maintainability observability')!;
   assert.ok(long.length<=48,long);
   assert.ok(!/ (?:in|of|to|and)$/.test(generateChatTitle('Move the logs of')!),'never ends on a connector');

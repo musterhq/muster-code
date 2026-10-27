@@ -19,3 +19,13 @@ test('UX-13: narrow windows auto-collapse the sidebar and restore it, never figh
   assert.equal(hidden, false);
   dispose();
 });
+
+// Spec: MUS-SPEC-15-398C (docs/spec/clauses/15-settings-and-themes.md#mus-spec-15-398c)
+test('at 900 pixels the sidebar steps aside and returns when widened', async () => {
+ const {installResponsiveNav} = await import('../src/renderer/responsiveNav.ts');
+ let width=900,hidden=false,change=()=>{};
+ const win={matchMedia:(query:string)=>({get matches(){return width<=Number(query.match(/(\d+)px/)![1]);},addEventListener(_:string,fn:()=>void){change=fn;},removeEventListener(){}})} as unknown as Window;
+ const dispose=installResponsiveNav({navHidden:()=>hidden,setNavHidden:value=>{hidden=value;}},win);
+ assert.equal(hidden,true,'the conversation has the full width at 900px');
+ width=1200;change();assert.equal(hidden,false,'the sidebar returns after widening');dispose();
+});

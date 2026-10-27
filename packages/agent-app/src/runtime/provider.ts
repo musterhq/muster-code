@@ -9,7 +9,7 @@ import {readOwnedCommandOutputs} from './command-output-recovery.ts';
 import {authFailureStatus, authRecovery, coreBudgetOptions, classifyProviderFailure, lifecycleDiagnostic, requestWhileOwned, providerAccessPolicy, type ProviderBudgets, type ProviderRecovery} from './provider-run-lifecycle.ts';
 import {currentProviderUsage, formatResetEta} from './provider-usage.ts';
 import {asSentence} from './admission-retry.ts';
-import {connectorPolicy, leanCodexFeatureOverrides} from './context-budget.ts';
+import {connectorAppIds, connectorCatalog, connectorPolicy, leanCodexFeatureOverrides} from './context-budget.ts';
 import type { Chat, ChatPermissionMode, ProviderInfo } from '../shared/protocol.ts';
 import {NativeUnavailableError} from './codex-native.ts';
 import {splitSecretOverrides} from './thread-config.ts';
@@ -64,6 +64,8 @@ export interface ProviderInput {
   contextWindow?: number;
   /** The user's request names a ChatGPT connector; Codex apps stay loaded for this chat from then on. */
   connectorsRequested?: boolean;
+  /** #756: the connectors this turn named (see requestedConnectorNames); only these load on a model without tool search. */
+  connectorNames?: string[];
   /** `driver` names the lane when the thread was not made by the route's own driver (the Messages lane, #688). */
   onThreadReady?(threadId: string, driver?: string): void;
   onTurnAccepted?(identity: {threadId: string; turnId: string; dispatchState: 'dispatched'; driver?: string}): void;
@@ -201,7 +203,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
   const sessions = new Map<string, OwnedSession>();
   const adapterRuns = new Map<string, AdapterRun>();
   /** Chats that asked for a ChatGPT connector: apps stay on for them, so a thread's tool list does not flip back and forth. */
-  const connectorChats = new Set<string>();
+  const connectorChats = new Map<string, Set<string>>();
   const idleListeners = new Set<(chatId: string, method: string, params: Record<string, unknown>) => void>();
   const catalog = options.catalog ?? (options.instances || options.available ? undefined : defaultCatalog());
   // Start CLI probes and model listings now so the first providers.list is already settled.
@@ -395,10 +397,13 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       const model0 = input.chat.model || route.info.models[0]?.id;
       if (!model0) throw new ProviderPreDispatchError('The selected provider reports no models.');
       // Mirrors the core's scope key (instruction-only changes are already evicted by the core).
-      if (input.connectorsRequested) connectorChats.add(input.chat.id);
+      if (input.connectorsRequested) { const named = connectorChats.get(input.chat.id) ?? new Set<string>(); for (const name of input.connectorNames ?? []) named.add(name); connectorChats.set(input.chat.id, named); }
+      const connectorHome = route.env.CODEX_HOME ?? route.env.MUSTER_CODEX_SOURCE_HOME ?? (route.sessionsRoot ? dirname(route.sessionsRoot) : undefined);
+      const namedConnectors = [...connectorChats.get(input.chat.id) ?? []];
+      const connectorApps = namedConnectors.length && connectorHome ? connectorAppIds(namedConnectors, [...connectorCatalog(connectorHome), ...(route.env.MUSTER_CODEX_SOURCE_HOME && route.env.MUSTER_CODEX_SOURCE_HOME !== connectorHome ? connectorCatalog(route.env.MUSTER_CODEX_SOURCE_HOME) : [])]) : [];
       // Context budget: Codex features Muster does not use, and connector (apps) tool schemas a model without deferred
       // tool search would otherwise receive inline on every request, stay off unless this chat asked for a connector.
-      const featureOverrides = [...leanCodexFeatureOverrides({toolSearch: route.info.models.find(entry => entry.id === model0)?.toolSearch, connectorsRequested: connectorChats.has(input.chat.id), policy: connectorPolicy()}),
+      const featureOverrides = [...leanCodexFeatureOverrides({toolSearch: route.info.models.find(entry => entry.id === model0)?.toolSearch, connectorsRequested: connectorChats.has(input.chat.id), policy: connectorPolicy(), apps: connectorApps}),
         ...(sandboxedRun(input.configOverrides) ? CODEX_SANDBOX_FEATURES : [])];
       // #426: the model's own window and compaction point (catalog or router listing), unless the user set them in config.toml.
       const windowOverrides = codexWindowOverrides(route.info.models.find(entry => entry.id === model0), userCompactionKeys(route.sessionsRoot ? dirname(route.sessionsRoot) : undefined), input.engineWindow);

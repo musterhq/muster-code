@@ -1,8 +1,8 @@
 import {useSyncExternalStore} from 'react';
 import {invoke} from './bridge';
-import {newChatTarget,resolveTarget,reusableChat,type ChatTarget} from './chatNavigation';
+import {resolveTarget,reusableChat,type ChatTarget} from './chatNavigation';
 import {focusComposer} from './focus';
-import {activeChat,closeSettings,getState,notifyError,pickFolder,selectChat,sendMessage,setComposerDraft,subscribeStore} from './store';
+import {closeSettings,defaultNewChatTarget,getState,notifyError,pickFolder,selectChat,sendMessage,setComposerDraft,subscribeStore} from './store';
 import {sendWithCheckoutGuard} from './components/ParallelRunGuard';
 
 /**
@@ -36,7 +36,7 @@ function watchSelection():void {
 /** Open (or just refocus) the draft. A second New chat never adds anything; an explicit target retargets it. */
 export function openNewChat(target?:ChatTarget):void {
   if(getState().screen!=='work')closeSettings();
-  if(!draft.open){watchSelection();update({open:true,target:target??newChatTarget(activeChat(),getState().snapshot),error:''});}
+  if(!draft.open){watchSelection();update({open:true,target:target??defaultNewChatTarget(),error:''});}
   else if(target)update({target});
   focusComposer();
 }

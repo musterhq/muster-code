@@ -31,6 +31,10 @@ Boundaries:
 | [MUS-SPEC-01-569A](01-chat-and-composer.md#mus-spec-01-569a) | Searching "checklist" in a message holding "İzmir" returns a highlight range that covers "checklist". | [`the index returns a correct highlight for such a message`](../../../packages/agent-app/tests/chat-search-casefold.test.ts) |
 | [MUS-SPEC-01-569B](01-chat-and-composer.md#mus-spec-01-569b) | In "İİİİ İstanbul deploy notes" the one highlight covers "deploy". | [`a snippet after a dotted capital I highlights the matched word itself`](../../../packages/agent-app/tests/chat-search-casefold.test.ts) |
 | [MUS-SPEC-01-569C](01-chat-and-composer.md#mus-spec-01-569c) | In a 200-"İ" message the snippet window holds "needle" and the highlight covers it. | [`a long message: the window is centred on the match, not shifted by earlier dotted capitals`](../../../packages/agent-app/tests/chat-search-casefold.test.ts) |
+| [MUS-SPEC-01-403A](01-chat-and-composer.md#mus-spec-01-403a) | Generated titles keep question marks, exclamation marks, periods, colons, slashes, hashes and quotation marks through send and completion. | [`sending a first message keeps punctuation in its generated sidebar title`](../../../packages/agent-app/tests/sidebar-chrome-403-dom.tsx) |
+| [MUS-SPEC-01-403B](01-chat-and-composer.md#mus-spec-01-403b) | New chat remembers the last selected project folder, avoids broad home folders and submits in the displayed folder. | [`New chat returns to the last project after a folderless or Documents chat`](../../../packages/agent-app/tests/sidebar-chrome-403-dom.tsx) |
+| [MUS-SPEC-01-403C](01-chat-and-composer.md#mus-spec-01-403c) | A single turn leaves no stray minimap dash; multi-turn ticks jump to their matching user row and disappear when the conversation shrinks. | [`a one-turn transcript has no lone minimap dash and later turns remain reachable`](../../../packages/agent-app/tests/sidebar-chrome-403-dom.tsx) |
+| [MUS-SPEC-01-403D](01-chat-and-composer.md#mus-spec-01-403d) | Duplicate chat names show distinct visible suffix hints, including same-folder chats; unique names stay plain. | [`duplicate sidebar chat names get distinct suffixes without renaming them`](../../../packages/agent-app/tests/sidebar-chrome-403-dom.tsx) |
 
 ### Imported chats keep their own model
 
@@ -221,3 +225,49 @@ Boundaries:
 - Environment: Node test runner; no network, no provider.
 - Known gaps: Tests the snippet builder directly.
 - Evidence: UNVERIFIED
+
+### Sidebar and conversation chrome
+
+<a id="mus-spec-01-403a"></a>
+#### MUS-SPEC-01-403A: Generated titles keep question marks, exclamation marks, periods, colons, slashes, hashes and quotation marks through send and completion.
+
+- Precondition: A new chat draft and a temporary durable chat store.
+- Action: Send first messages containing punctuation, finish each exchange and inspect the sidebar title.
+- Expected result: The generated sidebar titles keep their punctuation both during and after the exchange; a custom rename still wins.
+- Test: `packages/agent-app/tests/sidebar-chrome-403-dom.tsx::sending a first message keeps punctuation in its generated sidebar title`
+- Environment: The renderer bridge uses the real AgentStore title lifecycle with a scripted send; no external provider.
+- Known gaps: No external provider or native desktop; browser screenshots cover both themes separately.
+- Evidence: local; node packages/agent-app/dist/tests/sidebar-chrome-403-dom/sidebar-chrome-403-dom.mjs; exit 0; 4 passed, 0 failed, 0 skipped; commit 3d6bdf75f2454256e508cbebff87d2d923443774
+
+<a id="mus-spec-01-403b"></a>
+#### MUS-SPEC-01-403B: New chat remembers the last selected project folder, avoids broad home folders and submits in the displayed folder.
+
+- Precondition: Two project folders, a folderless chat and an old chat in the home Documents folder.
+- Action: Select a project chat, switch to a folderless chat and open New chat; send, then repeat from Documents and after removing the remembered folder.
+- Expected result: The draft and chat.create use the last selected valid project folder. Explicit No folder remains available; missing folders and broad home paths are never implicit defaults.
+- Test: `packages/agent-app/tests/sidebar-chrome-403-dom.tsx::New chat returns to the last project after a folderless or Documents chat`
+- Environment: DOM suite with a fake runtime and in-memory browser storage; no desktop or filesystem writes.
+- Known gaps: No external provider or native desktop; browser screenshots cover both themes separately.
+- Evidence: local; node packages/agent-app/dist/tests/sidebar-chrome-403-dom/sidebar-chrome-403-dom.mjs; exit 0; 4 passed, 0 failed, 0 skipped; commit 3d6bdf75f2454256e508cbebff87d2d923443774
+
+<a id="mus-spec-01-403c"></a>
+#### MUS-SPEC-01-403C: A single turn leaves no stray minimap dash; multi-turn ticks jump to their matching user row and disappear when the conversation shrinks.
+
+- Precondition: A transcript with one user message and its reply.
+- Action: Render it, add another exchange, click each turn marker, then replace it with a one-turn and empty transcript.
+- Expected result: No turn tick for zero or one turn. Each tick in a longer conversation targets its own user row; conversation search still opens for a single turn.
+- Test: `packages/agent-app/tests/sidebar-chrome-403-dom.tsx::a one-turn transcript has no lone minimap dash and later turns remain reachable`
+- Environment: DOM suite rendering the real Timeline with virtualized layout measurements.
+- Known gaps: No external provider or native desktop; browser screenshots cover both themes separately.
+- Evidence: local; node packages/agent-app/dist/tests/sidebar-chrome-403-dom/sidebar-chrome-403-dom.mjs; exit 0; 4 passed, 0 failed, 0 skipped; commit 3d6bdf75f2454256e508cbebff87d2d923443774
+
+<a id="mus-spec-01-403d"></a>
+#### MUS-SPEC-01-403D: Duplicate chat names show distinct visible suffix hints, including same-folder chats; unique names stay plain.
+
+- Precondition: Chats with the same title across folders and inside one folder, plus a unique title.
+- Action: Render the sidebar, select duplicate rows, then rename one chat so its title becomes unique.
+- Expected result: Every duplicate has a distinct visible suffix; selection still targets the correct chat, titles remain verbatim and the obsolete hint disappears.
+- Test: `packages/agent-app/tests/sidebar-chrome-403-dom.tsx::duplicate sidebar chat names get distinct suffixes without renaming them`
+- Environment: DOM suite rendering the real Sidebar; no provider or desktop.
+- Known gaps: No external provider or native desktop; browser screenshots cover both themes separately.
+- Evidence: local; node packages/agent-app/dist/tests/sidebar-chrome-403-dom/sidebar-chrome-403-dom.mjs; exit 0; 4 passed, 0 failed, 0 skipped; commit 3d6bdf75f2454256e508cbebff87d2d923443774

@@ -9,6 +9,8 @@
  * provider thread instead of re-injecting it into every user message.
  */
 import { createHash } from 'node:crypto';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 
 /** Rough token estimate (chars / 4): stable, dependency-free, good enough for budgets. */
 export const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
@@ -42,10 +44,54 @@ export function connectorPolicy(env: NodeJS.ProcessEnv = process.env): Connector
  * - goals: Codex's goal tools duplicate Muster's own goal loop (goals domain), which reads the
  *   spoken `update_goal(...)` line; a tool call there would bypass it.
  */
-export function leanCodexFeatureOverrides(input: { toolSearch?: boolean; connectorsRequested: boolean; policy?: ConnectorPolicy }): string[] {
+export function leanCodexFeatureOverrides(input: { toolSearch?: boolean; connectorsRequested: boolean; policy?: ConnectorPolicy; apps?: readonly string[] }): string[] {
   const policy = input.policy ?? 'auto';
   const apps = policy === 'always' || (policy === 'auto' && (input.toolSearch === true || input.connectorsRequested));
-  return ['features.recommended_plugins=false', 'features.goals=false', ...(apps ? [] : ['features.apps=false'])];
+  // #756: without tool search every connector schema goes inline (500+ tools); a router keeps 128 and silently drops the rest,
+  // sub-agents and apply_patch included. Load only the connectors the chat named.
+  const scoped = apps && policy === 'auto' && input.toolSearch !== true && input.apps?.length ? input.apps : undefined;
+  return ['features.recommended_plugins=false', 'features.goals=false', ...(apps ? [] : ['features.apps=false']),
+    ...(scoped ? ['apps._default.enabled=false', ...scoped.map(id => `apps.${id}.enabled=true`)] : [])];
+}
+
+const normalName = (name: string) => name.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+const SERVICE_ALIASES: Record<string, string> = { gdrive: 'google drive', 'google doc': 'google drive', 'google docs': 'google drive', 'google sheet': 'google drive', 'google sheets': 'google drive', 'google slide': 'google drive', 'google slides': 'google drive', jira: 'atlassian', confluence: 'atlassian', 'microsoft teams': 'teams' };
+/** The connectors a prompt names: service names ("figma", "google drive"), "the X connector" and `app://` ids. Empty when it asks for none. */
+export function requestedConnectorNames(prompt: string): string[] {
+  if (!requestsConnectors(prompt)) return [];
+  const names = new Set<string>();
+  for (const match of prompt.matchAll(/app:\/\/([\w-]+)/gi)) names.add(match[1]!);
+  for (const match of prompt.matchAll(new RegExp(SERVICES, 'gi'))) { const name = normalName(match[0]); names.add(SERVICE_ALIASES[name] ?? name); }
+  for (const match of prompt.matchAll(/\b(?:use|using|via|through|with)\s+(?:the\s+|my\s+|our\s+)?([\w.-]+)\s+connector\b/gi)) names.add(normalName(match[1]!));
+  return [...names];
+}
+
+export interface ConnectorApp { id: string; name: string }
+let catalogCache: { file: string; mtime: number; apps: ConnectorApp[] } | undefined;
+/** The connector apps Codex last listed for this home (its `cache/codex_apps_tools` file): id and display name. */
+export function connectorCatalog(codexHome: string): ConnectorApp[] {
+  try {
+    const dir = join(codexHome, 'cache', 'codex_apps_tools');
+    const newest = readdirSync(dir).filter(name => name.endsWith('.json')).map(name => ({ file: join(dir, name), mtime: statSync(join(dir, name)).mtimeMs })).sort((a, b) => b.mtime - a.mtime)[0];
+    if (!newest) return [];
+    if (catalogCache?.file === newest.file && catalogCache.mtime === newest.mtime) return catalogCache.apps;
+    const tools = (JSON.parse(readFileSync(newest.file, 'utf8')) as { tools?: { connector_id?: string; connector_name?: string }[] }).tools ?? [];
+    const apps = new Map<string, string>();
+    for (const tool of tools) if (tool.connector_id && /^[\w-]+$/.test(tool.connector_id) && tool.connector_name) apps.set(tool.connector_id, tool.connector_name);
+    catalogCache = { ...newest, apps: [...apps].map(([id, name]) => ({ id, name })) };
+    return catalogCache.apps;
+  } catch { return []; }
+}
+/** App ids for the named connectors: an exact id, or a display name that contains the name ("outlook" → Microsoft Outlook Email). */
+export function connectorAppIds(names: Iterable<string>, catalog: readonly ConnectorApp[]): string[] {
+  const ids = new Set<string>();
+  for (const raw of names) {
+    const name = normalName(raw);
+    const exact = catalog.find(app => app.id.toLowerCase() === raw.toLowerCase());
+    if (exact) { ids.add(exact.id); continue; }
+    for (const app of catalog) { const display = normalName(app.name); if (display === name || ` ${display} `.includes(` ${name} `)) ids.add(app.id); }
+  }
+  return [...ids];
 }
 
 export interface ContextBlock { label: string; text: string }

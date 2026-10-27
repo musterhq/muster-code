@@ -54,3 +54,18 @@ test('hidden models and non-OpenAI ids stay out of the merged list, and a gatewa
   assert.deepEqual(route(options, 'openai-direct').models.map(model => model.id), ['gpt-5.5', 'gpt-6-luna']);
   assert.deepEqual(route(options, 'acme').models.map(model => model.id), ['acme/large']);
 });
+
+// Spec: MUS-SPEC-03-398B (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-398b)
+test('a gateway catalog reports the non-chat models omitted from its live list', async t => {
+  const options=await install(t,{direct:{models:[entry('gpt-5.5','GPT-5.5')]},cache:{models:[]},gateway:{models:[entry('acme/large','Acme Large')]}});
+  await writeFile(join(options.env.CODEX_HOME,'acme-gateway.config.toml'),`model_provider="acme"\nmodel_catalog_json=${JSON.stringify(join(options.home,'gateway.json'))}\n[model_providers.acme]\nname="Acme"\nbase_url="https://counts398.test/v1"\nwire_api="responses"\n`);
+  const config={...options,fetch:(async()=>new Response(JSON.stringify({data:[{id:'acme/large'},{id:'acme/small'},{id:'image-model',output_modalities:['image']}]}))) as typeof fetch};
+  invalidateProviderInstances();
+  configuredProviderInstances(config);
+  let info=route(config,'acme');
+  for(let i=0;i<100&&!info.models.some(m=>m.id==='acme/small');i++){
+    await new Promise(resolve=>setTimeout(resolve,10));info=route(config,'acme');
+  }
+  assert.deepEqual(info.models.map(m=>m.id),['acme/large','acme/small']);
+  assert.ok(info.excludedModels?.some(m=>m.id==='non-chat-models'&&m.name.startsWith('1 ')),'the UI can explain the difference between server total and chat models');
+});

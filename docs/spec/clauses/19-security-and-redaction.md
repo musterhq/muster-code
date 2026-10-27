@@ -27,6 +27,15 @@ Boundaries:
 | [MUS-SPEC-19-575C](19-security-and-redaction.md#mus-spec-19-575c) | Four long inputs of repeated secret words each redact in under 400 ms. | [`a long run of secret words stays linear`](../../../packages/agent-app/tests/sanitize-bughunt.test.ts) |
 | [MUS-SPEC-19-577A](19-security-and-redaction.md#mus-spec-19-577a) | Clone URLs with a token as the username are refused. | [`clone URLs whose username is a token are rejected`](../../../packages/agent-app/tests/clone-url-token.test.ts) |
 | [MUS-SPEC-19-674A](19-security-and-redaction.md#mus-spec-19-674a) | Values under key names longer than 70 characters are redacted. | [`a secret whose key name is longer than 70 characters is redacted`](../../../packages/agent-app/tests/secret-redaction-long-names.test.ts) |
+| [MUS-SPEC-19-710A](19-security-and-redaction.md#mus-spec-19-710a) | A folder swapped for a link at the file open creates no file outside, even temporarily empty. | [`a workspace write raced at file creation leaves no empty file outside`](../../../packages/agent-app/tests/workspace-write-race-710.test.ts) |
+| [MUS-SPEC-19-710B](19-security-and-redaction.md#mus-spec-19-710b) | A folder swapped at parent creation creates no empty folder outside. | [`a workspace write raced at parent creation leaves no folder outside`](../../../packages/agent-app/tests/workspace-write-race-710.test.ts) |
+| [MUS-SPEC-19-710C](19-security-and-redaction.md#mus-spec-19-710c) | An edit raced at its write open creates nothing outside and keeps an existing outside file unchanged. | [`a workspace edit raced at file open leaves nothing outside and preserves outside files`](../../../packages/agent-app/tests/workspace-write-race-710.test.ts) |
+| [MUS-SPEC-19-406A](19-security-and-redaction.md#mus-spec-19-406a) | A chat uses MCP credentials through a private config file; process arguments never contain the credentials and the file is removed afterwards. | [`a chat can use its MCP credentials without exposing them in Claude process arguments`](../../../packages/agent-app/tests/hardening-406.test.ts) |
+| [MUS-SPEC-19-406B](19-security-and-redaction.md#mus-spec-19-406b) | MCP credentials without a secret prefix reach the chat through thread config, never launch arguments. | [`a coding-client chat receives unmarked MCP credentials through stdin instead of command arguments`](../../../packages/agent-app/tests/hardening-406.test.ts) |
+| [MUS-SPEC-19-406C](19-security-and-redaction.md#mus-spec-19-406c) | Provider endpoint host and port edits clear the old stored key and environment binding before discovery; a path edit retains them. | [`editing a provider endpoint never sends its old stored key to the new origin`](../../../packages/agent-app/tests/hardening-406.test.ts) |
+| [MUS-SPEC-19-406D](19-security-and-redaction.md#mus-spec-19-406d) | Memory endpoint host, port and scheme edits clear encrypted and session-only keys before a connection test; same-origin edits retain them. | [`editing the memory endpoint never sends the old key to a different origin`](../../../packages/agent-app/tests/memory-run.test.ts) |
+| [MUS-SPEC-19-406E](19-security-and-redaction.md#mus-spec-19-406e) | Every external action in every workflow uses a full commit SHA and records its version in a trailing comment. | [`every external workflow action is pinned to a full commit with its version recorded`](../../../packages/agent-app/tests/hardening-406.test.ts) |
+| [MUS-SPEC-19-406F](19-security-and-redaction.md#mus-spec-19-406f) | The mandatory release guard refuses missing or ad-hoc signing and accepts the three supported identity modes before packaging. | [`the macOS release refuses ad-hoc signing before it packages a build`](../../../packages/agent-app/tests/hardening-406.test.ts) |
 
 ### Known secret values
 
@@ -162,4 +171,107 @@ Boundaries:
 - Test: `packages/agent-app/tests/secret-redaction-long-names.test.ts::a secret whose key name is longer than 70 characters is redacted`
 - Environment: Node test runner; no network.
 - Known gaps: Unit test of the redactor. It does not export a chat or save a memory. The time-limit test in the same file passes on main, so it is not linked.
+- Evidence: UNVERIFIED
+
+### Workspace writes
+
+<a id="mus-spec-19-710a"></a>
+#### MUS-SPEC-19-710A: A workspace write raced at file creation leaves no empty file outside
+
+- Precondition: A Workspace chat folder has a plain subfolder d beside a separate outside folder. The requested file does not exist.
+- Action: Run write_file with new content while a racer swaps d for a link to the outside folder at the file open and restores it before cleanup.
+- Expected result: A folder swapped for a link at the file open creates no file outside, even temporarily empty. A successful call writes the requested content inside the chat folder.
+- Test: `packages/agent-app/tests/workspace-write-race-710.test.ts::a workspace write raced at file creation leaves no empty file outside`
+- Environment: Node test runner; real temporary folders; filesystem/child-process hooks force the race at the mutation boundary; the native helper is built locally when present.
+- Known gaps: Does not cover a process able to move a pinned directory outside the workspace or to add hard links after the handle check; that process already has access outside. No desktop UI is involved.
+- Evidence: local; ~/.muster-work/review/710/green.txt; exit 0; 4 passed, 0 failed, 0 skipped; commit db2dcfbd0197ba0406bb3135b41764e4ff8a15e2
+
+<a id="mus-spec-19-710b"></a>
+#### MUS-SPEC-19-710B: A workspace write raced at parent creation leaves no folder outside
+
+- Precondition: A Workspace chat folder has a plain subfolder d beside a separate outside folder. The requested file does not exist.
+- Action: Run write_file with new content while a racer attempts to swap d for a link to the outside folder at parent creation and restores it before cleanup.
+- Expected result: A folder swapped at parent creation creates no empty folder outside. A successful call writes the requested content inside the chat folder.
+- Test: `packages/agent-app/tests/workspace-write-race-710.test.ts::a workspace write raced at parent creation leaves no folder outside`
+- Environment: Node test runner; real temporary folders; filesystem/child-process hooks force the race at the mutation boundary; the native helper is built locally when present.
+- Known gaps: Does not cover a process able to move a pinned directory outside the workspace or to add hard links after the handle check; that process already has access outside. Windows can block the parent rename itself while the helper holds its descendant directory; the same assertions still check the completed write and the outside folder. No desktop UI is involved.
+- Evidence: local; ~/.muster-work/review/710/green.txt; exit 0; 4 passed, 0 failed, 0 skipped; commit db2dcfbd0197ba0406bb3135b41764e4ff8a15e2
+
+<a id="mus-spec-19-710c"></a>
+#### MUS-SPEC-19-710C: A workspace edit raced at file open leaves nothing outside and preserves outside files
+
+- Precondition: A Workspace chat folder has a plain subfolder d beside a separate outside folder. The file d/x.txt contains before; outside/keep.txt contains keep.
+- Action: Run edit_file replacing before with after while a racer swaps d for a link to the outside folder at the file open and restores it before cleanup.
+- Expected result: An edit raced at its write open creates nothing outside and keeps an existing outside file unchanged. A successful call writes the requested content inside the chat folder; a refused edit keeps the original content.
+- Test: `packages/agent-app/tests/workspace-write-race-710.test.ts::a workspace edit raced at file open leaves nothing outside and preserves outside files`
+- Environment: Node test runner; real temporary folders; filesystem/child-process hooks force the race at the mutation boundary; the native helper is built locally when present.
+- Known gaps: Does not cover a process able to move a pinned directory outside the workspace or to add hard links after the handle check; that process already has access outside. No desktop UI is involved.
+- Evidence: local; ~/.muster-work/review/710/green.txt; exit 0; 4 passed, 0 failed, 0 skipped; commit db2dcfbd0197ba0406bb3135b41764e4ff8a15e2
+
+### Process credentials, endpoint changes and release integrity
+
+<a id="mus-spec-19-406a"></a>
+#### MUS-SPEC-19-406A: A chat can use its MCP credentials without exposing them in Claude process arguments
+
+- Precondition: A chat has an MCP server with a stored API key and a per-chat token.
+- Action: Run a Claude chat through a real fixture child that reads its MCP configuration.
+- Expected result: A chat uses MCP credentials through a private config file; process arguments never contain the credentials and the file is removed afterwards.
+- Test: `packages/agent-app/tests/hardening-406.test.ts::a chat can use its MCP credentials without exposing them in Claude process arguments`
+- Environment: Node test runner; real child process standing in for the provider CLI.
+- Known gaps: Does not contact a live provider.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-406b"></a>
+#### MUS-SPEC-19-406B: A coding-client chat receives unmarked MCP credentials through stdin instead of command arguments
+
+- Precondition: A chat has MCP environment secrets and an authorization header without a secret prefix.
+- Action: Send a chat through the provider adapter and inspect the launch handed to its core transport.
+- Expected result: MCP credentials without a secret prefix reach the chat through thread config, never launch arguments.
+- Test: `packages/agent-app/tests/hardening-406.test.ts::a coding-client chat receives unmarked MCP credentials through stdin instead of command arguments`
+- Environment: Node test runner; provider adapter with a recording core transport.
+- Known gaps: The core transport is a stand-in; existing argv tests cover its stdin wire format.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-406c"></a>
+#### MUS-SPEC-19-406C: Editing a provider endpoint never sends its old stored key to the new origin
+
+- Precondition: A custom provider has a stored encrypted API key.
+- Action: Edit the endpoint path, then the host and port, checking the connection after each save.
+- Expected result: Provider endpoint host and port edits clear the old stored key and environment binding before discovery; a path edit retains them.
+- Test: `packages/agent-app/tests/hardening-406.test.ts::editing a provider endpoint never sends its old stored key to the new origin`
+- Environment: Node test runner; real provider settings and secret store; recording HTTP transport.
+- Known gaps: Does not open the settings UI.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-406d"></a>
+#### MUS-SPEC-19-406D: Editing the memory endpoint never sends the old key to a different origin
+
+- Precondition: Memory has an encrypted or session-only API key.
+- Action: Save endpoint edits through the memory domain and test each connection; also supply a replacement key explicitly.
+- Expected result: Memory endpoint host, port and scheme edits clear encrypted and session-only keys before a connection test; same-origin edits retain them.
+- Test: `packages/agent-app/tests/memory-run.test.ts::editing the memory endpoint never sends the old key to a different origin`
+- Environment: Node test runner; memory domain and real settings store; recording HTTP transport.
+- Known gaps: Does not open the settings UI.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-406e"></a>
+#### MUS-SPEC-19-406E: Every external workflow action is pinned to a full commit with its version recorded
+
+- Precondition: The repository contains CI and release workflows.
+- Action: Parse every workflow and inspect each action and reusable-workflow reference.
+- Expected result: Every external action in every workflow uses a full commit SHA and records its version in a trailing comment.
+- Test: `packages/agent-app/tests/hardening-406.test.ts::every external workflow action is pinned to a full commit with its version recorded`
+- Environment: Node test runner; YAML parser.
+- Known gaps: Does not execute GitHub Actions.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-406f"></a>
+#### MUS-SPEC-19-406F: The macOS release refuses ad-hoc signing before it packages a build
+
+- Precondition: The macOS build reports a signing mode.
+- Action: Parse the release workflow and execute only its signing guard for each supported and refused mode.
+- Expected result: The mandatory release guard refuses missing or ad-hoc signing and accepts the three supported identity modes before packaging.
+- Test: `packages/agent-app/tests/hardening-406.test.ts::the macOS release refuses ad-hoc signing before it packages a build`
+- Environment: Node test runner; local bash; no release run.
+- Known gaps: Does not build or sign an installer.
 - Evidence: UNVERIFIED

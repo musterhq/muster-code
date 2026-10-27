@@ -91,6 +91,7 @@ export function createDomainHooks() {
         }
         if (typeof result.developerInstructions === 'string' && result.developerInstructions.trim()) instructions.push(capBytes(result.developerInstructions.trim(), PROMPT_CONTRIBUTION_MAX_BYTES));
         if (typeof result.turnContext === 'string' && result.turnContext.trim()) turnNotes.push(capBytes(result.turnContext.trim(), PROMPT_CONTRIBUTION_MAX_BYTES));
+        if (result.ownsSilentEnd === true) merged.ownsSilentEnd = true;
       }
       if (instructions.length) merged.developerInstructions = instructions.join('\n\n');
       if (turnNotes.length) merged.turnContext = turnNotes.join('\n\n');
