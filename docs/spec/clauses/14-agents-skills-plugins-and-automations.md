@@ -61,8 +61,8 @@ Boundaries:
 | [MUS-SPEC-14-732F](14-agents-skills-plugins-and-automations.md#mus-spec-14-732f) | A logo the browser cannot draw falls back to the monogram on its row; a light and dark pair keeps the variant that still draws. | [`a logo the browser cannot draw falls back to the monogram on its row; a pair keeps the variant that still draws`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
 | [MUS-SPEC-14-732G](14-agents-skills-plugins-and-automations.md#mus-spec-14-732g) | A hand-typed /name shared by a Claude Code skill and a command attaches the skill, as Claude Code would run it | [`a hand-typed /foo, when a Claude Code skill and a command share the name, attaches the skill Claude Code would run`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
 | [MUS-SPEC-14-732H](14-agents-skills-plugins-and-automations.md#mus-spec-14-732h) | When only the dark-theme logo draws, light theme gets the monogram instead of a logo it cannot show | [`when only the dark-theme logo still draws, it shows in dark theme and the light theme gets the monogram`](../../../packages/agent-app/tests/claude-skills-729-components.tsx) |
-| [MUS-SPEC-14-732I](14-agents-skills-plugins-and-automations.md#mus-spec-14-732i) | A command folder swapped for a link to an outside folder while a command is read is refused, even if every check sees it restored | [`a command folder swapped for a link to an outside folder while it is read is refused, even if every check sees the folder restored`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
-| [MUS-SPEC-14-732J](14-agents-skills-plugins-and-automations.md#mus-spec-14-732j) | An inlined command keeps a quoted argument whole in $0, $1…, as Claude Code splits them | [`an inlined command keeps a quoted argument whole, splitting its arguments the way Claude Code does`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
+| [MUS-SPEC-14-732I](14-agents-skills-plugins-and-automations.md#mus-spec-14-732i) | A command folder swapped for a link to an outside folder while a command is read is refused, even if every check sees it restored | [`a command folder swapped for a link to an outside folder while it is read is refused, even if every check sees the folder restored`](../../../packages/agent-app/tests/confined-read-729.test.ts) |
+| [MUS-SPEC-14-732J](14-agents-skills-plugins-and-automations.md#mus-spec-14-732j) | A command's arguments reach the run as typed: a quoted argument stays whole in $0, $1…, its spacing and the command's own name inside it are kept, inlined and native | [`an inlined command keeps a quoted argument whole, splitting its arguments the way Claude Code does`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
 | [MUS-SPEC-14-732K](14-agents-skills-plugins-and-automations.md#mus-spec-14-732k) | The app's real image scaler shrinks a large plugin logo so it shows; an undecodable one keeps the monogram | [`a plugin logo over the icon budget is scaled by the app's real image scaler and shown; one it cannot decode keeps the monogram`](../../../packages/agent-app/tests/large-logo-729.electron.ts) |
 
 ### Claude Code background sub-agents
@@ -490,7 +490,7 @@ Boundaries:
 - Expected result: Neither the picker nor the attached command ever contains the secret: the file is opened without following a link and must still be the file that passed the check. An untouched command still reads normally.
 - Test: `packages/agent-app/tests/claude-skills-729.test.ts::a command file swapped for a symlink right after it is checked is not read through the link, in the picker or when a run attaches it`
 - Environment: Real discovery and attachment against a temporary home; `fs.promises.realpath` wrapped to swap the file at that moment.
-- Known gaps: Swapping a parent folder for a link is closed on macOS by 732I. On Linux only the last component is opened without following links (there is no O_NOFOLLOW_ANY and Node has no `openat`); a static parent link is still caught by the containment check, and the race needs a process already running as the user, which can read the outside file directly.
+- Known gaps: Swapping a parent folder for a link is closed by 732I on macOS (O_NOFOLLOW_ANY) and Linux (the kernel's path for the opened file must be the checked one; without /proc the read is refused). Windows opens with the containment and same-file checks only; creating a link there needs admin rights or Developer Mode.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-14-732b"></a>
@@ -573,22 +573,22 @@ Boundaries:
 <a id="mus-spec-14-732i"></a>
 #### MUS-SPEC-14-732I: A command folder swapped for a link while it is read is refused
 
-- Precondition: `~/.claude/commands/fe/comp.md` exists, and an outside folder holds a `comp.md` with a secret.
-- Action: While the command is read, `fe` is swapped for a link to the outside folder, and every containment check before and after still sees the real folder.
-- Expected result: The read is refused and the secret never reaches the picker or a run. The file is opened with O_NOFOLLOW_ANY, which refuses a link in any part of the path. An untouched command still reads.
-- Test: `packages/agent-app/tests/claude-skills-729.test.ts::a command folder swapped for a link to an outside folder while it is read is refused, even if every check sees the folder restored`
-- Environment: Real discovery against a temporary home; `realpath` and `lstat` wrapped so the checks see the folder restored while the open sees the link. macOS only.
-- Known gaps: Skipped off macOS; Linux has no O_NOFOLLOW_ANY (see 732A).
+- Precondition: `~/.claude/commands/team/review.md` and `~/.claude/commands/plain.md` exist, and an outside folder holds a `review.md` with a secret.
+- Action: List and attach the untouched command. Then swap `team` for a link to the outside folder, with every containment check before and after still seeing the real folder, and list and attach again.
+- Expected result: Untouched, `team:review` is listed and attaches with its own text. During the swap the secret never reaches the picker or a run, and `plain` still reads. macOS opens the file with O_NOFOLLOW_ANY; Linux refuses the read unless the kernel's path for the opened file is the checked one.
+- Test: `packages/agent-app/tests/confined-read-729.test.ts::a command folder swapped for a link to an outside folder while it is read is refused, even if every check sees the folder restored`
+- Environment: Real discovery and attachment against a temporary home; `realpath` and `lstat` wrapped so the checks see the folder restored while the open sees the link. Runs on macOS and, in CI, on Linux; skipped on Windows.
+- Known gaps: Windows is not covered (see 732A).
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-14-732j"></a>
 #### MUS-SPEC-14-732J: A quoted command argument stays whole
 
 - Precondition: `~/.claude/commands/fe/comp.md` reads `Build the $0 component with $1 styling.`
-- Action: Send `/fe:comp "Button primary" 'tailwind v4'`.
-- Expected result: The run gets `Build the Button primary component with tailwind v4 styling.`: `$0` is `Button primary` and `$1` is `tailwind v4`, without quotes, as Claude Code splits them (0-based). `$ARGUMENTS` is the text as typed.
+- Action: On a Codex route send `/fe:comp "Button primary" 'tailwind v4'`, then `/fe:comp "Button  primary" tailwind` (two spaces), then `/fe:comp "say /fe:comp now" tailwind`. On a Claude route send `/fe:comp "say /fe:comp now"  tailwind`.
+- Expected result: The first run gets `Build the Button primary component with tailwind v4 styling.`: `$0` is `Button primary` and `$1` is `tailwind v4`, without quotes, as Claude Code splits them (0-based). The second keeps both spaces in `Button  primary`. The third gets `say /fe:comp now`: only the leading invocation is removed. Claude Code receives the fourth message exactly as typed.
 - Test: `packages/agent-app/tests/claude-skills-729.test.ts::an inlined command keeps a quoted argument whole, splitting its arguments the way Claude Code does`
-- Environment: Real agent service on a Codex route (inlined, not native); the prompt the fake coding client receives is checked.
+- Environment: Real agent service on a Codex route (inlined) and a Claude route (native); the prompt each fake coding client receives is checked.
 - Known gaps: None known.
 - Evidence: UNVERIFIED
 

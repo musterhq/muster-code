@@ -509,26 +509,6 @@ test('a logo URL that redirects to plain http is never fetched over http; an htt
   assert.equal(icon('app-hop')?.kind, 'image', 'a relative https redirect is followed');
 });
 
-// Spec: MUS-SPEC-14-732I (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-732i)
-test('a command folder swapped for a link to an outside folder while it is read is refused, even if every check sees the folder restored', {skip: process.platform !== 'darwin' && 'needs O_NOFOLLOW_ANY (macOS)'}, async t => {
-  const root = await mkdtemp(join(tmpdir(), 'muster-732i-')), saved = process.env.HOME, originalRealpath = fsPromises.realpath, originalLstat = fsPromises.lstat;
-  process.env.HOME = join(root, 'home');
-  const commands = join(root, 'home', '.claude', 'commands'), outside = join(root, 'outside');
-  await mkdir(join(commands, 'team'), {recursive: true}); await mkdir(outside);
-  await writeFile(join(commands, 'team', 'review.md'), 'TEAM-REVIEW-BODY\n');
-  await writeFile(join(outside, 'review.md'), 'SECRET-OUTSIDE-THE-COMMANDS-FOLDER\n');
-  const inside = await realpath(join(commands, 'team', 'review.md')), secretStat = await stat(join(outside, 'review.md'));
-  t.after(async () => { fsPromises.realpath = originalRealpath; fsPromises.lstat = originalLstat; if (saved === undefined) delete process.env.HOME; else process.env.HOME = saved; await rm(root, {recursive: true, force: true}); });
-  // The racer keeps team/ as a link to the outside folder, but restores it whenever the reader resolves or lstats the path.
-  await rm(join(commands, 'team'), {recursive: true}); await symlink(outside, join(commands, 'team'));
-  fsPromises.realpath = (async (...args: Parameters<typeof originalRealpath>) => String(args[0]) === inside ? inside : originalRealpath(...args)) as typeof originalRealpath;
-  fsPromises.lstat = (async (...args: Parameters<typeof originalLstat>) => String(args[0]) === inside ? secretStat : originalLstat(...args)) as typeof originalLstat;
-  const listed = (await discoverSkills([])).find(entry => entry.name === 'team:review');
-  assert.doesNotMatch(listed?.readme ?? '', /SECRET/, 'the picker never shows the outside file');
-  const attached = await resolveAttachedSkill(inside, []);
-  assert.doesNotMatch(attached?.content ?? '', /SECRET/, 'a run never gets the outside file');
-});
-
 // Spec: MUS-SPEC-14-732J (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-732j)
 test('an inlined command keeps a quoted argument whole, splitting its arguments the way Claude Code does', async t => {
   const h: H = await harness(t);
@@ -538,6 +518,14 @@ test('an inlined command keeps a quoted argument whole, splitting its arguments 
   assert.equal((await h.snapshot(chat.id)).status, 'completed');
   const prompt = String(h.codex[0]?.prompt ?? '');
   assert.match(prompt, /<command-instructions>\nBuild the Button primary component with tailwind v4 styling\.\n<\/command-instructions>/, prompt.slice(prompt.indexOf('<command-instructions>'), prompt.indexOf('</command-instructions>') + 24));
+  // The arguments are the user's text as typed: spacing inside quotes stays, and the command's name inside an argument is kept.
+  await h.send(chat.id, `/fe:comp "Button  primary" tailwind`, [comp.id]);
+  assert.match(String(h.codex[1]?.prompt ?? ''), /<command-instructions>\nBuild the Button {2}primary component with tailwind styling\.\n<\/command-instructions>/);
+  await h.send(chat.id, `/fe:comp "say /fe:comp now" tailwind`, [comp.id]);
+  assert.match(String(h.codex[2]?.prompt ?? ''), /<command-instructions>\nBuild the say \/fe:comp now component with tailwind styling\.\n<\/command-instructions>/);
+  const native = await h.chat('cc/claude-opus-5-5', h.tree.project);
+  await h.send(native.id, `/fe:comp "say /fe:comp now"  tailwind`, [comp.id]);
+  assert.equal((await h.launches()).at(-1)?.prompt, `/fe:comp "say /fe:comp now"  tailwind`, 'Claude Code gets the arguments exactly as typed');
 });
 
 // Spec: MUS-SPEC-14-732C (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-732c)

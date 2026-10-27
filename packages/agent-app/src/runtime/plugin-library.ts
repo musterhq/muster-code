@@ -57,15 +57,22 @@ async function readSkill(dir: string, root: string): Promise<{ readme: string | 
 
 /**
  * Reads a file already resolved inside `root` without following a link swapped in after that check: the open refuses a
- * symlink (on macOS in any path component), and the opened file must still be the one at the resolved path inside the root. Null when it is not a regular
+ * symlink (on macOS in any path component; on Linux the kernel's path for the opened file must be the resolved one), and the
+ * opened file must still be the one at the resolved path inside the root. Null when it is not a regular
  * file, has moved out of the root, or (unless `truncate`) is over `max` bytes.
  */
 // macOS refuses a link in ANY component at open time (O_NOFOLLOW_ANY), which closes a parent folder swapped for a link between
 // the checks and the open; `resolved` is already a realpath, so a genuine path has no links to refuse.
 const OPEN_NO_LINKS = process.platform === 'darwin' ? constants.O_RDONLY | 0x20000000 : constants.O_RDONLY | constants.O_NOFOLLOW;
+/** Linux: the path the kernel holds for an open file, so a parent folder swapped for a link before the open is seen however the
+ *  race is timed. Null when /proc is not there, which refuses the read. */
+async function openedPath(fd: number): Promise<string | null> {
+  try { return await fs.readlink(`/proc/self/fd/${fd}`); } catch { return null; }
+}
 async function readContainedText(resolved: string, root: string, max: number, truncate = false): Promise<string | null> {
   const handle = await fs.open(resolved, OPEN_NO_LINKS);
   try {
+    if (process.platform === 'linux' && await openedPath(handle.fd) !== resolved) return null;
     const opened = await handle.stat();
     if (!opened.isFile() || (!truncate && opened.size > max)) return null;
     if (await contained(resolved, root) !== resolved) return null;
@@ -295,8 +302,11 @@ export function expandClaudeCommand(text: string, args: string): string {
 }
 /** The request as a command's arguments: the composer keeps the picked chip in the text as `$<name>`, which is not an argument. */
 export function commandArguments(request: string, name: string): string {
-  const tokens = new Set([`$${name}`, `/${name}`]);
-  return request.split(/(\s+)/).filter(part => !tokens.has(part)).join('').replace(/[ \t]{2,}/g, ' ').trim();
+  // Only the first standalone `/name` or `$name` is the invocation; everything else is the user's text, kept as typed.
+  const match = new RegExp(`(^|\\s)[$/]${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`).exec(request);
+  if (!match) return request.trim();
+  const start = match.index + match[1]!.length, end = start + name.length + 1;
+  return (request.slice(0, start) + request.slice(end).replace(/^[ \t]/, '')).trim();
 }
 /** The instruction block a selected skill or command adds to a request that Claude Code does not run natively. */
 export function selectedSkillBlock(entry: { name: string; provenance: string; content: string; claude?: 'skill' | 'command' }, request: string): string {

@@ -83,6 +83,11 @@ jobs:
         if: matrix.os == 'windows'
         run: node --max-old-space-size=1536 --experimental-transform-types --test tests/windows-tools-319.test.ts tests/http-tools-security.test.ts
 
+      # A Claude Code command is read only from inside its folder, even if a folder on its path is swapped for a link (#729).
+      - name: Confined command reads
+        if: matrix.os == 'linux'
+        run: node --experimental-transform-types --test tests/confined-read-729.test.ts
+
       - name: Typecheck and build
         run: |
           npx tsc --noEmit
