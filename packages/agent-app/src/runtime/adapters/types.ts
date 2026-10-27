@@ -12,6 +12,8 @@ export interface AdapterRunInput {
   /** True when the selected model reports image input; tool reads of images (read_file) are then sent to it as pictures. */
   vision?: boolean;
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
+  /** Declared input window for direct HTTP request budgeting (including tool rounds). */
+  contextWindow?: number;
   /** Mode and domain instructions, already joined. */
   instructions?: string;
   /** Muster's own tool servers for this run (in-app browser, terminal, mailbox…), from the domains' `mcp_servers.*`

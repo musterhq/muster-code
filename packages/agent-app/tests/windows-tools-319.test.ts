@@ -181,7 +181,7 @@ test('an OmniRoute combo ("intelligent-planner") in a Full-access chat is offere
   const result=await route!.adapter!.run(input);
   assert.equal(result.status,'completed');assert.equal(result.finalMessage,'Drill passed.');
   const names=(bodies[0]!.tools as Array<{function:{name:string}}>).map(tool=>tool.function.name);
-  assert.deepEqual(names,['read_file','list_directory','write_file','edit_file','run_command']);
+  assert.deepEqual(names,['read_file','list_directory','search_files','write_file','edit_file','run_command']);
   assert.match(String((bodies[0]!.messages as Array<{content:string}>)[0]!.content),/You have these tools in this chat: .*run_command/);
   const followUp=(bodies[1]!.messages as Array<{role:string;content?:string;tool_calls?:unknown}>).slice(-2);
   assert.equal(followUp[0]!.role,'assistant');assert.ok(followUp[0]!.tool_calls);
@@ -192,8 +192,8 @@ test('an OmniRoute combo ("intelligent-planner") in a Full-access chat is offere
   assert.ok(usage.last.inputTokens>=0);
 });
 test('tools follow the access level: read-only has no writes or shell, workspace has no shell, and files stay inside the folder',async t=>{
-  assert.deepEqual(toolSpecs('read-only').map(tool=>tool.function.name),['read_file','list_directory']);
-  assert.deepEqual(toolSpecs('workspace').map(tool=>tool.function.name),['read_file','list_directory','write_file','edit_file']);
+  assert.deepEqual(toolSpecs('read-only').map(tool=>tool.function.name),['read_file','list_directory','search_files']);
+  assert.deepEqual(toolSpecs('workspace').map(tool=>tool.function.name),['read_file','list_directory','search_files','write_file','edit_file']);
   const cwd=await directory(t),events:string[]=[];
   const ctx=(access:'read-only'|'workspace'|'full')=>({cwd,access,signal:new AbortController().signal,emit:(method:string)=>{events.push(method);},threadId:'t',turnId:'u',authorize:async()=>'allow' as const});
   const wrote=await executeTool({id:'1',name:'write_file',arguments:JSON.stringify({path:'notes/plan.md',content:'step 1'})},ctx('workspace'));

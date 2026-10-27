@@ -17,7 +17,7 @@ test('every tests/*.tsx file is a renderer suite or is excluded with a reason', 
 // Spec: MUS-SPEC-22-5B (docs/spec/clauses/22-engineering-standards.md#mus-spec-22-5b)
 test('the guard names a stray suite, a stale entry, a name in both lists and a duplicate', () => {
   assert.deepEqual(suiteProblems(['a', 'b'], ['a', 'b'], []), []);
-  assert.deepEqual(suiteProblems(['a', 'b', 'stray'], ['a', 'b'], []), ['stray.tsx is not run by test:renderer: add it to suites in scripts/renderer-suites.mjs, or to excluded with the reason']);
+  assert.deepEqual(suiteProblems(['a', 'b', 'stray'], ['a', 'b'], []), ['stray.tsx is not run by test:renderer: check discovery in scripts/renderer-suites.mjs']);
   assert.deepEqual(suiteProblems(['a'], ['a', 'gone'], []), ['suites lists gone, but tests/gone.tsx does not exist']);
   assert.deepEqual(suiteProblems(['a'], ['a'], ['gone']), ['excluded lists gone, but tests/gone.tsx does not exist']);
   assert.deepEqual(suiteProblems(['a'], ['a'], ['a']), ['a is both a suite and excluded']);
