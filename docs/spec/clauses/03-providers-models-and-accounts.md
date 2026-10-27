@@ -65,6 +65,14 @@ Boundaries:
 | [MUS-SPEC-03-730C](03-providers-models-and-accounts.md#mus-spec-03-730c) | A GPT model, a GPT combo and a connector turn on the same router run on the Codex client; only the Claude combo's turn starts Claude Code. | [`on one router, only the Claude turn runs through Claude Code; GPT models, GPT combos and connector turns stay on the Codex client`](../../../packages/agent-app/tests/router-claude-code-730.test.ts) |
 | [MUS-SPEC-03-730D](03-providers-models-and-accounts.md#mus-spec-03-730d) | After a Codex turn, Claude Code starts a fresh session whose prompt carries a summary of the earlier messages; the turn after continues that session with no summary. | [`a chat whose earlier turn ran on the Codex client moves to Claude Code with a summary, then continues that session`](../../../packages/agent-app/tests/router-claude-code-730.test.ts) |
 | [MUS-SPEC-03-740A](03-providers-models-and-accounts.md#mus-spec-03-740a) | With a Codex profile inherited from the parent shell, a config.toml provider route still lists its models and answers a chat with its own provider. | [`(b) a Codex config.toml provider with [auth] command: models listed and a chat answered with the command’s token`](../../../packages/agent-app/tests/provider-auth-e2e.test.ts) |
+| [MUS-SPEC-03-384A](03-providers-models-and-accounts.md#mus-spec-03-384a) | A follow-up after restarting the adapter answers from the earlier file result, without reading the deleted file again. | [`an HTTP follow-up after restart can answer from an earlier tool result`](../../../packages/agent-app/tests/http-router-384.test.ts) |
+| [MUS-SPEC-03-384B](03-providers-models-and-accounts.md#mus-spec-03-384b) | A command runs once; its next model request survives a 429 and a 503 with identical history and completes. | [`HTTP tool rounds retry a 429 and a 503 without executing a command twice`](../../../packages/agent-app/tests/http-router-384.test.ts) |
+| [MUS-SPEC-03-384C](03-providers-models-and-accounts.md#mus-spec-03-384c) | A persistent outage gets four attempts, a bad key one, and Stop ends a server-requested wait promptly. | [`HTTP retries stop at a bound, do not retry credentials, and Stop interrupts backoff`](../../../packages/agent-app/tests/http-router-384.test.ts) |
+| [MUS-SPEC-03-384D](03-providers-models-and-accounts.md#mus-spec-03-384d) | Both the model and the bounded timeline output keep the command opening and final test summary. | [`a long HTTP command preserves its opening and final test summary for the model and timeline`](../../../packages/agent-app/tests/http-router-384.test.ts) |
+| [MUS-SPEC-03-384E](03-providers-models-and-accounts.md#mus-spec-03-384e) | A read-only chat finds a source line by glob and text and reads a later byte range; search refuses a link outside the folder. | [`a read-only HTTP chat can search by glob and text and read beyond the first file page`](../../../packages/agent-app/tests/http-router-384.test.ts) |
+| [MUS-SPEC-03-384F](03-providers-models-and-accounts.md#mus-spec-03-384f) | The model receives mailbox data and project rules without instructions for unavailable canvas, desktop, background, sandbox or mailbox tools. | [`an HTTP request keeps mailbox data but only describes tools the route can execute`](../../../packages/agent-app/tests/http-router-384.test.ts) |
+| [MUS-SPEC-03-384G](03-providers-models-and-accounts.md#mus-spec-03-384g) | A long follow-up fits 85% of the declared window on the first request, with an earlier-history summary, recent messages and the current question. | [`an HTTP follow-up fits the declared window while retaining a summary and recent messages`](../../../packages/agent-app/tests/http-router-384.test.ts) |
+| [MUS-SPEC-03-384H](03-providers-models-and-accounts.md#mus-spec-03-384h) | A later round refused for context overflow retries with shorter output, keeps the result head and tail and paired tool call, and completes without running the tool again. | [`an HTTP context overflow in a later tool round shrinks old output and continues without repeating the tool`](../../../packages/agent-app/tests/http-router-384.test.ts) |
 
 ### Configured routers
 
@@ -599,6 +607,94 @@ Boundaries:
 - Test: `packages/agent-app/tests/provider-auth-e2e.test.ts::(b) a Codex config.toml provider with [auth] command: models listed and a chat answered with the command’s token`
 - Environment: Node test runner; the real Codex binary against a local mock router; skipped when no Codex binary is installed.
 - Known gaps: Covers a provider route; a profile route clears the inherited provider the same way but has no case of its own.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-384a"></a>
+#### MUS-SPEC-03-384A: An HTTP follow-up after restart can answer from an earlier tool result
+
+- Precondition: A file names a release animal. One HTTP turn reads it and finishes with an answer that does not repeat the animal; conversation memory is saved to disk.
+- Action: Delete the file, construct a new adapter with a fresh memory instance reading that disk history, and ask which animal the earlier file named.
+- Expected result: A follow-up after restarting the adapter answers from the earlier file result, without reading the deleted file again.
+- Test: `packages/agent-app/tests/http-router-384.test.ts::an HTTP follow-up after restart can answer from an earlier tool result`
+- Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
+- Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-384b"></a>
+#### MUS-SPEC-03-384B: HTTP tool rounds retry a 429 and a 503 without executing a command twice
+
+- Precondition: A Full access HTTP turn runs a shell command that appends one line to a counter file.
+- Action: Refuse the next model request with 429, then 503, then stream a successful answer.
+- Expected result: A command runs once; its next model request survives a 429 and a 503 with identical history and completes.
+- Test: `packages/agent-app/tests/http-router-384.test.ts::HTTP tool rounds retry a 429 and a 503 without executing a command twice`
+- Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
+- Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-384c"></a>
+#### MUS-SPEC-03-384C: HTTP retries stop at a bound, do not retry credentials, and Stop interrupts backoff
+
+- Precondition: Local HTTP endpoints simulate a persistent 503, a bad key, a disconnected request, a partially streamed answer and a one-second rate-limit wait.
+- Action: Run a turn against each endpoint; press Stop during the rate-limit wait.
+- Expected result: A persistent outage gets four attempts, a bad key one, and Stop ends a server-requested wait promptly.
+- Test: `packages/agent-app/tests/http-router-384.test.ts::HTTP retries stop at a bound, do not retry credentials, and Stop interrupts backoff`
+- Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
+- Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-384d"></a>
+#### MUS-SPEC-03-384D: A long HTTP command preserves its opening and final test summary for the model and timeline
+
+- Precondition: A Full access HTTP turn runs a command producing 300,000 filler characters between its opening and its final test summary.
+- Action: Ask the fake model to report the summary from the tool result, and inspect the command timeline event.
+- Expected result: Both the model and the bounded timeline output keep the command opening and final test summary.
+- Test: `packages/agent-app/tests/http-router-384.test.ts::a long HTTP command preserves its opening and final test summary for the model and timeline`
+- Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
+- Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-384e"></a>
+#### MUS-SPEC-03-384E: A read-only HTTP chat can search by glob and text and read beyond the first file page
+
+- Precondition: A read-only chat has a source file containing a known line, a file larger than the first read page, and a link to a separate temporary folder.
+- Action: Search with a file glob and literal text, read a later byte range, then try to search through the outside link.
+- Expected result: A read-only chat finds a source line by glob and text and reads a later byte range; search refuses a link outside the folder.
+- Test: `packages/agent-app/tests/http-router-384.test.ts::a read-only HTTP chat can search by glob and text and read beyond the first file page`
+- Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
+- Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-384f"></a>
+#### MUS-SPEC-03-384F: An HTTP request keeps mailbox data but only describes tools the route can execute
+
+- Precondition: The route has no MCP client or browser bridge. Its system notes include canvas, desktop, background-command, browser and sandbox instructions; its prompt holds mailbox data and a mailbox tool hint.
+- Action: Send the turn through the real route-note preparation and HTTP adapter.
+- Expected result: The model receives mailbox data and project rules without instructions for unavailable canvas, desktop, background, sandbox or mailbox tools.
+- Test: `packages/agent-app/tests/http-router-384.test.ts::an HTTP request keeps mailbox data but only describes tools the route can execute`
+- Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
+- Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-384g"></a>
+#### MUS-SPEC-03-384G: An HTTP follow-up fits the declared window while retaining a summary and recent messages
+
+- Precondition: Saved HTTP history holds twelve large user/reply pairs. The selected model has an 8,000-token window.
+- Action: Send a follow-up to a fake endpoint that refuses any request larger than 85% of that window by the character estimate.
+- Expected result: A long follow-up fits 85% of the declared window on the first request, with an earlier-history summary, recent messages and the current question.
+- Test: `packages/agent-app/tests/http-router-384.test.ts::an HTTP follow-up fits the declared window while retaining a summary and recent messages`
+- Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
+- Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-384h"></a>
+#### MUS-SPEC-03-384H: An HTTP context overflow in a later tool round shrinks old output and continues without repeating the tool
+
+- Precondition: An HTTP tool round reads a large file with useful facts at both ends; a second scenario has an 80-round tool workflow and a 4,000-token window.
+- Action: Refuse the large-file continuation once with context overflow, then accept the reduced request. Run the long workflow against an endpoint that checks every request budget.
+- Expected result: A later round refused for context overflow retries with shorter output, keeps the result head and tail and paired tool call, and completes without running the tool again.
+- Test: `packages/agent-app/tests/http-router-384.test.ts::an HTTP context overflow in a later tool round shrinks old output and continues without repeating the tool`
+- Environment: Node test runner; real adapter, real loopback HTTP server, temporary folders; POSIX shell for command cases.
+- Known gaps: No live provider or desktop UI; token budgeting uses the existing character estimate, and old output is summarized with excerpts rather than a model-generated summary.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-03-721h"></a>

@@ -60,6 +60,8 @@ export interface ProviderInput {
   claudeCommand?: {text: string; context: string};
   /** #739: the context window the engine reported on this chat's last turn, when it reported one. */
   engineWindow?: number;
+  /** Effective per-model window resolved by the service, including a user's override. */
+  contextWindow?: number;
   /** The user's request names a ChatGPT connector; Codex apps stay loaded for this chat from then on. */
   connectorsRequested?: boolean;
   /** `driver` names the lane when the thread was not made by the route's own driver (the Messages lane, #688). */
@@ -259,6 +261,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     try {
       const result = await adapter.run({
         chat: input.chat, cwd: input.cwd, prompt: native ? native.text : lane?.seed?.trim() ? `${lane.seed.trim()}\n\nCurrent user request:\n${input.prompt}` : input.prompt, model, permissionMode: access.permissionMode, signal: owned.controller.signal,
+        contextWindow: input.contextWindow ?? route.info.models.find(entry => entry.id === model)?.contextWindow,
         ...(sandboxedRun(input.configOverrides) ? {sandboxed: true} : {}),
         ...(input.images?.length ? {images: input.images} : {}), ...(route.info.models.find(entry => entry.id === model)?.images === true ? {vision: true} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),
         ...(resumeThreadId ? {resumeThreadId} : {}),

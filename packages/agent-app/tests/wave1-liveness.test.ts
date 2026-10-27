@@ -98,6 +98,5 @@ test('G9: a task marked running whose run is gone shows up as an orphaned run wi
   assert.equal(item.kind, 'orphaned_run'); assert.ok(item.actions.includes('rerun'));
   await h.s.invoke('project.recovery.resolve', { projectId: h.project.id, taskId: job.id, action: 'rerun' });
   await until(async () => h.calls.filter(c => c.chatId !== r.chatId).length >= 1, 'a fresh run');
-  assert.ok(true);
 });
 
