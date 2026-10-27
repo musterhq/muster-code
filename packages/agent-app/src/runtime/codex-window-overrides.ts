@@ -1,6 +1,6 @@
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {compactionThreshold, effectiveContextWindow, type ModelWindowInfo} from '../shared/context-window.ts';
+import {NATIVE_SAFETY_RATIO, compactionThreshold, effectiveContextWindow, type ModelWindowInfo} from '../shared/context-window.ts';
 
 const KEYS = ['model_context_window', 'model_auto_compact_token_limit'] as const;
 /** Compaction keys the user set themselves at the top of `<CODEX_HOME>/config.toml` (before any table). Only these key names are read. */
@@ -20,12 +20,16 @@ export function userCompactionKeys(codexHome: string | undefined): Set<string> {
 
 /** #426: `-c` overrides that give Codex the model's own window and compaction point when Muster knows them (catalog JSON or the
  *  router's listing) — so a gateway model Codex has no metadata for still auto-compacts before it is full. A key the user set in
- *  config.toml is never overridden. */
-export function codexWindowOverrides(model: ModelWindowInfo | undefined, userKeys: Set<string>): string[] {
+ *  config.toml is never overridden. #739: `engineWindow` is the window Codex reported on this chat's last turn. When it is below
+ *  the one Codex reports for an adopted window (95% of it), Codex did not take ours, so it compacts at 85% of its own. */
+export function codexWindowOverrides(model: ModelWindowInfo | undefined, userKeys: Set<string>, engineWindow?: number | null): string[] {
   if (!model?.contextWindow || model.contextWindow <= 0) return [];
-  const window = effectiveContextWindow(model, null), threshold = compactionThreshold(window, model.autoCompactTokenLimit);
+  const declared = effectiveContextWindow(model, null);
+  const clamped = typeof engineWindow === 'number' && engineWindow > 0 && engineWindow < Math.floor(declared.tokens * NATIVE_SAFETY_RATIO);
+  const threshold = compactionThreshold(clamped ? effectiveContextWindow(model, engineWindow) : declared, model.autoCompactTokenLimit);
+  // The window override stays the declared one: Codex clamps it anyway, and a changing value would restart its session each turn.
   return [
-    ...(userKeys.has('model_context_window') ? [] : [`model_context_window=${window.tokens}`]),
+    ...(userKeys.has('model_context_window') ? [] : [`model_context_window=${declared.tokens}`]),
     ...(userKeys.has('model_auto_compact_token_limit') ? [] : [`model_auto_compact_token_limit=${threshold.tokens}`]),
   ];
 }

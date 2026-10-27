@@ -24,8 +24,9 @@ test('#426 window and threshold: a 1M model and a 200K model compact at differen
   const big=musterCompactAt('openai-chat-completions',{contextWindow:1_000_000},null),small=musterCompactAt('openai-chat-completions',{contextWindow:200_000},null);
   assert.equal(big.at,Math.floor(1_000_000*AUTO_COMPACT_RATIO));assert.equal(small.at,Math.floor(200_000*AUTO_COMPACT_RATIO));
   assert.ok(small.at<300_000&&big.at>300_000,'300K tokens compacts the 200K model, never the 1M one');
-  // The declared window wins over the provider's report (a 1M model reported as 200K is not "full" at 200K).
-  assert.deepEqual(effectiveContextWindow({contextWindow:1_000_000},200_000),{tokens:1_000_000,source:'catalog'});
+  // #739: a report below the declared window is what the engine runs; a larger report keeps the declared window.
+  assert.deepEqual(effectiveContextWindow({contextWindow:1_000_000},200_000),{tokens:200_000,source:'reported'});
+  assert.deepEqual(effectiveContextWindow({contextWindow:200_000},1_000_000),{tokens:200_000,source:'catalog'});
   assert.deepEqual(effectiveContextWindow(undefined,200_000),{tokens:200_000,source:'reported'});
   assert.deepEqual(effectiveContextWindow({},null),{tokens:DEFAULT_CONTEXT_WINDOW,source:'default'},'no window at all uses the default');
   assert.equal(musterCompactAt('gemini-cli',undefined,null).at,Infinity,'#668: a guessed window never compacts ahead of time');
@@ -44,7 +45,7 @@ test('#426 a router model without a catalog uses its listed context_length; the 
   assert.deepEqual([listed!.contextWindow,listed!.contextWindowSource],[1_000_000,'listing']);
   assert.deepEqual(effectiveContextWindow(listed,null),{tokens:1_000_000,source:'listing'});
   assert.equal(effectiveContextWindow(unlisted,null).source,'default');
-  const view=contextView({usedTokens:200_000,windowTokens:200_000,source:'live',compacted:false,updatedAt:null},listed);
+  const view=contextView({usedTokens:200_000,windowTokens:null,source:'live',compacted:false,updatedAt:null},listed);
   assert.equal(view.windowTokens,1_000_000);assert.equal(view.percent,20,'a 1M model is not shown full at 200K');
   assert.equal(view.compactAt,Math.floor(1_000_000*AUTO_COMPACT_RATIO));assert.match(view.source,/router’s model list/);
   assert.equal(contextView({usedTokens:null,windowTokens:null,source:null,compacted:false,updatedAt:null}).windowTokens,null,'no default window is shown without usage');
