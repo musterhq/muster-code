@@ -32,11 +32,12 @@ export function ContextMeter({ telemetry }: { telemetry: ContextTelemetry }): Re
     return chat ? state.providers.value?.find(p => p.id === chat.providerId)?.models.find(m => m.id === chat.model) : undefined;
   });
   // #668: your own window for this model (Settings › Models) beats every other source.
-  const userWindow = useModelPolicy().contextWindows[useStoreSelector(state => { const chat = state.snapshot?.chats.find(c => c.id === state.activeChatId); return chat ? modelKey(chat.providerId ?? '', chat.model) : ''; })];
+  const key = useStoreSelector(state => { const chat = state.snapshot?.chats.find(c => c.id === state.activeChatId); return chat ? modelKey(chat.providerId ?? '', chat.model) : ''; });
+  const userWindow = useModelPolicy().contextWindows[key];
   const model = withUserWindow(catalogModel, userWindow);
   const [compacting, setCompacting] = useState(false), [compactError, setCompactError] = useState('');
   const { compacted, source } = telemetry;
-  const { estimated, usedTokens, windowTokens, percent, remaining, source: sourceLabel, compactAt, windowSource } = contextView(telemetry, model);
+  const { estimated, usedTokens, windowTokens, percent, remaining, source: sourceLabel, compactAt, windowSource } = contextView(telemetry, model, key || undefined);
   const usedLabel = usedTokens === null ? 'Unavailable' : formatTokens(usedTokens);
   const limitLabel = windowTokens === null ? 'Unavailable' : formatTokens(windowTokens);
   const detail = percent !== null

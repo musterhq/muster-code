@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS receipts (
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS context_telemetry (
   chat_id TEXT PRIMARY KEY, used_tokens INTEGER, window_tokens INTEGER,
-  source TEXT, compacted INTEGER NOT NULL DEFAULT 0, updated_at TEXT);
+  source TEXT, compacted INTEGER NOT NULL DEFAULT 0, updated_at TEXT, window_model TEXT);
 CREATE TABLE IF NOT EXISTS chat_queue (
   chat_id TEXT NOT NULL, id TEXT NOT NULL, position INTEGER NOT NULL, text TEXT NOT NULL,
   request_id TEXT NOT NULL UNIQUE, attachment_ids TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL,
@@ -188,6 +188,9 @@ export class AgentStore {
     // CHAT-15 snooze: an absolute wake instant and/or "until new activity".
     if (!chatColumns.some(c=>c.name==='snoozed_until')) this.db.exec('ALTER TABLE chats ADD COLUMN snoozed_until TEXT');
     if (!chatColumns.some(c=>c.name==='snooze_activity')) this.db.exec('ALTER TABLE chats ADD COLUMN snooze_activity INTEGER NOT NULL DEFAULT 0');
+    // #739: which model reported the window, so a switch to another model does not inherit it.
+    const telemetryColumns = this.db.prepare("SELECT name FROM pragma_table_info('context_telemetry')").all() as { name: string }[];
+    if (!telemetryColumns.some(c=>c.name==='window_model')) this.db.exec('ALTER TABLE context_telemetry ADD COLUMN window_model TEXT');
     // NAV-05: manual sidebar folder order (NULL = after every ordered folder, by creation).
     const folderColumns = this.db.prepare("SELECT name FROM pragma_table_info('folders')").all() as { name: string }[];
     if (!folderColumns.some(c=>c.name==='position')) this.db.exec('ALTER TABLE folders ADD COLUMN position INTEGER');
@@ -594,9 +597,9 @@ export class AgentStore {
   setContextTelemetry(chatId: string, t: ContextTelemetry): void {
     this.liveTelemetry.add(chatId);
     this.db.prepare(
-      'INSERT INTO context_telemetry (chat_id, used_tokens, window_tokens, source, compacted, updated_at) VALUES (?, ?, ?, ?, ?, ?) '
-      + 'ON CONFLICT(chat_id) DO UPDATE SET used_tokens = excluded.used_tokens, window_tokens = excluded.window_tokens, source = excluded.source, compacted = excluded.compacted, updated_at = excluded.updated_at',
-    ).run(chatId, t.usedTokens, t.windowTokens, t.source, t.compacted ? 1 : 0, t.updatedAt);
+      'INSERT INTO context_telemetry (chat_id, used_tokens, window_tokens, source, compacted, updated_at, window_model) VALUES (?, ?, ?, ?, ?, ?, ?) '
+      + 'ON CONFLICT(chat_id) DO UPDATE SET used_tokens = excluded.used_tokens, window_tokens = excluded.window_tokens, source = excluded.source, compacted = excluded.compacted, updated_at = excluded.updated_at, window_model = excluded.window_model',
+    ).run(chatId, t.usedTokens, t.windowTokens, t.source, t.compacted ? 1 : 0, t.updatedAt, t.windowModel ?? null);
   }
 
   /** Chats whose telemetry this process received from the provider: they read back as 'live', not 'restored'. */
@@ -608,7 +611,7 @@ export class AgentStore {
    */
   contextTelemetry(chatId: string): ContextTelemetry {
     const row = this.db.prepare('SELECT * FROM context_telemetry WHERE chat_id = ?').get(chatId) as
-      | { used_tokens: number | null; window_tokens: number | null; source: string | null; compacted: number; updated_at: string | null }
+      | { used_tokens: number | null; window_tokens: number | null; source: string | null; compacted: number; updated_at: string | null; window_model?: string | null }
       | undefined;
     if (!row) return { usedTokens: null, windowTokens: null, source: null, compacted: false, updatedAt: null };
     const used = typeof row.used_tokens === 'number' && Number.isInteger(row.used_tokens) && row.used_tokens >= 0 && row.used_tokens <= 50_000_000 ? row.used_tokens : null;
@@ -619,6 +622,7 @@ export class AgentStore {
       source: used !== null || window !== null || row.compacted === 1 ? (this.liveTelemetry.has(chatId) ? 'live' : 'restored') : null,
       compacted: row.compacted === 1,
       updatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
+      ...(window !== null && typeof row.window_model === 'string' && row.window_model ? { windowModel: row.window_model } : {}),
     };
   }
 

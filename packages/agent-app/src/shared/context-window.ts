@@ -9,6 +9,10 @@
  *  3. the router's own listing (`context_length` and its aliases on `/models`);
  *  4. the window the provider reports with its usage (Codex `modelContextWindow`);
  *  5. DEFAULT_CONTEXT_WINDOW.
+ * #739: a reported window clearly smaller than the catalog or listing wins over them. The engine runs that window whatever it
+ * was told (Codex clamps an unknown router model to 272K and reports 95% of it), so the meter and compaction follow it. Codex
+ * reports 95% of a window it adopted, so a report at or above 95% of the declared window means it took ours: the declared one
+ * stays. A report counts only for the model that made it (reportedWindowFor): after a model switch it is not evidence.
  * A guessed window (listing or default) never contradicts evidence: a turn the provider accepted with more input tokens
  * than the guess raises the window to those tokens (source 'observed'). Guesses (default, observed) never start a
  * proactive compaction; only a provider context-overflow error does. (A router listing that exposes a combo's member
@@ -38,9 +42,15 @@ export function effectiveContextWindow(model: ModelWindowInfo | undefined, repor
   if (positive(model?.contextWindow)) window = {tokens: Math.floor(model!.contextWindow!), source: model!.contextWindowSource ?? 'catalog'};
   else if (positive(reportedWindow)) window = {tokens: Math.floor(reportedWindow), source: 'reported'};
   else window = {tokens: DEFAULT_CONTEXT_WINDOW, source: 'default'};
+  if ((window.source === 'catalog' || window.source === 'listing') && positive(reportedWindow) && reportedWindow < Math.floor(window.tokens * NATIVE_SAFETY_RATIO)) return {tokens: Math.floor(reportedWindow), source: 'reported'};
   // Evidence beats a guess: the provider took this many input tokens, so the window is at least that large.
   if ((window.source === 'listing' || window.source === 'default') && positive(observedTokens) && observedTokens > window.tokens) return {tokens: Math.floor(observedTokens), source: 'observed'};
   return window;
+}
+/** #739: the reported window, only when the model `key` (`provider::model`) made the report. Untagged rows predate tagging and count. */
+export function reportedWindowFor(telemetry: {windowTokens: number | null; windowModel?: string}, key: string | undefined): number | null {
+  if (!positive(telemetry.windowTokens)) return null;
+  return !telemetry.windowModel || !key || telemetry.windowModel === key ? telemetry.windowTokens : null;
 }
 /** Only a window someone declared (you, the catalog, the router listing, the provider) may start a compaction; a default or observed one never does. */
 export const proactiveCompaction = (window: EffectiveWindow): boolean => window.source !== 'default' && window.source !== 'observed';

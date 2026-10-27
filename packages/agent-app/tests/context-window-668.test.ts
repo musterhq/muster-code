@@ -10,9 +10,12 @@ const telemetry=(usedTokens:number|null,windowTokens:number|null=null)=>({usedTo
 // Spec: MUS-SPEC-04-1A (docs/spec/clauses/04-context-window-and-compaction.md#mus-spec-04-1a)
 test('#668 resolver order: override > catalog > listing > reported > observed > default',()=>{
   const all={contextWindow:200_000,contextWindowSource:'catalog' as const,userContextWindow:1_000_000};
-  assert.deepEqual(effectiveContextWindow(all,64_000,900_000),{tokens:1_000_000,source:'override'},'your window beats everything, even observed usage');
-  assert.deepEqual(effectiveContextWindow({contextWindow:200_000,contextWindowSource:'catalog'},64_000),{tokens:200_000,source:'catalog'});
-  assert.deepEqual(effectiveContextWindow({contextWindow:200_000,contextWindowSource:'listing'},64_000),{tokens:200_000,source:'listing'});
+  assert.deepEqual(effectiveContextWindow(all,400_000,900_000),{tokens:1_000_000,source:'override'},'your window beats everything, even observed usage');
+  assert.deepEqual(effectiveContextWindow({contextWindow:200_000,contextWindowSource:'catalog'},400_000),{tokens:200_000,source:'catalog'});
+  assert.deepEqual(effectiveContextWindow({contextWindow:200_000,contextWindowSource:'listing'},400_000),{tokens:200_000,source:'listing'});
+  // #739: a report below the catalog or listing is the window the engine runs, so it wins.
+  assert.deepEqual(effectiveContextWindow({contextWindow:200_000,contextWindowSource:'catalog'},64_000),{tokens:64_000,source:'reported'});
+  assert.deepEqual(effectiveContextWindow({contextWindow:1_000_000,contextWindowSource:'listing'},258_400),{tokens:258_400,source:'reported'});
   assert.deepEqual(effectiveContextWindow({},64_000),{tokens:64_000,source:'reported'});
   assert.deepEqual(effectiveContextWindow({},null,300_000),{tokens:300_000,source:'observed'});
   assert.deepEqual(effectiveContextWindow(undefined,null),{tokens:DEFAULT_CONTEXT_WINDOW,source:'default'});

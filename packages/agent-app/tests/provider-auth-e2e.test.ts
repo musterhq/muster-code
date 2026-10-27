@@ -94,6 +94,11 @@ async function codexHome(t: {after(fn: () => Promise<void>): void}, router: Mock
     await writeFile(join(root, 'mock.json'), codexCatalog(['claude/claude-opus-4.1', 'codex/gpt-5.6-terra']));
     await writeFile(join(codex, 'mock-gateway.config.toml'), `model = "claude/claude-opus-4.1"\nmodel_provider = "mockroute"\nmodel_catalog_json = "${join(root, 'mock.json')}"\n${table}`);
   }
+  // #740: Muster started from a Muster shell inherits that shell's Codex profile, and the launcher spawns Codex
+  // with Muster's own environment; no route may launch with that profile.
+  const inherited = process.env.MUSTER_CODEX_PROFILE;
+  process.env.MUSTER_CODEX_PROFILE = 'inherited-from-parent';
+  t.after(async () => { if (inherited === undefined) delete process.env.MUSTER_CODEX_PROFILE; else process.env.MUSTER_CODEX_PROFILE = inherited; });
   const env = {...process.env, CODEX_HOME: codex, HOME: home, MUSTER_CODEX_COMMAND: codexBin!, MUSTER_PROVIDER_NODE: process.execPath};
   delete (env as Record<string, string | undefined>).OPENAI_API_KEY;
   return {root, home, codex, cwd, env};
@@ -119,6 +124,7 @@ async function codexChat(t: {after(fn: () => Promise<void>): void}, router: Mock
   assert.ok(turns.every(entry => entry.model === 'claude/claude-opus-4.1'), 'the slash model id reaches the router untouched');
 }
 
+// Spec: MUS-SPEC-03-740A (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-740a)
 test('(b) a Codex config.toml provider with [auth] command: models listed and a chat answered with the command’s token', {skip: codexSkip, timeout: 120_000}, async t => {
   const router = await startMockRouter(TOKEN); t.after(() => router.close());
   await codexChat(t, router, 'config-table');
