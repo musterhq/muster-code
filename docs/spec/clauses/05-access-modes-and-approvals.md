@@ -170,4 +170,4 @@ Boundaries:
 - Test: `packages/agent-app/tests/runtime-quality-407.test.ts::an unanswered permission request refuses the file change and reports that it did not run`
 - Environment: Node test runner, temporary folders and owned child processes.
 - Known gaps: A stub route drives the real provider and file tool, and a real child speaks the app-server approval protocol and writes only on acceptance; no model or network. Full access no-prompt behaviour also has existing coverage in MUS-SPEC-05-382B and MUS-SPEC-05-459B.
-- Evidence: UNVERIFIED
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/runtime-quality-407.test.ts; exit 0; 6 passed, 0 failed, 0 skipped; commit e1d4ec882cfdc8399da27908cdbc9ad3166ac23e
