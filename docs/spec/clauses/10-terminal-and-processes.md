@@ -25,6 +25,11 @@ Boundaries:
 | [MUS-SPEC-10-473D](10-terminal-and-processes.md#mus-spec-10-473d) | User-owned processes, stopped processes, stopped turns and deleted or archived chats never queue a follow-up. | [`never for a user-started process, a user-stopped process, a user-stopped turn, a deleted or archived chat`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 | [MUS-SPEC-10-473E](10-terminal-and-processes.md#mus-spec-10-473e) | stop_background refuses the user's command, stops the agent's own process, and a stopped process sends no follow-up. | [`stop_background stops only the agent’s own process, and a stopped process sends no follow-up`](../../../packages/agent-app/tests/process-continuations.test.ts) |
 | [MUS-SPEC-10-642A](10-terminal-and-processes.md#mus-spec-10-642a) | With the terminal dock open, moving through five chats starts no shell and shows the empty state with New terminal; opening Terminal starts exactly one shell for that chat, and opening it again adds none. | [`browsing chats with the terminal dock open starts no shell; opening Terminal starts exactly one`](../../../packages/agent-app/tests/processes-components.tsx) |
+| [MUS-SPEC-10-407A](10-terminal-and-processes.md#mus-spec-10-407a) | Stop closes the app-server and its real tool child. | [`closing the stopped app-server ends the dev server it started`](../../../packages/agent-app/tests/runtime-quality-407.test.ts) |
+| [MUS-SPEC-10-407B](10-terminal-and-processes.md#mus-spec-10-407b) | A tool child that ignores SIGTERM is gone even when its CLI parent exits first. | [`Stop ends a tool child even when the CLI exits before its child`](../../../packages/agent-app/tests/runtime-quality-407.test.ts) |
+| [MUS-SPEC-10-407C](10-terminal-and-processes.md#mus-spec-10-407c) | Startup reaps a saved process only when the recorded start time matches, even if the same command is still at that PID. | [`startup leaves a saved PID alive when its recorded process start time differs`](../../../packages/agent-app/tests/runtime-quality-407.test.ts) |
+| [MUS-SPEC-10-407D](10-terminal-and-processes.md#mus-spec-10-407d) | An oversized stdout line fails a turn instead of forwarding or buffering its payload. | [`an oversized app-server output line fails the turn with a bounded error`](../../../packages/agent-app/tests/runtime-quality-407.test.ts) |
+| [MUS-SPEC-10-407E](10-terminal-and-processes.md#mus-spec-10-407e) | An app-server closing stdin fails the request without an uncaught EPIPE in the host. | [`a closed app-server input fails the request without an uncaught pipe error`](../../../packages/agent-app/tests/runtime-quality-407.test.ts) |
 
 ### What the agent may stop
 
@@ -143,3 +148,60 @@ Boundaries:
 - Environment: DOM suite (`linkedom`); the app's calls are faked, so no real shell starts.
 - Known gaps: Counts the create requests the screen sends, not real shells. The Show panel button in the Terminal pane and the retry after a failed open are asserted in the same suite but outside this check, and the first also passes on `main`, so they are not linked. The suite `tests/terminal-load-retry-dom.tsx` was changed to ask for a terminal first; it is not linked here.
 - Evidence: UNVERIFIED
+
+### Runtime ownership and unanswered requests
+
+<a id="mus-spec-10-407a"></a>
+#### MUS-SPEC-10-407A: Stop closes the app-server and its real tool child.
+
+- Precondition: An app-server turn has started a long-running child command.
+- Action: Stop the turn and close its owned session.
+- Expected result: The run settles and the child process is gone.
+- Test: `packages/agent-app/tests/runtime-quality-407.test.ts::closing the stopped app-server ends the dev server it started`
+- Environment: Node test runner, temporary folders and owned child processes.
+- Known gaps: A fake app-server speaks the real stdio protocol. POSIX process-group check; Windows requires CI.
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/runtime-quality-407.test.ts; exit 0; 6 passed, 0 failed, 0 skipped; commit e1d4ec882cfdc8399da27908cdbc9ad3166ac23e
+
+<a id="mus-spec-10-407b"></a>
+#### MUS-SPEC-10-407B: A tool child that ignores SIGTERM is gone even when its CLI parent exits first.
+
+- Precondition: A CLI started a child that ignores SIGTERM and does not hold the parent output pipes.
+- Action: Stop the turn.
+- Expected result: The run reports Stopped and the child is killed rather than surviving a cancelled escalation timer.
+- Test: `packages/agent-app/tests/runtime-quality-407.test.ts::Stop ends a tool child even when the CLI exits before its child`
+- Environment: Node test runner, temporary folders and owned child processes.
+- Known gaps: Real Node parent and child processes through the common JSON-lines path and all five CLI adapters. The launcher substitutes a local script for the external CLI; POSIX check.
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/runtime-quality-407.test.ts; exit 0; 6 passed, 0 failed, 0 skipped; commit e1d4ec882cfdc8399da27908cdbc9ad3166ac23e
+
+<a id="mus-spec-10-407c"></a>
+#### MUS-SPEC-10-407C: Startup reaps a saved process only when the recorded start time matches, even if the same command is still at that PID.
+
+- Precondition: A saved service PID points at a real process with the same command.
+- Action: Start the service runner with a different recorded start time, then the matching start time.
+- Expected result: Mismatched and legacy records leave the process alive; the matching owned group is stopped. Newly started services record the OS start time.
+- Test: `packages/agent-app/tests/runtime-quality-407.test.ts::startup leaves a saved PID alive when its recorded process start time differs`
+- Environment: Node test runner, temporary folders and owned child processes.
+- Known gaps: Real child and PID file; a mismatched timestamp simulates PID reuse without exhausting the PID space. POSIX check.
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/runtime-quality-407.test.ts; exit 0; 6 passed, 0 failed, 0 skipped; commit e1d4ec882cfdc8399da27908cdbc9ad3166ac23e
+
+<a id="mus-spec-10-407d"></a>
+#### MUS-SPEC-10-407D: An oversized stdout line fails a turn instead of forwarding or buffering its payload.
+
+- Precondition: An app-server responds to a turn with a 17 MiB JSON output line.
+- Action: Run the turn through the stdio client.
+- Expected result: The turn fails with an oversized-line error and no giant final message.
+- Test: `packages/agent-app/tests/runtime-quality-407.test.ts::an oversized app-server output line fails the turn with a bounded error`
+- Environment: Node test runner, temporary folders and owned child processes.
+- Known gaps: A fake app-server process; no network. The cap is exercised across multiple stream chunks.
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/runtime-quality-407.test.ts; exit 0; 6 passed, 0 failed, 0 skipped; commit e1d4ec882cfdc8399da27908cdbc9ad3166ac23e
+
+<a id="mus-spec-10-407e"></a>
+#### MUS-SPEC-10-407E: An app-server closing stdin fails the request without an uncaught EPIPE in the host.
+
+- Precondition: An app-server closes its input after reading initialize.
+- Action: Let the client send its next message.
+- Expected result: The request fails normally and the host records no uncaught pipe error.
+- Test: `packages/agent-app/tests/runtime-quality-407.test.ts::a closed app-server input fails the request without an uncaught pipe error`
+- Environment: Node test runner, temporary folders and owned child processes.
+- Known gaps: Separate Node host and fake app-server processes; POSIX file-descriptor close. Windows requires CI.
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/runtime-quality-407.test.ts; exit 0; 6 passed, 0 failed, 0 skipped; commit e1d4ec882cfdc8399da27908cdbc9ad3166ac23e

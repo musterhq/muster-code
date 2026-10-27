@@ -1,3 +1,5 @@
+import {spawnOwned} from '../owned-process.ts';
+import {permissionResult} from '../permission-result.ts';
 import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
@@ -171,7 +173,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
           writeFileSync(configFile, JSON.stringify({mcpServers}), {mode: 0o600});
         }
         const launch = cliSpawn(options.binary, claudeArgs(input, sessionId, configFile), env);
-        child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32'});
+        child = spawnOwned(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe']}, spawn);
       }
       catch (error) { cleanConfig(); resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `Claude Code could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let accepted = false, settled = false, final: {ok: boolean; text: string} | undefined, stderr = '', streamedText = false;
@@ -257,7 +259,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       let killer: ReturnType<typeof setTimeout> | undefined;
       // SIGINT lets the CLI stop its own work; then the whole process group goes, so a tool command it started (which still
       // holds stdout) cannot keep the run open after Stop.
-      const abort = () => { child.kill('SIGINT'); killer = setTimeout(() => killTree(child, 'SIGKILL'), options.killGraceMs ?? 3000); };
+      const abort = () => { killTree(child, 'SIGINT'); killer = setTimeout(() => killTree(child, 'SIGKILL'), options.killGraceMs ?? 3000); };
       child.on('exit', () => { if (input.signal.aborted) killTree(child, 'SIGKILL'); });
       // #382: Claude Code asks before a tool it will not run on its own (`--permission-prompt-tool=stdio`). The ask goes through the
       // same Project rules, user-process guard and approval cards as every other route, and the answer returns on stdin.
@@ -277,7 +279,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
         if (request.subtype !== 'can_use_tool') { reply(requestId, {subtype: 'error', error: `Muster does not handle ${text(request.subtype) || 'this'} request.`}); return; }
         const args = request.input && typeof request.input === 'object' ? request.input as Record<string, unknown> : {};
         const [method, params] = permissionAsk(text(request.tool_name), args, text(request.tool_use_id));
-        const allowed = await Promise.resolve(input.authorize?.(method, params)).catch(() => false);
+        const allowed = permissionResult(await Promise.resolve().then(() => input.authorize?.(method, params)).catch(() => undefined)) === 'allow';
         reply(requestId, {subtype: 'success', response: allowed ? {behavior: 'allow', updatedInput: args} : {behavior: 'deny', message: 'The user declined this in Muster.'}});
       };
       if (input.signal.aborted) abort(); else input.signal.addEventListener('abort', abort, {once: true});

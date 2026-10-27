@@ -28,6 +28,7 @@ Boundaries:
 | [MUS-SPEC-05-573A](05-access-modes-and-approvals.md#mus-spec-05-573a) | A rule with many stars rejects a long command quickly and still matches as before. | [`a tool-rule glob with many stars matches in linear-ish time against a long command`](../../../packages/agent-app/tests/governance-bughunt.test.ts) |
 | [MUS-SPEC-05-382A](05-access-modes-and-approvals.md#mus-spec-05-382a) | A Claude Code shell command in a Workspace chat shows an approval card, is not answered before the user decides, and Claude Code is told to go ahead once the user approves. | [`Claude Code in Workspace access: a shell command waits for the approval card and runs once approved`](../../../packages/agent-app/tests/claude-approvals-382.test.ts) |
 | [MUS-SPEC-05-382B](05-access-modes-and-approvals.md#mus-spec-05-382b) | A declined shell command is refused to Claude Code with a reason and the turn still completes; Full access and Read only chats do not route prompts to Muster. | [`Claude Code in Workspace access: a declined shell command is refused and the turn still completes`](../../../packages/agent-app/tests/claude-approvals-382.test.ts) |
+| [MUS-SPEC-05-407A](05-access-modes-and-approvals.md#mus-spec-05-407a) | Missing, empty, declined, timed-out and no-opinion permission replies refuse a file write; only an explicit allow or accepted reply writes the file. | [`an unanswered permission request refuses the file change and reports that it did not run`](../../../packages/agent-app/tests/runtime-quality-407.test.ts) |
 
 ### Confined writes and policy-only requests
 
@@ -157,3 +158,16 @@ Boundaries:
 - Environment: Node test runner; a fake Claude Code process; no network.
 - Known gaps: Uses the protocol as seen in Claude Code 2.1.x, not a live Claude Code run.
 - Evidence: UNVERIFIED
+
+### Runtime ownership and unanswered requests
+
+<a id="mus-spec-05-407a"></a>
+#### MUS-SPEC-05-407A: Missing, empty, declined, timed-out and no-opinion permission replies refuse a file write; only an explicit allow or accepted reply writes the file.
+
+- Precondition: A Workspace chat on an HTTP route with the real provider adapter and file tool.
+- Action: Request a file write with each host permission reply.
+- Expected result: No answer, an empty reply, a failed or timed-out callback, deny and no-opinion leave the file absent and report a decline. Explicit allow and accept replies write the requested content.
+- Test: `packages/agent-app/tests/runtime-quality-407.test.ts::an unanswered permission request refuses the file change and reports that it did not run`
+- Environment: Node test runner, temporary folders and owned child processes.
+- Known gaps: A stub route drives the real provider and file tool, and a real child speaks the app-server approval protocol and writes only on acceptance; no model or network. Full access no-prompt behaviour also has existing coverage in MUS-SPEC-05-382B and MUS-SPEC-05-459B.
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/runtime-quality-407.test.ts; exit 0; 6 passed, 0 failed, 0 skipped; commit e1d4ec882cfdc8399da27908cdbc9ad3166ac23e

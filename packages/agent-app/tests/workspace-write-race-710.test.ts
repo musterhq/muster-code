@@ -19,7 +19,7 @@ async function sandbox(t: TestContext) {
   await fs.mkdir(ws); await fs.mkdir(outside); await fs.mkdir(join(ws, 'd'));
   return {ws, outside};
 }
-const ctx = (cwd: string): ToolContext => ({cwd, access: 'workspace', signal: new AbortController().signal, emit() {}, threadId: 't', turnId: 'u'});
+const ctx = (cwd: string): ToolContext => ({cwd, access: 'workspace', signal: new AbortController().signal, emit() {}, threadId: 't', turnId: 'u', authorize: async () => 'allow' as const});
 const call = (name: string, args: object) => ({id: '1', name, arguments: JSON.stringify(args)});
 
 /** Force the actual filesystem swap at the mutation boundary, then undo it before path-based cleanup can find it.

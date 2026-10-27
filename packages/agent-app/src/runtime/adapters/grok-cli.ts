@@ -1,3 +1,4 @@
+import {spawnOwned} from '../owned-process.ts';
 import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {cleanAgentEnv, compareVersions, killTree, num, obj, parseVersion, probeCli, stripAnsi, type AgentSpawn} from './cli-common.ts';
@@ -88,7 +89,7 @@ export function grokAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; s
     return new Promise<AdapterRunResult>(resolve => {
       const turnId = randomUUID(), env = cleanAgentEnv(options.env ?? process.env, GROK_ENV, input.env, options.binary), launch = cliSpawn(options.binary, grokLaunchArgs(input.permissionMode, input.sandboxed), env);
       let child: ChildProcess;
-      try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32'}); }
+      try { child = spawnOwned(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe']}, spawn); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `Grok could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let nextId = 1, session: string | undefined, accepted = false, settled = false, replaying = false, stderr = '', answer = '', stopReason = '', failure = '', killer: ReturnType<typeof setTimeout> | undefined;
       const pending = new Map<number, {resolve(value: Record<string, unknown>): void; reject(error: Error): void}>(), open = new Map<string, Record<string, unknown>>();
@@ -126,6 +127,7 @@ export function grokAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; s
           if (message.error) entry.reject(new Error(text(obj(message.error).message) || 'Grok returned an error.')); else entry.resolve(obj(message.result));
         }
       });
+      child.on('exit', () => { if (input.signal.aborted) killTree(child, 'SIGKILL'); });
       child.on('error', error => finish({status: 'failed', finalMessage: '', dispatchState: accepted ? 'dispatched' : 'not-dispatched', errorMessage: `Grok could not start: ${error.message}`}));
       child.on('close', code => {
         for (const [id, item] of open) input.onEvent('item/completed', {threadId: session ?? '', turnId, item: {...item, id, status: 'interrupted'}});

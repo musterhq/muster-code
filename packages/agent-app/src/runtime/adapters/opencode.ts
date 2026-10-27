@@ -1,3 +1,4 @@
+import {spawnOwned} from '../owned-process.ts';
 import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {cliSpawn, jsonLines, text} from './shared.ts';
@@ -40,9 +41,9 @@ export function probe(binary: string, args: string[], spawn: Spawn = nodeSpawn a
   return new Promise((resolve, reject) => {
     let out = '', child: ChildProcess;
     const launch = cliSpawn(binary, args);
-    try { child = spawn(launch.command, launch.args, {cwd: process.cwd(), env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true}); } catch (error) { reject(error); return; }
-    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`${binary} did not answer within ${timeoutMs / 1000}s.`)); }, timeoutMs);
-    child.stdin?.end();
+    try { child = spawnOwned(launch.command, launch.args, {cwd: process.cwd(), env: launch.env, stdio: ['pipe', 'pipe', 'pipe']}, spawn); } catch (error) { reject(error); return; }
+    const timer = setTimeout(() => { killTree(child, 'SIGKILL'); reject(new Error(`${binary} did not answer within ${timeoutMs / 1000}s.`)); }, timeoutMs);
+    child.stdin?.on('error', () => {}); child.stdin?.end();
     const take = (chunk: Buffer | string) => { if (out.length < 256 * 1024) out += String(chunk); };
     child.stdout?.on('data', take); child.stderr?.on('data', take);
     child.on('error', error => { clearTimeout(timer); reject(error); });
@@ -97,14 +98,14 @@ export function openCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEn
       const baseEnv = options.env ?? process.env;
       const mcpEnv = openCodeMcpEnv(input.mcpServers, input.env?.OPENCODE_CONFIG_CONTENT ?? baseEnv.OPENCODE_CONFIG_CONTENT, input.sandboxed);
       const launch = cliSpawn(options.binary, args, input.env || Object.keys(mcpEnv).length ? {...baseEnv, ...input.env, ...mcpEnv} : baseEnv);
-      try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32'}); }
+      try { child = spawnOwned(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe']}, spawn); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `OpenCode could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let session = input.resumeThreadId, settled = false, failure = '', stderr = '', answer = '', killer: ReturnType<typeof setTimeout> | undefined;
       const started = new Set<string>();
       // The first session id is the turn's own; a later id (a child session) must not re-bind the chat.
       const accept = (id: string) => { if (started.has('\0accepted')) return; session = id; started.add('\0accepted'); input.onThreadReady(id); input.onTurnAccepted({threadId: id, turnId}); };
       // SIGINT first, then the whole process group: a command OpenCode started must not outlive Stop or hold the run open.
-      const abort = () => { child.kill('SIGINT'); killer = setTimeout(() => killTree(child, 'SIGKILL'), options.killGraceMs ?? 3000); };
+      const abort = () => { killTree(child, 'SIGINT'); killer = setTimeout(() => killTree(child, 'SIGKILL'), options.killGraceMs ?? 3000); };
       child.on('exit', () => { if (input.signal.aborted) killTree(child, 'SIGKILL'); });
       if (input.signal.aborted) abort(); else input.signal.addEventListener('abort', abort, {once: true});
       const finish = (result: AdapterRunResult) => { if (settled) return; settled = true; clearTimeout(killer); input.signal.removeEventListener('abort', abort); resolve(result); };

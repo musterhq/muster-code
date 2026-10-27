@@ -1,3 +1,4 @@
+import {killOwned} from './owned-process.ts';
 /** Ending a command with everything it started, and running a shell command line, on every platform.
  *  macOS/Linux: the child leads its own process group (spawned detached) and the group is signalled.
  *  Windows: there are no process groups; `taskkill /T /F` ends the tree rooted at the child. */
@@ -5,10 +6,7 @@ import {execFile, spawnSync, type SpawnOptions} from 'node:child_process';
 
 export const WINDOWS = process.platform === 'win32';
 
-export function killTree(pid: number, signal: NodeJS.Signals = 'SIGTERM'): void {
-  if (!WINDOWS) { process.kill(-pid, signal); return; }
-  execFile('taskkill', ['/pid', String(pid), '/T', '/F'], {windowsHide: true}, () => { /* already gone is fine */ });
-}
+export {killOwned as killTree} from './owned-process.ts';
 
 /** The shell that runs a command line: /bin/sh -c, or cmd.exe /d /s /c on Windows. */
 export function shellCommand(line: string): {file: string; args: string[]; options: Pick<SpawnOptions, 'windowsVerbatimArguments' | 'detached' | 'windowsHide'>} {
@@ -45,14 +43,14 @@ const PS_SWEEP = '$p=@{};Get-CimInstance Win32_Process|ForEach-Object{$p[[int]$_
  */
 export function killTreeAndEscapees(pid: number, signal: NodeJS.Signals = 'SIGTERM'): void {
   if (WINDOWS) {
-    const taskkill = () => execFile('taskkill', ['/pid', String(pid), '/T', '/F'], {windowsHide: true}, () => { /* already gone is fine */ });
+    const taskkill = () => killOwned(pid, signal);
     try { execFile('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', PS_SWEEP, String(pid)], {windowsHide: true, timeout: 8000}, taskkill); } catch { taskkill(); }
     return;
   }
   const known = escapees.get(pid) ?? new Set<number>();
   for (const found of descendantPids(pid)) known.add(found);
   escapees.set(pid, known);
-  try { process.kill(-pid, signal); } catch { /* the group is gone */ }
+  try { killOwned(pid, signal); } catch { /* the group is gone */ }
   for (const other of known) { try { process.kill(other, signal); } catch { /* already gone */ } }
   if (signal === 'SIGKILL') escapees.delete(pid);
 }

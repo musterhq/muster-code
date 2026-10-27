@@ -21,7 +21,7 @@ async function sandbox(t: TestContext) {
   const ws = join(root, 'ws'), outside = join(root, 'outside'); await mkdir(ws); await mkdir(outside); return {root, ws, outside};
 }
 const events: Array<[string, Record<string, unknown>]> = [];
-const ctx = (cwd: string, access: ToolContext['access'], extra: Partial<ToolContext> = {}): ToolContext => ({cwd, access, signal: new AbortController().signal, emit: (method, params) => { events.push([method, params]); }, threadId: 't', turnId: 'u', ...extra});
+const ctx = (cwd: string, access: ToolContext['access'], extra: Partial<ToolContext> = {}): ToolContext => ({cwd, access, signal: new AbortController().signal, emit: (method, params) => { events.push([method, params]); }, threadId: 't', turnId: 'u', authorize: async () => 'allow', ...extra});
 const call = (name: string, args: object, id = '1') => ({id, name, arguments: JSON.stringify(args)});
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));

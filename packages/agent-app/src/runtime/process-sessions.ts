@@ -1,6 +1,7 @@
-import {spawn,type ChildProcess} from 'node:child_process';
+import type {ChildProcess} from 'node:child_process';
+import {spawnOwned} from './owned-process.ts';
 import {commandEnvironment} from './command-environment.ts';
-import {killTree, shellCommand, WINDOWS} from './process-tree.ts';
+import {killTree, shellCommand} from './process-tree.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import {promises as fs} from 'node:fs';
 import {dirname,isAbsolute,join} from 'node:path';
@@ -295,7 +296,7 @@ export class ProcessSessions {
     if(this.closing||this.cancelled.has(session.processId)){this.releaseHeavy(session.processId);session.status='stopped';this.cancelled.delete(session.processId);this.publish(session);await this.save();return clone(session);}
     let child:ChildProcess;
     const shell=shellCommand(input.command);
-    try{child=input.args?spawn(input.command,input.args,{cwd:authority.cwd,env:commandEnvironment(),stdio:['ignore','pipe','pipe'],detached:!WINDOWS,windowsHide:true}):spawn(shell.file,shell.args,{cwd:authority.cwd,env:commandEnvironment(),stdio:['ignore','pipe','pipe'],...shell.options});}
+    try{child=input.args?spawnOwned(input.command,input.args,{cwd:authority.cwd,env:commandEnvironment(),stdio:['ignore','pipe','pipe']}):spawnOwned(shell.file,shell.args,{cwd:authority.cwd,env:commandEnvironment(),stdio:['ignore','pipe','pipe'],...shell.options});}
     catch{this.releaseHeavy(session.processId);session.status='failed';session.error='The command could not be started.';this.publish(session);await this.save();return clone(session);}
     let resolve!:()=>void;const done=new Promise<void>(accept=>{resolve=accept;});
     const handle:Handle={child,stopping:false,finished:false,done,resolve};this.handles.set(session.processId,handle);
