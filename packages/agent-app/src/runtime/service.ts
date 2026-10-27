@@ -10,7 +10,7 @@ import { promises as fs, existsSync, mkdirSync, copyFileSync, statSync } from 'n
 import { basename, join } from 'node:path';
 import { rescanProviderListings, setProviderListingStore } from './provider-instances.ts';
 import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, QueuedMessage, ChatFallback, TimelineItem, WakeReason } from '../shared/protocol.ts';
-import { CONTEXT_OVERFLOW, musterCompactAt, reportedWindowFor, withUserWindow } from '../shared/context-window.ts';
+import { CONTEXT_OVERFLOW, effectiveContextWindow, musterCompactAt, reportedWindowFor, withUserWindow } from '../shared/context-window.ts';
 import { modelKey } from '../shared/model-catalog.ts';
 import type { PendingAttentionSummary, AttentionRequest } from '../shared/attention-protocol.ts';
 import { discoverLocalProviders } from './provider-discovery.ts';
@@ -826,7 +826,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const stoppedBeforeDispatch: ProviderResult = {status:'failed',finalMessage:'',dispatchState:'not-dispatched',recovery:{kind:'cancelled',retryable:false,reason:'Stopped before the request was sent.'}};
         // #739: this run's model; the window its events report belongs to it, and only its own earlier report caps it.
         const runModel = modelKey(chat.providerId ?? '', chat.model), engineWindow = reportedWindowFor(store.contextTelemetry(chatId), runModel);
+        const contextWindow = effectiveContextWindow(withUserWindow(selectedProvider.models.find(entry => entry.id === chat.model), domainHooks.contextWindowOverride(selectedProvider.id, chat.model)), engineWindow, store.contextTelemetry(chatId).usedTokens).tokens;
         const attempt = () => run.stopped ? Promise.resolve(stoppedBeforeDispatch) : provider.run({ chat: {...chat,providerTurnId:undefined,recovery:undefined}, cwd, prompt: contextualPrompt,
+          contextWindow,
           ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) || pluginReloads.wantsConnectors(chatId) ? {connectorsRequested: true, connectorNames: [...requestedConnectorNames(prompt), ...pluginReloads.connectorNames(chatId)]} : {}),
           ...(runOptions.configOverrides ? {configOverrides: runOptions.configOverrides as Record<string, string | number | boolean | string[]>} : {}), ...(runOptions.developerInstructions ? {developerInstructions: runOptions.developerInstructions} : {}),
           ...(claudeCommand ? {claudeCommand} : {}),
