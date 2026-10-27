@@ -26,6 +26,7 @@ import {appendCommandOutput,finishCommandOutput,stripAnsi} from './command-outpu
 import {OutputLog} from './output-log.ts';
 import {ProjectEventLog} from './project-event-log.ts';
 import { toolEventDetails } from './tool-event-details.ts';
+import { shellPatchChanges } from './shell-patch.ts';
 import { applyProviderEvent, COMPACTION_TEXT, isForeignThreadEvent } from './context-telemetry.ts';
 import { forgetQuickOpen, listFiles, readFile, searchFiles } from './files.ts';
 import { readAsset, readChatImage } from './file-assets.ts';
@@ -975,7 +976,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               const details = toolEventDetails(item), startedAt = toolStarted.get(itemId);
               if (finished && startedAt !== undefined) { toolStarted.delete(itemId); if (!(typeof details.durationMs === 'number' && details.durationMs > 0)) details.durationMs = Date.now() - startedAt; }
               else if (finished && !(typeof details.durationMs === 'number' && details.durationMs > 0) && typeof previous?.data?.durationMs === 'number') details.durationMs = previous.data.durationMs;
-              const metadata = {...details,providerItemId:itemId,type:type || previous?.data?.type,name:label,output,outputTruncated:buffered.truncated,...(childThread ? {threadId:childThread} : {}),...(finished ? {awaitingApproval:undefined} : {})};
+              const shellChanges = finished ? shellPatchChanges(item) : [];
+              const metadata = {...details,providerItemId:itemId,type:shellChanges.length ? 'fileChange' : type || previous?.data?.type,...(shellChanges.length ? {changes:shellChanges} : {}),name:label,output,outputTruncated:buffered.truncated,...(childThread ? {threadId:childThread} : {}),...(finished ? {awaitingApproval:undefined} : {})};
               if (!local) { local = store.appendItem(chatId, 'tool', body, status, metadata).id; toolIds.set(itemId, local); }
               else store.updateItem(local, body, status, {...store.item(local)?.data,...metadata});
               // A tool that streamed no deltas logs its full final output once.

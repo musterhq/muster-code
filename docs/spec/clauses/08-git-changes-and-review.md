@@ -26,6 +26,8 @@ Boundaries:
 | [MUS-SPEC-08-571B](08-git-changes-and-review.md#mus-spec-08-571b) | Undo of a deleted symlink leaves git status clean. | [`undoing a deleted symlink restores a symlink`](../../../packages/agent-app/tests/review-bughunt.test.ts) |
 | [MUS-SPEC-08-571C](08-git-changes-and-review.md#mus-spec-08-571c) | Undo of a staged symlink change keeps mode 120000 in the index. | [`undoing a staged symlink change keeps the index entry a symlink`](../../../packages/agent-app/tests/review-bughunt.test.ts) |
 | [MUS-SPEC-08-571D](08-git-changes-and-review.md#mus-spec-08-571d) | A binary file with the extension "constructor" gets no image preview. | [`a binary file whose extension is constructor has no image preview`](../../../packages/agent-app/tests/review-bughunt.test.ts) |
+| [MUS-SPEC-08-779A](08-git-changes-and-review.md#mus-spec-08-779a) | A successful shell apply_patch that adds calculator.py and edits util.py lists both files with their line counts as one turn's changes; a failed patch and a printed patch stay commands. | [`#779 files the model writes with a shell apply_patch show as inline diffs and in the files-changed pill; failed or printed patches do not`](../../../packages/agent-app/tests/shell-patch-diff-779.test.ts) |
+| [MUS-SPEC-08-777A](08-git-changes-and-review.md#mus-spec-08-777a) | A router agent missing from the gateway's catalog is launched with a catalog entry that has the freeform apply_patch tool and direct tools; the catalog's own models and file are unchanged. | [`#777 router models the catalog does not list run with the native apply_patch tool, so their edits show as inline diffs`](../../../packages/agent-app/tests/router-patch-tool-777.test.ts) |
 
 ### Refs, dash-named files and submodules
 
@@ -139,4 +141,28 @@ Boundaries:
 - Test: `packages/agent-app/tests/review-bughunt.test.ts::a binary file whose extension is constructor has no image preview`
 - Environment: Node test runner; git on PATH; a real repository in a temp folder.
 - Known gaps: Checks the diff data. It does not render the preview pane.
+- Evidence: UNVERIFIED
+
+### Inline diffs for every model (protected)
+
+<a id="mus-spec-08-779a"></a>
+#### MUS-SPEC-08-779A: A file written with a shell apply_patch shows as an inline diff and in the pill
+
+- Precondition: A chat whose model has no native patch tool, in a folder that is not a Git repository.
+- Action: The model runs `apply_patch` through the shell; it adds `calculator.py` and edits `util.py`. A second patch fails and a third is only printed with `cat`.
+- Expected result: The turn's changes list `calculator.py` (added, 4 lines) and `util.py` (1 added, 1 removed) as inline diffs, the files-changed pill counts them, and the tool row keeps the command output. The failed and printed patches stay plain commands.
+- Test: `packages/agent-app/tests/shell-patch-diff-779.test.ts::#779 files the model writes with a shell apply_patch show as inline diffs and in the files-changed pill; failed or printed patches do not`
+- Environment: Node test runner; a fake provider adapter replays the app-server items; no network, no Git.
+- Known gaps: Edits made with `sed`, `cat >` or `tee` outside a Git repository are still not captured.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-777a"></a>
+#### MUS-SPEC-08-777A: Router models get the native patch tool
+
+- Precondition: A gateway profile with a model catalog, and a router that also lists an agent (`intelligent-planner`) the catalog does not.
+- Action: Muster lists the route's models and launches Codex for a chat on the router agent.
+- Expected result: Codex is given a catalog with an entry for the agent using the freeform apply_patch tool and direct tools, so the model edits files with apply_patch and the edits show as inline diffs. The catalog's own models are passed on unchanged and the person's catalog file is not modified.
+- Test: `packages/agent-app/tests/router-patch-tool-777.test.ts::#777 router models the catalog does not list run with the native apply_patch tool, so their edits show as inline diffs`
+- Environment: Node test runner; a stand-in Codex records the catalog it is given; the listing is a fake fetch.
+- Known gaps: Checks the catalog Codex receives. A manual probe with Codex 0.163 against a local fake server showed `intelligent-planner` offered `apply_patch` only with the merged catalog. Routes with no catalog file still use Codex's fallback metadata.
 - Evidence: UNVERIFIED

@@ -5,6 +5,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Router models (planner, advisor and the other router agents) edit files with the native patch tool again, so their changes show as inline diffs and in the files-changed pill (#777).
+- A patch a model runs through the shell shows as an inline diff and counts in the files-changed pill, instead of appearing only as a command (#779).
 - A reply whose stream stops partway is saved with its full text, and a streamed piece without an id no longer hides later replies (#762).
 - When a router refuses to continue a conversation, the chat carries on in a copy of it with the full history, instead of restarting from a short summary that lost the context (#767).
 - Unanswered permissions now decline, Stop ends tool process trees, and startup leaves reused process IDs alone (#407).
