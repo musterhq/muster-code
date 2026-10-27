@@ -28,8 +28,44 @@ Boundaries:
 | [MUS-SPEC-08-571D](08-git-changes-and-review.md#mus-spec-08-571d) | A binary file with the extension "constructor" gets no image preview. | [`a binary file whose extension is constructor has no image preview`](../../../packages/agent-app/tests/review-bughunt.test.ts) |
 | [MUS-SPEC-08-779A](08-git-changes-and-review.md#mus-spec-08-779a) | A successful shell apply_patch that adds calculator.py and edits util.py lists both files with their line counts as one turn's changes; a failed patch and a printed patch stay commands. | [`#779 files the model writes with a shell apply_patch show as inline diffs and in the files-changed pill; failed or printed patches do not`](../../../packages/agent-app/tests/shell-patch-diff-779.test.ts) |
 | [MUS-SPEC-08-777A](08-git-changes-and-review.md#mus-spec-08-777a) | A router agent missing from the gateway's catalog is launched with a catalog entry that has the freeform apply_patch tool and direct tools; the catalog's own models and file are unchanged. | [`#777 router models the catalog does not list run with the native apply_patch tool, so their edits show as inline diffs`](../../../packages/agent-app/tests/router-patch-tool-777.test.ts) |
+| [MUS-SPEC-08-781A](08-git-changes-and-review.md#mus-spec-08-781a) | Reloading saved shell edits restores all changed files and totals without modifying stored rows or revision cursors. | [`reopening a saved shell-edit chat recovers all diffs without rewriting history`](../../../packages/agent-app/tests/stored-shell-patch-781.test.ts) |
+| [MUS-SPEC-08-781B](08-git-changes-and-review.md#mus-spec-08-781b) | Failed, interrupted, running and printed patches remain commands; native changes are untouched and action-only records recover. | [`saved non-edits stay commands and native changes remain intact`](../../../packages/agent-app/tests/stored-shell-patch-781.test.ts) |
+| [MUS-SPEC-08-781C](08-git-changes-and-review.md#mus-spec-08-781c) | Streamed command evidence yields both file diffs before the reply ends, even when completion omits command details. | [`a streamed shell edit appears before the reply ends when completion omits command details`](../../../packages/agent-app/tests/shell-patch-diff-779.test.ts) |
 
 ### Refs, dash-named files and submodules
+
+<a id="mus-spec-08-781a"></a>
+#### MUS-SPEC-08-781A: Saved shell edits recover without replay or database rewrites
+
+- Precondition: A saved chat and child transcript contain successful shell patch commands from an older app version, with additions and updates in a non-Git folder whose path contains spaces.
+- Action: Close and reopen the store, then request the full timeline, snapshot, incremental changes, individual item and child transcript.
+- Expected result: Every read restores both file patches and consistent totals, preserves command output, and leaves the persisted row and revision cursor unchanged.
+- Test: `packages/agent-app/tests/stored-shell-patch-781.test.ts::reopening a saved shell-edit chat recovers all diffs without rewriting history`
+- Environment: Node test runner, temporary real SQLite store, renderer change collector; no live database or network.
+- Known gaps: Historical shell writes without patch evidence cannot be reconstructed safely.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781b"></a>
+#### MUS-SPEC-08-781B: Recovery preserves non-edits and existing native diffs
+
+- Precondition: Stored commands include failed, interrupted, running, cancelled and printed patches alongside native file-change metadata and a successful command-actions-only edit.
+- Action: Load the saved tool rows and collect their changes.
+- Expected result: Non-edits remain commands without changes, existing native metadata is untouched, and successful action-only edits recover both files.
+- Test: `packages/agent-app/tests/stored-shell-patch-781.test.ts::saved non-edits stay commands and native changes remain intact`
+- Environment: Node test runner, temporary real SQLite store and renderer change collector.
+- Known gaps: Does not execute the recorded shell commands, intentionally.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781c"></a>
+#### MUS-SPEC-08-781C: Live streamed patch evidence survives a sparse completion event
+
+- Precondition: A provider sends the command and working directory at start, streams the patch success output, then completes with only a final output chunk and exit code.
+- Action: Request the chat timeline while the provider's reply is still running.
+- Expected result: Both changed files and their diffs appear immediately, with the complete command output retained rather than waiting for chat reload or turn completion.
+- Test: `packages/agent-app/tests/shell-patch-diff-779.test.ts::a streamed shell edit appears before the reply ends when completion omits command details`
+- Environment: Real agent service and temporary SQLite state with a deterministic event-provider fixture; no network or live app.
+- Known gaps: Does not verify a specific upstream provider's current event format.
+- Evidence: UNVERIFIED
 
 <a id="mus-spec-08-570a"></a>
 #### MUS-SPEC-08-570A: A branch is named correctly when a tag has the same name
