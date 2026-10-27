@@ -21,7 +21,7 @@
   "devDependencies": {
     "@types/node": "26.6.1",
     "esbuild": "0.28.2",
-    "tsc-rs": "0.7.0",
+    "tsc-rs": "0.8.0",
     "typescript": "7.0.2"
   },
   "homepage": "https://github.com/musterhq/muster-code",
