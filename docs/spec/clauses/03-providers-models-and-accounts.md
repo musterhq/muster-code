@@ -16,6 +16,8 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-03-721H](03-providers-models-and-accounts.md#mus-spec-03-721h) | With no Codex, npm, Node or other app on the machine, installing Codex gives a managed copy that reports its version, and chats run that native binary. | [`MUS-SPEC-03-721H: on a machine with no Codex, npm or Node, one click installs a Codex that runs`](../../../packages/agent-app/tests/cli-maintenance.test.ts) |
+| [MUS-SPEC-03-721I](03-providers-models-and-accounts.md#mus-spec-03-721i) | A download whose checksum does not match the registry's fails with a message naming the checksum, leaves no files and does not change which Codex chats use. | [`MUS-SPEC-03-721I: a download that fails its checksum installs nothing`](../../../packages/agent-app/tests/cli-maintenance.test.ts) |
 | [MUS-SPEC-03-1A](03-providers-models-and-accounts.md#mus-spec-03-1a) | All four turns complete without reconnecting; one request per turn with valid credentials; real counters preserved. | [`router usage compatibility: two independent chats complete successive turns without reconnecting`](../../../packages/agent-app/tests/router-usage-workflow.test.ts) |
 | [MUS-SPEC-03-1B](03-providers-models-and-accounts.md#mus-spec-03-1b) | The first turn completes and the truncated one fails, on the same thread. | [`router usage compatibility: a genuinely truncated stream still fails`](../../../packages/agent-app/tests/router-usage-workflow.test.ts) |
 | [MUS-SPEC-03-1C](03-providers-models-and-accounts.md#mus-spec-03-1c) | 404 without the private path; nothing forwarded; the real request is forwarded unchanged. | [`router bridge: a request without the private path prefix is refused and never forwarded`](../../../packages/agent-app/tests/responses-compat.test.ts) |
@@ -597,4 +599,26 @@ Boundaries:
 - Test: `packages/agent-app/tests/provider-auth-e2e.test.ts::(b) a Codex config.toml provider with [auth] command: models listed and a chat answered with the command’s token`
 - Environment: Node test runner; the real Codex binary against a local mock router; skipped when no Codex binary is installed.
 - Known gaps: Covers a provider route; a profile route clears the inherited provider the same way but has no case of its own.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-721h"></a>
+#### MUS-SPEC-03-721H: Codex installs on a clean machine without npm, Node or another app
+
+- Precondition: No Codex on PATH or in standard locations, no other desktop app bundle, no npm and no Node (`PATH` is empty). The registry publishes `@openai/codex` with a build for this machine.
+- Action: Install Codex from Settings or the setup guide (`providers.cli.update` for `codex`).
+- Expected result: The latest version is read from the registry, the platform build is downloaded and checked against the registry's sha512, and the managed copy reports its version. `MUSTER_CODEX_COMMAND` points at the native binary inside its package layout, so starting it needs no Node.
+- Test: `packages/agent-app/tests/cli-maintenance.test.ts::MUS-SPEC-03-721H: on a machine with no Codex, npm or Node, one click installs a Codex that runs`
+- Environment: Node test runner; a local registry serving a stand-in binary; skipped on platforms with no Codex build. A manual run against the real registry is in the PR evidence.
+- Known gaps: Claude Code and OpenCode still install through npm.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-721i"></a>
+#### MUS-SPEC-03-721I: A Codex download that fails its checksum installs nothing
+
+- Precondition: As 721H, but the registry's checksum does not match the download.
+- Action: Install Codex.
+- Expected result: The install fails with "nothing changed" and a reason naming the checksum; the version folder is removed and `MUSTER_CODEX_COMMAND` is unchanged.
+- Test: `packages/agent-app/tests/cli-maintenance.test.ts::MUS-SPEC-03-721I: a download that fails its checksum installs nothing`
+- Environment: As 721H.
+- Known gaps: None known.
 - Evidence: UNVERIFIED
