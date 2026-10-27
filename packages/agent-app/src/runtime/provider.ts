@@ -22,7 +22,7 @@ import {BROWSER_MCP, BROWSER_NOTE, browserToolStyle, routeBrowserNote} from '../
 import {ASK_USER_METHOD, ASK_USER_RULE} from './ask-user.ts';
 import type {McpServerSpec} from './adapters/types.ts';
 import type {RunnableAdapter} from './adapters/types.ts';
-import {CLAUDE_LANE_DRIVER} from '../shared/provider-lanes.ts';
+import {CLAUDE_CODE_LANE_DRIVER, CLAUDE_LANE_DRIVER} from '../shared/provider-lanes.ts';
 import {adoptCodexThread, prepareMusterCodexHome} from './codex-home.ts';
 import {claudeLaneAllowed, LANE_DROPPED_SERVERS, withoutUnavailableToolNotes} from './claude-lane.ts';
 import {SANDBOX_MCP_SERVER} from '../shared/sandbox-routes.ts';
@@ -235,7 +235,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     return session.stop;
   };
   /** Claude Code, OpenCode and HTTP routes: one owned local attempt per chat, no app-server session. */
-  async function runAdapter(route: ProviderInstance, adapter: RunnableAdapter, input: ProviderInput, resumeThreadId: string | undefined, lane?: {driver: string; seed?: string}): Promise<ProviderResult> {
+  async function runAdapter(route: ProviderInstance, adapter: RunnableAdapter, input: ProviderInput, resumeThreadId: string | undefined, lane?: {driver: string; seed?: string; env?: Record<string, string>}): Promise<ProviderResult> {
     const access = beforeDispatch(() => runAccessPolicy(input.chat, input.configOverrides));
     const model = input.chat.model || route.info.models[0]?.id;
     if (!model) throw new ProviderPreDispatchError('The selected provider reports no models.');
@@ -251,7 +251,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         ...(input.images?.length ? {images: input.images} : {}), ...(route.info.models.find(entry => entry.id === model)?.images === true ? {vision: true} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),
         ...(resumeThreadId ? {resumeThreadId} : {}),
         ...adapterBrowser(lane?.driver ?? route.info.driver, input.chat.mode, input.developerInstructions, input.configOverrides, subagentSupport(lane?.driver ?? route.info.driver) !== 'none', access.permissionMode),
-        ...(Object.keys(envFromOverrides(input.configOverrides)).length ? {env: envFromOverrides(input.configOverrides)} : {}),
+        ...(Object.keys({...envFromOverrides(input.configOverrides), ...lane?.env}).length ? {env: {...envFromOverrides(input.configOverrides), ...lane?.env}} : {}),
         // The adapter runs its own tools (HTTP routes): they meet the same Project tool rules, user-process guard and approval cards as Codex's.
         authorize: async (method, params, options) => {
           if (!live()) return false;
@@ -297,11 +297,16 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
   }
   /** #688: does this turn of a Codex gateway route go over the Messages API? Full access, no tool server only Codex can run,
    *  and a Claude model (by its id, or by asking the router once for a combo). Anything else keeps the Codex client. */
-  function claudeLaneModel(route: ProviderInstance, input: ProviderInput): string | undefined {
+  function claudeLaneModel(route: ProviderInstance, input: ProviderInput): {model: string; code?: RunnableAdapter} | undefined {
     const model = input.chat.model || route.info.models[0]?.id;
     if (!route.claudeLane || route.adapter || !model || input.connectorsRequested) return undefined;
-    try { return claudeLaneAllowed(providerAccessPolicy(input.chat).permissionMode, input.configOverrides) ? model : undefined; } catch { return undefined; }
+    // #730: with Claude Code installed, a Claude turn runs through it at any access level and with every tool server;
+    // only a goal (a Codex feature) keeps it on the Codex client.
+    const code = route.claudeLane.claudeCode();
+    if (code) return input.configOverrides?.['features.goals'] === true ? undefined : {model, code};
+    try { return claudeLaneAllowed(providerAccessPolicy(input.chat).permissionMode, input.configOverrides) ? {model} : undefined; } catch { return undefined; }
   }
+
   return {
     info() { return instances().map(instance=>({...instance.info,available:!disposed&&instance.info.available})); },
     async awaitListing(providerId, timeoutMs) { await awaitProviderListing(instances().find(instance => instance.info.id === providerId)?.listingKey, timeoutMs); },
@@ -327,7 +332,8 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       // #688: this turn runs over the router's Messages API instead of the Codex client (see claude-lane.ts for the rules).
       const laneModel = claudeLaneModel(route, input);
       // Only a turn that may use the lane waits (for the router's answer about a combo); every other turn dispatches in the same tick.
-      const useLane = laneModel !== undefined && await route.claudeLane!.isClaude(laneModel);
+      const useLane = laneModel !== undefined && await route.claudeLane!.isClaude(laneModel.model);
+      const laneDriver = useLane ? (laneModel!.code ? CLAUDE_CODE_LANE_DRIVER : CLAUDE_LANE_DRIVER) : undefined;
       if (laneModel !== undefined) {
         previous = sessions.get(input.chat.id);
         if (previous?.active || previous?.stop || adapterRuns.has(input.chat.id)) throw new ProviderPreDispatchError('This chat already owns a provider attempt. Wait for it to settle before continuing.');
@@ -338,16 +344,21 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       }
       const sameThreadRoute = input.chat.providerThreadProviderId===route.info.id && input.chat.providerThreadBindingId===bindingId;
       // A thread made by the other lane cannot be continued here: the earlier messages go again as a summary (the thread-reset path).
-      const laneMatches = useLane ? input.chat.providerThreadDriver===CLAUDE_LANE_DRIVER : !input.chat.providerThreadDriver;
+      const laneMatches = laneDriver ? input.chat.providerThreadDriver===laneDriver : !input.chat.providerThreadDriver;
       const resumeThread = sameThreadRoute && laneMatches ? input.chat.providerThreadId : undefined;
       const laneSeed = sameThreadRoute && !laneMatches && input.chat.providerThreadId ? input.onThreadReset?.(input.chat.providerThreadId, 'lane') : undefined;
-      const adapter = route.adapter ?? (useLane ? route.claudeLane!.adapter : undefined);
+      const adapter = route.adapter ?? (useLane ? laneModel!.code ?? route.claudeLane!.adapter : undefined);
+      let laneEnv: Record<string, string> | undefined;
+      if (laneDriver === CLAUDE_CODE_LANE_DRIVER) {
+        try { laneEnv = await route.claudeLane!.claudeCodeEnv(laneModel!.model); }
+        catch (error) { throw new ProviderPreDispatchError(`The router credentials could not be read: ${error instanceof Error ? error.message : String(error)}`); }
+      }
       if (adapter) {
         if (previous) {
           if (busyWithBackground(previous)) throw new ProviderPreDispatchError('Background provider work must finish before switching providers.');
           previous.controller.abort();close(previous);sessions.delete(input.chat.id);
         }
-        return runAdapter(route, adapter, input, resumeThread, useLane ? {driver: CLAUDE_LANE_DRIVER, ...(laneSeed ? {seed: laneSeed} : {})} : undefined);
+        return runAdapter(route, adapter, input, resumeThread, laneDriver ? {driver: laneDriver, ...(laneSeed ? {seed: laneSeed} : {}), ...(laneEnv ? {env: laneEnv} : {})} : undefined);
       }
       if(previous && input.chat.providerThreadId && !resumeThread) {
         if(busyWithBackground(previous)) throw new ProviderPreDispatchError('Background provider work must finish before replacing a stale continuation.');

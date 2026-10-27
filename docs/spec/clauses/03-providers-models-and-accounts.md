@@ -58,6 +58,10 @@ Boundaries:
 | [MUS-SPEC-03-720A](03-providers-models-and-accounts.md#mus-spec-03-720a) | The chat runs in Muster's own coding-client home under its data folder: no thread or thread index is written to the person's home, the person's profile is untouched, and follow-ups continue the same thread. | [`a new chat runs in Muster’s own coding-client home: nothing is written to the person’s home, which keeps its configuration`](../../../packages/agent-app/tests/own-codex-home-720.test.ts) |
 | [MUS-SPEC-03-720B](03-providers-models-and-accounts.md#mus-spec-03-720b) | A chat started before the change continues on its own thread with its earlier messages, and the person's copy of that thread is not written to again. | [`a chat started before the change continues its own thread with its history, without writing to the person’s home again`](../../../packages/agent-app/tests/own-codex-home-720.test.ts) |
 | [MUS-SPEC-03-720C](03-providers-models-and-accounts.md#mus-spec-03-720c) | Usage limits recorded in the person's home by their other coding apps still show for that account, the newest reading winning. | [`usage limits recorded by the person’s other coding apps still show for a chat that runs in Muster’s own home`](../../../packages/agent-app/tests/own-codex-home-720.test.ts) |
+| [MUS-SPEC-03-730A](03-providers-models-and-accounts.md#mus-spec-03-730a) | Claude Code starts once in the chat folder against the router URL with the route token, the chosen model with every alias pinned to it, no Anthropic API key, Workspace's permission mode and the user's tool server; the Codex client and the Messages API are not used; the answer shows and the thread is a Claude Code thread. | [`a Workspace router Claude turn with a user tool server runs through Claude Code against the router, never the Codex client`](../../../packages/agent-app/tests/router-claude-code-730.test.ts) |
+| [MUS-SPEC-03-730B](03-providers-models-and-accounts.md#mus-spec-03-730b) | The second turn resumes the first turn's Claude Code session with the new message alone. | [`the next router Claude turn resumes the same Claude Code session without a summary`](../../../packages/agent-app/tests/router-claude-code-730.test.ts) |
+| [MUS-SPEC-03-730C](03-providers-models-and-accounts.md#mus-spec-03-730c) | A GPT model, a GPT combo and a connector turn on the same router run on the Codex client; only the Claude combo's turn starts Claude Code. | [`on one router, only the Claude turn runs through Claude Code; GPT models, GPT combos and connector turns stay on the Codex client`](../../../packages/agent-app/tests/router-claude-code-730.test.ts) |
+| [MUS-SPEC-03-730D](03-providers-models-and-accounts.md#mus-spec-03-730d) | After a Codex turn, Claude Code starts a fresh session whose prompt carries a summary of the earlier messages; the turn after continues that session with no summary. | [`a chat whose earlier turn ran on the Codex client moves to Claude Code with a summary, then continues that session`](../../../packages/agent-app/tests/router-claude-code-730.test.ts) |
 
 ### Configured routers
 
@@ -327,18 +331,18 @@ Boundaries:
 <a id="mus-spec-03-688h"></a>
 #### MUS-SPEC-03-688H: A Claude model in a Full access chat runs over the Messages API
 
-- Precondition: A Full access Agent chat on a router gateway route (a Codex configuration), model `cc/claude-opus-5-5`. The service adds its usual per-chat tool servers (browser, canvas, background commands).
+- Precondition: Claude Code is not installed. A Full access Agent chat on a router gateway route (a Codex configuration), model `cc/claude-opus-5-5`. The service adds its usual per-chat tool servers (browser, canvas, background commands).
 - Action: Send a message.
 - Expected result: The router receives a Messages request (not a Codex run) with the chat's prompt and tools; the Codex client is never started; the instructions sent do not mention tools the Messages route lacks.
 - Test: `packages/agent-app/tests/claude-messages-lane.test.ts::a Claude model in a Full access chat on a router gateway runs over the Messages API, with the overrides the service adds`
 - Environment: Node test runner; the real service and domains with a fake router over fetch and a fake Codex client; no network.
-- Known gaps: Workspace and Read-only chats, chats in a sandbox and turns with Project, mailbox, terminal, SSH or user tool servers or an active goal stay on the Codex client (688J). The canvas, background-command and computer-use tools are not offered on the Messages route.
+- Known gaps: With Claude Code installed these turns run through Claude Code instead (730A). Without it, Workspace and Read-only chats, chats in a sandbox and turns with Project, mailbox, terminal, SSH or user tool servers or an active goal stay on the Codex client (688J). The canvas, background-command and computer-use tools are not offered on the Messages route.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-03-688i"></a>
 #### MUS-SPEC-03-688I: A router combo is routed by the model it really runs
 
-- Precondition: Two Full access chats on a router gateway route, one on a combo (`intelligent-planner`) whose Messages answer reports `claude-opus-5-5`, one on a combo (`executor`) whose answer reports `gpt-5.6-terra`.
+- Precondition: Claude Code is not installed. Two Full access chats on a router gateway route, one on a combo (`intelligent-planner`) whose Messages answer reports `claude-opus-5-5`, one on a combo (`executor`) whose answer reports `gpt-5.6-terra`.
 - Action: Send two messages in each chat, then wait past the cache window and send one more in the first.
 - Expected result: The combo whose probe reports a Claude model runs over the Messages API; the one that reports a GPT model runs on Codex; each is probed once inside the cache window and again after it.
 - Test: `packages/agent-app/tests/claude-messages-lane.test.ts::a router combo runs over the Messages API only when its probe reports a Claude model, and the answer is cached`
@@ -347,14 +351,14 @@ Boundaries:
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-03-688j"></a>
-#### MUS-SPEC-03-688J: Workspace chats and turns with project tools stay on Codex
+#### MUS-SPEC-03-688J: Without Claude Code, Workspace chats and turns with project tools stay on Codex
 
-- Precondition: A Claude model on a router gateway route. One chat has Workspace access. Another has Full access, but the turn carries a user tool server.
+- Precondition: Claude Code is not installed. A Claude model on a router gateway route. One chat has Workspace access. Another has Full access, but the turn carries a user tool server.
 - Action: Send a message in each.
 - Expected result: Both turns run on the Codex client; the router receives no Messages request.
 - Test: `packages/agent-app/tests/claude-messages-lane.test.ts::Workspace chats and turns with project tools stay on the Codex route`
 - Environment: Node test runner; a fake router over fetch and a fake Codex client; no network.
-- Known gaps: Claude models in these turns still hit the signed-thinking failure (#688) until the Messages route can offer their tools.
+- Known gaps: Claude models in these turns still hit the signed-thinking failure (#688) and the Codex client's reconnects. With Claude Code installed they run through it instead (730A).
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-03-688k"></a>
@@ -536,5 +540,49 @@ Boundaries:
 - Expected result: The newer reading from the person's home is shown.
 - Test: `packages/agent-app/tests/own-codex-home-720.test.ts::usage limits recorded by the person’s other coding apps still show for a chat that runs in Muster’s own home`
 - Environment: Node test runner; the real service, provider adapter and installed coding client against a local mock router; temporary home and data folders.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-730a"></a>
+#### MUS-SPEC-03-730A: A router Claude turn with the user's tool servers runs through Claude Code against the router
+
+- Precondition: Claude Code is installed. A Workspace chat on a router gateway route (credentials `Bearer test-token`, base URL `router.test/v1`), model `cc/claude-opus-5-5`. The turn carries a user tool server (`projectdb`). The machine also has an Anthropic API key in its environment.
+- Action: Send a message.
+- Expected result: Claude Code is started once, in the chat folder, against `router.test` (base URL without `/v1`) with the route's token, the model `cc/claude-opus-5-5` and every model alias pinned to it, no Anthropic API key, Workspace's permission mode and the `projectdb` server in its tool config. The Codex client never runs and the router receives no Messages request. The chat shows Claude Code's answer and completes, and its thread is recorded as a Claude Code thread.
+- Test: `packages/agent-app/tests/router-claude-code-730.test.ts::a Workspace router Claude turn with a user tool server runs through Claude Code against the router, never the Codex client`
+- Environment: Node test runner; the real service, domains, provider adapter and Claude Code adapter, with a fake `claude` executable that records its arguments and environment and answers in Claude Code's stream-json; a fake router over fetch and a fake Codex client; no network.
+- Known gaps: The fake executable stands in for Claude Code; the real CLI against the router was checked by hand (see #730). A route whose token is fetched by a command is read once per turn, so a token that expires during a single long turn is not refreshed mid-turn.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-730b"></a>
+#### MUS-SPEC-03-730B: The next turn continues the same Claude Code session
+
+- Precondition: The chat from 730A has finished one turn through Claude Code.
+- Action: Send a second message.
+- Expected result: Claude Code is started with `--resume` and the first turn's session id, the prompt is the new message alone (no summary of earlier messages), and the turn completes.
+- Test: `packages/agent-app/tests/router-claude-code-730.test.ts::the next router Claude turn resumes the same Claude Code session without a summary`
+- Environment: As 730A.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-730c"></a>
+#### MUS-SPEC-03-730C: On one router, only Claude turns run through Claude Code
+
+- Precondition: Claude Code is installed. On the same router gateway route, a Full access chat on `gpt-5.6-terra`, a Full access chat on the combo `executor` (whose probe reports a GPT model), a Full access chat on `cc/claude-opus-5-5` whose turn asks for app connectors, and a Full access chat on the combo `intelligent-planner` (whose probe reports a Claude model).
+- Action: Send a message in each.
+- Expected result: The GPT, GPT-combo and connector turns run on the Codex client. Claude Code is started once, for the `intelligent-planner` turn, and that chat's thread is a Claude Code thread. The router receives no Messages turn.
+- Test: `packages/agent-app/tests/router-claude-code-730.test.ts::on one router, only the Claude turn runs through Claude Code; GPT models, GPT combos and connector turns stay on the Codex client`
+- Environment: As 730A.
+- Known gaps: App connectors are only offered by the Codex client, so a Claude turn that asks for them still runs there.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-730d"></a>
+#### MUS-SPEC-03-730D: A chat whose earlier turns ran on the Codex client keeps its conversation on Claude Code
+
+- Precondition: A router Claude chat finished a turn on the Codex client (before Claude Code was installed, or on an older build), so it has a Codex thread. Claude Code is now installed.
+- Action: Send a message.
+- Expected result: Claude Code starts a new session (no `--resume` of the Codex thread id) and its prompt holds a summary of the earlier messages ahead of the new one; the Codex client does not run; the turn after that resumes the Claude Code session with no summary.
+- Test: `packages/agent-app/tests/router-claude-code-730.test.ts::a chat whose earlier turn ran on the Codex client moves to Claude Code with a summary, then continues that session`
+- Environment: As 730A.
 - Known gaps: None known.
 - Evidence: UNVERIFIED

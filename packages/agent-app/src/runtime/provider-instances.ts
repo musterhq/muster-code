@@ -14,6 +14,7 @@ import {readCodexCatalog} from './codex-catalog.ts';
 import bundledCodex from './catalogs/codex-models.json' with {type: 'json'};
 import {codexAuthHeaders,inlineStringTable,type CodexProviderAuth} from './codex-provider-auth.ts';
 import {createClaudeLane,type ClaudeLane} from './claude-lane.ts';
+import {claudeCodeAdapter} from './adapters/claude-code.ts';
 
 export interface ProviderInstance {
   info: ProviderInfo;
@@ -404,14 +405,28 @@ export async function awaitProviderListing(listingKey:string|undefined,timeoutMs
   await new Promise<void>(resolve=>setImmediate(resolve));
 }
 /** The Messages lane of a gateway route, shared by every rebuild of the instance list. Its credentials are the listing's own. */
-function claudeLaneFor(route:CodexRouteSpec,env:NodeJS.ProcessEnv,fetcher:typeof fetch|undefined,key:string):ClaudeLane {
+/** #730: Claude Code for router Claude turns, when it is installed: one adapter per binary, the binary looked up at most every 5s. */
+const routerClaudeCode=new Map<string,RunnableAdapter>();
+let claudeBinaryHit:{at:number;key:string;value?:string}|undefined;
+function installedClaudeCode(env:NodeJS.ProcessEnv,home:string):RunnableAdapter|undefined {
+  // Test runners use only an explicit MUSTER_CLAUDE_COMMAND, never the machine's own Claude Code.
+  if(process.env.NODE_TEST_CONTEXT&&!env.MUSTER_CLAUDE_COMMAND)return undefined;
+  const key=`${env.MUSTER_CLAUDE_COMMAND??''}|${env.PATH??''}|${home}`,at=Date.now();
+  if(!claudeBinaryHit||claudeBinaryHit.key!==key||at-claudeBinaryHit.at>=5000)claudeBinaryHit={at,key,value:env.MUSTER_CLAUDE_COMMAND||findBinary('claude',env,home,[join(home,'.claude/local/claude')])};
+  const binary=claudeBinaryHit.value;
+  if(!binary)return undefined;
+  let found=routerClaudeCode.get(binary);
+  if(!found){if(routerClaudeCode.size>=8)routerClaudeCode.clear();found=claudeCodeAdapter({binary,env});routerClaudeCode.set(binary,found);}
+  return found;
+}
+function claudeLaneFor(route:CodexRouteSpec,env:NodeJS.ProcessEnv,fetcher:typeof fetch|undefined,key:string,home:string):ClaudeLane {
   const base=route.baseUrl!.replace(/\/+$/,''),auth=route.auth??{};
   const headers=(force?:boolean)=>codexAuthHeaders(auth,env,{force:force===true});
   let lane=claudeLanes.get(key);
   if(lane)lane.configure({headers,...(fetcher?{fetch:fetcher}:{})});
   else {
     if(claudeLanes.size>=32)claudeLanes.delete(claudeLanes.keys().next().value!);
-    lane=createClaudeLane({endpoint:base,headers,label:route.name??route.modelProvider,...(fetcher?{fetch:fetcher}:{}),dir:providerDataDir});
+    lane=createClaudeLane({endpoint:base,headers,label:route.name??route.modelProvider,...(fetcher?{fetch:fetcher}:{}),dir:providerDataDir,claudeCode:()=>installedClaudeCode(env,home)});
     claudeLanes.set(key,lane);
   }
   return lane;
@@ -482,15 +497,15 @@ export function configuredProviderInstances(options:ProviderInstanceOptions={}):
   const node=providerNode(env,home);
   if(cli)track(cli);
   const validator=profileModule(directory);
-  const context={fs,directory,cli,node,env,track,validator,fetch:options.fetch};
+  const context={fs,directory,home,cli,node,env,track,validator,fetch:options.fetch};
   const extra=accountsFile?readAccounts(fs,track(accountsFile)).filter(account=>account.codexHome!==codexHome):[];
   const value=[...homeInstances({...context,codexHome}),...extra.flatMap(account=>homeInstances({...context,codexHome:account.codexHome,account}))];
   if(!memo&&memos.size>=MAX_MEMOS)memos.delete(memos.keys().next().value!);
   memos.set(key,{checkedAt:at,files,value});
   return value;
 }
-interface HomeContext {fs:ProviderInstanceFs;directory:string;codexHome:string;cli?:string;node:{node:string;env:Record<string,string>};env:NodeJS.ProcessEnv;track(file:string):string;validator?:CodexProfileModule;fetch?:typeof fetch;account?:ProviderAccount}
-function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetch:fetcher,account}:HomeContext):ProviderInstance[] {
+interface HomeContext {fs:ProviderInstanceFs;directory:string;home:string;codexHome:string;cli?:string;node:{node:string;env:Record<string,string>};env:NodeJS.ProcessEnv;track(file:string):string;validator?:CodexProfileModule;fetch?:typeof fetch;account?:ProviderAccount}
+function homeInstances({fs,directory,home,codexHome,cli,node,env,track,validator,fetch:fetcher,account}:HomeContext):ProviderInstance[] {
   let mcp:string[]=[];
   try {mcp=mcpServerNames(boundedFile(fs,track(join(codexHome,'config.toml'))));} catch {mcp=[];}
   const suffix=account?`_${accountHash(account.codexHome)}`:'';
@@ -594,7 +609,7 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       accountId=typeof tokenAccount==='string'&&tokenAccount?tokenAccount:apiKey??'codex-sign-in';
     }
     const bindingId=createHash('sha256').update(JSON.stringify([route.modelProvider,route.profile??'',codexHome,cli,route.fingerprint,accountId])).digest('hex');
-    const claudeLane=route.kind==='gateway'&&route.baseUrl?claudeLaneFor(route,env,fetcher,bindingId):undefined;
+    const claudeLane=route.kind==='gateway'&&route.baseUrl?claudeLaneFor(route,env,fetcher,bindingId,home):undefined;
     return {info:{...base,models,...(excluded.length?{excludedModels:excluded}:{}),...(incremental?{incrementalInput:true}:{}),...listingInfo,available:true,status:'ready',bindingId,detail:`Runs through the Codex CLI with ${catalogSource}. ${mcpDetail(mcp)} Upstream access is checked only when you run.`},command,env:childEnv,sessionsRoot,...(listingKey?{listingKey}:{}),...(claudeLane?{claudeLane}:{})};
   });
 }
