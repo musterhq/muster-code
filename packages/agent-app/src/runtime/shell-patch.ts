@@ -36,7 +36,7 @@ export function shellPatchChanges(item: Record<string, unknown>): Change[] {
   if (typeof item.command === 'string') scripts.push(innerScript(item.command));
   const cwd = typeof item.cwd === 'string' ? item.cwd : '';
   for (const script of scripts) {
-    const changes = patchesIn(script).flatMap(parseApplyPatch);
+    const changes = patchesIn(script).flatMap(patch => parseApplyPatch(patch, true));
     if (!changes.length) continue;
     const resolve = (path: string) => cwd && !isAbsolute(path) ? join(cwd, path) : path;
     return changes.map(change => ({...change, path: resolve(change.path), kind: change.kind.move_path ? {...change.kind, move_path: resolve(change.kind.move_path)} : change.kind}));

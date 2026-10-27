@@ -76,7 +76,7 @@ function EditedFileBody({entry,chatId,to,latest,onReview}:{entry:FileChangeEntry
   const reviewed=useFileReview({chatId,folderId:to?.folderId,path:to?.path,enabled:latest&&!!to,running:false});
   const patches=useMemo(()=>filePatches(entry),[entry]);
   return <div className="edited-file-body">
-    <FileChangeView path={entry.movePath??entry.path} kind={entry.kind} target={to} patches={patches} reviewed={reviewed} truncated={entry.patches.some(patch=>patch.truncated)} onReview={onReview}/>
+    <FileChangeView path={entry.movePath??entry.path} kind={entry.kind} target={to} edit={entry.patches.length?{chatId,itemId:entry.patches.at(-1)!.itemId}:undefined} patches={patches} reviewed={reviewed} truncated={entry.patches.some(patch=>patch.truncated)} onReview={onReview}/>
   </div>;
 }
 

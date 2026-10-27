@@ -116,6 +116,11 @@ export function reconstructBefore(after:string,patches:readonly string[]):string
   let text=after;
   for(const patch of [...patches].reverse()){
     try{
+      if(patch.startsWith('@@\n')){
+        const result=reverseContextPatch(text,patch);
+        if(result===undefined)return undefined;
+        text=result;continue;
+      }
       const parsed=parsePatch(patch);
       if(parsed.length!==1||!parsed[0].hunks.length)return undefined;
       const result=applyPatch(text,reversePatch(parsed[0]));
@@ -124,6 +129,29 @@ export function reconstructBefore(after:string,patches:readonly string[]):string
     }catch{return undefined;}
   }
   return text;
+}
+
+/** Shell patches have context rather than coordinates. Require one exact location
+ * per block; guessing at repeated text or an unanchored deletion invents history. */
+function reverseContextPatch(after:string,patch:string):string|undefined {
+  const newline=after.endsWith('\n'),crlf=after.includes('\r\n');
+  let lines=after.replace(/\r\n/g,'\n').split('\n');
+  if(newline)lines.pop();
+  const blocks=patch.split(/^@@\s*$/m).slice(1);
+  if(!blocks.length)return undefined;
+  for(const block of blocks.reverse()){
+    const rows=block.replace(/^\n/,'').replace(/\n$/,'').split('\n');
+    if(rows.some(row=>!/^[-+ ]/.test(row)))return undefined;
+    const before=rows.filter(row=>row[0]!=='+').map(row=>row.slice(1));
+    const current=rows.filter(row=>row[0]!=='-').map(row=>row.slice(1));
+    if(!current.length)return undefined;
+    const source='\n'+lines.join('\n')+'\n',needle='\n'+current.join('\n')+'\n';
+    const found=source.indexOf(needle);
+    if(found<0||source.indexOf(needle,found+1)>=0)return undefined;
+    const at=source.slice(0,found).split('\n').length-1;
+    lines=[...lines.slice(0,at),...before,...lines.slice(at+current.length)];
+  }
+  return lines.join(crlf?'\r\n':'\n')+(newline?(crlf?'\r\n':'\n'):'');
 }
 
 /** The whole post-edit file with the turn's changes woven in: every line, removed lines back in place. */

@@ -147,5 +147,5 @@ function PreviewFile({entry,chatId,folder,relative,onReview}:{entry:Entry;chatId
  const target=folder&&relative!==undefined?{folderId:folder.id,path:relative}:undefined;
  const reviewed=useFileReview({chatId,folderId:target?.folderId,path:target?.path,enabled:!!target,running:entry.status==='running'});
  const patches=useMemo(()=>entry.patches.map(patch=>({diff:patch.diff,adds:patch.adds,dels:patch.dels})),[entry]);
- return <FileChangeView path={entry.movePath??entry.path} kind={entry.kind} target={target} patches={patches} reviewed={reviewed} truncated={entry.patches.some(patch=>patch.truncated)} onReview={onReview} maxHeight={null}/>;
+ return <FileChangeView path={entry.movePath??entry.path} kind={entry.kind} target={target} edit={entry.patches.length?{chatId,itemId:entry.patches.at(-1)!.itemId}:undefined} patches={patches} reviewed={reviewed} truncated={entry.patches.some(patch=>patch.truncated)} onReview={onReview} maxHeight={null}/>;
 }

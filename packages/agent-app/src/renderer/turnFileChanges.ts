@@ -14,20 +14,23 @@ export interface FileChangeEntry { path: string; movePath?: string; kind: Change
  */
 export function collectFileChanges(items: readonly TimelineItem[]): FileChangeEntry[] {
   const changes = new Map<string, FileChangeEntry>();
+  const entries: FileChangeEntry[] = [];
   for (const item of items) {
     if (item.kind !== 'tool' || item.data?.type !== 'fileChange' || !['running', 'completed'].includes(item.status ?? '')) continue;
     for (const change of itemPatches(item.data)) {
       const entry: FileChangeEntry = changes.get(change.path) ?? {path: change.path, kind: change.kind, adds: 0, dels: 0, patches: [], status: item.status ?? 'unknown'};
+      if(!changes.has(change.path))entries.push(entry);
       entry.status = item.status ?? entry.status;
       if (change.movePath) entry.movePath = change.movePath;
       // A file the turn created stays "added" however often it is edited afterwards.
       if (!entry.patches.length) entry.kind = change.kind; else if (change.kind === 'delete') entry.kind = 'delete';
       if (change.patch && entry.patches.at(-1)?.diff !== change.patch) entry.patches.push({diff: change.patch, before: change.before, after: change.after, adds: change.adds, dels: change.dels, itemId: item.id, ...(change.truncated ? {truncated: true} : {})});
-      changes.set(change.path, entry);
+      if(change.movePath){changes.delete(change.path);changes.set(change.movePath,entry);}
+      else changes.set(change.path, entry);
     }
   }
-  for (const entry of changes.values()) Object.assign(entry, netChangeCounts(entry.patches));
-  return [...changes.values()];
+  for (const entry of entries) Object.assign(entry, netChangeCounts(entry.patches));
+  return entries;
 }
 
 /** The latest turn: everything after the last user message. */

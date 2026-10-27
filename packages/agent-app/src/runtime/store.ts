@@ -125,8 +125,8 @@ function rowToItem(row: TimelineRow): TimelineItem {
   let data = row.data ? JSON.parse(row.data) as Record<string, unknown> : undefined;
   // Older versions saved successful shell edits as commands. Recover only on read:
   // keep the original history, cursors and output, and never replay the command.
-  if (row.kind === 'tool' && row.status === 'completed' && data?.type === 'commandExecution') {
-    const changes = shellPatchChanges(data);
+  if (row.kind === 'tool' && row.status === 'completed' && (data?.type === 'commandExecution' || (data?.type === 'fileChange' && typeof data.command === 'string'))) {
+    const changes = shellPatchChanges({...data,type:'commandExecution'});
     if (changes.length) data = {...data, type: 'fileChange', changes};
   }
   return {

@@ -101,6 +101,7 @@ const COMMANDS = {
   'paperclip.output.save': true,
   'files.search': true,
   'files.read': true,
+  'files.chatEdit': true,
   'files.asset': true,
   'files.chatImage': true,
   'files.nativeAvailable': true,

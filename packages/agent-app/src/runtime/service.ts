@@ -7,7 +7,7 @@ import { HindsightService } from './hindsight-service.ts';
 import { MemoryConfigStore, MemoryTombstones, electronSecretBox } from './memory-context.ts';
 import { createHash } from 'node:crypto';
 import { promises as fs, existsSync, mkdirSync, copyFileSync, statSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, resolve, relative } from 'node:path';
 import { rescanProviderListings, setProviderListingStore } from './provider-instances.ts';
 import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, QueuedMessage, ChatFallback, TimelineItem, WakeReason } from '../shared/protocol.ts';
 import { CONTEXT_OVERFLOW, effectiveContextWindow, musterCompactAt, reportedWindowFor, withUserWindow } from '../shared/context-window.ts';
@@ -2259,6 +2259,22 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       }
       case 'files.search': return searchFiles(folderFor(p.folderId).path, text(p.path ?? '', 'path'), text(p.query,'query',256));
       case 'files.read': return readFile(folderFor(p.folderId).path, text(p.path,'path'));
+      case 'files.chatEdit': {
+        const chat=chatFor(text(p.chatId,'chatId')),item=store.item(text(p.itemId,'itemId'));
+        if(!item||item.chatId!==chat.id||item.kind!=='tool'||item.data?.type!=='fileChange'||!['running','completed'].includes(item.status??''))throw new Error('No recorded edit in this chat.');
+        const root=chat.folderId?folderFor(chat.folderId).path:join(options.dataDir,'scratch',chat.id);
+        const cwd=typeof item.data.cwd==='string'?item.data.cwd:root;
+        const path=resolve(cwd,text(p.path,'path'));
+        const changes=Array.isArray(item.data.changes)?item.data.changes:[];
+        const recorded=changes.some(change=>{
+          if(!change||typeof change!=='object')return false;
+          const kind=change.kind&&typeof change.kind==='object'?change.kind:{};
+          const recordedPath=change.movePath??change.move_path??kind.move_path??kind.movePath??change.path;
+          return typeof recordedPath==='string'&&resolve(cwd,recordedPath)===path;
+        });
+        if(!recorded)throw new Error('The requested file was not recorded as edited.');
+        return readFile(root,relative(root,path));
+      }
       case 'files.document': return readDocument(folderFor(p.folderId).path,text(p.path,'path'));
       case 'files.workbook': return readWorkbook(folderFor(p.folderId).path,text(p.path,'path'));
       case 'files.annotations.list':

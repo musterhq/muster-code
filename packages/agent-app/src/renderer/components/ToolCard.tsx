@@ -142,7 +142,7 @@ function EditDiffs({item}:{item:TimelineItem}) {
   if(!patches.length)return null;
   return <div className="tool-edit-diffs">{patches.map((patch,index)=><div key={patch.path+index} className="tool-edit-diff">
     {patches.length>1&&<div className="tool-edit-diff-path" title={patch.path}><span>{patch.path}</span><DiffStat adds={patch.adds} dels={patch.dels}/></div>}
-    <FileChangeView path={patch.movePath??patch.path} kind={patch.kind} target={fileTarget(item,patch.movePath??patch.path)} patches={patch.patch?[{diff:patch.patch,adds:patch.adds,dels:patch.dels}]:[]} truncated={patch.truncated}/>
+    <FileChangeView path={patch.movePath??patch.path} kind={patch.kind} target={fileTarget(item,patch.movePath??patch.path)} edit={{chatId:item.chatId,itemId:item.id}} patches={patch.patch?[{diff:patch.patch,adds:patch.adds,dels:patch.dels}]:[]} truncated={patch.truncated}/>
   </div>)}</div>;
 }
 
