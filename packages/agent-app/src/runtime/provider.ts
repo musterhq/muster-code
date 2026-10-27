@@ -53,6 +53,8 @@ export interface ProviderInput {
   /** Extra `-c key=value` overrides from domain run-options contributors. Access policy keys are ignored. String[] values become a TOML array. */
   configOverrides?: Record<string, string | number | boolean | string[]>;
   developerInstructions?: string;
+  /** #739: the context window the engine reported on this chat's last turn, when it reported one. */
+  engineWindow?: number;
   /** The user's request names a ChatGPT connector; Codex apps stay loaded for this chat from then on. */
   connectorsRequested?: boolean;
   /** `driver` names the lane when the thread was not made by the route's own driver (the Messages lane, #688). */
@@ -386,7 +388,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       const featureOverrides = [...leanCodexFeatureOverrides({toolSearch: route.info.models.find(entry => entry.id === model0)?.toolSearch, connectorsRequested: connectorChats.has(input.chat.id), policy: connectorPolicy()}),
         ...(sandboxedRun(input.configOverrides) ? CODEX_SANDBOX_FEATURES : [])];
       // #426: the model's own window and compaction point (catalog or router listing), unless the user set them in config.toml.
-      const windowOverrides = codexWindowOverrides(route.info.models.find(entry => entry.id === model0), userCompactionKeys(route.sessionsRoot ? dirname(route.sessionsRoot) : undefined));
+      const windowOverrides = codexWindowOverrides(route.info.models.find(entry => entry.id === model0), userCompactionKeys(route.sessionsRoot ? dirname(route.sessionsRoot) : undefined), input.engineWindow);
       const signature = JSON.stringify([access, model0, input.reasoningEffort ?? 'medium', input.configOverrides ?? {}, featureOverrides, windowOverrides, input.cwd, route.command, route.info.id, route.env]);
       if (previous && ((previous.signature !== undefined && previous.signature !== signature) || previous.stale) && !busyWithBackground(previous)) close(previous);
       if (!previous && sessions.size >= 64) {
