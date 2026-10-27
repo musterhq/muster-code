@@ -531,7 +531,8 @@ function homeInstances({fs,directory,home,codexHome,cli,node,env,track,validator
     // auth.json (the Keychain) is tied to the home's path, so that route keeps the person's home.
     const ownHome=registeredDataDir&&env.MUSTER_SHARED_CODEX_HOME!=='1'&&(route.kind!=='chatgpt'||Boolean(auth))?musterCodexHome(registeredDataDir,codexHome):undefined;
     const childEnv:Record<string,string>={MUSTER_PROVIDER_NODE:node.node,...node.env,CODEX_HOME:ownHome??codexHome,...(ownHome?{MUSTER_CODEX_SOURCE_HOME:codexHome}:{}),...(cli?{MUSTER_CODEX_COMMAND:cli}:{}),
-      ...(route.profile?{MUSTER_CODEX_PROFILE:route.profile}:{MUSTER_CODEX_PROVIDER:route.modelProvider,...(catalogPath?{MUSTER_CODEX_CATALOG:catalogPath}:{})})};
+      // The launcher picks a profile before a provider: an empty value clears the one Muster itself inherited (it may run from a Muster shell).
+      ...(route.profile?{MUSTER_CODEX_PROFILE:route.profile,MUSTER_CODEX_PROVIDER:'',MUSTER_CODEX_CATALOG:''}:{MUSTER_CODEX_PROFILE:'',MUSTER_CODEX_PROVIDER:route.modelProvider,MUSTER_CODEX_CATALOG:catalogPath??''})};
     const codex={modelProvider:route.modelProvider,kind:route.kind,...(route.profile?{profile:route.profile}:{}),...(account?{account:suffix.slice(1)}:{})} satisfies NonNullable<ProviderInfo['codex']>;
     const source=route.profile?`Codex profile ${route.profile}.config.toml${account?` in ${account.codexHome}`:''}`:route.kind==='chatgpt'?`Codex sign-in${account?` at ${account.codexHome}`:''}`:`[model_providers.${route.modelProvider}] in Codex config.toml${account?` at ${account.codexHome}`:''}`;
     const base={id,name,driver:'codex-app-server',codex,identityMasked:route.kind==='gateway'?'Gateway · account hidden':email??'ChatGPT account · hidden',models:[],available:false,source,...(route.baseUrl?{endpoint:route.baseUrl}:{})} satisfies ProviderInfo;

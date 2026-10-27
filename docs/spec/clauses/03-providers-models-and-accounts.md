@@ -62,6 +62,7 @@ Boundaries:
 | [MUS-SPEC-03-730B](03-providers-models-and-accounts.md#mus-spec-03-730b) | The second turn resumes the first turn's Claude Code session with the new message alone. | [`the next router Claude turn resumes the same Claude Code session without a summary`](../../../packages/agent-app/tests/router-claude-code-730.test.ts) |
 | [MUS-SPEC-03-730C](03-providers-models-and-accounts.md#mus-spec-03-730c) | A GPT model, a GPT combo and a connector turn on the same router run on the Codex client; only the Claude combo's turn starts Claude Code. | [`on one router, only the Claude turn runs through Claude Code; GPT models, GPT combos and connector turns stay on the Codex client`](../../../packages/agent-app/tests/router-claude-code-730.test.ts) |
 | [MUS-SPEC-03-730D](03-providers-models-and-accounts.md#mus-spec-03-730d) | After a Codex turn, Claude Code starts a fresh session whose prompt carries a summary of the earlier messages; the turn after continues that session with no summary. | [`a chat whose earlier turn ran on the Codex client moves to Claude Code with a summary, then continues that session`](../../../packages/agent-app/tests/router-claude-code-730.test.ts) |
+| [MUS-SPEC-03-740A](03-providers-models-and-accounts.md#mus-spec-03-740a) | With a Codex profile inherited from the parent shell, a config.toml provider route still lists its models and answers a chat with its own provider. | [`(b) a Codex config.toml provider with [auth] command: models listed and a chat answered with the command’s token`](../../../packages/agent-app/tests/provider-auth-e2e.test.ts) |
 
 ### Configured routers
 
@@ -585,4 +586,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/router-claude-code-730.test.ts::a chat whose earlier turn ran on the Codex client moves to Claude Code with a summary, then continues that session`
 - Environment: As 730A.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-740a"></a>
+#### MUS-SPEC-03-740A: A route ignores a Codex profile inherited from the parent shell
+
+- Precondition: Muster starts with `MUSTER_CODEX_PROFILE` already set by its parent shell (as in a terminal opened inside Muster). The user's `config.toml` has a `[model_providers.mockroute]` table with an `[auth]` command and no catalog.
+- Action: Let Muster discover the route, then send a chat on it.
+- Expected result: The route lists the router's models with the command's token, and the chat completes on mockroute. Codex never tries to load the inherited profile.
+- Test: `packages/agent-app/tests/provider-auth-e2e.test.ts::(b) a Codex config.toml provider with [auth] command: models listed and a chat answered with the command’s token`
+- Environment: Node test runner; the real Codex binary against a local mock router; skipped when no Codex binary is installed.
+- Known gaps: Covers a provider route; a profile route clears the inherited provider the same way but has no case of its own.
 - Evidence: UNVERIFIED
