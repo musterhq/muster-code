@@ -16,6 +16,13 @@ Boundaries:
 
 | Case | What the assertions check | Test |
 |---|---|---|
+| [MUS-SPEC-02-386A](02-turns-streaming-and-queue.md#mus-spec-02-386a) | Each failure has a notice. A live countdown precedes each of two continuations on the saved thread; the original request is not resent. After the third failure it stops without arming another retry system. | [`mid-turn 429 and 5xx show failure and countdown then continue the same thread, at most twice`](../../../packages/agent-app/tests/mid-turn-recovery-386.test.ts) |
+| [MUS-SPEC-02-386B](02-turns-streaming-and-queue.md#mus-spec-02-386b) | The countdown is cancelled, the chat is interrupted, and the provider receives no continuation. | [`Stop cancels a mid-turn continuation countdown and does not resend`](../../../packages/agent-app/tests/mid-turn-recovery-386.test.ts) |
+| [MUS-SPEC-02-386C](02-turns-streaming-and-queue.md#mus-spec-02-386c) | One continuation on the saved thread asks for a reply; its final answer is saved even though an earlier attempt streamed commentary. The transcript has one original user message. | [`a tool-only completion gets one finish-up continuation and the new final answer is saved`](../../../packages/agent-app/tests/mid-turn-recovery-386.test.ts) |
+| [MUS-SPEC-02-386D](02-turns-streaming-and-queue.md#mus-spec-02-386d) | Only one finish-up continuation runs. The chat fails with an Agent stopped without replying notice, instead of claiming completion or continuing forever. | [`a second tool-only ending stops visibly instead of looping or claiming completion`](../../../packages/agent-app/tests/mid-turn-recovery-386.test.ts) |
+| [MUS-SPEC-02-386E](02-turns-streaming-and-queue.md#mus-spec-02-386e) | One existing-style checklist holds the latest parent steps and statuses. The child plan does not overwrite it. | [`live native plan updates show one checklist with current steps and ignore a child thread`](../../../packages/agent-app/tests/mid-turn-recovery-386.test.ts) |
+| [MUS-SPEC-02-386F](02-turns-streaming-and-queue.md#mus-spec-02-386f) | An unresolved 503 never arms either automatic continuation or the older limit-resume path. Rejected credentials, quota refusals and normal final replies keep their existing handling; empty failures still get a notice. | [`uncertain, auth, no-activity and normal final replies never get a mid-turn continuation; empty failure gets a notice`](../../../packages/agent-app/tests/mid-turn-recovery-386.test.ts) |
+| [MUS-SPEC-02-386G](02-turns-streaming-and-queue.md#mus-spec-02-386g) | A matching native terminal failure after tool activity gets a countdown, then continues the same thread and saves its final reply. | [`a terminal native failure is classified and continued through the real provider adapter`](../../../packages/agent-app/tests/mid-turn-recovery-386.test.ts) |
 | [MUS-SPEC-02-387A](02-turns-streaming-and-queue.md#mus-spec-02-387a) | A tool row the provider started and never finished is interrupted, with its output kept, when the turn completes. | [`#387 a tool the provider never closed is shown as Stopped once a completed turn settles`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
 | [MUS-SPEC-02-387B](02-turns-streaming-and-queue.md#mus-spec-02-387b) | The same row is interrupted when the turn fails. | [`#387 a tool the provider never closed is shown as Stopped once a failed turn settles`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
 | [MUS-SPEC-02-387C](02-turns-streaming-and-queue.md#mus-spec-02-387c) | A tool row left running when the app closed mid-turn is interrupted when Muster restarts. | [`#387 a tool row left running when Muster closed is Stopped after restart`](../../../packages/agent-app/tests/tool-rows-settle-387.test.ts) |
@@ -679,4 +686,83 @@ Boundaries:
 - Test: `packages/agent-app/tests/queue-after-crash-579.test.ts::a message queued before a crash is sent once after Continue anyway and Steer`
 - Environment: Node test runner; the agent service with a fake Codex-style provider that keeps its saved queue across a relaunch and sends it when the thread goes idle; no network.
 - Known gaps: The fake app-server models the real one's queue persistence and idle send from its documented methods, not from a live Codex. A provider that keeps no queue of its own never double-sends, and Continue anyway then Steer on it already sent once.
+- Evidence: UNVERIFIED
+
+### Mid-turn recovery and live plans
+
+<a id="mus-spec-02-386a"></a>
+#### MUS-SPEC-02-386A: Mid-turn 429 and 5xx show failure and countdown then continue the same thread, at most twice
+
+- Precondition: A running chat has done tool work and the provider confirms a transient 429 or 5xx failure.
+- Action: Let each countdown elapse while the provider keeps failing.
+- Expected result: Each failure has a notice. A live countdown precedes each of two continuations on the saved thread; the original request is not resent. After the third failure it stops without arming another retry system.
+- Test: `packages/agent-app/tests/mid-turn-recovery-386.test.ts::mid-turn 429 and 5xx show failure and countdown then continue the same thread, at most twice`
+- Environment: Node test runner; real agent service with a fake provider, temporary data folder and fake timers; renderer checklist/countdown view models.
+- Known gaps: No live provider or desktop app; screenshot evidence uses an isolated browser harness.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-386b"></a>
+#### MUS-SPEC-02-386B: Stop cancels a mid-turn continuation countdown and does not resend
+
+- Precondition: A confirmed transient failure after tool activity is waiting to continue.
+- Action: Press Stop and let the countdown time pass.
+- Expected result: The countdown is cancelled, the chat is interrupted, and the provider receives no continuation.
+- Test: `packages/agent-app/tests/mid-turn-recovery-386.test.ts::Stop cancels a mid-turn continuation countdown and does not resend`
+- Environment: Node test runner; real agent service with a fake provider, temporary data folder and fake timers; renderer checklist/countdown view models.
+- Known gaps: No live provider or desktop app; screenshot evidence uses an isolated browser harness.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-386c"></a>
+#### MUS-SPEC-02-386C: A tool-only completion gets one finish-up continuation and the new final answer is saved
+
+- Precondition: A chat emits commentary and a tool call, then completes with only the earlier commentary as its final-message field.
+- Action: Send a task and let the finish-up continuation answer.
+- Expected result: One continuation on the saved thread asks for a reply; its final answer is saved even though an earlier attempt streamed commentary. The transcript has one original user message.
+- Test: `packages/agent-app/tests/mid-turn-recovery-386.test.ts::a tool-only completion gets one finish-up continuation and the new final answer is saved`
+- Environment: Node test runner; real agent service with a fake provider, temporary data folder and fake timers; renderer checklist/countdown view models.
+- Known gaps: No live provider or desktop app; screenshot evidence uses an isolated browser harness.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-386d"></a>
+#### MUS-SPEC-02-386D: A second tool-only ending stops visibly instead of looping or claiming completion
+
+- Precondition: A chat and its automatic finish-up continuation both complete immediately after a tool call without replying.
+- Action: Send a task and wait for both attempts.
+- Expected result: Only one finish-up continuation runs. The chat fails with an Agent stopped without replying notice, instead of claiming completion or continuing forever.
+- Test: `packages/agent-app/tests/mid-turn-recovery-386.test.ts::a second tool-only ending stops visibly instead of looping or claiming completion`
+- Environment: Node test runner; real agent service with a fake provider, temporary data folder and fake timers; renderer checklist/countdown view models.
+- Known gaps: No live provider or desktop app; screenshot evidence uses an isolated browser harness.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-386e"></a>
+#### MUS-SPEC-02-386E: Live native plan updates show one checklist with current steps and ignore a child thread
+
+- Precondition: A running parent chat has a saved thread id.
+- Action: Receive two native plan updates and a child-thread update.
+- Expected result: One existing-style checklist holds the latest parent steps and statuses. The child plan does not overwrite it.
+- Test: `packages/agent-app/tests/mid-turn-recovery-386.test.ts::live native plan updates show one checklist with current steps and ignore a child thread`
+- Environment: Node test runner; real agent service with a fake provider, temporary data folder and fake timers; renderer checklist/countdown view models.
+- Known gaps: No live provider or desktop app; screenshot evidence uses an isolated browser harness.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-386f"></a>
+#### MUS-SPEC-02-386F: An unresolved failure cannot bypass the continuation safety check
+
+- Precondition: A chat has an uncertain 503 outcome or unknown dispatch state; other chats have rejected credentials, no activity, a quota refusal, a normal reply or an empty failure.
+- Action: Send the tasks and advance time past the old rate-limit retry delay.
+- Expected result: An unresolved 503 never arms either automatic continuation or the older limit-resume path. Rejected credentials, quota refusals and normal final replies keep their existing handling; empty failures still get a notice.
+- Test: `packages/agent-app/tests/mid-turn-recovery-386.test.ts::uncertain, auth, no-activity and normal final replies never get a mid-turn continuation; empty failure gets a notice`
+- Environment: Node test runner; real service, fake provider and fake timers.
+- Known gaps: No live provider or desktop app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-386g"></a>
+#### MUS-SPEC-02-386G: Native terminal proof permits continuation on the saved thread
+
+- Precondition: A chat runs through the real provider adapter over a fake native transport.
+- Action: The transport reports a parent turn starting, a completed command and a matching failed turn ending with HTTP 503, then answers the continuation.
+- Expected result: A matching native terminal failure after tool activity gets a countdown, then continues the same thread and saves its final reply.
+- Test: `packages/agent-app/tests/mid-turn-recovery-386.test.ts::a terminal native failure is classified and continued through the real provider adapter`
+- Environment: Node test runner; real service and provider adapter, fake native transport and fake timers.
+- Known gaps: No live provider or desktop app.
 - Evidence: UNVERIFIED
