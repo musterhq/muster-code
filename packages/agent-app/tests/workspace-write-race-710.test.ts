@@ -49,13 +49,19 @@ function race(t: TestContext, ws: string, outside: string, directory = false) {
   t.mock.method(childProcess, 'spawn', (...args: Parameters<typeof childProcess.spawn>) => {
     const child = spawn(...args);
     if (String(args[0]).includes('muster-write')) {
+      t.after(() => { if (child.exitCode === null) child.kill(); });
       const end = child.stdin!.end.bind(child.stdin!);
       // The helper has pinned all parents before it asks for the content. Hold that content until the swap completes.
       child.stdin!.end = ((...input: Parameters<typeof end>) => {
         restored = (async () => {
-          await swap();
+          // Always finish stdin, including when Windows refuses the rename of a pinned directory.
+          // Otherwise a failed injection leaves the helper waiting forever and hides the test failure.
+          let swapped = false, failure: unknown;
+          try { await swap(); swapped = true; } catch (error) { failure = error; }
           const closed = new Promise<void>(resolve => child.once('close', () => resolve()));
-          end(...input); await closed; await restore();
+          end(...input); await closed;
+          if (swapped) await restore();
+          if (failure) throw failure;
         })();
         return child.stdin!;
       }) as typeof end;
@@ -68,7 +74,7 @@ function race(t: TestContext, ws: string, outside: string, directory = false) {
 }
 
 // Spec: MUS-SPEC-19-710A (docs/spec/clauses/19-security-and-redaction.md#mus-spec-19-710a)
-test('a workspace write raced at file creation leaves no empty file outside', async t => {
+test('a workspace write raced at file creation leaves no empty file outside', {timeout: 30_000}, async t => {
   const {ws, outside} = await sandbox(t);
   const done = race(t, ws, outside);
   const result = await executeTool(call('write_file', {path: 'd/x.txt', content: 'new content'}), ctx(ws));
@@ -78,7 +84,7 @@ test('a workspace write raced at file creation leaves no empty file outside', as
 });
 
 // Spec: MUS-SPEC-19-710B (docs/spec/clauses/19-security-and-redaction.md#mus-spec-19-710b)
-test('a workspace write raced at parent creation leaves no folder outside', async t => {
+test('a workspace write raced at parent creation leaves no folder outside', {timeout: 30_000}, async t => {
   const {ws, outside} = await sandbox(t);
   const done = race(t, ws, outside, true);
   const result = await executeTool(call('write_file', {path: 'd/sub/x.txt', content: 'new content'}), ctx(ws));
@@ -88,7 +94,7 @@ test('a workspace write raced at parent creation leaves no folder outside', asyn
 });
 
 // Spec: MUS-SPEC-19-710C (docs/spec/clauses/19-security-and-redaction.md#mus-spec-19-710c)
-test('a workspace edit raced at file open leaves nothing outside and preserves outside files', async t => {
+test('a workspace edit raced at file open leaves nothing outside and preserves outside files', {timeout: 30_000}, async t => {
   const {ws, outside} = await sandbox(t);
   await fs.writeFile(join(ws, 'd/x.txt'), 'before'); await fs.writeFile(join(outside, 'keep.txt'), 'keep');
   const done = race(t, ws, outside);
