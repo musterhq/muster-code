@@ -53,6 +53,8 @@ export interface ClaudeLaneConfig {
   headers: (force?: boolean) => Promise<Record<string, string>>;
   label: string;
   fetch?: typeof fetch;
+  /** #730: Claude Code, when it is installed. A Claude turn then runs through it, pointed at the router. */
+  claudeCode?: () => RunnableAdapter | undefined;
 }
 export interface ClaudeLane {
   /** Runs one turn over the Messages API. */
@@ -61,6 +63,26 @@ export interface ClaudeLane {
   isClaude(model: string): Promise<boolean>;
   /** Replaces the credentials and transport of the next requests (the route is rebuilt when its configuration changes). */
   configure(next: Pick<ClaudeLaneConfig, 'headers' | 'fetch'>): void;
+  /** #730: Claude Code when it is installed (a Claude turn then runs through it instead of the Messages API). */
+  claudeCode(): RunnableAdapter | undefined;
+  /** #730: the environment that points Claude Code at the router with the route's own credentials, every model alias
+   *  pinned to the chosen model (so sub-agents and background calls never ask the router for a model it lacks). */
+  claudeCodeEnv(model: string): Promise<Record<string, string>>;
+}
+
+/** Claude Code's settings for a router: its base URL (without /v1), the route's bearer token and any other headers. */
+export function claudeCodeRouterEnv(endpoint: string, headers: Record<string, string>, model: string): Record<string, string> {
+  const env: Record<string, string> = {ANTHROPIC_BASE_URL: endpoint.replace(/\/+$/, '').replace(/\/v1$/, '')};
+  const extra: string[] = [];
+  for (const [name, value] of Object.entries(headers)) {
+    const key = name.toLowerCase();
+    if (key === 'authorization') env.ANTHROPIC_AUTH_TOKEN = value.replace(/^Bearer\s+/i, '');
+    else if (key === 'x-api-key') env.ANTHROPIC_AUTH_TOKEN ??= value;
+    else if (!/[\r\n]/.test(name + value)) extra.push(`${name}: ${value}`);
+  }
+  if (extra.length) env.ANTHROPIC_CUSTOM_HEADERS = extra.join('\n');
+  for (const key of ['ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_SMALL_FAST_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL']) env[key] = model;
+  return env;
 }
 
 export function createClaudeLane(options: ClaudeLaneConfig & {now?: () => number; dir?: () => string | undefined}): ClaudeLane {
@@ -113,6 +135,8 @@ export function createClaudeLane(options: ClaudeLaneConfig & {now?: () => number
   return {
     adapter,
     configure(next) { current = {headers: next.headers, ...(next.fetch ? {fetch: next.fetch} : {})}; },
+    claudeCode: () => options.claudeCode?.(),
+    async claudeCodeEnv(model) { return claudeCodeRouterEnv(options.endpoint, await current.headers(false), model); },
     async isClaude(model) {
       if (CLAUDE_MODEL_ID.test(model)) return true;
       if (GPT_MODEL_ID.test(model)) return false;

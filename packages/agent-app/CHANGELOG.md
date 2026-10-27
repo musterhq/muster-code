@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Claude models on your own router now run through Claude Code when it is installed, pointed at the router with the route's own key. They no longer go through the coding client, so the repeated "Reconnecting…" and "stream closed" failures are gone, and your own tool servers, approvals and steering work as they do with the Claude Code sign-in. GPT models, connector turns and goals stay on the coding client.
 - Claude chats on your own router no longer reset to a summary when the router has lost the saved thinking for an earlier tool call. Muster resends that part of the history as plain text, so the chat keeps its full history and thread and carries on. Starting fresh is now a last resort.
 - Chats on your coding-client sign-ins and profiles no longer show up in your other coding apps. Muster now keeps its own threads in its data folder while sharing your sign-in, profiles, skills and plugins; existing chats continue where they left off.
 - Switching a chat to a model on another provider or account no longer loses the conversation. The first message on the new model now carries a summary of the earlier messages, as forks and compaction already do, and the chat says so.

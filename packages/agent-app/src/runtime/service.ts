@@ -63,7 +63,7 @@ import type { ChatGoal } from '../shared/domains/goals-protocol.ts';
 import { firstReadyModel } from '../shared/domains/settings-protocol.ts';
 import { attentionDeadline, pendingStatusAtRead } from '../shared/attention-expiry.ts';
 import { isAdapterProvider } from './adapters/index.ts';
-import { CLAUDE_LANE_DRIVER, effectiveDriver } from '../shared/provider-lanes.ts';
+import { effectiveDriver, inProcessLane } from '../shared/provider-lanes.ts';
 import { createSkill } from './skill-authoring.ts';
 import { exportChat, isChatExportFormat } from './chat-export.ts';
 import { redactSecrets } from './secret-redaction.ts';
@@ -228,7 +228,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     restartCandidates.push(chat.id);
   }
   // Adapter routes and the Messages lane (#688) run inside Muster: their work died with the process.
-  const orphaned = store.recoverOrphanedRuns(chat => chat.providerThreadDriver === CLAUDE_LANE_DRIVER || isAdapterProvider(chat.providerThreadProviderId ?? chat.providerId ?? ''));
+  const orphaned = store.recoverOrphanedRuns(chat => inProcessLane(chat.providerThreadDriver) || isAdapterProvider(chat.providerThreadProviderId ?? chat.providerId ?? ''));
   // #450: rows already sent are dropped and natively held rows come back; an orphaned chat's queue waits for it to continue.
   queue.recoverAtBoot();
   for (const chatId of orphaned) if (store.queue(chatId).length && !queue.paused(chatId)) queue.pause(chatId, 'interrupted');
