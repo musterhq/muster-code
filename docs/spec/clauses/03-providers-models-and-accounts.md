@@ -52,8 +52,10 @@ Boundaries:
 | [MUS-SPEC-03-688N](03-providers-models-and-accounts.md#mus-spec-03-688n) | The saved conversation starts with a user message that holds the person's own text, stays within its limits and holds no image data. | [`saved Claude history never starts with an assistant message`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
 | [MUS-SPEC-03-688O](03-providers-models-and-accounts.md#mus-spec-03-688o) | An error event before any content is retried once and the turn completes; an error after text has streamed fails the turn without resending; every request asks for high effort. | [`an error event before any content is sent once more; after content it fails the turn`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
 | [MUS-SPEC-03-688P](03-providers-models-and-accounts.md#mus-spec-03-688p) | The turn runs over the Messages API with a native ask_user tool offered; the call returns the default at once, a non-blocking question card is posted, and the turn completes on the Messages lane. | [`a Full access Claude turn still runs over the Messages API when the service adds the ask_user server, and ask_user returns the default`](../../../packages/agent-app/tests/claude-messages-lane.test.ts) |
-| [MUS-SPEC-03-716A](03-providers-models-and-accounts.md#mus-spec-03-716a) | A resume refused with "replay state expired or is unavailable" before the turn starts is retried once on a fresh thread: the message reaches the provider twice at most, the retry resumes nothing and starts with a summary of the earlier messages, one notice says a fresh conversation started, and the chat ends completed on the new thread. | [`a resumed router thread whose replay state expired starts one fresh conversation with a summary`](../../../packages/agent-app/tests/replay-expired-716.test.ts) |
-| [MUS-SPEC-03-716B](03-providers-models-and-accounts.md#mus-spec-03-716b) | If the fresh conversation is refused with the same error there is no third attempt and the error is shown through the usual recovery notice. | [`when the fresh conversation is refused with the same 409 there is no third attempt and the error is shown`](../../../packages/agent-app/tests/replay-expired-716.test.ts) |
+| [MUS-SPEC-03-716A](03-providers-models-and-accounts.md#mus-spec-03-716a) | When the copy of the thread is refused too, one fresh thread starts with a summary of the earlier messages; the chat ends completed on it, with one notice for the copy and one for the summary. | [`when the copy is refused too, one fresh conversation starts with a summary`](../../../packages/agent-app/tests/replay-expired-716.test.ts) |
+| [MUS-SPEC-03-716B](03-providers-models-and-accounts.md#mus-spec-03-716b) | If the copy and the fresh conversation are both refused there is no fourth attempt and the error is shown through the usual recovery notice. | [`when the copy and the fresh conversation are refused with the same 409 there is no fourth attempt and the error is shown`](../../../packages/agent-app/tests/replay-expired-716.test.ts) |
+| [MUS-SPEC-03-767A](03-providers-models-and-accounts.md#mus-spec-03-767a) | Through the real coding client, a router that refuses the thread's session gets the turn from a new session whose request carries every earlier user message and reply as history, with no digest; one notice says the chat continues in a copy; later turns keep working. | [`a router that refuses a thread's session continues the turn with the whole earlier conversation`](../../../packages/agent-app/tests/router-refused-session-767.test.ts) |
+| [MUS-SPEC-03-767B](03-providers-models-and-accounts.md#mus-spec-03-767b) | A resume refused with "replay state expired or is unavailable" before output is retried once in a copy of the saved thread (`thread/fork`), with no summary; the message reaches the provider twice at most and the chat ends completed on the copy. | [`a resumed router thread whose replay state expired continues in one copy of the thread, without a summary`](../../../packages/agent-app/tests/replay-expired-716.test.ts) |
 | [MUS-SPEC-03-716C](03-providers-models-and-accounts.md#mus-spec-03-716c) | A 409 with other text, or the same text after the turn produced output, does not start a fresh conversation. | [`a 409 with other text, or after the turn produced output, does not start a fresh conversation`](../../../packages/agent-app/tests/replay-expired-716.test.ts) |
 | [MUS-SPEC-03-722A](03-providers-models-and-accounts.md#mus-spec-03-722a) | After the router loses an earlier tool call's replay state, the next message completes on the same thread with the earlier tool output still in the history: one refused request, one accepted retry, no fresh-conversation notice, and the turn after it is not refused. | [`a router that lost an old tool call's replay state does not reset the chat: same thread, full history, no fresh conversation`](../../../packages/agent-app/tests/router-replay-722.test.ts) |
 | [MUS-SPEC-03-722B](03-providers-models-and-accounts.md#mus-spec-03-722b) | Only the replay refusal is retried, and only once; any other 409 reaches the coding client unchanged with its request sent as is. | [`the bridge retries only the replay refusal, only once, and passes every other 409 through unchanged`](../../../packages/agent-app/tests/router-replay-722.test.ts) |
@@ -440,24 +442,46 @@ Boundaries:
 - Known gaps: The `muster_ask` MCP server itself is dropped on this lane (it has no MCP client); the native tool takes its place.
 - Evidence: UNVERIFIED
 
-<a id="mus-spec-03-716a"></a>
-#### MUS-SPEC-03-716A: A chat whose router conversation expired continues on a fresh one
+<a id="mus-spec-03-767a"></a>
+#### MUS-SPEC-03-767A: A refused router thread continues with the whole conversation
 
-- Precondition: A chat on a Claude model of a router gateway route (for example `intelligent-planner`) has a saved provider thread from days earlier. The router no longer holds that conversation's Claude replay state, so resuming it is refused with HTTP 409 "replay state expired or is unavailable" before the turn starts.
+- Precondition: A chat on a configured Responses router has two completed turns. The router then refuses every request for that thread's session with HTTP 409 "replay state expired or is unavailable", while a new session with the same history works (seen on the live router on 2026-10-27, #767).
+- Action: Send a third message, then a fourth, through Muster and the real coding client.
+- Expected result: The third turn completes. The accepted request comes from a new session and carries the first and second user messages and both earlier replies as history items, not a digest. The chat shows one notice that it continues in a copy of the conversation with its full history, and no refusal error. The fourth turn completes on the copy with the whole history.
+- Test: `packages/agent-app/tests/router-refused-session-767.test.ts::a router that refuses a thread's session continues the turn with the whole earlier conversation`
+- Environment: Node test runner; a local mock router; the real coding client installed (CI sets MUSTER_REQUIRE_CODEX_E2E=1 so the test cannot skip).
+- Known gaps: The live router's refusal could not be reproduced on demand, so the mock models the observed behaviour (refusal keyed by the `session-id` header).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-767b"></a>
+#### MUS-SPEC-03-767B: An expired thread continues in one copy first
+
+- Precondition: A chat on a Claude model of a router gateway route has a saved provider thread. Resuming it is refused with HTTP 409 "replay state expired or is unavailable" before the turn produces output.
 - Action: Send a message.
-- Expected result: Muster tries the saved thread once, then runs the same message once more on a fresh thread. The retry resumes nothing and starts with a summary of the earlier messages, then "Current user request:" and the message. The chat shows one notice that the earlier conversation could no longer be continued and a fresh one started with a summary, ends completed, and keeps the new thread. The expired-state error is not shown.
-- Test: `packages/agent-app/tests/replay-expired-716.test.ts::a resumed router thread whose replay state expired starts one fresh conversation with a summary`
+- Expected result: Muster tries the saved thread once, then runs the same message once in a copy of it (`thread/fork`), with no summary. The message reaches the provider twice at most. One notice says the chat continues in a copy with its full history; the chat ends completed on the copy. The expired-state error is not shown.
+- Test: `packages/agent-app/tests/replay-expired-716.test.ts::a resumed router thread whose replay state expired continues in one copy of the thread, without a summary`
+- Environment: Node test runner; the real service and provider adapter with a fake Codex client; no network.
+- Known gaps: Recognised by the router's words, not by model id.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-716a"></a>
+#### MUS-SPEC-03-716A: When the copy is refused too, a fresh conversation starts with a summary
+
+- Precondition: As MUS-SPEC-03-767B, but the router also refuses the copy with the same 409.
+- Action: Send a message.
+- Expected result: After the refused resume and the refused copy, Muster runs the message once more on a fresh thread that resumes and copies nothing and starts with a summary of the earlier messages, then "Current user request:" and the message. The chat shows one notice for the copy and one that a fresh one started with a summary, ends completed, and keeps the new thread.
+- Test: `packages/agent-app/tests/replay-expired-716.test.ts::when the copy is refused too, one fresh conversation starts with a summary`
 - Environment: Node test runner; the real service and provider adapter with a fake Codex client; no network.
 - Known gaps: Recognised by the router's words, not by model id; the live router is not exercised.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-03-716b"></a>
-#### MUS-SPEC-03-716B: An expired conversation is retried once, never looped
+#### MUS-SPEC-03-716B: An expired conversation is retried a bounded number of times, never looped
 
 - Precondition: As MUS-SPEC-03-716A, but the router also refuses the fresh conversation with the same 409.
 - Action: Send a message.
-- Expected result: The provider is asked twice (the resume and one fresh attempt), never a third time. The chat shows the usual recovery notice with the provider's words, and one notice that a fresh conversation was tried.
-- Test: `packages/agent-app/tests/replay-expired-716.test.ts::when the fresh conversation is refused with the same 409 there is no third attempt and the error is shown`
+- Expected result: The provider is asked three times (the resume, one copy, one fresh attempt), never a fourth. The chat shows the usual recovery notice with the provider's words, plus one notice for the copy and one for the fresh attempt.
+- Test: `packages/agent-app/tests/replay-expired-716.test.ts::when the copy and the fresh conversation are refused with the same 409 there is no fourth attempt and the error is shown`
 - Environment: Node test runner; the real service and provider adapter with a fake Codex client; no network.
 - Known gaps: None known.
 - Evidence: UNVERIFIED
