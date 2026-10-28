@@ -45,6 +45,8 @@ interface Props<T> {
   className: string;
   reveal?: VirtualRowReveal;
   tableRef?: React.Ref<HTMLTableElement>;
+  /** Called with the first and last mounted item whenever the window moves. */
+  onWindow?: (first: number, last: number) => void;
 }
 
 function indexAt(starts: Float64Array, count: number, offset: number): number {
@@ -60,13 +62,13 @@ function indexAt(starts: Float64Array, count: number, offset: number): number {
  * VirtualFileSource. The surrounding `.code-scroll` is the scroller; anything above the table (a review bar)
  * is accounted for by measuring the table's offset.
  */
-export function VirtualRowTable<T>({items, isTall, itemKey, render, textOf, lineOf, gutterDigits, extraWidth = 0, columns, className, reveal, tableRef}: Props<T>): React.ReactElement {
+export function VirtualRowTable<T>({items, isTall, itemKey, render, textOf, lineOf, gutterDigits, extraWidth = 0, columns, className, reveal, tableRef, onWindow}: Props<T>): React.ReactElement {
   const root = useRef<HTMLDivElement>(null);
   const [heights, setHeights] = useState({row: ROW_HEIGHT, tall: TALL_HEIGHT});
   const [view, setView] = useState({top: 0, height: 600});
   const [endpoints, setEndpoints] = useState<number[]>([]);
   const count = items.length;
-  const latest = useRef({items, starts: new Float64Array(0), heights, textOf, lineOf, isTall});
+  const latest = useRef<{items: readonly T[]; starts: Float64Array; heights: {row: number; tall: number}; textOf: Props<T>['textOf']; lineOf: Props<T>['lineOf']; isTall: Props<T>['isTall']; onWindow: Props<T>['onWindow']}>({items, starts: new Float64Array(0), heights, textOf, lineOf, isTall, onWindow});
   const starts = useMemo(() => {
     const out = new Float64Array(count + 1);
     let offset = 0;
@@ -74,7 +76,7 @@ export function VirtualRowTable<T>({items, isTall, itemKey, render, textOf, line
     out[count] = offset;
     return out;
   }, [items, count, heights]);
-  latest.current = {items, starts, heights, textOf, lineOf, isTall};
+  latest.current = {items, starts, heights, textOf, lineOf, isTall, onWindow};
   // Only the items decide the widest line; the callbacks are fresh closures on every render of the parent.
   const widest = useMemo(() => {
     let longest = 0;
@@ -205,6 +207,8 @@ export function VirtualRowTable<T>({items, isTall, itemKey, render, textOf, line
 
   const first = Math.max(0, indexAt(starts, count, view.top) - OVERSCAN);
   const last = Math.min(count, indexAt(starts, count, view.top + view.height) + 1 + OVERSCAN);
+  // Tell the host which items are mounted, so it can ask for the syntax colours of just those.
+  useLayoutEffect(() => { latest.current.onWindow?.(first, Math.max(first, last - 1)); }, [first, last]);
   const extra = [...new Set(endpoints)].filter(index => index >= 0 && index < count).sort((a, b) => a - b);
   const visible = [...extra.filter(index => index < first), ...Array.from({length: Math.max(0, last - first)}, (_, offset) => first + offset), ...extra.filter(index => index >= last)];
   let previous = 0;

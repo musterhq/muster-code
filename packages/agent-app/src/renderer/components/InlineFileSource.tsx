@@ -1,6 +1,7 @@
 import React, {useMemo, useRef, useState} from 'react';
 import {Check, ChevronDown, ChevronUp, Undo2} from 'lucide-react';
-import {useHighlightedTokens} from './HighlightedCode';
+import {useHighlightedTokens,useWindowTokens} from './HighlightedCode';
+import {lineContent} from './codeLineContent';
 import {codeLanguageFromPath} from './codeLanguage';
 import {buildInlineFileDiff, type CumulativeFileDiff} from '../inlineFileDiffModel';
 import './inline-file-diff.css';
@@ -27,6 +28,12 @@ type Row = {kind:'source';line:number;text:string;added:boolean;hunkId?:string} 
 type Entry = {kind:'row';row:Row;index:number;start?:string} | {kind:'actions';hunkId:string};
 const itemKey=(entry:Entry):string=>entry.kind==='actions'?`actions:${entry.hunkId}`:entry.row.kind==='deleted'?`deleted:${entry.row.line}:${entry.row.anchorLine}:${entry.index}`:`source:${entry.row.line}`;
 
+/** The display-row index of the row entry at or just before `entryIndex` (hunk action bars are entries with no row). */
+function rowIndexAt(entries:Entry[],entryIndex:number):number {
+  for(let at=Math.min(entryIndex,entries.length-1);at>=0;at--){const entry=entries[at];if(entry.kind==='row')return entry.index;}
+  return 0;
+}
+
 /**
  * Source with agent changes painted in place. With `review`, every change
  * since the baseline is shown and each hunk gets floating Undo / Keep / Next
@@ -41,8 +48,11 @@ export function InlineFileSource({source,path,patch,status,unavailableReason,rev
   const displayRows=useMemo<Row[]>(()=>reviewRows??(model?.state==='decorated'?model.rows:source.split(/\r?\n/).map((text,index)=>({kind:'source' as const,line:index+1,text,added:false}))),[reviewRows,model,source]);
   const hunks=reviewing?review!.model.hunks:[];
   const virtual=source.length>=LARGE_FILE_THRESHOLD;
-  // A large file is drawn as plain windowed rows, like VirtualFileSource, so syntax colouring of the whole file is skipped.
-  const highlighted=useHighlightedTokens(useMemo(()=>virtual?'':displayRows.map(row=>row.text).join('\n'),[virtual,displayRows]),language,0);
+  const joined=useMemo(()=>displayRows.map(row=>row.text).join('\n'),[displayRows]);
+  // A small file is coloured whole. A large one is windowed, so only the mounted rows (plus a margin) are coloured.
+  const highlighted=useHighlightedTokens(virtual?'':joined,language,0);
+  const [mounted,setMounted]=useState({first:0,last:0});
+  const tokensOf=useWindowTokens(virtual?joined:'',language,mounted.first,mounted.last);
   const [current,setCurrent]=useState(0);
   const table=useRef<HTMLTableElement>(null);
   // One entry per table row: a source or deleted line, or the Undo / Keep bar under a hunk's last row.
@@ -85,8 +95,8 @@ export function InlineFileSource({source,path,patch,status,unavailableReason,rev
       </div></td></tr>;
     }
     const {row,index,start}=entry;
-    const tokens=!virtual&&highlighted?.sourceLines[index]===row.text?highlighted.rows[index]:undefined;
-    const content=tokens?tokens.map((token,tokenIndex)=>token.color?<span key={tokenIndex} style={{color:token.color}}>{token.content}</span>:<React.Fragment key={tokenIndex}>{token.content}</React.Fragment>):row.text||'\u00a0';
+    const tokens=virtual?tokensOf(index):highlighted?.sourceLines[index]===row.text?highlighted.rows[index]:undefined;
+    const content=row.text?lineContent(row.text,tokens):'\u00a0';
     return row.kind==='deleted'
       ? <tr data-hunk-start={start} className="file-inline-diff-deleted" aria-label={`Deleted line ${row.line}`}><td className="code-no" style={gutter}>{row.line}</td><td className="code-line"><span className="file-inline-diff-marker">−</span>{content}</td></tr>
       : <tr data-line={row.line} data-hunk-start={start} className={row.added?'file-inline-diff-added':undefined}><td className="code-no" style={gutter}>{row.line}</td><td className="code-line">{row.added&&<span className="file-inline-diff-marker">+</span>}{content}</td></tr>;
@@ -109,7 +119,8 @@ export function InlineFileSource({source,path,patch,status,unavailableReason,rev
     {review?.model.state==='unavailable'&&<div className="inline-file-diff-note" role="status">{review.model.reason}</div>}
     {virtual
       ? <VirtualRowTable<Entry> tableRef={table} className="code-table source-code-table inline-file-diff-table" items={entries} columns={2} gutterDigits={gutterDigits} extraWidth={24}
-          isTall={entry=>entry.kind==='actions'} itemKey={itemKey} render={renderEntry} textOf={entry=>entry.kind==='row'&&entry.row.kind==='source'?entry.row.text:undefined} lineOf={entry=>entry.kind==='row'&&entry.row.kind==='source'?entry.row.line:undefined} reveal={reveal}/>
+          isTall={entry=>entry.kind==='actions'} itemKey={itemKey} render={renderEntry} textOf={entry=>entry.kind==='row'&&entry.row.kind==='source'?entry.row.text:undefined} lineOf={entry=>entry.kind==='row'&&entry.row.kind==='source'?entry.row.line:undefined} reveal={reveal}
+          onWindow={(first,last)=>setMounted(prior=>{const from=rowIndexAt(entries,first),to=rowIndexAt(entries,last);return prior.first===from&&prior.last===to?prior:{first:from,last:to};})}/>
       : <table ref={table} className="code-table source-code-table inline-file-diff-table"><tbody>{entries.map(entry=><React.Fragment key={itemKey(entry)}>{renderEntry(entry)}</React.Fragment>)}</tbody></table>}
   </div>;
 }

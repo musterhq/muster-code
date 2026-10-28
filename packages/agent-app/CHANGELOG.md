@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Code stays coloured everywhere: files up to the 512 KB read limit now keep their syntax colours in the file view, the edited-file and blame views, and while searching with Find (matches are marked on top of the colours, with the current one stood out). Large files colour only the rows on screen, a block at a time off the main thread, so they open as fast as before. `.cjs` files and more file types (such as `.json5`, `.ini`, `.less`, `.zig`, `.hs`, `.astro`) are coloured too (#778).
 - Restore inline file diffs and changed-file totals when reopening saved shell-edit chats, retain streamed patch evidence in live turns, and show complete scratch files with their edits in place using the existing editor and Git colours (#781).
 - Every edit's inline diff opens as the whole file again, with its changes in place: earlier edits of a file the chat edited again, edits made outside the chat's folder (for example in a worktree) and files the chat created no longer fall back to a few lines around the change (#781).
 
