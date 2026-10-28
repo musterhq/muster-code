@@ -1,5 +1,5 @@
 /** Scoped folder browsing: bounded listings and bounded text reads. */
-import { promises as fs, type Dir } from 'node:fs';
+import { constants as fsConstants, promises as fs, type Dir } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { join, relative } from 'node:path';
@@ -83,11 +83,14 @@ export async function listFiles(root: string, rel: string, options: { showHidden
   return entries.slice(0, MAX_ENTRIES);
 }
 
-export async function readFile(root: string, rel: string): Promise<{ path: string; text: string; truncated: boolean; revision: string; encodingWarning: boolean }> {
+export async function readFile(root: string, rel: string, options: { noFollow?: boolean } = {}): Promise<{ path: string; text: string; truncated: boolean; revision: string; encodingWarning: boolean }> {
   const abs = await resolveInside(root, rel);
-  const stat = await fs.stat(abs);
-  if (!stat.isFile()) throw new Error(`Not a file: ${rel}`);
-  const handle = await fs.open(abs, 'r');
+  // noFollow: the file itself must not be a link (one swapped in after it was checked is refused at open).
+  let handle: fs.FileHandle;
+  try { handle = await fs.open(options.noFollow ? join(root, rel) : abs, options.noFollow ? fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW : 'r'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ELOOP') throw new Error(`Not a file: ${rel}`); throw error; }
+  const stat = await handle.stat().catch(async error => { await handle.close(); throw error; });
+  if (!stat.isFile()) { await handle.close(); throw new Error(`Not a file: ${rel}`); }
   try {
     const table = /\.(csv|tsv)$/i.test(rel);
     const limit = table ? MAX_TABLE_BYTES : MAX_TEXT_BYTES;

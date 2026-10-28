@@ -56,3 +56,33 @@ test('#779 files the model writes with a shell apply_patch show as inline diffs 
   assert.equal(tool('call_2')?.type, 'commandExecution');
   assert.equal(tool('call_3')?.type, 'commandExecution');
 });
+
+// Spec: MUS-SPEC-08-781C (docs/spec/clauses/08-git-changes-and-review.md#mus-spec-08-781c)
+// Protected: complete inline diff
+test('a streamed shell edit appears before the reply ends when completion omits command details', async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'muster-781-live-'));
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  let delivered!: () => void;
+  const ready = new Promise<void>(resolve => { delivered = resolve; });
+  const provider: ProviderAdapter = {info,
+    async run(input) {
+      input.onEvent('item/started', {item: {id: 'streamed', type: 'commandExecution', command: wrapped(PATCH), cwd: CWD}});
+      input.onEvent('item/commandExecution/outputDelta', {itemId: 'streamed', delta: 'Success. Updated the following files:\nA calculator.py\nM util.py\n'});
+      input.onEvent('item/completed', {item: {id: 'streamed', type: 'commandExecution', exitCode: 0, aggregatedOutput: 'validation complete\n'}});
+      delivered();
+      await hold;
+      return {status: 'completed', finalMessage: 'done'};
+    }, async stop() { release(); return true; }, dispose() {},
+  };
+  const service = createAgentService({dataDir, provider, onEvent() {}});
+  t.after(async () => { release(); await service.dispose(); await rm(dataDir, {recursive: true, force: true}); });
+  const chat = await service.invoke('chat.create', {});
+  await service.invoke('chat.send', {id: chat.id, text: 'edit files', requestId: randomUUID()});
+  await ready;
+  assert.equal((await service.invoke('app.snapshot', undefined)).chats.find(c => c.id === chat.id)?.status, 'running');
+  const rows = (await service.invoke('chat.timeline', {id: chat.id})).items;
+  const changes = collectFileChanges(latestTurnItems(rows));
+  assert.deepEqual(changes.map(c => c.path), [`${CWD}/calculator.py`, `${CWD}/util.py`]);
+  assert.match(String(rows.find(r => r.data?.providerItemId === 'streamed')?.data?.output), /validation complete/);
+});

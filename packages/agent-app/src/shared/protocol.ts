@@ -276,6 +276,7 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'paperclip.output.save': {input:{id:string;projectId?:string};output:{saved:boolean;fileName?:string}};
  'files.search': { input: {folderId: string; path?: string; query: string}; output: {entries: FileEntry[]; truncated: boolean} };
  'files.read': { input: {folderId: string; path: string}; output: {path: string; text: string; truncated: boolean} };
+ 'files.chatEdit': { input: {chatId: string; itemId: string; path: string}; output: {path: string; text: string; truncated: boolean} };
  /** An image this chat's own tool rows named (a path outside every folder is fine); read by the runtime, never by arbitrary renderer input. */
  'files.chatImage': { input: {chatId: string; path: string}; output: {mime: string; dataUrl: string; size: number; width: number; height: number} };
  'files.asset': { input: {folderId: string; path: string}; output: {mime: string; dataUrl: string; size: number; width: number; height: number} };

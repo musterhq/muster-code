@@ -148,10 +148,10 @@ function contentText(content: unknown): string {
   }).filter(Boolean).join('\n');
 }
 /** Codex `apply_patch` text → app-server style `changes`: adds carry the whole file, updates a bare `+`/`-`/` ` patch. */
-export function parseApplyPatch(patch: string): Array<{ path: string; kind: { type: 'add' | 'delete' | 'update'; move_path?: string }; diff: string }> {
+export function parseApplyPatch(patch: string, preserveHunks = false): Array<{ path: string; kind: { type: 'add' | 'delete' | 'update'; move_path?: string }; diff: string }> {
   const changes: Array<{ path: string; kind: { type: 'add' | 'delete' | 'update'; move_path?: string }; diff: string }> = [];
   let current: { path: string; kind: { type: 'add' | 'delete' | 'update'; move_path?: string }; lines: string[] } | undefined;
-  const flush = () => { if (!current) return; const body = current.lines.join('\n'); changes.push({ path: current.path, kind: current.kind, diff: current.kind.type === 'add' ? body.replace(/^\+/gm, '') : body }); current = undefined; };
+  const flush = () => { if (!current) return; const body = current.lines.join('\n'); changes.push({ path: current.path, kind: current.kind, diff: current.kind.type === 'add' ? body.replace(/^\+/gm, '')+(preserveHunks&&current.lines.length?'\n':'') : body }); current = undefined; };
   for (const line of patch.split(/\r?\n/)) {
     if (/^\*\*\* (?:Begin|End) Patch\s*$/.test(line)) { flush(); continue; }
     const header = /^\*\*\* (Add|Delete|Update) File: (.+)$/.exec(line);
@@ -159,7 +159,7 @@ export function parseApplyPatch(patch: string): Array<{ path: string; kind: { ty
     const move = /^\*\*\* Move to: (.+)$/.exec(line);
     if (move && current) { current.kind.move_path = move[1]!.trim(); continue; }
     if (!current) continue;
-    if (line.startsWith('@@')) continue; // context markers carry no line numbers; the bare patch below is enough for counts and rendering
+    if (line.startsWith('@@')) { if (preserveHunks) current.lines.push('@@'); continue; }
     if (line === '*** End of File') continue;
     if (/^[+\- ]/.test(line) || line === '') current.lines.push(line === '' ? ' ' : line);
   }

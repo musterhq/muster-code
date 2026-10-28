@@ -7,7 +7,7 @@ import { HindsightService } from './hindsight-service.ts';
 import { MemoryConfigStore, MemoryTombstones, electronSecretBox } from './memory-context.ts';
 import { createHash } from 'node:crypto';
 import { promises as fs, existsSync, mkdirSync, copyFileSync, statSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, dirname, join, resolve, relative } from 'node:path';
 import { rescanProviderListings, setProviderListingStore } from './provider-instances.ts';
 import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, QueuedMessage, ChatFallback, TimelineItem, WakeReason } from '../shared/protocol.ts';
 import { CONTEXT_OVERFLOW, effectiveContextWindow, musterCompactAt, reportedWindowFor, withUserWindow } from '../shared/context-window.ts';
@@ -976,7 +976,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               const details = toolEventDetails(item), startedAt = toolStarted.get(itemId);
               if (finished && startedAt !== undefined) { toolStarted.delete(itemId); if (!(typeof details.durationMs === 'number' && details.durationMs > 0)) details.durationMs = Date.now() - startedAt; }
               else if (finished && !(typeof details.durationMs === 'number' && details.durationMs > 0) && typeof previous?.data?.durationMs === 'number') details.durationMs = previous.data.durationMs;
-              const shellChanges = finished ? shellPatchChanges(item) : [];
+              // Completion events may omit the command and contain only an output
+              // suffix. Use the accumulated evidence, not just the final packet.
+              const patchEvidence = {...previous?.data, ...item, aggregatedOutput: output};
+              let shellChanges = finished && status === 'completed' ? shellPatchChanges(patchEvidence) : [];
+              if (finished && status === 'completed' && !shellChanges.length && streamed !== output)
+                shellChanges = shellPatchChanges({...patchEvidence, aggregatedOutput: streamed});
               const metadata = {...details,providerItemId:itemId,type:shellChanges.length ? 'fileChange' : type || previous?.data?.type,...(shellChanges.length ? {changes:shellChanges} : {}),name:label,output,outputTruncated:buffered.truncated,...(childThread ? {threadId:childThread} : {}),...(finished ? {awaitingApproval:undefined} : {})};
               if (!local) { local = store.appendItem(chatId, 'tool', body, status, metadata).id; toolIds.set(itemId, local); }
               else store.updateItem(local, body, status, {...store.item(local)?.data,...metadata});
@@ -2254,6 +2259,40 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       }
       case 'files.search': return searchFiles(folderFor(p.folderId).path, text(p.path ?? '', 'path'), text(p.query,'query',256));
       case 'files.read': return readFile(folderFor(p.folderId).path, text(p.path,'path'));
+      case 'files.chatEdit': {
+        // The file one of this chat's own edit rows recorded, wherever it is (a worktree, a sibling checkout, scratch):
+        // the inline diff needs the whole file to place the edit. Nothing else is readable through this command.
+        const chat=chatFor(text(p.chatId,'chatId')),item=store.item(text(p.itemId,'itemId'));
+        if(!item||item.chatId!==chat.id||item.kind!=='tool'||item.data?.type!=='fileChange'||!['running','completed'].includes(item.status??''))throw new Error('No recorded edit in this chat.');
+        const root=chat.folderId?folderFor(chat.folderId).path:join(options.dataDir,'scratch',chat.id);
+        const cwd=typeof item.data.cwd==='string'?item.data.cwd:root;
+        const path=resolve(cwd,text(p.path,'path'));
+        const recorded=new Set<string>();
+        for(const change of Array.isArray(item.data.changes)?item.data.changes:[]){
+          if(!change||typeof change!=='object')continue;
+          const kind=change.kind&&typeof change.kind==='object'?change.kind:{};
+          for(const name of [change.path,change.movePath,change.move_path,kind.move_path,kind.movePath])if(typeof name==='string')recorded.add(resolve(cwd,name));
+        }
+        // The row's own file, or the name later edit rows of this chat renamed it to (a rename chain a→b→c→d is followed to the end).
+        const renames:[string,string][]=[];
+        for(const row of store.timeline(chat.id)){
+          if(row.kind!=='tool'||row.data?.type!=='fileChange'||!['running','completed'].includes(row.status??'')||!Array.isArray(row.data.changes))continue;
+          const rowCwd=typeof row.data.cwd==='string'?row.data.cwd:root;
+          for(const change of row.data.changes){
+            if(!change||typeof change!=='object'||typeof change.path!=='string')continue;
+            const kind=change.kind&&typeof change.kind==='object'?change.kind:{};
+            const to=[change.movePath,change.move_path,kind.move_path,kind.movePath].find(name=>typeof name==='string');
+            if(typeof to==='string')renames.push([resolve(rowCwd,change.path),resolve(rowCwd,to)]);
+          }
+        }
+        const names=new Set(recorded);
+        for(let grew=true;grew;){grew=false;for(const [from,to] of renames)if(names.has(from)&&!names.has(to)){names.add(to);grew=true;}}
+        if(!names.has(path))throw new Error('The requested file was not recorded as edited.');
+        // Read from the file's own folder and never through a link at the file: a link swapped in for it (even to a
+        // file next to it) is refused at open, and resolveInside refuses folders that lead elsewhere.
+        const folder=await fs.realpath(dirname(path));
+        return readFile(folder,basename(path),{noFollow:true});
+      }
       case 'files.document': return readDocument(folderFor(p.folderId).path,text(p.path,'path'));
       case 'files.workbook': return readWorkbook(folderFor(p.folderId).path,text(p.path,'path'));
       case 'files.annotations.list':

@@ -43,6 +43,7 @@ import { MessageBody, localImagePath } from './MessageBody';
 import {LiveAnnouncer,LiveTurnHeader,TurnHeader,WorkingTail} from './TurnStatus';
 import {ReasoningRow} from './ReasoningRow';
 import {TurnFileChanges} from './TurnFileChanges';
+import {LaterEditsContext,laterEdits} from '../turnFileChanges';
 import {describeTurns,foldable,rowStart} from './turnStatusModel';
 import {dividerLabel,dividerRows} from '../dayDividers';
 import {attachmentPreview} from '../timelineBridge';
@@ -201,6 +202,8 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
     for(const row of rows){if(row.kind==='user'){if(candidate)last.add(candidate);candidate=undefined;}else if(row.kind==='assistant')candidate=row.id;}
     if(candidate)last.add(candidate);return last;},[rows]);
   const turnModel=useMemo(()=>describeTurns(rows,live),[rows,live]);
+  // Every edit row's later history over the whole chat (not just the mounted rows), so each opens whole.
+  const editHistory=useMemo(()=>laterEdits(items),[items]);
   // Per turn: its tool items, a Codex summary for the folded header, and whether it edited files.
   const turnWork=useMemo(()=>{
     const map=new Map<string,{items:TimelineItem[];summary:string;edits:boolean}>();
@@ -407,7 +410,7 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
   return (
     <div className={`timeline-shell${turns.length?' timeline-with-navigation':''}`}>
     <TimelineNavigation turns={turns} currentId={currentTurn} canGoBack={backCount>0} onTurn={jumpToTurn} onBack={jumpBack} onLatest={jumpToLatest} searchQuery={searchQuery} onSearch={setSearchQuery} searchCount={searchMatches.length} searchIndex={searchIndex} onSearchStep={stepSearch}/>
-    <div className="timeline" ref={scrollRef} onScroll={onScroll}>
+    <LaterEditsContext.Provider value={editHistory}><div className="timeline" ref={scrollRef} onScroll={onScroll}>
       <div
         className="timeline-inner"
         style={{ height: totalSize }}
@@ -441,7 +444,7 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
         })}
         {live&&<div className="timeline-row timeline-tail" style={{transform:`translateY(${totalSize-TAIL_HEIGHT}px)`}}><WorkingTail items={items}/></div>}
       </div>
-    </div>
+    </div></LaterEditsContext.Provider>
     {away&&<button className="jump-latest" onClick={jumpToLatest} aria-label={unread?'New activity — jump to latest':'Jump to latest'}><ArrowUp size={14} style={{transform:'rotate(180deg)'}}/>{unread&&<span>New activity</span>}</button>}
     {navigationNotice&&<div className="turn-navigation-status" role="status">{navigationNotice}</div>}
     </div>
