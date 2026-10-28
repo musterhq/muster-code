@@ -12,6 +12,7 @@ import { canonicalFolderKey, canonicalFolderPath, mergeDuplicateFolders, pending
 import { runSchemaMigrations, type MigrationResult, type SchemaMigration } from './schema-migrations.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { DEFAULT_CHAT_TITLE, generateChatTitle } from './chat-title.ts';
+import { shellPatchChanges } from './shell-patch.ts';
 import type { Chat, ChatRecovery, ChatTitleSource, ChatStatus, ContextTelemetry, Folder, Project, QueuedMessage, Snapshot, TimelineItem } from '../shared/protocol.ts';
 
 /** Transcripts of subagents that run inside a CLI provider (Claude Code Task/Agent): rows keyed by the child thread id, never mixed into the parent timeline. */
@@ -121,6 +122,13 @@ function readRecovery(value: string): ChatRecovery {
 }
 
 function rowToItem(row: TimelineRow): TimelineItem {
+  let data = row.data ? JSON.parse(row.data) as Record<string, unknown> : undefined;
+  // Older versions saved successful shell edits as commands. Recover only on read:
+  // keep the original history, cursors and output, and never replay the command.
+  if (row.kind === 'tool' && row.status === 'completed' && (data?.type === 'commandExecution' || (data?.type === 'fileChange' && typeof data.command === 'string'))) {
+    const changes = shellPatchChanges({...data,type:'commandExecution'});
+    if (changes.length) data = {...data, type: 'fileChange', changes};
+  }
   return {
     id: row.id,
     chatId: row.chat_id,
@@ -128,7 +136,7 @@ function rowToItem(row: TimelineRow): TimelineItem {
     text: row.text,
     ...(row.status ? { status: row.status } : {}),
     createdAt: row.created_at,
-    ...(row.data ? { data: JSON.parse(row.data) as Record<string, unknown> } : {}),
+    ...(data ? { data } : {}),
   };
 }
 

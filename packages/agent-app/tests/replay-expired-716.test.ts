@@ -17,7 +17,7 @@ const EXPIRED = 'unexpected status 409 Conflict: claude/claude-opus-5-5: model â
 const failed = (errorMessage: string, extra: Partial<ProviderResult> = {}): ProviderResult => ({status: 'failed', finalMessage: '', errorMessage, dispatchState: 'dispatched', ...extra});
 const ok = (n: number): ProviderResult => ({status: 'completed', finalMessage: `answer ${n}`, threadId: `thread-${n}`, turnId: `turn-${n}`, dispatchState: 'dispatched'});
 
-type Call = {prompt: string; threadId: string | undefined};
+type Call = {prompt: string; threadId: string | undefined; forkFrom: string | undefined};
 /** `script` answers each Codex run by its number (1 = the first run of the test). */
 async function harness(t: TestContext, script: (call: Call, n: number, input: Record<string, unknown>) => ProviderResult) {
   const dataDir = await mkdtemp(join(tmpdir(), 'muster-716-'));
@@ -25,7 +25,7 @@ async function harness(t: TestContext, script: (call: Call, n: number, input: Re
   const core: CoreClient = {
     CODEX_RUN_LIFECYCLE_VERSION: 1,
     async runCodexAppServer(input) {
-      const call = {prompt: String(input.prompt), threadId: input.threadId as string | undefined};
+      const call = {prompt: String(input.prompt), threadId: input.threadId as string | undefined, forkFrom: input.forkFromThreadId as string | undefined};
       calls.push(call);
       const n = calls.length, threadId = call.threadId ?? `thread-${n}`, turnId = `turn-${n}`;
       (input.onThreadReady as ((id: string) => void) | undefined)?.(threadId);
@@ -63,44 +63,67 @@ async function harness(t: TestContext, script: (call: Call, n: number, input: Re
   return {calls, items, snapshot, send};
 }
 
-// Spec: MUS-SPEC-03-716A (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-716a)
-test('a resumed router thread whose replay state expired starts one fresh conversation with a summary', async t => {
+// Spec: MUS-SPEC-03-767B (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-767b)
+test('a resumed router thread whose replay state expired continues in one copy of the thread, without a summary', async t => {
   const h = await harness(t, (call, n) => n === 1 ? ok(1) : call.threadId ? failed(EXPIRED) : ok(2));
   await h.send('Capital of France?');
   assert.equal((await h.snapshot()).providerThreadId, 'thread-1');
   await h.send('Population?');
 
-  assert.equal(h.calls.length, 3, 'the first turn, the refused resume, and one fresh attempt');
+  assert.equal(h.calls.length, 3, 'the first turn, the refused resume, and one copy');
   assert.equal(h.calls[1]!.threadId, 'thread-1', 'the second message first tries to resume the saved thread');
-  assert.equal(h.calls[2]!.threadId, undefined, 'the retry resumes nothing');
-  assert.match(h.calls[2]!.prompt, /^[\s\S]*User: Capital of France\?[\s\S]*Assistant: answer 1[\s\S]*Current user request:\nPopulation\?$/);
-  assert.ok(!h.calls[2]!.prompt.slice(0, h.calls[2]!.prompt.indexOf('Current user request:')).includes('Population?'), 'the new message is sent once, after the summary');
+  assert.equal(h.calls[2]!.forkFrom, 'thread-1', 'the retry continues in a copy of the saved thread');
+  assert.equal(h.calls[2]!.threadId, undefined);
+  assert.ok(!h.calls[2]!.prompt.includes('<earlier-conversation>'), 'the copy holds the history; no summary is sent');
   assert.equal(h.calls.filter(call => call.prompt.includes('Population?')).length, 2, 'the message reaches the provider twice at most');
 
   const chat = await h.snapshot();
   assert.equal(chat.status, 'completed');
-  assert.equal(chat.providerThreadId, 'thread-3', 'the chat now continues on the fresh thread');
+  assert.equal(chat.providerThreadId, 'thread-3', 'the chat now continues on the copy');
   const items = await h.items();
   const notices = items.filter(item => item.data?.kind === 'thread-reset');
   assert.equal(notices.length, 1);
-  assert.match(notices[0]!.text, /could no longer continue the earlier conversation.*fresh one started with a summary/i);
+  assert.match(notices[0]!.text, /continues in a copy of this conversation with its full history/i);
   assert.ok(items.some(item => item.kind === 'assistant' && item.text.includes('answer 2')));
   assert.ok(!items.some(item => /replay state/i.test(item.text)), 'the expired-state error is not shown');
 });
 
+// Spec: MUS-SPEC-03-716A (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-716a)
+test('when the copy is refused too, one fresh conversation starts with a summary', async t => {
+  const h = await harness(t, (call, n) => n === 1 ? ok(1) : call.threadId || call.forkFrom ? failed(EXPIRED) : ok(2));
+  await h.send('Capital of France?');
+  await h.send('Population?');
+
+  assert.equal(h.calls.length, 4, 'the first turn, the refused resume, the refused copy, and one fresh attempt');
+  assert.equal(h.calls[2]!.forkFrom, 'thread-1');
+  assert.equal(h.calls[3]!.threadId, undefined, 'the last retry resumes nothing');
+  assert.equal(h.calls[3]!.forkFrom, undefined, 'and copies nothing');
+  assert.match(h.calls[3]!.prompt, /^[\s\S]*User: Capital of France\?[\s\S]*Assistant: answer 1[\s\S]*Current user request:\nPopulation\?$/);
+  assert.ok(!h.calls[3]!.prompt.slice(0, h.calls[3]!.prompt.indexOf('Current user request:')).includes('Population?'), 'the new message is sent once, after the summary');
+
+  const chat = await h.snapshot();
+  assert.equal(chat.status, 'completed');
+  assert.equal(chat.providerThreadId, 'thread-4', 'the chat now continues on the fresh thread');
+  const items = await h.items();
+  const notices = items.filter(item => item.data?.kind === 'thread-reset');
+  assert.equal(notices.length, 2, 'one notice for the copy, one for the summary');
+  assert.match(notices[1]!.text, /could no longer continue the earlier conversation.*fresh one started with a summary/i);
+  assert.ok(items.some(item => item.kind === 'assistant' && item.text.includes('answer 2')));
+});
+
 // Spec: MUS-SPEC-03-716B (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-716b)
-test('when the fresh conversation is refused with the same 409 there is no third attempt and the error is shown', async t => {
+test('when the copy and the fresh conversation are refused with the same 409 there is no fourth attempt and the error is shown', async t => {
   const h = await harness(t, (_call, n) => n === 1 ? ok(1) : failed(EXPIRED));
   await h.send('Capital of France?');
   await h.send('Population?');
 
-  assert.equal(h.calls.length, 3, 'one resume and one fresh attempt, never a third');
+  assert.equal(h.calls.length, 4, 'one resume, one copy and one fresh attempt, never a fourth');
   assert.equal((await h.snapshot()).status, 'failed');
   const items = await h.items();
   const last = items[items.length - 1]!;
   assert.equal(last.kind, 'notice');
   assert.equal((last.data as {recovery?: {kind: string}} | undefined)?.recovery?.kind, 'recovery-needed', 'the failure is reported through the usual recovery notice, as before');
-  assert.equal(items.filter(item => item.data?.kind === 'thread-reset').length, 1, 'one notice for the one fresh attempt');
+  assert.equal(items.filter(item => item.data?.kind === 'thread-reset').length, 2, 'one notice for the copy and one for the fresh attempt');
 });
 
 // Spec: MUS-SPEC-03-716C (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-716c)

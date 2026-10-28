@@ -77,7 +77,7 @@ export interface ProviderInput {
   onRequest(method: string, params: Record<string, unknown>, options?: {policyOnly?: boolean}): Promise<RequestResult>;
   /** The saved provider thread could not be resumed and a fresh one starts. Returns text (a digest of the earlier
    *  conversation) to send ahead of this turn's prompt. */
-  onThreadReset?(previousThreadId: string, reason?: 'lane' | 'expired'): string | undefined;
+  onThreadReset?(previousThreadId: string, reason?: 'lane' | 'expired' | 'forked'): string | undefined;
 }
 export interface ProviderResult { status: 'completed' | 'failed'; finalMessage: string; threadId?: string; errorMessage?: string; dispatchState?: 'not-dispatched' | 'dispatched' | 'unknown'; turnId?: string; recovery?: ProviderRecovery; threadReset?: boolean; /** The lane that ran the turn when it was not the route's own driver (#688). */ driver?: string; /** #729: the message was the picked `/command` and the turn's context went to the system prompt, not the thread. */ nativeCommand?: boolean; failure?: {kind: 'rpc-rejected' | 'request-timeout' | 'aborted'; method?: string; statusCode?: number; retryAfterMs?: number; requestId?: string} }
 export interface ProviderAdapter {
@@ -512,8 +512,8 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         };
         // The same app-server launch and observers re-open this thread when /compact finds the idle timer closed it.
         session.reopen = {...launch, ...observers};
-        const dispatch = (threadId: string | undefined, seed: string | undefined) => client().runCodexAppServer({
-          ...launch, ...observers,
+        const dispatch = (threadId: string | undefined, seed: string | undefined, forkFromThreadId?: string) => client().runCodexAppServer({
+          ...launch, ...observers, ...(forkFromThreadId ? {forkFromThreadId} : {}),
           prompt: seed?.trim() ? `${seed.trim()}\n\nCurrent user request:\n${input.prompt}` : input.prompt,
           ...(input.images?.length ? { images: input.images } : {}),
           ...budgetOptions,
@@ -535,15 +535,23 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           onDelta(text: string) { session.activity = true; produced = true; if (!lateCancellation()) input.onDelta(text); },
           onReasoningDelta(text: string) { session.activity = true; produced = true; if (!lateCancellation()) input.onReasoning(text); },
         });
-        // #716: a router keeps Claude replay state only for a while, so resuming a days-old thread is refused ("replay state
-        // expired or is unavailable", HTTP 409). The turn is accepted and the user message recorded first, but no output
-        // comes. The thread cannot be continued and resuming it again would fail the same way every time: start one fresh
-        // thread, seeded with a summary, exactly once.
+        // #716/#767: a router keeps Claude replay state only for a while and then refuses every request for that thread's
+        // session ("replay state expired or is unavailable", HTTP 409), even with the same history sent as text. The turn
+        // is accepted and the user message recorded first, but no output comes. Continue in a copy of the thread
+        // (`thread/fork`: the full history under a new session). Only when no copy can be made, or the copy is refused
+        // too, start one fresh thread seeded with a summary. Each step runs at most once.
+        type Attempt = Awaited<ReturnType<typeof dispatch>>;
+        const refusedBeforeOutput = (attempt: Attempt) => attempt.status === 'failed' && !produced && !commands.size
+          && !session.controller.signal.aborted && !disposed && REPLAY_STATE_EXPIRED.test(attempt.errorMessage ?? '');
         const result=await Promise.race([networkStopped, dispatch(resumeThread, laneSeed).then(async first => {
-          if (!resumeThread || first.status !== 'failed' || produced || commands.size || !input.onThreadReset
-            || session.controller.signal.aborted || disposed || !REPLAY_STATE_EXPIRED.test(first.errorMessage ?? '')) return first;
+          if (!resumeThread || !input.onThreadReset || !refusedBeforeOutput(first)) return first;
+          input.onThreadReset(resumeThread, 'forked');
+          let copy: Attempt | undefined;
+          try { copy = await dispatch(undefined, undefined, resumeThread); } catch { copy = undefined; }
+          if (lateCancellation()) return copy ?? first;
+          if (copy && copy.dispatchState !== 'not-dispatched' && !refusedBeforeOutput(copy)) return copy;
           const seed = input.onThreadReset(resumeThread, 'expired');
-          if (lateCancellation()) return first;
+          if (lateCancellation()) return copy ?? first;
           session.threadId = undefined; session.turnId = undefined;
           return dispatch(undefined, seed);
         })]);

@@ -1,5 +1,7 @@
 import React, {useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {flushSync} from 'react-dom';
+import {lineContent} from './codeLineContent';
+import {useWindowTokens} from './HighlightedCode';
 
 export const LARGE_FILE_THRESHOLD = 256 * 1024;
 /** First-frame estimate of a source row: 12px mono at line-height 1.6 plus the cell's 1px padding, as in
@@ -9,8 +11,8 @@ const OVERSCAN = 12;
 
 /** Fixed-height source rows. Keep selection endpoints mounted so dragging and
  * copying across an unmounted range still uses the original file's text. */
-export const VirtualFileSource = React.memo(function VirtualFileSource({source, targetLine, query = '', matches = [], current = 0}: {
-  source: string; targetLine?: number; query?: string; matches?: number[]; current?: number;
+export const VirtualFileSource = React.memo(function VirtualFileSource({source, language = 'text', targetLine, query = '', matches = [], current = 0}: {
+  source: string; language?: string; targetLine?: number; query?: string; matches?: number[]; current?: number;
 }): React.ReactElement {
   const lines = useMemo(() => source.split('\n'), [source]);
   const offsets = useMemo(() => {
@@ -102,27 +104,19 @@ export const VirtualFileSource = React.memo(function VirtualFileSource({source, 
   const gutter = useMemo(() => ({width: `calc(${String(lines.length).length}ch + 16px)`}), [lines.length]); // + .code-no inline padding
   const start = Math.max(0, viewport.top - OVERSCAN);
   const end = Math.min(lines.length, viewport.top + Math.ceil(viewport.height / rowHeight) + OVERSCAN);
+  // Colour only the mounted rows (plus a block of margin): the worker tokenises as far down the file as they reach.
+  const tokensOf = useWindowTokens(source, language, start, Math.max(start, end - 1));
   const visible = [...new Set([...Array.from({length: Math.max(0, end - start)}, (_, i) => start + i), ...endpoints.filter(i => i >= 0 && i < lines.length)])].sort((a, b) => a - b);
   let previous = 0;
   return <div ref={root} className="virtual-file-source" data-line-count={lines.length}>
     <table className="code-table source-code-table" aria-rowcount={lines.length} style={{minWidth: `max(100%, calc(${widestLine + String(lines.length).length}ch + 56px))`}}><tbody>{visible.map(index => {
       const gap = index - previous, gapStart = previous + 1; previous = index + 1;
       const text = lines[index].replace(/\r$/, '');
-      const from = offsets[index], to = from + text.length;
-      const hits: React.ReactNode[] = [];
-      let cursor = from;
-      // Binary search avoids scanning all matches for every visible row.
-      for (let hit = Math.max(0, lineAtOffset(matches, from) - 1); hit < matches.length && matches[hit] < to; hit++) {
-        const position = matches[hit], left = Math.max(from, position), right = Math.min(to, position + query.length);
-        if (right <= cursor) continue;
-        hits.push(source.slice(cursor, left), <mark key={hit} data-current={hit === current}>{source.slice(left, right)}</mark>);
-        cursor = right;
-      }
-      hits.push(source.slice(cursor, to));
+      const marks = matches.length ? {starts: matches, length: query.length, current, lineStart: offsets[index]} : undefined;
       return <React.Fragment key={index}>
         {gap > 0 && <tr aria-hidden="true" className="virtual-file-spacer" data-gap-start={gapStart} style={{height: gap * rowHeight}}><td colSpan={2}/></tr>}
         <tr data-line={index + 1} aria-rowindex={index + 1} className={index + 1 === targetLine ? 'file-line-target' : undefined}>
-          <td className="code-no" style={gutter}>{index + 1}</td><td className="code-line">{text ? hits : '\u00a0'}</td>
+          <td className="code-no" style={gutter}>{index + 1}</td><td className="code-line">{text ? lineContent(text, tokensOf(index), marks) : '\u00a0'}</td>
         </tr>
       </React.Fragment>;
     })}{previous < lines.length && <tr aria-hidden="true" className="virtual-file-spacer" data-gap-start={previous + 1} style={{height: (lines.length - previous) * rowHeight}}><td colSpan={2}/></tr>}</tbody></table>

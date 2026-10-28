@@ -612,6 +612,9 @@ function homeInstances({fs,directory,home,codexHome,cli,node,env,track,validator
       accountId=typeof tokenAccount==='string'&&tokenAccount?tokenAccount:apiKey??'codex-sign-in';
     }
     const bindingId=createHash('sha256').update(JSON.stringify([route.modelProvider,route.profile??'',codexHome,cli,route.fingerprint,accountId])).digest('hex');
+    // #777: router models the catalog does not list get an entry in the launcher's merged copy, so Codex offers them the
+    // native apply_patch tool and their edits show as inline diffs.
+    if(catalogPath&&route.kind==='gateway'){const listed=new Set(list?.map(entry=>entry&&typeof entry==='object'?(entry as {slug?:unknown}).slug:undefined));const extra=models.filter(model=>!listed.has(model.id)).map(model=>({id:model.id,name:model.name,...(model.contextWindow?{contextWindow:model.contextWindow}:{})}));if(extra.length)childEnv.MUSTER_CODEX_EXTRA_MODELS=JSON.stringify(extra);}
     const claudeLane=route.kind==='gateway'&&route.baseUrl?claudeLaneFor(route,env,fetcher,bindingId,home):undefined;
     return {info:{...base,models,...(excluded.length?{excludedModels:excluded}:{}),...(incremental?{incrementalInput:true}:{}),...listingInfo,available:true,status:'ready',bindingId,detail:`Runs through the Codex CLI with ${catalogSource}. ${mcpDetail(mcp)} Upstream access is checked only when you run.`},command,env:childEnv,sessionsRoot,...(listingKey?{listingKey}:{}),...(claudeLane?{claudeLane}:{})};
   });

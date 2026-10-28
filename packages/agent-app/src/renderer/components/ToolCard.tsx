@@ -16,6 +16,7 @@ import {invoke} from '../bridge';
 import {computerAction,type ComputerAction} from '../../shared/computer-use';
 import {toolImageUrl,toolShots,type PipSource,type ToolShot} from '../computerUse';
 import {itemPatches} from '../patchModel';
+import {LaterEditsContext,laterEditsKey} from '../turnFileChanges';
 import {FileChangeView} from './FileDiffEditor';
 import {DiffStat} from './DiffStat';
 import {MessageBody} from './MessageBody';
@@ -139,11 +140,16 @@ export function ImageThumbs({item,paths}:{item:TimelineItem;paths:readonly strin
 /** An edit row opened: each changed file as the inline diff editor (the whole file when it can be read). */
 function EditDiffs({item}:{item:TimelineItem}) {
   const patches=itemPatches(item.data);
+  const history=React.useContext(LaterEditsContext);
   if(!patches.length)return null;
-  return <div className="tool-edit-diffs">{patches.map((patch,index)=><div key={patch.path+index} className="tool-edit-diff">
-    {patches.length>1&&<div className="tool-edit-diff-path" title={patch.path}><span>{patch.path}</span><DiffStat adds={patch.adds} dels={patch.dels}/></div>}
-    <FileChangeView path={patch.movePath??patch.path} kind={patch.kind} target={fileTarget(item,patch.movePath??patch.path)} patches={patch.patch?[{diff:patch.patch,adds:patch.adds,dels:patch.dels}]:[]} truncated={patch.truncated}/>
-  </div>)}</div>;
+  return <div className="tool-edit-diffs">{patches.map((patch,index)=>{
+    // The file as it is now: under its later name when the chat renamed it after this edit.
+    const later=history.get(laterEditsKey(item.id,patch.path)),now=later?.path??patch.movePath??patch.path;
+    return <div key={patch.path+index} className="tool-edit-diff">
+      {patches.length>1&&<div className="tool-edit-diff-path" title={patch.path}><span>{patch.path}</span><DiffStat adds={patch.adds} dels={patch.dels}/></div>}
+      <FileChangeView path={patch.movePath??patch.path} kind={patch.kind} target={fileTarget(item,now)} edit={{chatId:item.chatId,itemId:item.id,readPath:now}} later={later?.patches} patches={patch.patch?[{diff:patch.patch,adds:patch.adds,dels:patch.dels}]:[]} truncated={patch.truncated}/>
+    </div>;
+  })}</div>;
 }
 
 /** ExitPlanMode / native plan text: the Plan card already shows the whole plan, so the tool row carries a

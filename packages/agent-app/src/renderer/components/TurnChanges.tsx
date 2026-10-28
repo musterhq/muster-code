@@ -2,7 +2,7 @@ import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {ExternalLink,Check,Undo2,Eye,Loader2,AlertCircle,RotateCw} from 'lucide-react';
 import type {TimelineItem} from '../../shared/protocol';
 import {FileChangeView,useFileReview} from './FileDiffEditor';
-import {collectFileChanges,latestTurnItems,mergeReviewFiles,type FileChangeEntry} from '../turnFileChanges';
+import {collectFileChanges,laterEdits,laterEditsKey,latestTurnItems,mergeReviewFiles,type FileChangeEntry,type LaterEdits} from '../turnFileChanges';
 import {GeneratedChanges,formatCount} from './DiffStat';
 import {splitChangeTotals} from '../changeCounts';
 import {uniqueFileLabels} from './toolPresentation';
@@ -51,6 +51,8 @@ export function TurnChanges({items,inline=true,folder}:{items:TimelineItem[];inl
  // Files Git saw change since the turn started join the provider's fileChange items: a model that edits through shell commands reports none.
  const gitFiles=useLatestTurnFiles(chatId,folder?.id,chatStatus);
  const timelineEntries=useMemo(()=>collectTurnChanges(items),[items]);
+ // TurnChanges renders beside the timeline, not inside it: the same whole-chat history for each edit's later patches.
+ const history=useMemo(()=>laterEdits(items),[items]);
  const entries=useMemo(()=>mergeReviewFiles(timelineEntries,gitFiles?.files,relative),[timelineEntries,gitFiles,folderPath]);
  // F15: root and apps/api package.json must not both read "package.json".
  const labels=useMemo(()=>uniqueFileLabels(entries.map(entry=>entry.path)),[entries]);
@@ -136,16 +138,21 @@ export function TurnChanges({items,inline=true,folder}:{items:TimelineItem[];inl
    {notice&&<p className="turn-change-notice" role="alert">{notice}</p>}
    {inline&&selected&&<section className="turn-change-preview" aria-label={`Inline diff for ${selected.path}`}>
     <header><span title={selected.path}>{selected.path}</span>{fileActions(selected)}{reviewable(selected.path)&&<button type="button" className="turn-change-open" title="Open in the Diff tab" onClick={()=>openReview(selected.path)}><ExternalLink size={11} aria-hidden="true"/>Diff tab</button>}{(()=>{const state=selected.status==='completed'||selected.status==='running'?stateOf(selected):undefined;return <span className={`turn-change-state is-${state??'unavailable'}`}>{state?STATE_LABEL[state]:'Unavailable'}</span>;})()}</header>
-    <PreviewFile entry={selected} chatId={chatId??''} folder={folder} relative={relative(selected.path)} onReview={reviewable(selected.path)?()=>openReview(selected.path):undefined}/>
+    <PreviewFile entry={selected} chatId={chatId??''} folder={folder} relative={relative} history={history} onReview={reviewable(selected.path)?()=>openReview(selected.path):undefined}/>
    </section>}
   </div>}
  </div>;
 }
 
 /** The popover's file: the same whole-file editor as the transcript (live review with Keep/Undo when there is one). */
-function PreviewFile({entry,chatId,folder,relative,onReview}:{entry:Entry;chatId:string;folder?:{id:string};relative?:string;onReview?:()=>void}) {
- const target=folder&&relative!==undefined?{folderId:folder.id,path:relative}:undefined;
+function PreviewFile({entry,chatId,folder,relative,history,onReview}:{entry:Entry;chatId:string;folder?:{id:string};relative:(path:string)=>string|undefined;/** `laterEdits` of the whole chat. */history:ReadonlyMap<string,LaterEdits>;onReview?:()=>void}) {
+ const last=entry.patches.at(-1),after=last?history.get(laterEditsKey(last.itemId,last.path)):undefined;
+ // The file under its name now, so a rename after the turn's last edit still reads the right file.
+ const own=entry.movePath??entry.path,now=after?.path??own;
+ const path=relative(own),nowPath=relative(now);
+ const target=folder&&path!==undefined?{folderId:folder.id,path}:undefined;
+ const here=folder&&nowPath!==undefined&&now!==own?{folderId:folder.id,path:nowPath}:target;
  const reviewed=useFileReview({chatId,folderId:target?.folderId,path:target?.path,enabled:!!target,running:entry.status==='running'});
  const patches=useMemo(()=>entry.patches.map(patch=>({diff:patch.diff,adds:patch.adds,dels:patch.dels})),[entry]);
- return <FileChangeView path={entry.movePath??entry.path} kind={entry.kind} target={target} patches={patches} reviewed={reviewed} truncated={entry.patches.some(patch=>patch.truncated)} onReview={onReview} maxHeight={null}/>;
+ return <FileChangeView path={own} kind={entry.kind} target={here} edit={last?{chatId,itemId:last.itemId,readPath:now}:undefined} later={after?.patches} patches={patches} reviewed={reviewed} truncated={entry.patches.some(patch=>patch.truncated)} onReview={onReview} maxHeight={null}/>;
 }

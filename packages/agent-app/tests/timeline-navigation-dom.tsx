@@ -144,7 +144,9 @@ assert.deepEqual(rowsFor().map(row=>row.querySelector('.tool-row-text')?.textCon
 assert.deepEqual(rowsFor().map(row=>row.querySelector('.diff-stat')?.getAttribute('aria-label')),['2 lines added, 1 removed','2 lines added, 0 removed'],'"- one" in a new markdown file is an addition');
 assert.equal(document.querySelector('.turn-files-pill'),null,'the latest turn\'s pill floats above the composer instead');
 const appRows=()=>rowsFor()[0].querySelectorAll('.fde .inline-diff-row');
-assert.deepEqual(reads.sort(),['notes.md','src/app.ts'],'the latest turn opens with each file read from disk');
+// A file the turn created is whole in its own patch (MUS-SPEC-08-781G): it is not read, so only the updated file is.
+assert.deepEqual(reads.sort(),['src/app.ts'],'the latest turn opens an updated file from disk and a created file from its own patch');
+assert.equal(rowsFor()[1].querySelectorAll('.fde .inline-diff-row.is-add').length,2,'the created file shows every line, all added');
 assert.equal(appRows().length,41,'every line of the 40-line file renders, plus the removed line in place');
 assert.equal(rowsFor()[0].querySelectorAll('.fde .inline-diff-row.is-add').length,2);
 const removed=rowsFor()[0].querySelector('.fde .inline-diff-row.is-del');

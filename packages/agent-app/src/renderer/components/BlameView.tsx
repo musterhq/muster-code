@@ -5,7 +5,8 @@ import {openHistoryTab} from '../store';
 import {useStoreSelector} from '../useStore';
 import {compactAge, exactTime} from '../relativeTime';
 import {codeLanguageFromPath} from './codeLanguage';
-import {useHighlightedTokens} from './HighlightedCode';
+import {useHighlightedTokens, useWindowTokens} from './HighlightedCode';
+import {lineContent} from './codeLineContent';
 import {ResourceState} from './ResourceState';
 import {cleanIpcError, gitErrorMessage} from './resourceErrors';
 import {VirtualRowTable} from './VirtualRowTable';
@@ -25,9 +26,12 @@ export function BlameView({folderId, path, source, targetLine}: {folderId: strin
     return () => { live = false; };
   }, [folderId, path, source]);
   const lines = useMemo(() => source === '' ? [] : source.split('\n'), [source]);
-  // A large file is drawn as plain windowed rows (like the plain source view), so it is not syntax coloured.
+  // A small file is coloured whole. A large one is windowed, so only the mounted rows (plus a margin) are coloured.
   const virtual = source.length >= LARGE_FILE_THRESHOLD;
-  const highlighted = useHighlightedTokens(virtual ? '' : source, codeLanguageFromPath(path), 0);
+  const language = codeLanguageFromPath(path);
+  const highlighted = useHighlightedTokens(virtual ? '' : source, language, 0);
+  const [mounted, setMounted] = useState({first: 0, last: 0});
+  const tokensOf = useWindowTokens(virtual ? source : '', language, mounted.first, mounted.last);
   const indexes = useMemo(() => virtual ? Array.from(lines, (_, index) => index) : [], [virtual, lines]);
   const now = useMemo(() => Date.now(), [blame]);
   const current = blame?.path === path ? blame : undefined;
@@ -47,9 +51,7 @@ export function BlameView({folderId, path, source, targetLine}: {folderId: strin
           <span className="blame-age">{compactAge(commit.authoredAt, now)}</span>
         </button>)}</td>
       <td className="code-no" style={virtual ? {width: 'var(--virtual-gutter)'} : undefined}>{index + 1}</td>
-      <td className="code-line">{((!virtual && highlighted?.sourceLines[index] === line ? highlighted.rows[index] : undefined) ?? [{content: line}]).map((token, tokenIndex) => token.color
-        ? <span key={tokenIndex} style={{color: token.color}}>{token.content}</span>
-        : <React.Fragment key={tokenIndex}>{token.content}</React.Fragment>)}</td>
+      <td className="code-line">{lineContent(line, virtual ? tokensOf(index) : highlighted?.sourceLines[index] === line ? highlighted.rows[index] : undefined)}</td>
     </tr>;
   };
   return <div className="blame-view" data-testid="blame-view">
@@ -58,7 +60,8 @@ export function BlameView({folderId, path, source, targetLine}: {folderId: strin
     {virtual
       ? <VirtualRowTable<number> className="code-table source-code-table blame-table" items={indexes} columns={3} gutterDigits={String(lines.length).length} extraWidth={260}
           itemKey={index => index} render={renderLine} textOf={index => lines[index]} lineOf={index => index + 1}
-          reveal={targetLine && targetLine <= lines.length ? {index: targetLine - 1, token: `line:${targetLine}`} : undefined}/>
+          reveal={targetLine && targetLine <= lines.length ? {index: targetLine - 1, token: `line:${targetLine}`} : undefined}
+          onWindow={(first, last) => setMounted(prior => prior.first === first && prior.last === last ? prior : {first, last})}/>
       : <table className="code-table source-code-table blame-table"><tbody>{lines.map((_, index) => <React.Fragment key={index}>{renderLine(index)}</React.Fragment>)}</tbody></table>}
   </div>;
 }

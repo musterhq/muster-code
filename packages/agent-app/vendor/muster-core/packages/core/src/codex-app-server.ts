@@ -50,6 +50,8 @@ export interface CodexAppServerRunInput {
   readonly keepAlive?: boolean;
   /** Start a fresh provider thread while retaining the already-warm app-server process. */
   readonly rotateThread?: boolean;
+  /** Muster: continue in a copy of this saved thread (`thread/fork`): the full history under a new thread and session. */
+  readonly forkFromThreadId?: string;
   readonly onDelta?: (text: string) => void;
   /** Provider-visible reasoning: summary deltas, or the reasoning text a provider chose to expose when it sends no
    *  summary. Hidden reasoning never reaches the app-server, so it is never forwarded. */
@@ -407,7 +409,13 @@ export async function runCodexAppServer(input: CodexAppServerRunInput): Promise<
       lease.session.client.setObserver({ ...(input.onEvent ? { onEvent: input.onEvent } : {}), ...(input.onRequest ? { onRequest: input.onRequest } : {}) });
     }
     input.onThreadReady?.(lease.session.threadId);
-    if (input.rotateThread && lease.cacheState === "hit") {
+    if (input.forkFromThreadId && lease.cacheState === "hit") {
+      const threadOpenStartedAt = Date.now();
+      lease.session.threadId = await lease.session.client.forkThread(input.forkFromThreadId, input.cwd);
+      effectiveThreadOpenMs += Date.now() - threadOpenStartedAt;
+      effectiveThreadOpenState = "started";
+      input.onThreadReady?.(lease.session.threadId);
+    } else if (input.rotateThread && lease.cacheState === "hit") {
       const threadOpenStartedAt = Date.now();
       lease.session.threadId = await lease.session.client.startThread(input.cwd);
       effectiveThreadOpenMs += Date.now() - threadOpenStartedAt;
@@ -641,7 +649,9 @@ async function createSession(
     await client.initialize();
     const startupMs = Date.now() - startupStartedAt;
     const threadOpenStartedAt = Date.now();
-    const threadId = input.input.threadId
+    const threadId = input.input.forkFromThreadId
+      ? await client.forkThread(input.input.forkFromThreadId, input.input.cwd)
+      : input.input.threadId
       ? await client.resumeThread(input.input.threadId, input.input.cwd)
       : await client.startThread(input.input.cwd);
     const threadOpenMs = Date.now() - threadOpenStartedAt;
@@ -939,6 +949,24 @@ class CodexAppServerClient {
     const threadId = stringValue(thread.id) ?? stringValue(thread.sessionId) ?? stringValue(result.sessionId) ?? stringValue(result.threadId);
     if (!threadId) throw new Error("codex app-server thread/start returned no thread id");
     return threadId;
+  }
+
+  /** `thread/fork`: a new thread holding the saved thread's full history. */
+  async forkThread(threadId: string, cwd: string): Promise<string> {
+    const result = await this.request("thread/fork", {
+      threadId,
+      cwd,
+      excludeTurns: true,
+      approvalPolicy: "never",
+      sandbox: this.sandbox,
+      ...(this.developerInstructions ? { developerInstructions: this.developerInstructions } : {}),
+      ...(this.threadConfig ? { config: this.threadConfig } : {}),
+    }, 30_000);
+    const thread = asRecord(result.thread);
+    const forkedId = stringValue(thread.id) ?? stringValue(result.threadId);
+    if (!forkedId) throw new Error("codex app-server thread/fork returned no thread id");
+    if (forkedId === threadId) throw new Error("codex app-server thread/fork returned the original thread");
+    return forkedId;
   }
 
   async resumeThread(threadId: string, cwd: string): Promise<string> {

@@ -7,6 +7,14 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 Chats on your own router keep their sub-agents and tools when you use a connector, Codex and computer use no longer need another app or npm on the Mac, your Claude Code skills and commands show up in Muster, and long chats compact at the right time.
 
+- Code stays coloured everywhere: files up to the 512 KB read limit now keep their syntax colours in the file view, the edited-file and blame views, and while searching with Find (matches are marked on top of the colours, with the current one stood out). Large files colour only the rows on screen, a block at a time off the main thread, so they open as fast as before. `.cjs` files and more file types (such as `.json5`, `.ini`, `.less`, `.zig`, `.hs`, `.astro`) are coloured too (#778).
+- Restore inline file diffs and changed-file totals when reopening saved shell-edit chats, retain streamed patch evidence in live turns, and show complete scratch files with their edits in place using the existing editor and Git colours (#781).
+- Every edit's inline diff opens as the whole file again, with its changes in place: earlier edits of a file the chat edited again, edits made outside the chat's folder (for example in a worktree) and files the chat created no longer fall back to a few lines around the change (#781).
+
+- Router models (planner, advisor and the other router agents) edit files with the native patch tool again, so their changes show as inline diffs and in the files-changed pill (#777).
+- A patch a model runs through the shell shows as an inline diff and counts in the files-changed pill, instead of appearing only as a command (#779).
+- A reply whose stream stops partway is saved with its full text, and a streamed piece without an id no longer hides later replies (#762).
+- When a router refuses to continue a conversation, the chat carries on in a copy of it with the full history, instead of restarting from a short summary that lost the context (#767).
 - Unanswered permissions now decline, Stop ends tool process trees, and startup leaves reused process IDs alone (#407).
 - Chat titles keep their punctuation, New chat returns to your last project folder, matching chat names get a small suffix, and one-turn chats no longer show a stray minimap dash (#403).
 - A temporary provider failure after work has started now gets up to two automatic continuations on the same thread, with a countdown and a notice for each failure. A turn that ends after a tool call without replying gets one chance to finish, and live plan updates show their checklist (#386).
