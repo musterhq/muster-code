@@ -260,19 +260,7 @@ function findMatches(text: string, query: string): number[] {
   return positions;
 }
 
-/** Plain-text render with matches marked; used only while Find is active so the highlighter never has to know about it. */
-function FindHighlightedText({text, query, matches, current}: {text: string; query: string; matches: number[]; current: number}): React.ReactElement {
-  if (!matches.length) return <pre className="file-find-plain">{text}</pre>;
-  const parts: React.ReactNode[] = [];
-  let cursor = 0;
-  matches.forEach((position, index) => {
-    if (position > cursor) parts.push(text.slice(cursor, position));
-    parts.push(<mark key={index} data-current={index === current} ref={index === current ? (el => el?.scrollIntoView({block: 'center'})) : undefined}>{text.slice(position, position + query.length)}</mark>);
-    cursor = position + query.length;
-  });
-  if (cursor < text.length) parts.push(text.slice(cursor));
-  return <pre className="file-find-plain">{parts}</pre>;
-}
+
 
 function FindBar({find, matchCount}: {find: FileFind; matchCount: number}): React.ReactElement {
   const go = (delta: 1 | -1) => find.setIndex(i => {
@@ -452,7 +440,7 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
           <span>{staleReason}</span>
           <button type="button" onClick={reload}>Refresh</button>
         </div>}
-        {blaming && tab.folderId && tab.path ? <BlameView folderId={tab.folderId} path={tab.path} source={text} targetLine={tab.line}/> : turnReview && turnReview.model.state !== 'clean' ? <InlineFileSource source={text} path={tab.path??''} review={turnReview} targetLine={tab.line}/> : latestEdit && !turnReview ? <InlineFileSource source={text} path={tab.path??''} patch={latestEdit.patch} status={latestEdit.status} unavailableReason={latestEdit.unavailableReason} targetLine={tab.line}/> : text.length >= LARGE_FILE_THRESHOLD ? <VirtualFileSource source={text} targetLine={tab.line}/> : <HighlightedSourceTable source={text} language={codeLanguageFromPath(tab.path ?? '')} targetLine={tab.line}/ >}
+        {blaming && tab.folderId && tab.path ? <BlameView folderId={tab.folderId} path={tab.path} source={text} targetLine={tab.line}/> : turnReview && turnReview.model.state !== 'clean' ? <InlineFileSource source={text} path={tab.path??''} review={turnReview} targetLine={tab.line}/> : latestEdit && !turnReview ? <InlineFileSource source={text} path={tab.path??''} patch={latestEdit.patch} status={latestEdit.status} unavailableReason={latestEdit.unavailableReason} targetLine={tab.line}/> : text.length >= LARGE_FILE_THRESHOLD ? <VirtualFileSource source={text} language={codeLanguageFromPath(tab.path ?? '')} targetLine={tab.line}/> : <HighlightedSourceTable source={text} language={codeLanguageFromPath(tab.path ?? '')} targetLine={tab.line}/>}
         {!text && <p className="file-empty">This file is empty.</p>}
       </div>}
       {richText && kind !== 'html' && !previewAllowed && !truncated && <div className="pane-truncated">Showing source: Document preview is limited to 65,536 characters.</div>}
@@ -490,8 +478,8 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
     <div className="file-content-layout">
     <div className="file-document" onScrollCapture={event=>{onScrollCapture(event);if(picked)setPicked(undefined);}} onMouseDown={event=>{if(!(event.target as Element).closest?.('.file-selection-context'))setPicked(undefined);}} onMouseUp={()=>{const selection=window.getSelection();if(selection && code.current?.contains(selection.anchorNode)){const virtual=code.current.querySelector<HTMLElement>('.virtual-file-source');setQuote(((virtual&&virtualFileSelection(virtual,text))?.text??virtualRowSelection(code.current.querySelector('.virtual-row-source'))?.text??selection.toString()).slice(0,2000));}if(!preview)setPicked(selectedLines(code.current?.querySelector('.code-scroll') ?? null, text));}}>
       {editing && tab.folderId && tab.path ? <FileEditor folderId={tab.folderId} path={tab.path} tabId={tab.id} onSaved={() => {}}/>
-        : find.open && text.length >= LARGE_FILE_THRESHOLD ? <div className="code-scroll" role="region" aria-label={`Source of ${tab.path}`} tabIndex={0}><VirtualFileSource source={text} query={find.query} matches={fileFindMatches} current={find.index}/></div>
-        : find.open ? <FindHighlightedText text={text} query={find.query} matches={fileFindMatches} current={find.index}/>
+        : find.open && text.length >= LARGE_FILE_THRESHOLD ? <div className="code-scroll" role="region" aria-label={`Source of ${tab.path}`} tabIndex={0}><VirtualFileSource source={text} language={codeLanguageFromPath(tab.path ?? '')} query={find.query} matches={fileFindMatches} current={find.index}/></div>
+        : find.open ? <div className="code-scroll" role="region" aria-label={`Source of ${tab.path}`} tabIndex={0}><HighlightedSourceTable source={text} language={codeLanguageFromPath(tab.path ?? '')} find={{query: find.query, matches: fileFindMatches, current: find.index}}/></div>
         : content}
       {picked && <button type="button" className="file-selection-context" style={{position:'fixed',top:Math.min(picked.rect.bottom+6,window.innerHeight-32),left:Math.max(8,Math.min(picked.rect.left,window.innerWidth-140))}} onClick={()=>{const range=picked.start===picked.end?`L${picked.start}`:`L${picked.start}-${picked.end}`;void addReviewContext({label:`${tab.path}:${range}`,text:picked.text,source:{kind:'file',folderId:tab.folderId,path:tab.path,startLine:picked.start,endLine:picked.end}}).then(result=>setSelectionStatus(result==='added'?'Added to chat':result==='copied'?'Copied selection — paste it into the chat':'Could not add the selection'));setPicked(undefined);window.getSelection()?.removeAllRanges();}}><MessageSquarePlus size={12} aria-hidden="true"/>Add to chat</button>}
     </div>

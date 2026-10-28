@@ -47,6 +47,12 @@ Boundaries:
 | [MUS-SPEC-07-33H](07-files-editor-and-search.md#mus-spec-07-33h) | The Find bar opens on Cmd+F in an open file, marks every match and counts them. | [`Cmd+F opens Find in the open file and typing shows the match count with every match marked`](../../../packages/agent-app/tests/file-find-dom.tsx) |
 | [MUS-SPEC-07-33I](07-files-editor-and-search.md#mus-spec-07-33i) | Stepping through matches with wrap on and off, and a new search starting again at the first match. | [`Next, Previous and Enter step through the matches and wrap around, and Wrap around off stops at the ends`](../../../packages/agent-app/tests/file-find-dom.tsx) |
 | [MUS-SPEC-07-33J](07-files-editor-and-search.md#mus-spec-07-33j) | Closing Find with Escape or the Close find button restores the source view and keeps the last search. | [`Escape and Close find close the Find bar and show the file as source again`](../../../packages/agent-app/tests/file-find-dom.tsx) |
+| [MUS-SPEC-07-778A](07-files-editor-and-search.md#mus-spec-07-778a) | A TypeScript source of 200 KB and one of 512 KB both come back with colour tokens, one row per line. | [`a source past 96 KB, up to the 512 KB read limit, is coloured`](../../../packages/agent-app/tests/syntax-highlight-778.test.ts) |
+| [MUS-SPEC-07-778B](07-files-editor-and-search.md#mus-spec-07-778b) | A big source is coloured block by block, only as far as asked, with the same tokens as one pass; unknown or closed documents are reported missing. | [`a big source is tokenised in blocks that match one pass, and blocks come only as far as they are asked for`](../../../packages/agent-app/tests/syntax-highlight-778.test.ts) |
+| [MUS-SPEC-07-778C](07-files-editor-and-search.md#mus-spec-07-778c) | Find marks the matches inside the coloured rows, marks the current one, and no plain-text view replaces the source. | [`Find keeps the colours and marks the matches, in a windowed file and in a small one`](../../../packages/agent-app/tests/syntax-highlight-778-dom.tsx) |
+| [MUS-SPEC-07-778D](07-files-editor-and-search.md#mus-spec-07-778d) | .cjs, .mjs, .cts and .mts map to JavaScript or TypeScript and every known extension maps to a loadable grammar. | [`.cjs, .mjs, .cts and .mts highlight as JavaScript or TypeScript and every known extension maps to a grammar`](../../../packages/agent-app/tests/syntax-highlight-778.test.ts) |
+| [MUS-SPEC-07-778E](07-files-editor-and-search.md#mus-spec-07-778e) | A 340 KB file is coloured on the mounted rows, near the top and far down, within the windowed budget, and is never sent whole. | [`a file past the old 96 KB colour limit is coloured, and only the mounted rows are coloured and asked for`](../../../packages/agent-app/tests/syntax-highlight-778-dom.tsx) |
+| [MUS-SPEC-07-778F](07-files-editor-and-search.md#mus-spec-07-778f) | The edited-file and blame views of a 340 KB file are windowed and coloured, and an added line keeps its marker. | [`the edited-file and blame views of a file over 256 KB colour their mounted rows`](../../../packages/agent-app/tests/syntax-highlight-778-dom.tsx) |
 
 ### Large files
 
@@ -91,7 +97,73 @@ Boundaries:
 - Expected result: Both views draw fewer than 2,000 elements and fewer than 100 rows, and the table still reports every row. Added and removed lines carry their + and − markers. Undo and Keep act on the first change, and the count drops by one. Previous change brings a far-off change into view. Copy returns the exact source text, including rows that are not on the page. Find counts the match in the whole file. In Blame, the first line names its commit and scrolling to line 9,001 shows the second commit's note. The view for a latest-edit patch of a 2 MB file is bounded too, and a small file keeps the full table.
 - Test: `packages/agent-app/tests/large-edited-file-dom.tsx::a 2 MB edited file and its blame view stay windowed`
 - Environment: linkedom DOM suite in `scripts/test-renderer.mjs` (`large-edited-file-dom`).
-- Known gaps: linkedom does no layout, so row heights and scroll positions are simulated (21px rows, 600px viewport); the 50ms long-task limit is not measured here (run the headless Chrome check for that). Large files in these two views are not syntax coloured.
+- Known gaps: linkedom does no layout, so row heights and scroll positions are simulated (21px rows, 600px viewport); the 50ms long-task limit is not measured here (run the headless Chrome check for that). Syntax colour in these two views is covered by MUS-SPEC-07-778F.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-07-778a"></a>
+#### MUS-SPEC-07-778A: A source up to the 512 KB read limit is syntax coloured
+
+- Precondition: A TypeScript source of 200 KB, and another of 512 KB, both with block comments that run across many lines.
+- Action: Ask the highlight worker to colour each source in one request.
+- Expected result: Both come back with colour tokens and one row of tokens per line. A source over 96 KB used to come back with no tokens at all.
+- Test: `packages/agent-app/tests/syntax-highlight-778.test.ts::a source past 96 KB, up to the 512 KB read limit, is coloured`
+- Environment: Node, with the real worker module and the real grammars; no browser.
+- Known gaps: The worker's message loop is driven directly, not through a browser Worker.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-07-778b"></a>
+#### MUS-SPEC-07-778B: A big source is coloured in blocks, only as far as a view asks, with the same colours
+
+- Precondition: A TypeScript source of about 400 KB opened as a document in the worker.
+- Action: Ask for the first block, then for blocks 40 and 41, then ask for a document the worker does not hold, then close the document and ask again.
+- Expected result: The first request returns only the first block. The later window needs no source sent again. Every line has exactly the tokens one pass over the whole source gives, including lines after a block comment that began in an earlier block. An unknown or closed document is reported as missing.
+- Test: `packages/agent-app/tests/syntax-highlight-778.test.ts::a big source is tokenised in blocks that match one pass, and blocks come only as far as they are asked for`
+- Environment: Node, with the real worker module and the real grammars; no browser.
+- Known gaps: Timing is not asserted here; the long-task budget is measured by the headless Chrome check in MUS-SPEC-07-630A.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-07-778c"></a>
+#### MUS-SPEC-07-778C: Find keeps the syntax colours and marks the matches
+
+- Precondition: A 340 KB source file that opens windowed, and a small source file holding "beta" three times, each open in a file tab with Find.
+- Action: Press Cmd+F in the large file and search for a word on a line far below the first screen; then do the same in the small file.
+- Expected result: The matches are marked inside the source rows, the current match is marked as current, and the rows keep their colours. No plain-text view replaces the source. The large file stays under 100 rows. The text is unchanged.
+- Test: `packages/agent-app/tests/syntax-highlight-778-dom.tsx::Find keeps the colours and marks the matches, in a windowed file and in a small one`
+- Environment: linkedom DOM suite in `scripts/test-renderer.mjs` (`syntax-highlight-778-dom`), with a stand-in highlight worker.
+- Known gaps: The real colours come from the worker (MUS-SPEC-07-778A and MUS-SPEC-07-778B); here the stand-in gives every token one colour. The look of the marks is checked by the screenshots in the pull request, not by the test.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-07-778d"></a>
+#### MUS-SPEC-07-778D: .cjs, .mjs, .cts and .mts files are coloured, and every known extension maps to a grammar
+
+- Precondition: The file extensions the app already treats as code or markup in its file icons and Markdown file links.
+- Action: Resolve the language of a file with each extension, and compare it with the grammars the worker can load.
+- Expected result: `.cjs` and `.mjs` are JavaScript, `.cts` and `.mts` are TypeScript, and every listed extension maps to a language other than plain text that the worker has a grammar for.
+- Test: `packages/agent-app/tests/syntax-highlight-778.test.ts::.cjs, .mjs, .cts and .mts highlight as JavaScript or TypeScript and every known extension maps to a grammar`
+- Environment: Node; no browser.
+- Known gaps: The list of extensions is the one in the test; a new extension has to be added to it.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-07-778e"></a>
+#### MUS-SPEC-07-778E: A file over the old 96 KB limit is coloured in the file view, only on the rows that are mounted
+
+- Precondition: A 340 KB source file, which opens as windowed rows.
+- Action: Open the file, then scroll far down.
+- Expected result: The mounted rows are coloured, and so are the rows far down once scrolled to. The page stays under 100 rows and 1,500 elements. The file is never sent to the worker as one source to colour in one pass; its source is sent once and later windows ask only for the blocks under them.
+- Test: `packages/agent-app/tests/syntax-highlight-778-dom.tsx::a file past the old 96 KB colour limit is coloured, and only the mounted rows are coloured and asked for`
+- Environment: linkedom DOM suite in `scripts/test-renderer.mjs` (`syntax-highlight-778-dom`), with a stand-in highlight worker; the real-Chrome check in MUS-SPEC-07-630A covers timing.
+- Known gaps: linkedom does no layout, so row heights and scroll are simulated.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-07-778f"></a>
+#### MUS-SPEC-07-778F: The edited-file and blame views of a file over 256 KB are coloured
+
+- Precondition: A 340 KB source file with a latest-edit patch, and the same file in the blame view.
+- Action: Open each view.
+- Expected result: Both views are windowed (under 100 rows, under 2,000 elements) and their mounted rows are coloured. An added line keeps its marker and its colour.
+- Test: `packages/agent-app/tests/syntax-highlight-778-dom.tsx::the edited-file and blame views of a file over 256 KB colour their mounted rows`
+- Environment: linkedom DOM suite in `scripts/test-renderer.mjs` (`syntax-highlight-778-dom`), with a stand-in highlight worker.
+- Known gaps: The cumulative review (turn baseline) view uses the same rows and window as the latest-edit view but is not opened here.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-07-276a"></a>

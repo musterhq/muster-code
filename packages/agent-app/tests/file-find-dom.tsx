@@ -40,7 +40,7 @@ const bar=()=>document.querySelector('.file-find-bar');
 const count=()=>document.querySelector('.file-find-count')?.textContent??null;
 const button=(label:string)=>document.querySelector<HTMLButtonElement>(`.file-find-bar button[aria-label="${label}"]`)!;
 const input=()=>document.querySelector('.file-find-bar input')! as HTMLInputElement&Record<string,{onChange:(event:unknown)=>void}>;
-const current=()=>{const marks=[...document.querySelectorAll('.file-find-plain mark')];return {total:marks.length,at:marks.findIndex(mark=>mark.getAttribute('data-current')==='true')};};
+const current=()=>{const marks=[...document.querySelectorAll('.source-code-table mark')];return {total:marks.length,at:marks.findIndex(mark=>mark.getAttribute('data-current')==='true')};};
 const type=async(value:string)=>{const element=input();Object.defineProperty(element,'value',{configurable:true,get:()=>value,set:()=>{}});const props=element[Object.keys(element).find(name=>name.startsWith('__reactProps'))!];props.onChange({target:element,currentTarget:element});await delay(40);};
 const key=async(name:string,extra:Record<string,unknown>={})=>{const event=new window.Event('keydown',{bubbles:true,cancelable:true});Object.assign(event,{key:name,metaKey:false,ctrlKey:false,shiftKey:false,...extra});input().dispatchEvent(event);await delay(40);};
 const click=async(element:HTMLElement)=>{element.click();await delay(40);};
@@ -86,10 +86,10 @@ await check('Next, Previous and Enter step through the matches and wrap around, 
 
 // Spec: MUS-SPEC-07-33J (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-33j)
 await check('Escape and Close find close the Find bar and show the file as source again',async()=>{
-  assert.ok(document.querySelector('.file-find-plain'),'while Find is open the text is shown with its matches marked');
+  assert.ok(document.querySelector('.source-code-table mark'),'while Find is open the matches are marked in the source table');
   await key('Escape');
   assert.equal(bar(),null,'Escape closes Find');
-  assert.equal(document.querySelector('.file-find-plain'),null,'the marks are gone');
+  assert.equal(document.querySelectorAll('mark').length,0,'the marks are gone');
   assert.ok(document.querySelector('.code-scroll'),'the file is back to its highlighted source');
   const event=new window.Event('keydown',{bubbles:true,cancelable:true});Object.assign(event,{key:'f',ctrlKey:true,metaKey:false});
   window.dispatchEvent(event);await delay(60);
