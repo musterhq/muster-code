@@ -105,7 +105,7 @@ const LANGUAGE_LOADERS: Record<string, () => Promise<{ default: unknown }>> = {
 
 function resolveLanguage(value: string): string | undefined {
   const requested = normalizeCodeLanguage(value);
-  return LANGUAGE_LOADERS[requested] ? requested : undefined;
+  return Object.hasOwn(LANGUAGE_LOADERS, requested) ? requested : undefined;
 }
 
 function highlighter() {
@@ -125,7 +125,8 @@ async function loadLanguage(instance: HighlighterCore, language: string): Promis
       releaseHighlighter(true); // Only this request is in flight.
       instance = await highlighter();
     }
-    const loader = LANGUAGE_LOADERS[language];
+    // Own properties only: a language named `constructor` or `toString` must not reach a prototype method.
+    const loader = Object.hasOwn(LANGUAGE_LOADERS, language) ? LANGUAGE_LOADERS[language] : undefined;
     if (!loader) throw new Error(`Unsupported syntax language: ${language}`);
     loading = loader().then(module => instance.loadLanguage(...(module.default as Parameters<typeof instance.loadLanguage>))).then(() => undefined);
     languageLoads.set(language, loading);

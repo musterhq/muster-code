@@ -44,6 +44,8 @@ test('a source past 96 KB, up to the 512 KB read limit, is coloured', async () =
     assert.ok(coloured(reply.rows), `a ${source.length}-byte source comes back coloured`);
     assert.equal((reply.rows as Row[][]).length, source.split('\n').length, 'one row of tokens per line');
   }
+  // A language name that is a prototype method (`constructor`, `toString`) is not a grammar and must come back plain.
+  for (const language of ['constructor', 'toString', '__proto__']) assert.equal((await ask({source: 'x', language})).rows, null, `${language} is not a language`);
 });
 
 // Spec: MUS-SPEC-07-778B (docs/spec/clauses/07-files-editor-and-search.md#mus-spec-07-778b)
