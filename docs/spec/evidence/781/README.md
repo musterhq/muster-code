@@ -53,6 +53,4 @@ Missing, oversized or ambiguously matching source is explicitly identified as an
 incomplete recorded patch, never fabricated as a whole file. No new Keep/Undo
 actions are offered without an existing review baseline.
 
-Independent review is pending. The local installed application was not replaced
-or restarted. Only the explicitly requested old pinned chat was inspected to
-confirm the original appearance. Release/build verification remains a CI gate.
+Reviewed and merged in #782 (d5f7f26e) with all CI checks green. The screenshots show a demo chat whose first turn edits one file three times and a second turn edits it again, with the FIRST edit expanded: before, only the changed lines with the note "changed after this edit"; after, the whole file with the change in place in the original Git colours. The installed application was not touched.
