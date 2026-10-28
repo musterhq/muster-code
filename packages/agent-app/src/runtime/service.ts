@@ -2273,14 +2273,21 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           const kind=change.kind&&typeof change.kind==='object'?change.kind:{};
           for(const name of [change.path,change.movePath,change.move_path,kind.move_path,kind.movePath])if(typeof name==='string')recorded.add(resolve(cwd,name));
         }
-        // The row's own file, or the name a later edit row of this chat renamed it to.
-        const renamed=store.timeline(chat.id).some(row=>row.kind==='tool'&&row.data?.type==='fileChange'&&Array.isArray(row.data.changes)&&row.data.changes.some(change=>{
-          if(!change||typeof change!=='object')return false;
-          const rowCwd=typeof row.data?.cwd==='string'?row.data.cwd:root,kind=change.kind&&typeof change.kind==='object'?change.kind:{};
-          const from=typeof change.path==='string'?resolve(rowCwd,change.path):'',to=[change.movePath,change.move_path,kind.move_path,kind.movePath].find(name=>typeof name==='string');
-          return typeof to==='string'&&resolve(rowCwd,to)===path&&recorded.has(from);
-        }));
-        if(!recorded.has(path)&&!renamed)throw new Error('The requested file was not recorded as edited.');
+        // The row's own file, or the name later edit rows of this chat renamed it to (a rename chain a→b→c→d is followed to the end).
+        const renames:[string,string][]=[];
+        for(const row of store.timeline(chat.id)){
+          if(row.kind!=='tool'||row.data?.type!=='fileChange'||!['running','completed'].includes(row.status??'')||!Array.isArray(row.data.changes))continue;
+          const rowCwd=typeof row.data.cwd==='string'?row.data.cwd:root;
+          for(const change of row.data.changes){
+            if(!change||typeof change!=='object'||typeof change.path!=='string')continue;
+            const kind=change.kind&&typeof change.kind==='object'?change.kind:{};
+            const to=[change.movePath,change.move_path,kind.move_path,kind.movePath].find(name=>typeof name==='string');
+            if(typeof to==='string')renames.push([resolve(rowCwd,change.path),resolve(rowCwd,to)]);
+          }
+        }
+        const names=new Set(recorded);
+        for(let grew=true;grew;){grew=false;for(const [from,to] of renames)if(names.has(from)&&!names.has(to)){names.add(to);grew=true;}}
+        if(!names.has(path))throw new Error('The requested file was not recorded as edited.');
         // Read from the file's own folder and never through a link at the file: a link swapped in for it (even to a
         // file next to it) is refused at open, and resolveInside refuses folders that lead elsewhere.
         const folder=await fs.realpath(dirname(path));

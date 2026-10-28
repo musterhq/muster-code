@@ -37,6 +37,10 @@ Boundaries:
 | [MUS-SPEC-08-781G](08-git-changes-and-review.md#mus-spec-08-781g) | A file created in one turn and edited in a later one still opens whole in the first turn. | [`a file created in one turn and edited in a later one still opens whole in the first turn`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
 | [MUS-SPEC-08-781H](08-git-changes-and-review.md#mus-spec-08-781h) | Every edit of a file the chat edited again opens whole, also across a rename. | [`every edit of a file the chat edited again later opens as the whole file, also across a rename`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
 | [MUS-SPEC-08-781I](08-git-changes-and-review.md#mus-spec-08-781i) | An edit outside the chat's folder opens whole; a file next to it and a swapped-in link are refused. | [`a chat in one folder opens the whole file it edited in a worktree outside that folder, and nothing else there`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
+| [MUS-SPEC-08-781J](08-git-changes-and-review.md#mus-spec-08-781j) | In a scratch chat's real transcript, a file edited three times in one turn and again in the next opens every edit as the whole file, with the Edited row and the files-changed pill kept outside the folded work. | [`a scratch chat: every edit of a file edited again in a later turn opens as the whole file in the transcript`](../../../packages/agent-app/tests/inline-diff-transcript-781-dom.tsx) |
+| [MUS-SPEC-08-781K](08-git-changes-and-review.md#mus-spec-08-781k) | A file renamed twice after an edit is read under its final name; unnamed files and other chats stay refused. | [`the first edit of a file renamed twice afterwards reads the file under its final name, and only that`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
+| [MUS-SPEC-08-781L](08-git-changes-and-review.md#mus-spec-08-781l) | The same real-transcript workflow in a chat with a folder reads through the folder and opens every edit whole. | [`a folder chat: every edit of a file edited again in a later turn opens as the whole file in the transcript`](../../../packages/agent-app/tests/inline-diff-transcript-781-dom.tsx) |
+| [MUS-SPEC-08-781M](08-git-changes-and-review.md#mus-spec-08-781m) | The Changes popover opens the latest turn's file as the whole file, using the same later-edit history as the transcript. | [`the Changes popover opens the latest turn’s file as the whole file too`](../../../packages/agent-app/tests/inline-diff-transcript-781-dom.tsx) |
 
 ### Refs, dash-named files and submodules
 
@@ -82,6 +86,50 @@ Boundaries:
 - Test: `packages/agent-app/tests/full-inline-diff-781.test.ts::a chat in one folder opens the whole file it edited in a worktree outside that folder, and nothing else there`
 - Environment: Node test runner; the agent service with a fake provider; temp folders.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781j"></a>
+#### MUS-SPEC-08-781J: The real transcript opens every edit of a re-edited file as the whole file (scratch chat)
+
+- Precondition: A scratch chat's first turn edits one file three times (one stored shell `apply_patch` row recovered by the store, two native file changes) and a second turn edits it again; "Inline diff length" is the default Full file.
+- Action: Render the chat's timeline. Open the turn-1 Edited row, then unfold the turn's work and open the first of its three edits.
+- Expected result: Turn 1 keeps an "Edited" row outside the folded work and ends with the "N files changed" pill. Both opened editors list every line of the file in order (no "unchanged lines" gaps, no snippet note), with removed and added lines in place as `.is-del` / `.is-add` rows, as the file stood after that edit (the second turn's change undone). The file is read through the chat-scoped read.
+- Test: `packages/agent-app/tests/inline-diff-transcript-781-dom.tsx::a scratch chat: every edit of a file edited again in a later turn opens as the whole file in the transcript`
+- Environment: Production Timeline, TurnFileChanges, ToolCard and FileChangeView with rows read back through the real store; bridge faked; linkedom.
+- Known gaps: Colours and layout need the browser screenshots; a file changed outside the chat afterwards still shows the recorded patch, labelled.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781k"></a>
+#### MUS-SPEC-08-781K: A file renamed more than once after an edit is still readable by that edit, and only that file
+
+- Precondition: A chat edits `a.ts`, then renames it to `b.ts`, then renames that to `c.ts`; `c.ts` and an unrelated `other.ts` exist.
+- Action: Ask for `c.ts` through the first edit row, for `other.ts`, and for `c.ts` from another chat.
+- Expected result: The renderer's later-edit lookup names `c.ts` for the first edit, and the chat-scoped read returns `c.ts`. `other.ts` and the other chat's request are refused.
+- Test: `packages/agent-app/tests/full-inline-diff-781.test.ts::the first edit of a file renamed twice afterwards reads the file under its final name, and only that`
+- Environment: Node test runner; the agent service with a fake provider; temp folders.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781l"></a>
+#### MUS-SPEC-08-781L: The real transcript opens every edit of a re-edited file as the whole file (folder chat)
+
+- Precondition: The 781J chat, attached to a folder that contains the file.
+- Action: Render the timeline and open the turn-1 Edited row and the first edit.
+- Expected result: As 781J, read through the folder read of the file's folder-relative name.
+- Test: `packages/agent-app/tests/inline-diff-transcript-781-dom.tsx::a folder chat: every edit of a file edited again in a later turn opens as the whole file in the transcript`
+- Environment: As 781J.
+- Known gaps: As 781J.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781m"></a>
+#### MUS-SPEC-08-781M: The Changes popover opens the latest turn's file whole
+
+- Precondition: The 781J chat, latest turn edited the file after an earlier turn did.
+- Action: Open the "N files changed" popover and read its inline preview.
+- Expected result: The preview lists every line of the file with the latest change in place; no gaps and no snippet note.
+- Test: `packages/agent-app/tests/inline-diff-transcript-781-dom.tsx::the Changes popover opens the latest turn’s file as the whole file too`
+- Environment: As 781J, with the production TurnChanges component.
+- Known gaps: As 781J. The popover shows the latest turn, which has no later edits, so this case guards the popover's later-edit wiring and whole-file preview rather than failing on the previous code.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-08-781d"></a>

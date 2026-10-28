@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - Restore inline file diffs and changed-file totals when reopening saved shell-edit chats, retain streamed patch evidence in live turns, and show complete scratch files with their edits in place using the existing editor and Git colours (#781).
+- Every edit's inline diff opens as the whole file again, with its changes in place: earlier edits of a file the chat edited again, edits made outside the chat's folder (for example in a worktree) and files the chat created no longer fall back to a few lines around the change (#781).
 
 - Router models (planner, advisor and the other router agents) edit files with the native patch tool again, so their changes show as inline diffs and in the files-changed pill (#777).
 - A patch a model runs through the shell shows as an inline diff and counts in the files-changed pill, instead of appearing only as a command (#779).

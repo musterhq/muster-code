@@ -90,6 +90,37 @@ test('a chat in one folder opens the whole file it edited in a worktree outside 
   await assert.rejects(service.invoke('files.chatEdit', {chatId: chat.id, itemId, path: entry.path}), 'a link swapped in for the edited file is refused, even to a file next to it');
 });
 
+// Spec: MUS-SPEC-08-781K (docs/spec/clauses/08-git-changes-and-review.md#mus-spec-08-781k)
+// Protected: complete inline diff for a file renamed more than once after an edit.
+test('the first edit of a file renamed twice afterwards reads the file under its final name, and only that', async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'muster-781-chain-'));
+  const cwd = join(dataDir, 'work');
+  await mkdir(cwd, {recursive: true});
+  const body = (from: string, to: string | undefined, line: string) => `*** Begin Patch\n*** Update File: ${from}\n${to ? `*** Move to: ${to}\n` : ''}@@\n-const v = ${line};\n+const v = ${Number(line) + 1};\n*** End Patch`;
+  const steps = [body('a.ts', undefined, '1'), body('a.ts', 'b.ts', '2'), body('b.ts', 'c.ts', '3')];
+  const provider: ProviderAdapter = {info: () => [{id: 'hybrow', name: 'Fixture', available: true, identityMasked: 'Hidden', models: []}],
+    async run(input) {
+      for (const [i, patch] of steps.entries()) input.onEvent('item/completed', {item: {id: `edit-${i}`, type: 'commandExecution', cwd, command: `apply_patch <<'PATCH'\n${patch}\nPATCH`, exitCode: 0, aggregatedOutput: 'Success. Updated the following files:\nM x\n'}});
+      return {status: 'completed', finalMessage: 'done'};
+    }, async stop() { return true; }, dispose() {}};
+  const service = createAgentService({dataDir, provider, onEvent() {}});
+  t.after(async () => { await service.dispose(); await rm(dataDir, {recursive: true, force: true}); });
+  const chat = await service.invoke('chat.create', {});
+  await service.invoke('chat.send', {id: chat.id, text: 'bump it', requestId: randomUUID()});
+  for (let i = 0; i < 200; i++) { if ((await service.invoke('app.snapshot', undefined)).chats.find(c => c.id === chat.id)?.status === 'completed') break; await delay(5); }
+  await writeFile(join(cwd, 'c.ts'), 'const v = 4;\n');
+  await writeFile(join(cwd, 'other.ts'), 'private');
+  const rows = (await service.invoke('chat.timeline', {id: chat.id})).items.filter(row => row.data?.type === 'fileChange');
+  assert.equal(rows.length, 3);
+  const now = laterEdits(rows).get(laterEditsKey(rows[0]!.id, join(cwd, 'a.ts')));
+  assert.equal(now?.path, join(cwd, 'c.ts'), 'the renderer follows both renames from the first edit');
+  const read = await service.invoke('files.chatEdit', {chatId: chat.id, itemId: rows[0]!.id, path: now!.path});
+  assert.equal(read.text, 'const v = 4;\n', 'the service follows the same chain to the file as it is now');
+  await assert.rejects(service.invoke('files.chatEdit', {chatId: chat.id, itemId: rows[0]!.id, path: join(cwd, 'other.ts')}), 'a file no edit named stays unreadable');
+  const other = await service.invoke('chat.create', {});
+  await assert.rejects(service.invoke('files.chatEdit', {chatId: other.id, itemId: rows[0]!.id, path: now!.path}), 'another chat cannot use this chat’s edit');
+});
+
 // Spec: MUS-SPEC-08-781E (docs/spec/clauses/08-git-changes-and-review.md#mus-spec-08-781e)
 // Protected: complete inline diff; never invent omitted or ambiguous source.
 test('contextual shell hunks retain all source and refuse stale or ambiguous placement',()=>{
