@@ -140,11 +140,10 @@ test('missing LibreOffice throws a distinguishable error the renderer can fall b
   }
 });
 
-test('standard soffice installs are probed before the Codex runtime copy', () => {
-  const codex = CANDIDATE_PATHS.findIndex(path => path.includes('codex-runtimes'));
-  const app = CANDIDATE_PATHS.indexOf('/Applications/LibreOffice.app/Contents/MacOS/soffice');
-  assert.ok(app >= 0 && codex > app);
-  assert.equal(codex, CANDIDATE_PATHS.length - 1, 'the bundled Codex runtime is the last resort');
+test('standard soffice installs come first and no other app\'s runtime folder is probed', () => {
+  assert.ok(CANDIDATE_PATHS.length > 0);
+  if (process.platform === 'darwin') assert.equal(CANDIDATE_PATHS[0], '/Applications/LibreOffice.app/Contents/MacOS/soffice');
+  assert.ok(CANDIDATE_PATHS.every(path => !path.includes('/.cache/')), 'nothing from a cache folder');
 });
 
 test('an executable candidate is returned in order', async () => {

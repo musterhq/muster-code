@@ -346,7 +346,8 @@ test('Settings commands report the runtime and download it in the background', a
   assert.deepEqual(none.pinned && {version: none.pinned.version, bytes: none.pinned.bytes}, {version: '26.2.6', bytes: payload.length});
   const started = await h['office.runtime.download']!({}) as {phase: string};
   assert.equal(started.phase, 'downloading', 'returns at once; progress arrives as events');
-  for (let i = 0; i < 500 && (await h['office.runtime.status']!({}) as {source: string}).source !== 'downloaded'; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  const lastChange = () => (events.filter(event => event.type === 'officeRuntimeChanged').at(-1) as {status: {phase: string; source: string}} | undefined)?.status;
+  for (let i = 0; i < 1000 && !(lastChange()?.source === 'downloaded' && lastChange()?.phase === 'idle'); i++) await new Promise(resolve => setTimeout(resolve, 5));
   const done = await h['office.runtime.status']!({}) as {source: string; version: string; bytes: number; path: string; phase: string};
   assert.equal(done.source, 'downloaded');
   assert.equal(done.version, '26.2.6');
