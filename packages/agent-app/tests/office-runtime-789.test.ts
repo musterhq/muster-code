@@ -155,7 +155,7 @@ test('a download that fails its checksum is rejected and deleted', async t => {
   const payload = Buffer.alloc(30_000, 1), tampered = Buffer.from(payload); tampered[100] = 2;
   const net = server(tampered);
   let extracted = 0;
-  const runtime = new OfficeRuntime({root, build: buildFor(payload), fetch: net.fetch, extract: async (...args) => { extracted++; await fakeExtract(...args); }, candidates: [], env: {}});
+  const runtime = new OfficeRuntime({root, build: buildFor(payload), fetch: net.fetch, extract: async (archive, into) => { extracted++; await fakeExtract(archive, into); }, candidates: [], env: {}});
   await assert.rejects(runtime.ensure(), /checksum/i);
   assert.equal(extracted, 0, 'nothing from a bad download is unpacked');
   assert.deepEqual(await fs.readdir(join(root, 'downloads')).catch(() => []), [], 'the bad file is deleted');
@@ -338,7 +338,7 @@ test('Settings commands report the runtime and download it in the background', a
   const payload = Buffer.alloc(40_000, 8), net = server(payload);
   officeRuntimeTesting.options = {build: buildFor(payload), fetch: net.fetch, extract: fakeExtract, candidates: [], env: {}};
   const events: AgentEvent[] = [];
-  const domain = DOMAIN_FACTORIES.office({dataDir, db: () => db, hooks: createDomainHooks().hooks, emit: event => events.push(event)} as unknown as DomainContext);
+  const domain = DOMAIN_FACTORIES.office({dataDir, db: () => db, hooks: createDomainHooks().hooks, emit: (event: AgentEvent) => events.push(event)} as unknown as DomainContext);
   t.after(() => domain.dispose?.());
   const h = domain.handlers as Record<string, (input: unknown) => unknown>;
   const none = await h['office.runtime.status']!({}) as {source: string; pinned: {version: string; bytes: number} | null};

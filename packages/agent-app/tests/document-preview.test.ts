@@ -15,7 +15,7 @@ import { test, before, after } from 'node:test';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readDocument, findSoffice, CANDIDATE_PATHS, LIBREOFFICE_MISSING } from '../src/runtime/document-preview.ts';
+import { readDocument, findSoffice, CANDIDATE_PATHS, LIBREOFFICE_MISSING, SOFFICE_SANDBOX } from '../src/runtime/document-preview.ts';
 
 let root: string;
 let outside: string;
@@ -156,4 +156,10 @@ test('an executable candidate is returned in order', async () => {
   } finally {
     if (saved !== undefined) process.env['MUSTER_SOFFICE_PATH'] = saved;
   }
+});
+
+test('the macOS sandbox denies IP traffic but leaves soffice its local socket', () => {
+  // `deny network*` made soffice exit 0 without writing a PDF.
+  assert.ok(!SOFFICE_SANDBOX.includes('network*'));
+  assert.match(SOFFICE_SANDBOX, /deny network-outbound \(remote ip\)/);
 });

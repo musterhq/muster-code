@@ -116,12 +116,15 @@ export async function writeRegistryDisableMacros(profileDir: string): Promise<vo
 
 // --- Child process with timeout + tree kill ---
 
+export const SOFFICE_SANDBOX = '(version 1)(allow default)(deny network-outbound (remote ip))(deny network-inbound (local ip))';
+
 /** Runs soffice with no shell; the whole process tree is killed on timeout or when `signal` aborts. */
 export function runSoffice(soffice: string, args: string[], timeoutMs = CONVERT_TIMEOUT_MS, signal?: AbortSignal): Promise<void> {
   const { promise, resolve, reject } = Promise.withResolvers<void>();
-  // Deny network to document parsers on the supported macOS host. This is not a full filesystem sandbox.
+  // Deny network to document parsers on the supported macOS host. This is not a full filesystem sandbox. Only IP traffic
+  // is denied: `network*` also blocks the local socket soffice talks to itself over, and it then exits 0 with no PDF (#789).
   const isolated=process.platform==='darwin';
-  const child = spawn(isolated?'/usr/bin/sandbox-exec':soffice, isolated?['-p','(version 1)(allow default)(deny network*)',soffice,...args]:args, { stdio: 'ignore', detached: process.platform !== 'win32' });
+  const child = spawn(isolated?'/usr/bin/sandbox-exec':soffice, isolated?['-p',SOFFICE_SANDBOX,soffice,...args]:args, { stdio: 'ignore', detached: process.platform !== 'win32' });
   const kill = () => {
     try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* already dead */ }
     try { child.kill('SIGKILL'); } catch { /* already dead */ }

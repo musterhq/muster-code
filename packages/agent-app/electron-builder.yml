@@ -34,6 +34,7 @@ files:
 asar: true
 asarUnpack:
   - node_modules/node-pty/**
+  - node_modules/@napi-rs/**
   - dist/runtime/resources/**
   - dist/runtime/muster-write{,.exe}
   - dist/main/browser-mcp.cjs
