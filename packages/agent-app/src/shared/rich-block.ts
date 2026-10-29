@@ -134,8 +134,30 @@ export function parseChartSource(source: string): ChartParse {
   const columns: string[] = [];
   for (const row of rows.slice(0, 200)) for (const key of Object.keys(row)) if (!columns.includes(key)) columns.push(key);
   // The shorthand's title is a string; Vega-Lite wants the same. The view's own size is decided by the container.
-  const { $schema: _schema, ...rest } = spec;
+  const { $schema: _schema, ...rest } = keepDataOrder(spec);
   return {ok: true, plan: {spec: rest, title: chartTitle(spec), rows, columns}};
+}
+
+const CATEGORY_CHANNELS = ['x', 'y', 'color', 'xOffset', 'yOffset', 'row', 'column'];
+/** Vega-Lite sorts nominal and ordinal axes alphabetically by default, so Jan..Jun came out Apr, Feb, Jan. An agent
+ *  writes its rows in the order it means; keep that order unless the spec asks for a sort. Recurses into layers and
+ *  concatenated views; quantitative and temporal channels are left alone. */
+function keepDataOrder(spec: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {...spec};
+  if (isRecord(spec.encoding)) {
+    const encoding: Record<string, unknown> = {...spec.encoding};
+    for (const channel of CATEGORY_CHANNELS) {
+      const def = encoding[channel];
+      if (isRecord(def) && (def.type === 'nominal' || def.type === 'ordinal') && def.sort === undefined) encoding[channel] = {...def, sort: null};
+    }
+    out.encoding = encoding;
+  }
+  for (const key of ['layer', 'hconcat', 'vconcat', 'concat']) {
+    const parts = spec[key];
+    if (Array.isArray(parts)) out[key] = parts.map(part => isRecord(part) ? keepDataOrder(part) : part);
+  }
+  if (isRecord(spec.spec)) out.spec = keepDataOrder(spec.spec);
+  return out;
 }
 
 /** RFC 4180 CSV. A text cell that a spreadsheet would run as a formula gets a leading apostrophe. */

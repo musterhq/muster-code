@@ -164,3 +164,22 @@ test('agent guidance names the exact fence formats and stays small', () => {
   assert.match(RICH_CONTENT_GUIDANCE, /Close every fence/);
   assert.ok(RICH_CONTENT_GUIDANCE.length < 1500, `guidance ships with every run (${RICH_CONTENT_GUIDANCE.length} characters)`);
 });
+
+// Spec: MUS-SPEC-21-361F (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-361f)
+test('charts: categories keep the data order unless the spec sorts them (months are not alphabetised)', () => {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'].map((month, at) => ({month, sales: 100 + at}));
+  const plain = parseChartSource(JSON.stringify({data: {values: months}, mark: 'bar', encoding: {x: {field: 'month', type: 'nominal'}, y: {field: 'sales', type: 'quantitative'}}}));
+  assert.ok(plain.ok);
+  assert.equal((plain.plan.spec.encoding as {x: {sort: unknown}}).x.sort, null);
+  const layered = parseChartSource(JSON.stringify({data: {values: months}, layer: [{mark: 'bar', encoding: {x: {field: 'month', type: 'ordinal'}, y: {field: 'sales', type: 'quantitative'}}}]}));
+  assert.ok(layered.ok);
+  assert.equal((layered.plan.spec.layer as Array<{encoding: {x: {sort: unknown}}}>)[0]!.encoding.x.sort, null);
+  // An explicit sort, and quantitative or temporal channels, are left as written.
+  const sorted = parseChartSource(JSON.stringify({data: {values: months}, mark: 'bar', encoding: {x: {field: 'month', type: 'nominal', sort: '-y'}, y: {field: 'sales', type: 'quantitative'}}}));
+  assert.ok(sorted.ok);
+  assert.equal((sorted.plan.spec.encoding as {x: {sort: unknown}}).x.sort, '-y');
+  assert.equal('sort' in ((sorted.plan.spec.encoding as {y: object}).y), false);
+  const short = parseChartSource(JSON.stringify({type: 'bar', data: months, x: 'month', y: 'sales'}));
+  assert.ok(short.ok);
+  assert.equal((short.plan.spec.encoding as {x: {sort?: unknown}}).x.sort ?? null, null);
+});
