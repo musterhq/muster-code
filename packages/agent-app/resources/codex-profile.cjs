@@ -126,6 +126,34 @@ function providerOverrides(provider, catalog) {
   return ['model_provider=' + JSON.stringify(provider), ...(catalog ? ['model_catalog_json=' + JSON.stringify(catalog)] : [])];
 }
 
+/**
+ * The catalog override with every extra model the router serves added, when the user's catalog lacks it. Codex gives a
+ * model with no catalog entry fallback metadata and no native apply_patch tool, so router models edited files through
+ * the shell and showed no inline diff. Each added entry copies the catalog's first model, with the router's id and name,
+ * direct tools and the freeform apply_patch tool. The user's catalog file is never changed; the merged copy goes to `dir`.
+ */
+function withRouterModels(overrides, extras, dir) {
+  const at = overrides.findIndex(value => value.startsWith('model_catalog_json='));
+  if (at < 0 || !Array.isArray(extras) || !extras.length) return overrides;
+  let path, catalog;
+  try { path = JSON.parse(overrides[at].slice('model_catalog_json='.length)); catalog = JSON.parse(readFileSync(path, 'utf8')); } catch { return overrides; }
+  const models = Array.isArray(catalog && catalog.models) ? catalog.models : undefined;
+  const template = models && models.find(model => model && typeof model === 'object' && typeof model.slug === 'string');
+  if (!template) return overrides;
+  const known = new Set(models.map(model => model && model.slug));
+  const added = extras.filter(extra => extra && typeof extra.id === 'string' && extra.id && !known.has(extra.id)).map(extra => {
+    const entry = { ...template, slug: extra.id, display_name: typeof extra.name === 'string' && extra.name ? extra.name : extra.id, description: '', visibility: 'list', apply_patch_tool_type: 'freeform' };
+    delete entry.tool_mode;
+    if (typeof extra.contextWindow === 'number' && extra.contextWindow > 0) { entry.context_window = extra.contextWindow; entry.max_context_window = extra.contextWindow; }
+    return entry;
+  });
+  if (!added.length) return overrides;
+  const text = JSON.stringify({ ...catalog, models: [...models, ...added] });
+  const merged = join(dir, require('node:crypto').createHash('sha256').update(text).digest('hex').slice(0, 16) + '.json');
+  try { require('node:fs').mkdirSync(dir, { recursive: true }); if (!existsSync(merged)) require('node:fs').writeFileSync(merged, text, { mode: 0o600 }); } catch { return overrides; }
+  return overrides.map((value, index) => index === at ? 'model_catalog_json=' + JSON.stringify(merged) : value);
+}
+
 /** The JS entry an npm `.cmd` shim runs, e.g. `"%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*`. */
 function npmShimEntry(shim) {
   try {
@@ -183,8 +211,10 @@ function route(selection) {
   return { provider: selection.provider, overrides, ids: catalogIds(selection.catalog) };
 }
 
-function launch(selection, args) {
-  const { provider, overrides, ids } = route(selection);
+async function launch(selection, args) {
+  const chosen = route(selection), { provider, ids } = chosen;
+  let extras; try { extras = JSON.parse(process.env.MUSTER_CODEX_EXTRA_MODELS || '[]'); } catch { extras = []; }
+  const overrides = withRouterModels(chosen.overrides, extras, join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'muster-catalogs'));
   if (args[0] !== 'app-server') throw new Error('Muster provider launcher only supports app-server.');
   let selectedModel;
   for (let i = 0; i < args.length - 1; i++) if (args[i] === '-c' && args[i + 1].startsWith('model=')) {
@@ -195,7 +225,34 @@ function launch(selection, args) {
   if (!command || !existsSync(command)) throw new Error('Codex CLI not found. Install it, or set MUSTER_CODEX_COMMAND to its executable.');
   // Profile identity overrides win over CLI input, while MCP and approval
   // configuration remains intact. No --profile flag: app-server rejects it.
-  const codexArgs = [...args, ...overrides.flatMap(value => ['-c', value])];
+  // Keep the original provider identity, authentication and thread ownership. A
+  // local bridge only fills missing usage counters in Responses gateway streams.
+  // Direct sign-in never goes through it.
+  let compatibility;
+  if (provider !== 'openai') {
+    let values = new Map();
+    try { values = parseToml(readFileSync(join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'config.toml'), 'utf8')).values; } catch { /* profiles can define the entire route */ }
+    for (const override of overrides) {
+      const at = override.indexOf('='); values.set(override.slice(0, at), override.slice(at + 1));
+    }
+    const table = `model_providers.${provider}.`;
+    const string = key => {
+      const value = values.get(table + key);
+      if (typeof value !== 'string') return undefined;
+      if (/^'[^']*'$/.test(value)) return value.slice(1, -1);
+      try { const parsed = JSON.parse(value); return typeof parsed === 'string' ? parsed : undefined; } catch { return undefined; }
+    };
+    let endpoint;
+    try { endpoint = new URL(string('base_url')); } catch { /* leave unsupported configurations with the client */ }
+    // A client-managed transport proxy must keep its original connection path.
+    // This bridge cannot transparently reproduce every proxy/TLS configuration.
+    const transportProxy = ['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy'].some(name => process.env[name]);
+    if (!transportProxy && string('wire_api') === 'responses' && endpoint && ['http:', 'https:'].includes(endpoint.protocol) && !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash) {
+      compatibility = await require('./responses-compat.cjs').startResponsesCompatibility(endpoint.href);
+    }
+  }
+  const codexArgs = [...args, ...overrides.flatMap(value => ['-c', value]),
+    ...(compatibility ? ['-c', `model_providers.${provider}.base_url=${JSON.stringify(compatibility.baseUrl)}`] : [])];
   // A JS entry (a resolved npm shim on Windows) runs through this Node; a native binary runs directly.
   const script = /\.(?:c|m)?js$/i.test(command);
   const child = spawn(script ? process.execPath : command, script ? [command, ...codexArgs] : codexArgs, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
@@ -241,9 +298,10 @@ function launch(selection, args) {
     }
     write(message);
   });
-  child.on('error', () => { process.stderr.write('Selected provider app-server failed to start.\n'); process.exitCode = 1; process.stdin.destroy(); });
+  child.on('error', () => { compatibility?.close(); process.stderr.write('Selected provider app-server failed to start.\n'); process.exitCode = 1; process.stdin.destroy(); });
   child.stdin.on('error', () => { process.stderr.write('Selected provider connection closed.\n'); child.kill(); });
   child.on('exit', code => {
+    compatibility?.close();
     if (code) {
       const catalog = catalogFailure(stderrTail);
       process.stderr.write((catalog ? catalog + '\n' : '') + 'Selected provider app-server exited; check the profile, catalog and CLI configuration.\n');
@@ -267,8 +325,8 @@ function selection(argv, env) {
   throw new Error('No Codex route selected. Set MUSTER_CODEX_PROFILE or MUSTER_CODEX_PROVIDER.');
 }
 
-module.exports = { profileOverrides, servesExecutor, providerOverrides, parseToml, codexCommand, modelMatches, catalogFailure };
+module.exports = { withRouterModels, profileOverrides, servesExecutor, providerOverrides, parseToml, codexCommand, modelMatches, catalogFailure };
 if (require.main === module) {
-  try { const chosen = selection(process.argv, process.env); launch(chosen.selection, chosen.args); }
+  try { const chosen = selection(process.argv, process.env); launch(chosen.selection, chosen.args).catch(error => { process.stderr.write(error.message + '\n'); process.exitCode = 1; }); }
   catch (error) { process.stderr.write(error.message + '\n'); process.exitCode = 1; }
 }

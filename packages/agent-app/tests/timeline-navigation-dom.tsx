@@ -57,7 +57,7 @@ assert.deepEqual(readingAnchor(),previousReading,'Back restores anchor plus offs
 (document.querySelector('[aria-label="Go to latest conversation activity"]') as HTMLButtonElement).click();await delay(30);
 assert.ok(timeline.scrollTop>0);
 await render([{...rows[0],id:'other',chatId:'two',text:'Second chat only'}],'two');
-assert.equal(document.querySelectorAll('.turn-tick').length,1);assert.match(document.querySelector('.turn-tick')?.getAttribute('aria-label')??'',/Second chat only/);
+assert.equal(document.querySelectorAll('.turn-tick').length,0,'a one-turn chat has no lone minimap dash');
 assert.equal(document.querySelector('[aria-label="Back to previous reading position"]')?.hasAttribute('disabled'),true);
 // All turns remain keyboard-reachable without rendering thousands of buttons.
 const many=summarizeTurns(Array.from({length:5000},(_,index)=>({...rows[0],id:'many'+index,text:'Prompt '+index})));
@@ -144,7 +144,9 @@ assert.deepEqual(rowsFor().map(row=>row.querySelector('.tool-row-text')?.textCon
 assert.deepEqual(rowsFor().map(row=>row.querySelector('.diff-stat')?.getAttribute('aria-label')),['2 lines added, 1 removed','2 lines added, 0 removed'],'"- one" in a new markdown file is an addition');
 assert.equal(document.querySelector('.turn-files-pill'),null,'the latest turn\'s pill floats above the composer instead');
 const appRows=()=>rowsFor()[0].querySelectorAll('.fde .inline-diff-row');
-assert.deepEqual(reads.sort(),['notes.md','src/app.ts'],'the latest turn opens with each file read from disk');
+// A file the turn created is whole in its own patch (MUS-SPEC-08-781G): it is not read, so only the updated file is.
+assert.deepEqual(reads.sort(),['src/app.ts'],'the latest turn opens an updated file from disk and a created file from its own patch');
+assert.equal(rowsFor()[1].querySelectorAll('.fde .inline-diff-row.is-add').length,2,'the created file shows every line, all added');
 assert.equal(appRows().length,41,'every line of the 40-line file renders, plus the removed line in place');
 assert.equal(rowsFor()[0].querySelectorAll('.fde .inline-diff-row.is-add').length,2);
 const removed=rowsFor()[0].querySelector('.fde .inline-diff-row.is-del');

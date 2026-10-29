@@ -5,12 +5,12 @@ import {EarlierOutput} from './EarlierOutput';
 import {Check,ChevronRight,CircleCheck,CircleDot,CircleHelp,CircleX,Copy,Eraser,FlaskConical,Globe,Hammer,MessageSquarePlus,PanelBottom,PanelRight,Pencil,Play,Plus,RefreshCw,Search,Square,SquareTerminal,Trash2,Wrench,X} from 'lucide-react';
 import {Collapsible as Disclosure} from '@base-ui/react/collapsible';
 import {invoke,subscribe} from '../bridge';
-import {useStore,useStoreSelector} from '../useStore';
+import {useStoreSlice,useStoreSelector} from '../useStore';
 import {openBrowserTab,openTab,selectChat,stopChat} from '../store';
 import {copyText} from '../clipboard';
 import {addComposerContext,type ContextChipSource} from '../composerContext';
 import {selectionWithin} from './ToolOutput';
-import {agentCommands,portURL,refreshListeningPorts,setTerminalDock,setTerminalPaneView,subscribeTerminalDock,subscribeTerminalPaneView,terminalDock,terminalPaneView,useListeningPorts,type AgentCommand,type TerminalPaneView} from '../processSummary';
+import {agentCommands,portURL,refreshListeningPorts,requestTerminal,setTerminalDock,setTerminalPaneView,subscribeTerminalDock,subscribeTerminalPaneView,subscribeTerminalRequests,terminalRequested,terminalDock,terminalPaneView,useListeningPorts,type AgentCommand,type TerminalPaneView} from '../processSummary';
 import {clearTerminal,disposeTerminal,openTerminalFind,reconcileTerminal,TerminalView,terminalText} from './TerminalView';
 import {useDisclosure} from './useDisclosure';
 import {TerminalAgentAccess} from './TerminalAgentAccess';
@@ -19,6 +19,7 @@ import type {FileRunAction} from '../../shared/domains/files-protocol';
 import './processes-tab.css';
 import './process-saved-actions.css';
 import { ResourceState } from './ResourceState';
+import {cleanIpcError} from './resourceErrors';
 import {Tip} from './Tooltip';
 
 const PURPOSES=[{id:'command',label:'Command',Icon:SquareTerminal},{id:'test',label:'Test',Icon:FlaskConical},{id:'build',label:'Build',Icon:Hammer},{id:'server',label:'Server',Icon:Globe},{id:'task',label:'Task',Icon:Wrench}] as const;
@@ -140,7 +141,7 @@ type OwnedCommands=ReturnType<typeof useOwnedCommands>;
 
 /** "Run a command": a non-interactive command with captured output (Full access only). */
 function CommandLauncher({chatId,active,commands}:{chatId:string;active:boolean;commands:OwnedCommands}) {
-  const app=useStore(),chat=app.snapshot?.chats.find(chat=>chat.id===chatId);
+  const app=useStoreSlice('snapshot','sending'),chat=app.snapshot?.chats.find(chat=>chat.id===chatId);
   const [command,setCommand]=useState(''),[label,setLabel]=useState(''),[purpose,setPurpose]=useState<ProcessPurpose>('command'),[starting,setStarting]=useState(false),[startError,setStartError]=useState('');
   const pending=useRef(false),request=useRef<{signature:string;id:string}|null>(null);
   const draft=useRef({command,label,purpose});draft.current={command,label,purpose};
@@ -179,7 +180,7 @@ function CommandLauncher({chatId,active,commands}:{chatId:string;active:boolean;
   </div>;
 }
 
-const message=(cause:unknown)=>cause instanceof Error?cause.message:String(cause);
+const message=(cause:unknown)=>cleanIpcError(cause)||'Something went wrong with the terminal. Try again.';
 function Owner({who}:{who:'user'|'agent'}) {
   return <span className={`terminal-owner is-${who}`} title={who==='agent'?'Started by the agent':'Started by you'}>{who==='agent'?'Agent':'You'}</span>;
 }
@@ -200,11 +201,12 @@ function PortChips({ports}:{ports:readonly ListeningPort[]}) {
  * otherwise opens the right-pane Terminal tab. */
 export function toggleTerminal(chatId:string,label:string):void {
   const dock=terminalDock();
-  if(dock.placement==='panel')setTerminalDock({open:!dock.open});else openTerminalTab(chatId,label,'terminals');
+  if(dock.placement==='panel'){if(!dock.open)requestTerminal(chatId);setTerminalDock({open:!dock.open});}else openTerminalTab(chatId,label,'terminals');
 }
 /** Open (or focus) the chat's Terminal resource, optionally revealing a kind of row. */
 export function openTerminalTab(chatId:string,label:string,view?:TerminalPaneView):void {
   void label; // one resource, one name: "Terminal"
+  if(!view||view==='terminals')requestTerminal(chatId);
   // Shells shown in the bottom panel open there rather than in a second right-pane copy.
   if(view==='terminals'&&terminalDock().placement==='panel'){setTerminalDock({open:true});return;}
   if(view)setTerminalPaneView(chatId,view);
@@ -215,8 +217,10 @@ const chosen=new Map<string,string>(),autoOpened=new Set<string>();
 /** Interactive PTYs for a conversation. Each emulator lives in a module registry,
  * so switching tabs or placements re-attaches it instead of replaying or restarting it. */
 function useTerminals(chatId:string,active:boolean,autoStart:boolean) {
+  const requested=useSyncExternalStore(subscribeTerminalRequests,()=>terminalRequested(chatId));
   const archived=useStoreSelector(state=>!!state.snapshot?.chats.find(chat=>chat.id===chatId)?.archived);
   const [terminals,setTerminals]=useState<TerminalInfo[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[creating,setCreating]=useState(false);
+  const [loadError,setLoadError]=useState(''),[attempt,setAttempt]=useState(0);
   const [selected,setSelected]=useState<string|undefined>(()=>chosen.get(chatId));
   const body=useRef<HTMLDivElement>(null),pending=useRef(false),alive=useRef(true);
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
@@ -224,29 +228,35 @@ function useTerminals(chatId:string,active:boolean,autoStart:boolean) {
   const create=async()=>{
     if(pending.current||archived)return;pending.current=true;setCreating(true);setError('');
     const box=body.current,cols=Math.max(20,Math.floor(((box?.clientWidth||640)-12)/7.25)),rows=Math.max(5,Math.floor(((box?.clientHeight||360)-8)/15));
-    try{const info=await invoke('terminal.create',{chatId,cols:Math.min(cols,1000),rows:Math.min(rows,500)});if(!alive.current)return;setTerminals(rows=>[...rows,info]);select(info.id);}
+    try{const info=await invoke('terminal.create',{chatId,cols:Math.min(cols,1000),rows:Math.min(rows,500)});if(!alive.current){void invoke('terminal.kill',{id:info.id}).catch(()=>{});return;}setTerminals(rows=>[...rows,info]);select(info.id);}
     catch(cause){if(alive.current)setError(message(cause));}
     finally{pending.current=false;if(alive.current)setCreating(false);}
   };
   useEffect(()=>{
     if(!active)return;
-    let disposed=false;setLoading(true);setError('');
+    let disposed=false,retries=0;let retryTimer:ReturnType<typeof setTimeout>|undefined;
+    setLoading(true);setLoadError('');setError('');
     const unsubscribe=subscribe(event=>{if(event.type==='terminalExit')setTerminals(rows=>rows.map(row=>row.id===event.id?{...row,status:'exited',exitCode:event.code}:row));});
     const load=()=>invoke('terminal.list',{chatId}).then(value=>{
       const list=Array.isArray(value)?value:[];
       if(disposed)return list;
-      setTerminals(list);for(const row of list)reconcileTerminal(row.id,row.end);return list;
+      setLoadError('');setTerminals(list);for(const row of list)reconcileTerminal(row.id,row.end);return list;
     });
-    void load().then(list=>{
+    const initialLoad=()=>{void load().then(list=>{
       if(disposed)return;setLoading(false);
       // Opening Terminal on a conversation with no terminal starts one, once per window.
-      if(autoStart&&!list.length&&!autoOpened.has(chatId)&&!archived){autoOpened.add(chatId);void create();}
-    },cause=>{if(!disposed){setError(message(cause));setLoading(false);}});
+      if(autoStart&&requested&&!list.length&&!autoOpened.has(chatId)&&!archived){autoOpened.add(chatId);void create();}
+    },cause=>{
+      if(disposed)return;
+      if(retries<2){retryTimer=setTimeout(initialLoad,250*2**retries++);return;}
+      setLoadError(cleanIpcError(cause));setLoading(false);
+    });};
+    initialLoad();
     // A hidden window receives no events; catch up any stream that moved on meanwhile.
     const returned=()=>{if(document.visibilityState!=='hidden')void load().catch(()=>{});};
     document.addEventListener('visibilitychange',returned);window.addEventListener('focus',returned);
-    return()=>{disposed=true;unsubscribe();document.removeEventListener('visibilitychange',returned);window.removeEventListener('focus',returned);};
-  },[chatId,active,autoStart]);
+    return()=>{disposed=true;clearTimeout(retryTimer);unsubscribe();document.removeEventListener('visibilitychange',returned);window.removeEventListener('focus',returned);};
+  },[chatId,active,autoStart,requested,attempt]);
   const current=terminals.find(row=>row.id===selected)??[...terminals].reverse().find(row=>row.status==='running')??terminals[terminals.length-1];
   const close=async(row:TerminalInfo)=>{
     setError('');
@@ -259,7 +269,7 @@ function useTerminals(chatId:string,active:boolean,autoStart:boolean) {
     }catch(cause){if(alive.current)setError(message(cause));}
   };
   const labelOf=(row:TerminalInfo)=>`${row.title} ${terminals.findIndex(item=>item.id===row.id)+1}`;
-  return {archived,terminals,loading,error,setError,creating,create,close,current,select,body,labelOf};
+  return {archived,terminals,loading,loadError,retry:()=>setAttempt(value=>value+1),error,setError,creating,create,close,current,select,body,labelOf};
 }
 type Shells=ReturnType<typeof useTerminals>;
 
@@ -279,11 +289,13 @@ function ShellBody({shells,active}:{shells:Shells;active:boolean}) {
   const {current,creating,archived,loading}=shells;
   return <>
     {current&&current.status!=='running'&&<p className="terminal-ended" role="status">{current.status==='ended'?'Terminal ended when Muster quit. Its last output is shown below; shells do not outlive the app.':`Process exited${current.exitCode!==null?` with code ${current.exitCode}`:''}.`} <button type="button" disabled={creating||archived} onClick={()=>void shells.create()}>Start a new terminal</button></p>}
+    {shells.loadError&&<ResourceState kind="error" compact message="Terminals could not be loaded." detail={shells.loadError} onRetry={shells.retry}/>}
     {shells.error&&<p className="process-error terminal-error" role="alert">{shells.error}</p>}
     <div className="terminal-body" ref={shells.body}>
       {current?<TerminalView key={current.id} id={current.id} readOnly={current.status!=='running'} visible={active}/>
         :creating?<p className="process-note terminal-empty" role="status">Starting terminal…</p>
         :loading?<ResourceState kind="loading" label="Loading terminals" rows={3}/>
+        :shells.loadError?null
         :<div className="processes-empty"><SquareTerminal size={24} aria-hidden="true"/><p>{archived?'Restore this conversation to open a terminal.':'No terminal is open.'}</p>{!archived&&<button type="button" className="terminal-start" onClick={()=>void shells.create()}><Plus size={12}/>New terminal</button>}</div>}
     </div>
   </>;
@@ -397,7 +409,7 @@ function DesktopProcessesTab({chatId,active=true}:{chatId:string;active?:boolean
   const agentPorts=ports.filter(port=>port.owner==='agent');
   const running=shells.terminals.filter(row=>row.status==='running').length+commands.sessions.filter(session=>isActiveProcess(session.status)).length+agent.filter(row=>row.running).length+agentPorts.length;
   const total=shells.terminals.length+commands.sessions.length+agent.length+agentPorts.length;
-  const newShell=()=>{if(inPane)void shells.create();else setTerminalDock({open:true});};
+  const newShell=()=>{if(inPane)void shells.create();else openTerminalTab(chatId,'Terminal','terminals');};
   return <section className="processes-tab terminal-pane" aria-label="Terminal">
     <header className="terminal-pane-head">
       <h2>Terminal</h2><span className="terminal-pane-count" role="status">{running} running{total>running?` · ${total-running} finished`:''}</span>
@@ -423,7 +435,7 @@ function DesktopProcessesTab({chatId,active=true}:{chatId:string;active?:boolean
     </div>
     <div className="terminal-pane-body">
       {inPane?<>{shells.current&&<div className="terminal-shell-tools" aria-label="Shell tools"><span className="terminal-shell-name">{shells.labelOf(shells.current)}</span><ShellTools chatId={chatId} shells={shells}/></div>}<ShellBody shells={shells} active={active}/></>
-        :<div className="processes-empty"><PanelBottom size={24} aria-hidden="true"/><p>Terminals are shown in the bottom panel under the conversation.</p><div className="terminal-placement-actions"><button type="button" className="terminal-start" onClick={()=>setTerminalDock({open:true})}><PanelBottom size={12}/>Show panel</button><button type="button" className="terminal-start" onClick={()=>setTerminalDock({placement:'pane',open:false})}><PanelRight size={12}/>Show here instead</button></div></div>}
+        :<div className="processes-empty"><PanelBottom size={24} aria-hidden="true"/><p>Terminals are shown in the bottom panel under the conversation.</p><div className="terminal-placement-actions"><button type="button" className="terminal-start" onClick={()=>openTerminalTab(chatId,'Terminal','terminals')}><PanelBottom size={12}/>Show panel</button><button type="button" className="terminal-start" onClick={()=>setTerminalDock({placement:'pane',open:false})}><PanelRight size={12}/>Show here instead</button></div></div>}
     </div>
   </section>;
 }

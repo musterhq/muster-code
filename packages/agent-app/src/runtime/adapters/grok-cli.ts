@@ -1,3 +1,4 @@
+import {spawnOwned} from '../owned-process.ts';
 import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {cleanAgentEnv, compareVersions, killTree, num, obj, parseVersion, probeCli, stripAnsi, type AgentSpawn} from './cli-common.ts';
@@ -5,6 +6,7 @@ import {cliSpawn, jsonLines, loadImages, text} from './shared.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
 import {launcherSpec} from '../launcher-script.ts';
 import {BROWSER_MCP, BROWSER_TOOLS, NO_BROWSER_NOTE, browserNote} from '../../shared/computer-use.ts';
+import {SANDBOX_TOOLS} from '../../shared/sandbox-routes.ts';
 
 /** #424: Muster's tool servers (the in-app browser among them) as ACP stdio MCP servers for session/new and session/load. */
 export function acpMcpServers(servers: AdapterRunInput['mcpServers']): Array<{name: string; command: string; args: string[]; env: Array<{name: string; value: string}>}> {
@@ -47,11 +49,15 @@ export async function grokCapabilities(binary: string, options: {spawn?: AgentSp
 }
 
 /** `--always-approve` only for full access; everything else starts in Grok's default (ask) mode and is decided below. */
-export const grokLaunchArgs = (mode: AdapterRunInput['permissionMode']): string[] => mode === 'full' ? ['agent', '--always-approve', 'stdio'] : ['--permission-mode', 'default', 'agent', 'stdio'];
+export const grokLaunchArgs = (mode: AdapterRunInput['permissionMode'], sandboxed = false): string[] => mode === 'full' && !sandboxed ? ['agent', '--always-approve', 'stdio'] : ['--permission-mode', 'default', 'agent', 'stdio'];
 
-/** Which option to answer an ACP permission request with. read-only: reads/searches only; workspace: no commands; full: everything. */
-export function grokPermissionChoice(mode: AdapterRunInput['permissionMode'], toolKind: string, options: Array<{optionId: string; kind: string}>): string | undefined {
-  const allowed = mode === 'full' || (mode === 'workspace' ? toolKind !== 'execute' : ['read', 'search', 'think'].includes(toolKind));
+/** #653: a sandbox tool call (muster_sandbox), named in the request's title the way grokToolItem finds the browser tools. */
+const SANDBOX_TOOL_TITLE = new RegExp(`\\b(?:${SANDBOX_TOOLS.join('|')})\\b`);
+/** Which option to answer an ACP permission request with. read-only: reads/searches only; workspace: no commands; full: everything.
+ *  #653 sandboxed: reads/searches plus the muster_sandbox tools; host commands, edits and everything else are rejected. */
+export function grokPermissionChoice(mode: AdapterRunInput['permissionMode'], toolKind: string, options: Array<{optionId: string; kind: string}>, sandbox?: {title: string}): string | undefined {
+  const allowed = sandbox ? ['read', 'search', 'think'].includes(toolKind) || (!['execute', 'edit', 'delete', 'move'].includes(toolKind) && SANDBOX_TOOL_TITLE.test(sandbox.title))
+    : mode === 'full' || (mode === 'workspace' ? toolKind !== 'execute' : ['read', 'search', 'think'].includes(toolKind));
   const order = allowed ? ['allow_once', 'allow_always'] : ['reject_once', 'reject_always'];
   for (const kind of order) { const hit = options.find(option => option.kind === kind); if (hit) return hit.optionId; }
   return undefined;
@@ -81,9 +87,9 @@ export function grokAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; s
   const spawn = options.spawn ?? (nodeSpawn as unknown as AgentSpawn);
   return {kind: 'cli', run(input) {
     return new Promise<AdapterRunResult>(resolve => {
-      const turnId = randomUUID(), env = cleanAgentEnv(options.env ?? process.env, GROK_ENV, input.env, options.binary), launch = cliSpawn(options.binary, grokLaunchArgs(input.permissionMode), env);
+      const turnId = randomUUID(), env = cleanAgentEnv(options.env ?? process.env, GROK_ENV, input.env, options.binary), launch = cliSpawn(options.binary, grokLaunchArgs(input.permissionMode, input.sandboxed), env);
       let child: ChildProcess;
-      try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32'}); }
+      try { child = spawnOwned(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe']}, spawn); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `Grok could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let nextId = 1, session: string | undefined, accepted = false, settled = false, replaying = false, stderr = '', answer = '', stopReason = '', failure = '', killer: ReturnType<typeof setTimeout> | undefined;
       const pending = new Map<number, {resolve(value: Record<string, unknown>): void; reject(error: Error): void}>(), open = new Map<string, Record<string, unknown>>();
@@ -112,7 +118,7 @@ export function grokAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; s
           // A request from the agent. Permission asks follow the access level; files and terminals are not offered by Muster.
           if (method === 'session/request_permission') {
             const params = obj(message.params), options_ = (Array.isArray(params.options) ? params.options : []).map(entry => ({optionId: text(obj(entry).optionId), kind: text(obj(entry).kind)}));
-            const choice = grokPermissionChoice(input.permissionMode, text(obj(params.toolCall).kind), options_);
+            const choice = grokPermissionChoice(input.permissionMode, text(obj(params.toolCall).kind), options_, input.sandboxed ? {title: text(obj(params.toolCall).title)} : undefined);
             send({id, result: {outcome: choice ? {outcome: 'selected', optionId: choice} : {outcome: 'cancelled'}}});
           } else send({id, error: {code: -32601, message: `${method} is not supported by Muster.`}});
         } else if (method === 'session/update') update(obj(obj(message.params).update));
@@ -121,6 +127,7 @@ export function grokAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; s
           if (message.error) entry.reject(new Error(text(obj(message.error).message) || 'Grok returned an error.')); else entry.resolve(obj(message.result));
         }
       });
+      child.on('exit', () => { if (input.signal.aborted) killTree(child, 'SIGKILL'); });
       child.on('error', error => finish({status: 'failed', finalMessage: '', dispatchState: accepted ? 'dispatched' : 'not-dispatched', errorMessage: `Grok could not start: ${error.message}`}));
       child.on('close', code => {
         for (const [id, item] of open) input.onEvent('item/completed', {threadId: session ?? '', turnId, item: {...item, id, status: 'interrupted'}});

@@ -34,6 +34,10 @@ export interface AppSettings {
   'general.defaultModel': ModelPreference | null;
   /** CHAT-16: archive chats idle for this many days (0 = never). Pinned, running, snoozed and needs-attention chats are never auto-archived. */
   'chats.autoArchiveDays': AutoArchiveDays;
+  /** #448: a run stopped on a provider usage limit continues when the limit resets (each chat can opt out). */
+  'chats.resumeAfterLimit': boolean;
+  /** #449: chats that were working when Muster closed continue after the next start. */
+  'chats.resumeAfterRestart': boolean;
   /** AUT-05: OS notifications when a run finishes out of sight. 'failures' keeps only failed runs; 'off' silences them. */
   'notifications.runs': RunNotifications;
   /** AUT-05: dock badge and bounce for approvals and questions waiting on you. */
@@ -77,6 +81,8 @@ export const SETTING_DEFAULTS: AppSettings = {
   'chat.responseStyle': 'auto',
   'general.defaultModel': null,
   'chats.autoArchiveDays': 0,
+  'chats.resumeAfterLimit': true,
+  'chats.resumeAfterRestart': true,
   'notifications.runs': 'all',
   'notifications.attention': true,
   'notifications.mutedUntil': null,
@@ -117,6 +123,8 @@ const CHECKS: { [K in SettingKey]: { valid(value: unknown): value is AppSettings
   'notifications.attention': { valid: bool, expected: 'true or false' },
   'notifications.mutedUntil': { valid: (value): value is string | null => value === null || (typeof value === 'string' && value.length <= 40 && Number.isFinite(Date.parse(value))), expected: 'null or an ISO date-time' },
   'terminal.shell': { valid: isTerminalShellPreference, expected: '"system", "zsh", "bash", "fish" or an absolute path' },
+  'chats.resumeAfterLimit': { valid: bool, expected: 'true or false' },
+  'chats.resumeAfterRestart': { valid: bool, expected: 'true or false' },
   'chats.autoArchiveDays': { valid: (value): value is AutoArchiveDays => typeof value === 'number' && (AUTO_ARCHIVE_DAYS as readonly number[]).includes(value), expected: `one of ${AUTO_ARCHIVE_DAYS.join(', ')} (days; 0 = never)` },
 };
 
@@ -127,7 +135,13 @@ export function validateSetting<K extends SettingKey>(key: K | string, value: un
   if (!isSettingKey(key)) throw new Error(`Unknown setting ${JSON.stringify(String(key).slice(0, 64))}.`);
   const check = CHECKS[key];
   if (!check.valid(value)) throw new Error(`${key} must be ${check.expected}.`);
-  return value as AppSettings[K];
+  return canonical(key, value) as AppSettings[K];
+}
+/** A valid value in its stored form: model names lose surrounding spaces. Runs after the check, never instead of it. */
+function canonical(key: SettingKey, value: unknown): unknown {
+  if (key !== 'general.defaultModel' || value === null) return value;
+  const preference = value as ModelPreference;
+  return { ...preference, model: preference.model.trim() };
 }
 
 /** Known keys with valid values override defaults; anything else in a stored file is dropped. */
@@ -135,7 +149,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
   const next: Record<string, unknown> = { ...SETTING_DEFAULTS };
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const key of SETTING_KEYS) {
     const value = (raw as Record<string, unknown>)[key];
-    if (CHECKS[key].valid(value)) next[key] = value;
+    if (CHECKS[key].valid(value)) next[key] = canonical(key, value);
   }
   return next as unknown as AppSettings;
 }

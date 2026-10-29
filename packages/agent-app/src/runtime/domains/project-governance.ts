@@ -129,6 +129,8 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   const heldMessage = (h: NonNullable<ReturnType<typeof holdFor>>) => `Held: ${h.mode === 'cancel' ? 'cancelled' : 'paused'} with ${h.rootKey || 'its parent task'}${h.rootTitle ? ` “${clip(h.rootTitle, 60)}”` : ''}${h.reason ? ` (${clip(h.reason, 80)})` : ''}. Release the hold first.`;
   /** The reason a task may not start now, or null. Called by dispatch, the wake queue and the scheduler. */
   function gate(t: Pick<ProjectTaskRecord, 'id' | 'projectId'> & { owner?: TaskOwner }): string | null {
+    const stopped = gov().openBreaker(t.projectId, 'start_failure', t.id);
+    if (stopped) return `Stopped: ${stopped.summary} Resolve it in the Inbox first.`;
     const h = holdFor(t);
     if (h) return heldMessage(h);
     const full = t.owner ? t : tasks().getTask(t.id), mid = full?.owner ? ownerMemberId(full as ProjectTask) : null;
@@ -174,6 +176,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   /** The scheduler asks once per candidate task: the index is shared for a second instead of rebuilt each time. */
   const heldMemo = new Map<string, { at: number; fn: (id: string) => HoldInfo | null }>();
   const held = (t: ProjectTask): boolean => {
+    if (gov().openBreaker(t.projectId, 'start_failure', t.id)) return true;
     let m = heldMemo.get(t.projectId);
     if (!m || now() - m.at > 1000) { m = { at: now(), fn: holdIndex(t.projectId) }; heldMemo.set(t.projectId, m); }
     return Boolean(m.fn(t.id));
@@ -207,6 +210,32 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     }
     const last = [...run].reverse().find(i => i.kind === 'assistant' && i.text.trim());
     return { status, error: chat.error, assistantText: last?.text ?? '', toolCalls, fileChanges, tools, files, askedYou: run.some(i => i.kind === 'question') };
+  }
+
+  // #157: the same start error three times in a row for one task stops its retries and puts one Problem in the Inbox.
+  const START_FAILURE_LIMIT = 3;
+  const START_FAILURE = /could not start|failed to start|could not be (made|dispatched)|isn.t available|^Choose a model|\bspawn\b|\bENOENT\b|\bEACCES\b/i;
+  const startFailures = new Map<string, { message: string; count: number }>();
+  /** The text of an error that means "the run never got going" (a missing binary, an unusable runner, no worktree), or null for any other failure. */
+  const startFailureOf = (error: string | null | undefined): string | null => { const m = (error ?? '').replace(/\s+/g, ' ').trim(); return m && START_FAILURE.test(m) ? m : null; };
+  /** Counts one start failure of a task; true when this one reached the limit and the task is now stopped. */
+  function noteStartFailure(task: ProjectTask, message: string): boolean {
+    const cur = startFailures.get(task.id), count = cur && cur.message === message ? cur.count + 1 : 1;
+    startFailures.set(task.id, { message, count });
+    if (count < START_FAILURE_LIMIT) return false;
+    if (gov().openBreaker(task.projectId, 'start_failure', task.id)) return true;
+    const why = clip(redactSecrets(message), 200), key = keyOf(task);
+    gov().addBreaker({ projectId: task.projectId, kind: 'start_failure', subject: task.id, memberId: ownerMemberId(task), summary: `${key} “${clip(task.title, 50)}” could not start ${count} times in a row with the same error: ${why}`, evidence: [`Error: ${why}`, `Attempts: ${count}`] });
+    record(task.projectId, 'task.breaker', `${key} could not start ${count} times in a row (${clip(why, 120)}). Retries for it are stopped until you resolve the Problem in the Inbox.`, task.id, 'system');
+    wakeQueue().cancelFor(task.projectId, new Set([task.id]), 'Dropped: this task keeps failing to start.');
+    const retry = task.runChatId ? retryTimers.get(task.runChatId) : undefined; if (retry) { timers.clear(retry); retryTimers.delete(task.runChatId!); }
+    deps.changed(task.projectId, task.id, true);
+    return true;
+  }
+  /** A dispatch that threw before any run existed (no worktree, no usable runner, the provider refused to launch): counted like a run that failed to start. */
+  function dispatchFailed(taskId: string, error: unknown): void {
+    const task = tasks().getTask(taskId), message = startFailureOf(error instanceof Error ? error.message : String(error));
+    if (task && message && !message.startsWith('Stopped:')) noteStartFailure(task, message);
   }
 
   const pendingMeta = new Map<string, WakeInfo & { taskId: string; memberId: string | null }>();
@@ -243,7 +272,14 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
 
   // ── wake queue and heartbeats (C14, C30) ────────────────────────────────────
-  const wakeQueue = (): WakeQueue => queue ??= new WakeQueue({
+  /** Built once; the first build resumes every wake that was still waiting when the app last closed. */
+  const wakeQueue = (): WakeQueue => {
+    if (queue) return queue;
+    queue = buildQueue();
+    void queue.restore().catch(() => undefined);
+    return queue;
+  };
+  const buildQueue = () => new WakeQueue({
     store: gov(), now, setTimer: timers.set, clearTimer: timers.clear,
     settings, heartbeat: (p, m) => agentGov(p, m).heartbeat,
     member: (p, m) => { const x = memberOf(p, m); return x ? { name: x.name, paused: Boolean(x.pausedAt), revoked: Boolean(x.revokedAt), pending: Boolean(x.pendingAt) } : undefined; },
@@ -323,11 +359,27 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     finally { arm(projectId, memberId); } // re-arms only while the agent is still eligible
   }
   let armed = false;
-  /** Arms the timers of every enabled agent, once, the first time governance is used. */
+  /** Arms the timers of every enabled agent, once, the first time governance is used. Waiting wakes come back, and every
+   * project is evaluated once, so subtasks that finished while the app was closed still wake their parent's owner. */
   function armAll() {
     if (armed || disposed) return; armed = true;
     for (const a of gov().heartbeatAgents()) arm(a.projectId, a.memberId);
     armMonitors();
+    wakeQueue();
+    let ids: string[] = [];
+    // `archived` is added lazily by the projects domain, so read every row and filter here rather than naming the column.
+    try { ids = (ctx.db().prepare('SELECT * FROM projects').all() as { id: string; archived?: number | null }[]).filter(r => !r.archived).map(r => r.id); } catch { /* a bare test context has no projects table */ }
+    seedChildMarks(ids);
+    for (const projectId of ids) scheduleEval(projectId);
+  }
+  /** Once, at the first start after the update: subtasks that were already done before this wake existed are noted without waking anyone. */
+  function seedChildMarks(ids: readonly string[]) {
+    try {
+      const d = ctx.db();
+      if (d.prepare("SELECT 1 FROM meta WHERE key = 'children_wakes_seeded'").get()) return;
+      for (const projectId of ids) void evaluateChildren(projectId, taskList(projectId), true);
+      d.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('children_wakes_seeded', ?)").run(new Date(now()).toISOString());
+    } catch { /* a bare test context has no meta table */ }
   }
 
   // ── stop variants (G33) ─────────────────────────────────────────────────────
@@ -387,6 +439,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
         try { tasks().setState({ projectId, id: t.id, revision: tasks().getTask(t.id)!.revision, state: 'cancelled', reason: `Cancelled with ${key}` }, 'user'); } catch { /* a task that raced is left as it is */ }
       }
     }
+    if (mode === 'cancel') scheduleEval(projectId);
     record(projectId, 'task.hold', `${mode === 'cancel' ? 'Cancelled' : 'Paused'} ${key} “${clip(root.title, 60)}” and ${ids.length - 1} ${ids.length === 2 ? 'task' : 'tasks'} under it${stopped ? `; stopped ${stopped} running ${stopped === 1 ? 'run' : 'runs'}` : ''}${reason ? ` (${clip(reason, 80)})` : ''}.`, taskId, 'user');
     deps.changed(projectId, taskId);
     return holdView(gov().getHold(holdId)!);
@@ -557,7 +610,40 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   /** Coalesces any number of triggers within 100 ms into one evaluation. */
   function scheduleEval(projectId: string) {
     if (disposed || evalTimers.has(projectId)) return;
-    evalTimers.set(projectId, timers.set(() => { evalTimers.delete(projectId); void evaluateWatchdogs(projectId).catch(() => undefined); }, 100));
+    evalTimers.set(projectId, timers.set(() => { evalTimers.delete(projectId); void evaluate(projectId).catch(() => undefined); }, 100));
+  }
+  async function evaluate(projectId: string): Promise<void> {
+    if (!deps.exists(projectId)) return;
+    const all = taskList(projectId);
+    await evaluateChildren(projectId, all).catch(() => undefined);
+    await evaluateWatchdogs(projectId, all);
+  }
+  /**
+   * Every subtask of an agent's task is done (verified or cancelled): one wake for the parent's owner, once per completion
+   * set. The set is fingerprinted by the subtasks' ids, states and revisions, so a later evaluation of the same set wakes
+   * nobody, and a subtask reopened and finished again wakes the owner again. Each pass re-reads the stored states, so a
+   * missed hint is caught by the next one (a run settling, a state change, or the boot catch-up).
+   */
+  async function evaluateChildren(projectId: string, all: ProjectTask[] = taskList(projectId), quiet = false): Promise<void> {
+    const kids = new Map<string, ProjectTask[]>();
+    for (const t of all) if (t.parentId) { const list = kids.get(t.parentId); if (list) list.push(t); else kids.set(t.parentId, [t]); }
+    if (!kids.size) return;
+    const byId = new Map(all.map(t => [t.id, t]));
+    for (const [parentId, children] of kids) {
+      const parent = byId.get(parentId), owner = parent ? ownerMemberId(parent) : null;
+      if (!parent || !owner || DONE.has(parent.state) || !children.every(c => DONE.has(c.state))) continue;
+      const fp = fingerprintOf(children);
+      if (gov().wakeMark(parentId, 'children_completed') === fp) continue;
+      // A paused, pending or removed owner, or a held project, is left unmarked so the next evaluation after a resume wakes them.
+      const m = memberOf(projectId, owner);
+      if (!quiet && (!m || m.pausedAt || m.pendingAt || m.revokedAt || projectHold(projectId) || gate(parent))) continue;
+      gov().setWakeMark(projectId, parentId, 'children_completed', fp);
+      if (quiet || !agentGov(projectId, owner).heartbeat.wakeOnChildren) continue;
+      const sorted = [...children].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0)), shown = sorted.slice(0, 12).map(c => `${keyOf(c)}${c.state === 'cancelled' ? ' (cancelled)' : ''}`);
+      const list = `${shown.join(', ')}${sorted.length > shown.length ? ` and ${sorted.length - shown.length} more` : ''}`;
+      const note = children.length === 1 ? `Its subtask is done: ${list}` : `All ${children.length} subtasks are done: ${list}`;
+      await wakeQueue().request({ projectId, memberId: owner, taskId: parentId, reason: 'children_completed', note }).catch(() => undefined);
+    }
   }
   function pendingPath(projectId: string, ids: ReadonlySet<string>): boolean {
     if (gov().monitors(projectId).some(m => m.state === 'scheduled' && ids.has(m.taskId))) return true;
@@ -565,9 +651,9 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     return gov().wakes(projectId, { limit: 50 }).some(w => (w.status === 'throttled' || w.status === 'deferred') && w.taskId && ids.has(w.taskId));
   }
   /** One finding per distinct stopped state of a root task's subtree: every leaf has stopped, none is live, and something failed or is blocked. */
-  async function evaluateWatchdogs(projectId: string): Promise<void> {
+  async function evaluateWatchdogs(projectId: string, all: ProjectTask[] = taskList(projectId)): Promise<void> {
     if (!deps.exists(projectId)) return;
-    const all = taskList(projectId), tree: TreeTask[] = all, byId = new Map(all.map(t => [t.id, t]));
+    const tree: TreeTask[] = all, byId = new Map(all.map(t => [t.id, t]));
     const roots = all.filter(t => !t.parentId && all.some(k => k.parentId === t.id));
     for (const root of roots) {
       const leaves = leavesOf(tree, root.id), ids = new Set(subtreeIds(tree, root.id));
@@ -708,7 +794,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     const t = tasks().assertTaskProject(projectId, taskId);
     if (action === 'dismiss') { for (const k of ['orphaned_run', 'stranded_assignment', 'needs_followup']) gov().dismissRecovery(taskId, k); deps.changed(projectId, taskId); return; }
     if (action === 'resume') { const h = holdFor(t); if (!h) throw new Error('That task is not on hold.'); releaseHold({ projectId, id: h.id }); return; }
-    if (action === 'cancel') { tasks().setState({ projectId, id: taskId, revision: t.revision, state: 'cancelled', reason: 'Cancelled from recovery' }, 'user'); deps.changed(projectId, taskId); return; }
+    if (action === 'cancel') { tasks().setState({ projectId, id: taskId, revision: t.revision, state: 'cancelled', reason: 'Cancelled from recovery' }, 'user'); deps.changed(projectId, taskId); scheduleEval(projectId); return; }
     if (action === 'block') { tasks().setState({ projectId, id: taskId, revision: t.revision, state: 'blocked', reason: 'Marked blocked from recovery' }, 'user'); deps.changed(projectId, taskId); return; }
     // rerun: back to a startable state, then wake the owner on the usual path.
     let cur = t;
@@ -888,11 +974,14 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       const liveness: Liveness = classifyRun(facts);
       gov().upsertRunMeta(projectId, chat.id, { liveness });
       if (status === 'failed') {
-        const kind = failureKind(chat.error);
-        if (kind === 'transient' && m.retries < s.maxRetries && !gate(task)) { scheduleRetry(tasks().getTask(task.id) ?? task, chat, m.retries + 1, chat.error ?? 'failed'); return; }
+        const kind = failureKind(chat.error), startError = startFailureOf(chat.error);
+        // The run never got going: the same error three times in a row stops this task's retries and raises one Problem.
+        const stopped = startError !== null && noteStartFailure(tasks().getTask(task.id) ?? task, startError);
+        if (kind === 'transient' && !stopped && m.retries < s.maxRetries && !gate(task)) { scheduleRetry(tasks().getTask(task.id) ?? task, chat, m.retries + 1, chat.error ?? 'failed'); return; }
         if (kind === 'limit') { record(projectId, 'task.run-limit', `“${clip(task.title, 60)}” stopped on a usage limit. It will not retry by itself: run it again after the limit resets.`, task.id, 'system'); }
         return;
       }
+      if (status === 'completed') startFailures.delete(task.id);
       if (status === 'completed' && m.comment === 'asked') { await commentBackstop(tasks().getTask(task.id) ?? task, chat, facts); }
       else if (status === 'completed' && (liveness === 'empty_response' || liveness === 'plan_only') && !facts.askedYou) {
         if (m.continuations < s.maxContinuations && !gate(task)) {
@@ -931,7 +1020,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       patch.heartbeat = clampHeartbeat(input.heartbeat as Partial<AgentGovernance['heartbeat']>, cur.heartbeat);
       const hb = patch.heartbeat;
       if (hb.enabled !== cur.heartbeat.enabled || hb.intervalSec !== cur.heartbeat.intervalSec) said.push(hb.enabled ? `heartbeat every ${hb.intervalSec >= 3600 && hb.intervalSec % 3600 === 0 ? `${hb.intervalSec / 3600} h` : hb.intervalSec >= 60 && hb.intervalSec % 60 === 0 ? `${hb.intervalSec / 60} min` : `${hb.intervalSec} s`}` : 'heartbeat off');
-      for (const k of ['wakeOnAssignment', 'wakeOnComment', 'wakeOnDecision'] as const) if (hb[k] !== cur.heartbeat[k]) said.push(`${k === 'wakeOnAssignment' ? 'wake on assignment' : k === 'wakeOnComment' ? 'wake on comment' : 'wake on decision'} ${hb[k] ? 'on' : 'off'}`);
+      for (const k of ['wakeOnAssignment', 'wakeOnComment', 'wakeOnDecision', 'wakeOnChildren'] as const) if (hb[k] !== cur.heartbeat[k]) said.push(`${k === 'wakeOnAssignment' ? 'wake on assignment' : k === 'wakeOnComment' ? 'wake on comment' : k === 'wakeOnDecision' ? 'wake on decision' : 'wake when subtasks finish'} ${hb[k] ? 'on' : 'off'}`);
       if (hb.minGapSec !== cur.heartbeat.minGapSec) said.push(`least ${hb.minGapSec} s between wakes`);
     }
     if (input.capabilities !== undefined) {
@@ -1034,7 +1123,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     if (g.capabilities.canAssign) critical.push(`You may create subtasks${g.capabilities.assignScope === 'project' ? ' anywhere in the project' : ' under this task'} and hand them to teammates: end your reply with \`\`\`muster-subtasks [{"title":"…","acceptance":"…","assignee":"Name"}]\`\`\`.`);
     if (g.capabilities.canHire) critical.push('You may propose a new teammate: ```muster-hire {"name":"…","title":"…","instructions":"…"}``` or the agent_propose_hire tool.');
     critical.push(`Tools (muster_tasks): task_get, task_list, agent_list, task_comment, task_update, task_create, task_assign, task_checkout, task_document_upsert, task_ask_questions, task_request_confirmation, agent_propose_hire.`, 'Muster task protocol:', TASK_PROTOCOL);
-    if (settings(projectId).runComment !== 'off') critical.push('End every run with a short comment on the task: what you did, what changed, what is left.');
+    if (settings(projectId).runComment !== 'off') critical.push('End every run with a short comment on the task: what you did, what changed, what is left. Post it yourself with task_comment; do not draft it and ask whether to post.');
     return { critical, bundle };
   }
   const taskLines = (task: ProjectTask, chatId: string): string[] => { const { critical, bundle } = taskSections(task, chatId); return [...critical, ...bundle]; };
@@ -1072,7 +1161,8 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       overrides[`mcp_servers.${TASK_MCP}.env.MUSTER_CHAT_TOKEN`] = taskToolHost().chatToken(chat.id);
       overrides[`mcp_servers.${TASK_MCP}.tool_timeout_sec`] = 60;
     } catch { /* the tools are optional: a run without them still works through fenced blocks */ }
-    return Object.keys(overrides).length ? { configOverrides: overrides } : null;
+    // The project's comment setting decides what follows a silent run (ask, notice or nothing), never the chat's own finish-up.
+    return { ...(Object.keys(overrides).length ? { configOverrides: overrides } : {}), ownsSilentEnd: true };
   }
   /** Before a task run: say, in the activity feed, which identity its commits carry. Nothing is written to any git config. */
   async function prepareDispatch(task: ProjectTask, cwd: string | null): Promise<void> {
@@ -1128,7 +1218,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     expireProposals(projectId);
     const items: { id: string; kind: 'review' | 'blocked' | 'approval' | 'question' | 'other'; title: string; why: string; severity: 'high' | 'medium' | 'low'; at: string; taskId: string | null; agentId: string | null; area: string }[] = [];
     for (const w of gov().watchdogs(projectId, true)) { const t = tasks().getTask(w.taskId); items.push({ id: `watchdog:${w.id}`, kind: 'blocked', title: `${t ? keyOf(t) : 'A task'} · subtree stopped`, why: w.summary, severity: 'medium', at: w.createdAt, taskId: w.taskId, agentId: null, area: 'governance' }); }
-    for (const b of gov().breakers(projectId)) items.push({ id: `breaker:${b.id}`, kind: 'other', title: b.kind === 'wake_storm' ? 'Wake storm stopped' : b.kind === 'review_loop' ? 'Review loop' : 'Circuit breaker', why: b.summary, severity: 'high', at: b.createdAt, taskId: b.kind === 'review_loop' ? b.subject : null, agentId: b.memberId ? `member:${b.memberId}` : null, area: 'governance' });
+    for (const b of gov().breakers(projectId)) items.push({ id: `breaker:${b.id}`, kind: b.kind === 'start_failure' ? 'blocked' : 'other', title: b.kind === 'wake_storm' ? 'Wake storm stopped' : b.kind === 'review_loop' ? 'Review loop' : b.kind === 'start_failure' ? `${tasks().getTask(b.subject) ? keyOf(tasks().getTask(b.subject)!) : 'A task'} · cannot start` : 'Circuit breaker', why: b.summary, severity: 'high', at: b.createdAt, taskId: b.kind === 'review_loop' || b.kind === 'start_failure' ? b.subject : null, agentId: b.memberId ? `member:${b.memberId}` : null, area: 'governance' });
     for (const p of gov().proposals(projectId, true)) items.push({ id: `secret:${p.id}`, kind: 'approval', title: `${p.memberName} asks for the secret ${p.name}`, why: p.purpose, severity: 'high', at: p.createdAt, taskId: p.taskId, agentId: `member:${p.memberId}`, area: 'secrets' });
     for (const m of gov().monitors(projectId)) if (m.state === 'escalated') { const t = tasks().getTask(m.taskId); items.push({ id: `monitor:${m.id}`, kind: 'blocked', title: `${t ? keyOf(t) : 'A task'} · follow-up check`, why: m.note || `The follow-up check on “${t?.title ?? 'a task'}” found it unfinished after ${m.attempts} ${m.attempts === 1 ? 'attempt' : 'attempts'}.`, severity: 'medium', at: m.lastFiredAt ?? m.createdAt, taskId: m.taskId, agentId: null, area: 'governance' }); }
     for (const s of gov().stages(projectId)) if ((s.status === 'awaiting' || s.status === 'escalated') && tasks().getTask(s.taskId)) { const t = tasks().getTask(s.taskId)!; items.push({ id: `stage:${s.taskId}`, kind: 'review', title: `${keyOf(t)} · ${s.kind === 'review' ? 'review' : 'approval'} ${s.stage + 1} of ${s.stages}`, why: s.status === 'escalated' ? s.feedback ?? 'Waiting for your decision.' : `Waiting for ${s.approverName === 'You' ? 'your' : `${s.approverName}'s`} ${s.kind === 'review' ? 'review' : 'approval'}.`, severity: 'high', at: s.updatedAt, taskId: s.taskId, agentId: null, area: 'governance' }); }
@@ -1159,8 +1249,8 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     try {
       if (command === 'project.tasks.add') { const o = output as { id?: string; projectId?: string; owner?: TaskOwner } | undefined; if (o?.id && o.projectId && o.owner?.kind === 'agent') onAssigned(o.projectId, o.id); }
       else if (command === 'project.tasks.edit') { const patch = (input.patch ?? {}) as { owner?: TaskOwner }; const o = output as { id?: string; projectId?: string } | undefined; if (patch.owner?.kind === 'agent' && o?.id && o.projectId) onAssigned(o.projectId, o.id); }
-      else if ((command === 'project.members.pause' || command === 'project.members.revoke' || command === 'project.members.restore') && typeof input.projectId === 'string' && typeof input.id === 'string') arm(input.projectId, input.id);
-      else if (command === 'project.archive' || command === 'project.restore') { const pid = typeof input.id === 'string' ? input.id : ''; for (const a of gov().heartbeatAgents()) if (a.projectId === pid) arm(a.projectId, a.memberId); }
+      else if ((command === 'project.members.pause' || command === 'project.members.revoke' || command === 'project.members.restore') && typeof input.projectId === 'string' && typeof input.id === 'string') { arm(input.projectId, input.id); if (command !== 'project.members.revoke') scheduleEval(input.projectId); }
+      else if (command === 'project.archive' || command === 'project.restore') { const pid = typeof input.id === 'string' ? input.id : ''; for (const a of gov().heartbeatAgents()) if (a.projectId === pid) arm(a.projectId, a.memberId); if (command === 'project.restore' && pid) scheduleEval(pid); }
       if (command === 'project.members.pause' && input.paused === false && typeof input.projectId === 'string' && typeof input.id === 'string') {
         const open = gov().openBreaker(input.projectId, 'wake_storm', input.id);
         if (open) { gov().setBreakerState(open.id, 'resumed'); deps.changed(input.projectId); }
@@ -1276,6 +1366,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       const projectId = project(input), b = gov().getBreaker(id(input.id, 'event id'));
       if (!b || b.projectId !== projectId) throw new Error('That event no longer exists.');
       if (b.state !== 'open') return b;
+      if (b.kind === 'start_failure') startFailures.delete(b.subject);
       if (input.action === 'resume' && b.kind === 'wake_storm' && b.memberId) { try { await deps.team.handlers['project.members.pause']!({ projectId, id: b.memberId, paused: false }); } catch { /* already resumed */ } arm(projectId, b.memberId); }
       gov().setBreakerState(b.id, input.action === 'resume' ? 'resumed' : 'dismissed');
       record(projectId, 'task.breaker', input.action === 'resume' ? `Resumed after: ${b.summary}` : `Dismissed: ${b.summary}`, b.subject, 'user'); deps.changed(projectId, '', true);
@@ -1337,9 +1428,9 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
   return {
     handlers: commands() as unknown as Record<string, DomainHandler>,
-    gate, preflight, release, held, identityForFolder, noteWorktree, clampAccess, beforeSend, prepareDispatch, taskLines, taskSections, runOptions, decideTool, started, settled, idle, purgeTask, purgeProject, memberGone, taskView, holdFor, evaluate: scheduleEval, armAll, dispose,
+    gate, preflight, release, held, dispatchFailed, identityForFolder, noteWorktree, clampAccess, beforeSend, prepareDispatch, taskLines, taskSections, runOptions, decideTool, started, settled, idle, purgeTask, purgeProject, memberGone, taskView, holdFor, evaluate: scheduleEval, armAll, dispose,
     /** For tests: the stores and queues behind the commands. */
-    internals: { gov, wakeQueue, heartbeatTimers, retryTimers, tick, fireMonitors, evaluateWatchdogs, readyTaskFor, recoveryItems, effectivePolicy, startStage },
+    internals: { gov, wakeQueue, heartbeatTimers, retryTimers, tick, fireMonitors, evaluateWatchdogs, evaluateChildren, readyTaskFor, recoveryItems, effectivePolicy, startStage },
   };
 }
 export type Governance = ReturnType<typeof createGovernance>;

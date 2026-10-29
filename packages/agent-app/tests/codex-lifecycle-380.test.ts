@@ -164,7 +164,7 @@ async function serviceWith(t:TestContext,run:ProviderAdapter['run'],extra:Partia
 }
 
 test('approvals asked after the turn ended (background sub-agents) get a card instead of a silent decline',async t=>{
-  let captured:ProviderInput|undefined;let during:Promise<Record<string,unknown>|undefined>|undefined;
+  let captured:ProviderInput|undefined;let during:ReturnType<ProviderInput['onRequest']>|undefined;
   const {service,chat,items,status}=await serviceWith(t,async input=>{
     captured=input;
     during=input.onRequest('item/commandExecution/requestApproval',{command:'npm test',threadId:'child-thread'});

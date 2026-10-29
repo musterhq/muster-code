@@ -172,3 +172,6 @@
 @keyframes memory-scrim-in { from { opacity: 0; } }
 .memory-toolbar .settings-button { white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .memory-drawer-scrim { animation: none; } }
+
+.memory-offer-summary { border: 0; padding: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-offer-summary:hover { color: var(--accent); }

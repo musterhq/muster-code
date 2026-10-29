@@ -10,7 +10,10 @@ export type PromptContributor = (input: { chat: Chat; folder?: Folder; project?:
 export interface RunOptions { reasoningEffort?: ReasoningEffort; configOverrides?: Record<string, unknown>; developerInstructions?: string;
   /** Notes for this turn only (a goal's token budget). Sent with the message, so a per-turn change never alters the
    *  developer instructions that key the warm app-server. */
-  turnContext?: string }
+  turnContext?: string;
+  /** The domain follows up itself when the run ends after a tool call without a reply (a task run's comment backstop),
+   *  so the chat does not also ask the agent to finish. */
+  ownsSilentEnd?: boolean }
 export type RunOptionsContributor = (chat: Chat) => Promise<RunOptions | null>;
 export interface RunStarted { chat: Chat; runId: string; cwd: string }
 export interface RunSettled { chat: Chat; runId: string; status: ChatStatus }
@@ -20,6 +23,8 @@ export interface ChatDefaults { providerId?: string; model?: string; effort?: Re
 export type ChatDefaultsResolver = (input: { folderId?: string; projectId?: string }) => ChatDefaults | undefined;
 /** A domain command that completed without throwing. Observers must not throw or block. */
 export interface CommandCompleted { command: string; input: Record<string, unknown>; output: unknown }
+/** #654: a chat is about to be deleted (still in the store) or was just archived. */
+export interface ChatRemoval { chat: Chat; kind: 'delete' | 'archive' }
 export type RunEnvironmentResolver = (chat: Chat, defaultCwd: string) => Promise<{ cwd: string }>;
 /** G13: a per-agent tool policy decision for an approval request. null: no rule applies and the usual flow decides. */
 export type ToolPolicyResolver = (chat: Chat, method: string, params: Record<string, unknown>) => { effect: 'allow' | 'ask' | 'deny'; message: string } | null;
@@ -39,6 +44,8 @@ export interface DomainHooks {
   onProviderEvent(fn: (event: ProviderEventInfo) => void): () => void;
   setChatDefaults(fn: ChatDefaultsResolver | undefined): void;
   setRunEnvironmentResolver(fn: RunEnvironmentResolver | undefined): void;
+  /** #668: the user's own context window for a model (Settings › Models), read by Muster's compaction trigger. */
+  setContextWindowResolver?(fn: ((providerId: string, model: string) => number | undefined) | undefined): void;
   /** Replaces the single tool-policy resolver (undefined clears it). Optional so bare test contexts need not provide it. */
   setToolPolicy?(fn: ToolPolicyResolver | undefined): void;
   /** Replaces the resolver of the git identity a Git-tab commit in a folder carries (an agent's task worktree). */
@@ -58,6 +65,8 @@ export interface DomainHooks {
   commitIdentity?(folderId: string): { name: string; email: string } | null;
   /** Observes successful domain commands (e.g. Projects logging memory and environment writes to activity). Optional so bare test contexts need not provide it. */
   onCommand?(fn: (event: CommandCompleted) => void): () => void;
+  /** #654: release what a chat owns. On 'delete' a throw keeps the chat (its message is shown); 'archive' never fails the archive. Optional so bare test contexts need not provide it. */
+  onChatRemoval?(fn: (event: ChatRemoval) => Promise<void> | void): () => void;
 }
 
 export interface DomainContext {
@@ -73,6 +82,8 @@ export interface DomainContext {
   modelCatalog?(): { providers: ProviderInfo[]; builtin: { providerId: string; model: string } };
   /** Settles once the first provider probe has (or a short grace period has passed); instant afterwards. */
   modelCatalogReady?(): Promise<void>;
+  /** Settles when every provider check has finished, however long that takes (no grace period). */
+  providersSettled?(): Promise<void>;
   /** Codex app-server native thread APIs (goals, queue, projects) behind a capability probe. Absent in bare test contexts. */
   native?: NativeThreadBridge;
 }

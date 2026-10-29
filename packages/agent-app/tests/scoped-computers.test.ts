@@ -66,7 +66,7 @@ test('authority fails before dependency or path access; view never provisions',a
   const f=await fixture(t);await assert.rejects(f.manager.inspect({kind:'chat',id:'missing'}),/no longer available/);assert.equal(f.calls.length,0);
   const status=await f.manager.inspect(a);assert.equal(status.state,'not-created');assert.deepEqual(f.calls.map(call=>call.method),['constructor']);assert.equal(f.runner.calls.length,0);
   assert.equal(status.durability,'scratch');assert.equal((await f.manager.inspect(b)).durability,'durable');
-  assert.deepEqual(status.limits,{network:'none',memoryMiB:512,cpus:1,processes:256,maxRunning:2,maxTimeoutMs:7_200_000});assert.equal(status.user,'1000:1000');
+  assert.deepEqual(status.limits,{network:'none',memoryMiB:512,cpus:1,processes:256,diskGiB:10,maxRunning:2,maxTimeoutMs:7_200_000});assert.equal(status.user,'1000:1000');
   const options=f.calls[0].options as any;assert.equal(options.dockerHost,'unix:///tmp/fixture.sock');assert.equal(options.image,SANDBOX_IMAGE);assert.match(SANDBOX_IMAGE,/^node:24-bookworm-slim@sha256:[0-9a-f]{64}$/);await f.manager.dispose();
 });
 test('bundled QM sandbox contract adapts to Agent Mode lifecycle without changing its ownership calls',async()=>{
@@ -132,9 +132,19 @@ test('stdin reaches the running command and EOF completes it; other scopes canno
   const result=await terminal(f.manager,a,executionId);assert.equal(result.state,'completed');assert.equal(result.stdout,'typed\n');
   await assert.rejects(f.manager.dispatch('computer.input',{scope:a,execId:executionId,data:'late'}),/already finished/);await f.manager.dispose();
 });
+// Spec: MUS-SPEC-06-742A (docs/spec/clauses/06-sandbox.md#mus-spec-06-742a)
 test('history keeps the last runs with output tails and shows interrupted work as ended after restart',async t=>{
   const f=await fixture(t);await f.manager.start(a);const done=await f.manager.exec({scope:a,command:'echo:kept\n',requestId:'kept'});await terminal(f.manager,a,done.executionId);
-  const live=await f.manager.exec({scope:a,command:'wait',requestId:'interrupted'});await delay(5);
+  const live=await f.manager.exec({scope:a,command:'wait',requestId:'interrupted'});
+  const recordDir=join(f.appData,'scoped-computers');
+  const recordFile=(await readdir(recordDir)).find(name=>/^computer_[0-9a-f]{32}\.json$/.test(name))!;
+  let persisted=false;
+  for(let attempt=0;attempt<100;attempt++){
+    const record=JSON.parse(await readFile(join(recordDir,recordFile),'utf8'));
+    if(record.active?.executionId===live.executionId&&record.active.pgid===f.runner.procs[1].pgid){persisted=true;break;}
+    await delay(5);
+  }
+  assert.ok(persisted,'restart begins only once the running process group is durable');
   const reopened=new ScopedComputers(f.options);const runs=await reopened.history(a);
   assert.deepEqual(runs.map(run=>[run.command,run.state,!!run.restored]),[['echo:kept\n','completed',false],['wait','recovery-needed',true]]);assert.equal(runs[0].stdout,'kept\n');
   assert.equal((await reopened.inspect(a)).state,'recovery-needed');assert.equal((await reopened.execution(a,done.executionId)).stdout,'kept\n','restored receipts carry their output tail');

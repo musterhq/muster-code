@@ -24,12 +24,14 @@ export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
   if (!q) return { score: 0, ranges: [] };
   const t = text.toLocaleLowerCase();
   const positions: number[] = [];
+  const widths: number[] = [];
   let cursor = 0;
   for (const ch of q) {
     const found = t.indexOf(ch, cursor);
     if (found === -1) return null;
     positions.push(found);
-    cursor = found + 1;
+    widths.push(ch.length);
+    cursor = found + ch.length;
   }
   let score = 0;
   for (let i = 0; i < positions.length; i++) {
@@ -37,18 +39,18 @@ export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
     const prev = text[at - 1];
     const boundary = at === 0 || (prev !== undefined && WORD_BREAK.test(prev));
     score += boundary ? 8 : 2;
-    if (i > 0 && positions[i] === positions[i - 1] + 1) score += 4;
+    if (i > 0 && positions[i] === positions[i - 1] + widths[i - 1]) score += 4;
   }
   score -= positions[0] * 0.5; // an earlier first match ranks higher
   score -= text.length * 0.01; // among ties, prefer the shorter (more specific) text
   const ranges: Array<[number, number]> = [];
   let start = positions[0];
-  let end = positions[0] + 1;
+  let end = positions[0] + widths[0];
   for (let i = 1; i < positions.length; i++) {
-    if (positions[i] === end) { end = positions[i] + 1; continue; }
+    if (positions[i] === end) { end = positions[i] + widths[i]; continue; }
     ranges.push([start, end]);
     start = positions[i];
-    end = positions[i] + 1;
+    end = positions[i] + widths[i];
   }
   ranges.push([start, end]);
   return { score, ranges };
@@ -73,10 +75,21 @@ export function splitHighlight(text: string, ranges: FuzzyMatch['ranges']): Arra
 /** Empty query shows up to nine rows, so ⌘1…⌘9 always maps to a visible row. */
 export const MAX_CHAT_RESULTS = 9;
 
+const parentOf = (path: string) => path.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '');
+const baseOf = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+/** A folder's name, plus its parent folder's name when another folder has the same name (the parent path if that also matches). */
+export function folderDisplayName(folder: Pick<Folder, 'name' | 'path'>, folders: readonly Pick<Folder, 'name' | 'path'>[]): string {
+  const twins = folders.filter(item => item.name === folder.name);
+  if (twins.length < 2) return folder.name;
+  const parent = parentOf(folder.path);
+  const short = baseOf(parent);
+  return `${folder.name} · ${twins.filter(item => baseOf(parentOf(item.path)) === short).length > 1 ? parent : short}`;
+}
+
 /** The muted right-aligned label: the chat's project name, else its folder name, else "Personal chat". */
 export function chatLocationName(
   chat: Pick<Chat, 'folderId' | 'projectId'>,
-  folders: readonly Pick<Folder, 'id' | 'name'>[],
+  folders: readonly Pick<Folder, 'id' | 'name' | 'path'>[],
   projects: readonly Pick<Project, 'id' | 'name'>[],
 ): string {
   if (chat.projectId) {
@@ -85,7 +98,7 @@ export function chatLocationName(
   }
   if (chat.folderId) {
     const folder = folders.find((f) => f.id === chat.folderId);
-    if (folder) return folder.name;
+    if (folder) return folderDisplayName(folder, folders);
   }
   return 'Personal chat';
 }

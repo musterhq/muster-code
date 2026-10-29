@@ -1,5 +1,5 @@
 import {isWebHost} from '../webHost.ts';
-import React, {useCallback, useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {Menu} from '@base-ui/react/menu';
 import { AlertTriangle, Check, ChevronDown, FolderGit2, GitBranch, Globe, Laptop, Loader2, Monitor, RefreshCw, SquarePen, TerminalSquare, Upload } from 'lucide-react';
 import type {Chat, ContextTelemetry, Folder, Project} from '../../shared/protocol';
@@ -12,33 +12,59 @@ import {ContextMeter} from './ContextMeter';
 import {BranchPicker, type BranchMode} from './BranchPicker';
 import {SandboxApplySheet} from './SandboxApplySheet';
 import { device } from '../../shared/device-noun.ts';
+import {SANDBOX_ROUTE_UNSUPPORTED, sandboxRouteSupported} from '../../shared/sandbox-routes.ts';
+import {useStoreSlice} from '../useStore';
 import './environment-footer.css';
 
 export const SANDBOX_ENV_LABEL = 'Sandbox · Linux container';
+/** #652: what runs where in a sandbox chat, on a model whose tools can use the sandbox. */
+export const sandboxWhatRunsWhere = (): string => `Commands and file edits the agent makes with sandbox tools run in a Linux container, on an isolated copy of the folder. The agent can still read files on ${device().lower}.`;
+/** #652: a sandbox chat whose model can't use the sandbox: its tools run on the host, kept read-only. */
+export const sandboxRouteWarning = (): string => `${SANDBOX_ROUTE_UNSUPPORTED}. They run on ${device().lower}, read-only.`;
 // On Muster Server's web UI the host is the server, not the viewer's computer (#199).
 export const HOST_ENV_LABEL = isWebHost() ? 'Server' : device().title;
 
-/** Where the chat's agent runs (SBX-01); refreshed on domain events, on container activity and on window focus. */
-export function useChatEnvironment(chatId: string): {environment: ChatEnvironmentStatus | undefined; refresh: () => void} {
-  const [environment, setEnvironment] = useState<ChatEnvironmentStatus>();
-  const token = useRef(0);
-  const refresh = useCallback(() => {
-    const mine = ++token.current;
-    invoke('sandbox.chatEnvironment.get', {chatId}).then(value => { if (mine === token.current) setEnvironment(value); }, () => {});
-  }, [chatId]);
-  useEffect(() => {
-    setEnvironment(undefined); refresh();
+/** One shared watcher per chat: the footer, the composer and the summary card read the same status, so mounting one more
+ *  reader costs no extra request and a refresh that changes nothing re-renders nobody. */
+interface EnvironmentWatch {value?: ChatEnvironmentStatus; key: string; token: number; listeners: Set<() => void>; stop: () => void}
+const watches = new Map<string, EnvironmentWatch>();
+function refreshEnvironment(chatId: string): void {
+  const watch = watches.get(chatId); if (!watch) return;
+  const mine = ++watch.token;
+  invoke('sandbox.chatEnvironment.get', {chatId}).then(value => { if (mine === watch.token && watches.get(chatId) === watch) publishEnvironment(watch, value); }, () => {});
+}
+function publishEnvironment(watch: EnvironmentWatch, value: ChatEnvironmentStatus | undefined): void {
+  const key = JSON.stringify(value ?? null);
+  if (key === watch.key) return;
+  watch.key = key; watch.value = value;
+  for (const listener of [...watch.listeners]) listener();
+}
+function watchEnvironment(chatId: string, listener: () => void): () => void {
+  let watch = watches.get(chatId);
+  if (!watch) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const off = subscribe(event => {
-      if (event.type === 'sandboxEnvironment') { if (event.chatId === chatId) setEnvironment(event.environment); return; }
+      if (event.type === 'sandboxEnvironment') { if (event.chatId === chatId) { const current = watches.get(chatId); if (current) { current.token++; publishEnvironment(current, event.environment); } } return; }
       // Container events arrive on the same channel outside AgentEvent (as ScopedComputerTab reads them).
       const type = (event as {type: string}).type;
       if (type !== 'computerExecution' && type !== 'computerProgress' && type !== 'computerServices') return;
-      clearTimeout(timer); timer = setTimeout(refresh, 300);
+      clearTimeout(timer); timer = setTimeout(() => refreshEnvironment(chatId), 300);
     });
-    window.addEventListener('focus', refresh);
-    return () => { off(); clearTimeout(timer); window.removeEventListener('focus', refresh); token.current++; };
-  }, [chatId, refresh]);
+    const focus = () => refreshEnvironment(chatId);
+    window.addEventListener('focus', focus);
+    const created: EnvironmentWatch = {key: 'null', token: 0, listeners: new Set(), stop: () => { off(); clearTimeout(timer); window.removeEventListener('focus', focus); created.token++; }};
+    watch = created; watches.set(chatId, watch);
+    refreshEnvironment(chatId);
+  }
+  const mine = watch;
+  mine.listeners.add(listener);
+  return () => { mine.listeners.delete(listener); if (!mine.listeners.size && watches.get(chatId) === mine) { mine.stop(); watches.delete(chatId); } };
+}
+
+/** Where the chat's agent runs (SBX-01); refreshed on domain events, on container activity and on window focus. */
+export function useChatEnvironment(chatId: string): {environment: ChatEnvironmentStatus | undefined; refresh: () => void} {
+  const environment = useSyncExternalStore(useCallback((listener: () => void) => watchEnvironment(chatId, listener), [chatId]), () => watches.get(chatId)?.value);
+  const refresh = useCallback(() => refreshEnvironment(chatId), [chatId]);
   return {environment, refresh};
 }
 
@@ -97,13 +123,16 @@ async function chatInWorktree(entry: GitWorktree): Promise<void> {
  * composer footer and the summary card.
  */
 export function EnvironmentMenu({chat, project, folder, info, environment, className, children, side = 'top', align = 'start', onNewWorktree, onApply}: {
-  chat: Pick<Chat, 'id' | 'title'> & {status?: Chat['status']}; project?: Pick<Project, 'id' | 'name'>; folder?: Pick<Folder, 'id'>; info?: GitRepoInfo; environment?: ChatEnvironmentStatus;
+  chat: Pick<Chat, 'id' | 'title'> & {status?: Chat['status']; providerId?: Chat['providerId']}; project?: Pick<Project, 'id' | 'name'>; folder?: Pick<Folder, 'id'>; info?: GitRepoInfo; environment?: ChatEnvironmentStatus;
   className: string; children: React.ReactNode; side?: 'top' | 'bottom'; align?: 'start' | 'end'; onNewWorktree?: () => void; onApply?: () => void;
 }): React.ReactElement {
   const [open, setOpen] = useState(false);
   const inSandbox = environment?.env === 'sandbox';
   const busy = chat.status === 'running' || chat.status === 'stopping';
   const lock = busy ? 'Stop the chat before changing where it runs' : undefined;
+  // #652: the sandbox is offered only where the model's tools can use it.
+  const {providers} = useStoreSlice('providers');
+  const routeOk = sandboxRouteSupported(providers.value, chat.providerId);
   const [worktrees, setWorktrees] = useState<GitWorktree[]>();
   const [loading, setLoading] = useState(false);
   // Handing off to the branch picker: don't pull focus back to this trigger, or the picker would lose it and close.
@@ -128,11 +157,13 @@ export function EnvironmentMenu({chat, project, folder, info, environment, class
               <Laptop size={14}/><span className="env-menu-text">{HOST_ENV_LABEL}</span>{info && <span className="env-menu-detail">{info.worktree ? 'worktree' : info.branch ?? 'detached'}</span>}
               {!inSandbox ? <Check size={13} className="env-menu-check" aria-label="Current"/> : null}
             </Menu.Item>
-            <Menu.Item className="env-menu-item" disabled={busy} title={lock ?? 'Commands and edits run inside a Linux container on an isolated copy of the folder; host access becomes read-only'} onClick={() => { if (!inSandbox) void setEnvironment(chat.id, 'sandbox'); }}>
+            <Menu.Item className="env-menu-item" disabled={busy || (!inSandbox && !routeOk)} title={lock ?? (routeOk ? sandboxWhatRunsWhere() : `${SANDBOX_ROUTE_UNSUPPORTED}.`)} onClick={() => { if (!inSandbox && routeOk) void setEnvironment(chat.id, 'sandbox'); }}>
               <Monitor size={14}/><span className="env-menu-text">Sandbox</span><span className="env-menu-detail">Linux container · isolated copy</span>
-              {inSandbox ? environment?.ready ? <Check size={13} className="env-menu-check" aria-label="Current"/> : <AlertTriangle size={13} className="env-menu-warn" aria-label="Container not running"/> : null}
+              {inSandbox ? environment?.ready && routeOk ? <Check size={13} className="env-menu-check" aria-label="Current"/> : <AlertTriangle size={13} className="env-menu-warn" aria-label={routeOk ? 'Container not running' : SANDBOX_ROUTE_UNSUPPORTED}/> : null}
             </Menu.Item>
-            {inSandbox && !environment?.ready && <div className="env-menu-note" role="note">{environment?.reason ?? 'The container is not running.'}</div>}
+            {!routeOk ? <div className="env-menu-note" role="note" data-testid="sandbox-route-note">{inSandbox ? sandboxRouteWarning() : `${SANDBOX_ROUTE_UNSUPPORTED}.`}</div>
+              : inSandbox && !environment?.ready ? <div className="env-menu-note" role="note">{environment?.reason ?? 'The container is not running.'}</div>
+              : inSandbox ? <div className="env-menu-note" role="note" data-testid="sandbox-runs-where">{sandboxWhatRunsWhere()}</div> : null}
             {inSandbox && <>
               <div className="env-menu-separator" role="separator"/>
               <Menu.GroupLabel className="env-menu-label">Browser</Menu.GroupLabel>
@@ -189,13 +220,15 @@ export function EnvironmentFooter({chat, folder, project, telemetry}: {chat: Cha
   const [picker, setPicker] = useState<{open: boolean; mode: BranchMode}>({open: false, mode: 'switch'});
   const [applying, setApplying] = useState(false);
   const inSandbox = environment?.env === 'sandbox';
+  const {providers} = useStoreSlice('providers');
+  const warn = inSandbox && (!environment.ready || !sandboxRouteSupported(providers.value, chat.providerId));
   const envLabel = inSandbox ? SANDBOX_ENV_LABEL : info?.worktree ? 'Worktree' : HOST_ENV_LABEL;
   const branch = info ? info.branch ?? 'Detached HEAD' : undefined;
   return <footer className="chat-context env-footer">
-    <EnvironmentMenu chat={chat} project={project} folder={folder} info={info} environment={environment} className={`env-footer-trigger${inSandbox && !environment.ready ? ' is-warn' : ''}`}
+    <EnvironmentMenu chat={chat} project={project} folder={folder} info={info} environment={environment} className={`env-footer-trigger${warn ? ' is-warn' : ''}`}
       onNewWorktree={() => setPicker({open: true, mode: 'worktree'})} onApply={folder ? () => setApplying(true) : undefined}>
       {inSandbox ? <Monitor size={12} aria-hidden="true"/> : info?.worktree ? <FolderGit2 size={12} aria-hidden="true"/> : <Laptop size={12} aria-hidden="true"/>}
-      <span>{envLabel}</span>{inSandbox && !environment.ready && <AlertTriangle size={11} aria-label="Container not running"/>}<ChevronDown size={11} className="env-footer-chevron" aria-hidden="true"/>
+      <span>{envLabel}</span>{warn && <AlertTriangle size={11} aria-label={environment.ready ? SANDBOX_ROUTE_UNSUPPORTED : 'Container not running'}/>}<ChevronDown size={11} className="env-footer-chevron" aria-hidden="true"/>
     </EnvironmentMenu>
     {folder && <SandboxApplySheet chatId={chat.id} folderId={folder.id} open={applying} onClose={() => setApplying(false)}/>}
     {folder && branch !== undefined && <>

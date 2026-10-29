@@ -1,10 +1,13 @@
-import React, {useRef, useState} from 'react';
+import React, {useMemo, useRef, useState} from 'react';
 import {Check, ChevronDown, ChevronUp, Undo2} from 'lucide-react';
-import {useHighlightedTokens} from './HighlightedCode';
+import {useHighlightedTokens,useWindowTokens} from './HighlightedCode';
+import {lineContent} from './codeLineContent';
 import {codeLanguageFromPath} from './codeLanguage';
 import {buildInlineFileDiff, type CumulativeFileDiff} from '../inlineFileDiffModel';
 import './inline-file-diff.css';
 import {Tip} from './Tooltip';
+import {VirtualRowTable, type VirtualRowReveal} from './VirtualRowTable';
+import {LARGE_FILE_THRESHOLD} from './VirtualFileSource';
 
 /** Cumulative review of the file against a turn baseline, with the actions the host has wired. */
 export interface InlineFileReview {
@@ -22,30 +25,82 @@ export interface InlineFileReview {
 
 type Row = {kind:'source';line:number;text:string;added:boolean;hunkId?:string} | {kind:'deleted';line:number;anchorLine:number;text:string;hunkId?:string};
 
+type Entry = {kind:'row';row:Row;index:number;start?:string} | {kind:'actions';hunkId:string};
+const itemKey=(entry:Entry):string=>entry.kind==='actions'?`actions:${entry.hunkId}`:entry.row.kind==='deleted'?`deleted:${entry.row.line}:${entry.row.anchorLine}:${entry.index}`:`source:${entry.row.line}`;
+
+/** The display-row index of the row entry at or just before `entryIndex` (hunk action bars are entries with no row). */
+function rowIndexAt(entries:Entry[],entryIndex:number):number {
+  for(let at=Math.min(entryIndex,entries.length-1);at>=0;at--){const entry=entries[at];if(entry.kind==='row')return entry.index;}
+  return 0;
+}
+
 /**
  * Source with agent changes painted in place. With `review`, every change
  * since the baseline is shown and each hunk gets floating Undo / Keep / Next
  * controls (Keep All / Undo All in the bar); otherwise the latest provider
  * patch is decorated when it still matches the buffer.
  */
-export function InlineFileSource({source,path,patch,status,unavailableReason,review}:{source:string;path:string;patch?:string;status?:string;unavailableReason?:string;review?:InlineFileReview}):React.ReactElement {
+export function InlineFileSource({source,path,patch,status,unavailableReason,review,targetLine}:{source:string;path:string;patch?:string;status?:string;unavailableReason?:string;review?:InlineFileReview;targetLine?:number}):React.ReactElement {
   const language=codeLanguageFromPath(path);
-  const model=!review&&patch?buildInlineFileDiff(source,patch):null;
+  const model=useMemo(()=>!review&&patch?buildInlineFileDiff(source,patch):null,[review,patch,source]);
   const reviewing=review?.model.state==='decorated';
-  const displayRows:Row[]=reviewing?review!.model.rows:model?.state==='decorated'?model.rows:source.split(/\r?\n/).map((text,index)=>({kind:'source' as const,line:index+1,text,added:false}));
-  const highlighted=useHighlightedTokens(displayRows.map(row=>row.text).join('\n'),language,0);
+  const reviewRows=reviewing?review!.model.rows:undefined;
+  const displayRows=useMemo<Row[]>(()=>reviewRows??(model?.state==='decorated'?model.rows:source.split(/\r?\n/).map((text,index)=>({kind:'source' as const,line:index+1,text,added:false}))),[reviewRows,model,source]);
+  const hunks=reviewing?review!.model.hunks:[];
+  const virtual=source.length>=LARGE_FILE_THRESHOLD;
+  const joined=useMemo(()=>displayRows.map(row=>row.text).join('\n'),[displayRows]);
+  // A small file is coloured whole. A large one is windowed, so only the mounted rows (plus a margin) are coloured.
+  const highlighted=useHighlightedTokens(virtual?'':joined,language,0);
+  const [mounted,setMounted]=useState({first:0,last:0});
+  const tokensOf=useWindowTokens(virtual?joined:'',language,mounted.first,mounted.last);
   const [current,setCurrent]=useState(0);
   const table=useRef<HTMLTableElement>(null);
-  const hunks=reviewing?review!.model.hunks:[];
-  const lastRow=new Map<string,number>(),seen=new Set<string>();
-  if(reviewing)displayRows.forEach((row,index)=>{if(row.hunkId)lastRow.set(row.hunkId,index);});
+  // One entry per table row: a source or deleted line, or the Undo / Keep bar under a hunk's last row.
+  const {entries,hunkEntry,gutterDigits}=useMemo(()=>{
+    const lastRow=new Map<string,number>(),seen=new Set<string>(),hunkEntry=new Map<string,number>();
+    if(reviewing)displayRows.forEach((row,index)=>{if(row.hunkId)lastRow.set(row.hunkId,index);});
+    const entries:Entry[]=[];let widest=0;
+    displayRows.forEach((row,index)=>{
+      const start=reviewing&&row.hunkId&&!seen.has(row.hunkId)?row.hunkId:undefined;
+      if(start){seen.add(start);hunkEntry.set(start,entries.length);}
+      entries.push({kind:'row',row,index,start});
+      if(row.line>widest)widest=row.line;
+      if(reviewing&&row.hunkId&&lastRow.get(row.hunkId)===index)entries.push({kind:'actions',hunkId:row.hunkId});
+    });
+    return {entries,hunkEntry,gutterDigits:String(widest).length};
+  },[displayRows,reviewing]);
+  const [stepped,setStepped]=useState<VirtualRowReveal>();
+  const revealCount=useRef(0);
   const go=(index:number)=>{
     if(!hunks.length)return;
     const next=(index+hunks.length)%hunks.length;setCurrent(next);
-    table.current?.querySelector(`[data-hunk-start="${hunks[next].id.replace(/["\\]/g,'')}"]`)?.scrollIntoView({block:'center'});
+    const id=hunks[next].id;
+    // A large file mounts only the rows near the viewport, so the target row may not exist yet: scroll by index.
+    if(virtual)setStepped({index:hunkEntry.get(id)??0,token:++revealCount.current});
+    else table.current?.querySelector(`[data-hunk-start="${id.replace(/["\\]/g,'')}"]`)?.scrollIntoView({block:'center'});
   };
+  const targetIndex=virtual&&targetLine?entries.findIndex(entry=>entry.kind==='row'&&entry.row.kind==='source'&&entry.row.line===targetLine):-1;
+  const reveal=stepped??(targetIndex<0?undefined:{index:targetIndex,token:`line:${targetLine}`});
   const disabled=!review||review.busy||review.running;
   const lock=review?.running?'The agent is still editing this file':undefined;
+  const gutter=virtual?{width:'var(--virtual-gutter)'}:undefined;
+  const renderEntry=(entry:Entry):React.ReactElement=>{
+    if(entry.kind==='actions'){
+      const hunkIndex=hunks.findIndex(hunk=>hunk.id===entry.hunkId),hunk=hunks[hunkIndex];
+      return <tr className="file-hunk-actions-row"><td colSpan={2}><div className="file-hunk-actions" role="group" aria-label={`Change ${hunkIndex+1} of ${hunks.length}`}>
+        <span className="file-hunk-stats">{hunk.adds>0&&<span className="change-adds">+{hunk.adds}</span>}{hunk.dels>0&&<span className="change-dels">−{hunk.dels}</span>}</span>
+        <button type="button" disabled={disabled} title={lock??'Revert this change'} onClick={()=>{setCurrent(hunkIndex);review!.onUndo(hunk.id);}}><Undo2 size={11} aria-hidden="true"/>Undo</button>
+        {review!.onKeep&&<button type="button" className="is-primary" disabled={disabled} title={lock??'Accept this change'} onClick={()=>{setCurrent(hunkIndex);review!.onKeep!([hunk.id]);}}><Check size={11} aria-hidden="true"/>Keep</button>}
+        {hunks.length>1&&<Tip label="Next change"><button type="button" aria-label="Next change" onClick={()=>go(hunkIndex+1)}><ChevronDown size={11} aria-hidden="true"/></button></Tip>}
+      </div></td></tr>;
+    }
+    const {row,index,start}=entry;
+    const tokens=virtual?tokensOf(index):highlighted?.sourceLines[index]===row.text?highlighted.rows[index]:undefined;
+    const content=row.text?lineContent(row.text,tokens):'\u00a0';
+    return row.kind==='deleted'
+      ? <tr data-hunk-start={start} className="file-inline-diff-deleted" aria-label={`Deleted line ${row.line}`}><td className="code-no" style={gutter}>{row.line}</td><td className="code-line"><span className="file-inline-diff-marker">−</span>{content}</td></tr>
+      : <tr data-line={row.line} data-hunk-start={start} className={row.added?'file-inline-diff-added':undefined}><td className="code-no" style={gutter}>{row.line}</td><td className="code-line">{row.added&&<span className="file-inline-diff-marker">+</span>}{content}</td></tr>;
+  };
   return <div className="inline-file-source" aria-label={`${language==='text'?'Source':language+' source'} · ${path}`}>
     {reviewing&&<div className="inline-file-review-bar" role="toolbar" aria-label="Review agent changes">
       <span className="inline-file-review-count">{review!.running?'Agent editing · ':''}{hunks.length} {hunks.length===1?'change':'changes'} <span>since {review!.label}</span></span>
@@ -62,22 +117,10 @@ export function InlineFileSource({source,path,patch,status,unavailableReason,rev
     {!review&&model?.state==='decorated'&&<div className="inline-file-diff-legend" role="status">{status==='running'?'Agent edit in progress':'Agent edit'} <span>· additions and removed lines</span></div>}
     {!review&&model?.state!=='decorated'&&(unavailableReason||model?.reason)&&<div className={`inline-file-diff-note${model?.state==='stale'?' is-stale':''}`} role="status">{unavailableReason||model?.reason}</div>}
     {review?.model.state==='unavailable'&&<div className="inline-file-diff-note" role="status">{review.model.reason}</div>}
-    <table ref={table} className="code-table source-code-table inline-file-diff-table"><tbody>{displayRows.map((row,index)=>{
-      const tokens=highlighted?.sourceLines[index]===row.text?highlighted.rows[index]:undefined;
-      const content=tokens?tokens.map((token,tokenIndex)=>token.color?<span key={tokenIndex} style={{color:token.color}}>{token.content}</span>:<React.Fragment key={tokenIndex}>{token.content}</React.Fragment>):row.text||'\u00a0';
-      const start=reviewing&&row.hunkId&&!seen.has(row.hunkId)?row.hunkId:undefined;
-      if(start)seen.add(start);
-      const line=row.kind==='deleted'
-        ? <tr key={`deleted:${row.line}:${row.anchorLine}:${index}`} data-hunk-start={start} className="file-inline-diff-deleted" aria-label={`Deleted line ${row.line}`}><td className="code-no">{row.line}</td><td className="code-line"><span className="file-inline-diff-marker">−</span>{content}</td></tr>
-        : <tr key={`source:${row.line}`} data-line={row.line} data-hunk-start={start} className={row.added?'file-inline-diff-added':undefined}><td className="code-no">{row.line}</td><td className="code-line">{row.added&&<span className="file-inline-diff-marker">+</span>}{content}</td></tr>;
-      if(!reviewing||!row.hunkId||lastRow.get(row.hunkId)!==index)return line;
-      const hunkIndex=hunks.findIndex(hunk=>hunk.id===row.hunkId),hunk=hunks[hunkIndex];
-      return <React.Fragment key={`hunk:${row.hunkId}`}>{line}<tr className="file-hunk-actions-row"><td colSpan={2}><div className="file-hunk-actions" role="group" aria-label={`Change ${hunkIndex+1} of ${hunks.length}`}>
-        <span className="file-hunk-stats">{hunk.adds>0&&<span className="change-adds">+{hunk.adds}</span>}{hunk.dels>0&&<span className="change-dels">−{hunk.dels}</span>}</span>
-        <button type="button" disabled={disabled} title={lock??'Revert this change'} onClick={()=>{setCurrent(hunkIndex);review!.onUndo(hunk.id);}}><Undo2 size={11} aria-hidden="true"/>Undo</button>
-        {review!.onKeep&&<button type="button" className="is-primary" disabled={disabled} title={lock??'Accept this change'} onClick={()=>{setCurrent(hunkIndex);review!.onKeep!([hunk.id]);}}><Check size={11} aria-hidden="true"/>Keep</button>}
-        {hunks.length>1&&<Tip label="Next change"><button type="button" aria-label="Next change" onClick={()=>go(hunkIndex+1)}><ChevronDown size={11} aria-hidden="true"/></button></Tip>}
-      </div></td></tr></React.Fragment>;
-    })}</tbody></table>
+    {virtual
+      ? <VirtualRowTable<Entry> tableRef={table} className="code-table source-code-table inline-file-diff-table" items={entries} columns={2} gutterDigits={gutterDigits} extraWidth={24}
+          isTall={entry=>entry.kind==='actions'} itemKey={itemKey} render={renderEntry} textOf={entry=>entry.kind==='row'&&entry.row.kind==='source'?entry.row.text:undefined} lineOf={entry=>entry.kind==='row'&&entry.row.kind==='source'?entry.row.line:undefined} reveal={reveal}
+          onWindow={(first,last)=>setMounted(prior=>{const from=rowIndexAt(entries,first),to=rowIndexAt(entries,last);return prior.first===from&&prior.last===to?prior:{first:from,last:to};})}/>
+      : <table ref={table} className="code-table source-code-table inline-file-diff-table"><tbody>{entries.map(entry=><React.Fragment key={itemKey(entry)}>{renderEntry(entry)}</React.Fragment>)}</tbody></table>}
   </div>;
 }

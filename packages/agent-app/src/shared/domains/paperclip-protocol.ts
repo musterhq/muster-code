@@ -133,10 +133,10 @@ export interface WorkspaceRun {
   /** Muster runs open their chat. */
   chatId?: string;
 }
-export type InboxKind = 'review' | 'blocked' | 'approval' | 'question' | 'failed_run' | 'agent_error' | 'mention' | 'mail' | 'budget' | 'other';
+export type InboxKind = 'review' | 'blocked' | 'approval' | 'question' | 'failed_run' | 'agent_error' | 'mention' | 'mail' | 'budget' | 'checkout' | 'other';
 /** `group` is the project it belongs to (the Inbox groups by it); `source` says whether it came from Paperclip or Muster. */
 /** `chatIds`: a Muster task's run chats. The Inbox lists and counts the task, not those chats again. */
-export interface WorkspaceInboxItem { id: string; kind: InboxKind; /** The org (company) a server item belongs to, so one Inbox over several orgs can tag each row. */ org?: { id: string; name: string }; /** A Paperclip approval this row stands for: decided from the row. */ approvalId?: string; approvalVerbs?: ApprovalDecision[]; title: string; why: string; severity: 'critical' | 'high' | 'medium' | 'low'; at: string; taskId: string | null; agentId: string | null; runId: string | null; group?: string; source?: WorkspaceSource; projectId?: string | null; chatIds?: string[]; /** Listed by the server's own attention feed, which already limits it to what the signed-in board user may act on. */ scoped?: boolean }
+export interface WorkspaceInboxItem { id: string; kind: InboxKind; /** The org (company) a server item belongs to, so one Inbox over several orgs can tag each row. */ org?: { id: string; name: string }; /** A Paperclip approval this row stands for: decided from the row. */ approvalId?: string; approvalVerbs?: ApprovalDecision[]; /** A check-out of this Mac that has sat idle for days: the row offers Hand back, Release and Keep (`taskId` is the task). */ checkout?: { days: number }; title: string; why: string; severity: 'critical' | 'high' | 'medium' | 'low'; at: string; taskId: string | null; agentId: string | null; runId: string | null; group?: string; source?: WorkspaceSource; projectId?: string | null; chatIds?: string[]; /** Listed by the server's own attention feed, which already limits it to what the signed-in board user may act on. */ scoped?: boolean }
 export interface WorkspaceGoal { id: string; title: string; status: string; level: string | null; parentId?: string | null; ownerAgentId?: string | null }
 /** A Paperclip approval waiting on the board (a hire, a CEO strategy, a budget override, a board request). Decided only by you. */
 export interface WorkspaceApproval {
@@ -175,7 +175,10 @@ export interface LedgerFile { path: string; status: 'added' | 'modified' | 'dele
 export interface LedgerEntry {
   id: string; seq: number | null; source: LedgerSource; chatId: string | null; runId: string; taskId: string | null; projectId: string | null;
   trigger: string; agent: string; provider: string | null; model: string | null;
-  tokens: { input: number; cached: number; output: number; reasoning: number } | null; costUsd: number | null;
+  /** `cacheWrite`: tokens written to the provider's prompt cache, a subset of `input` (cache reads are `cached`). Absent: none, or not reported. */
+  tokens: { input: number; cached: number; output: number; reasoning: number; cacheWrite?: number } | null; costUsd: number | null;
+  /** The cost is an estimate: a message's final token count never arrived, or cache writes were billed at the input rate because no cache-write price is known. */
+  estimated?: true;
   tools: { name: string; count: number }[]; approvals: number;
   /** A linked server's run: `unfetched` means the list this receipt came from carries no tool data, so an empty `tools` is "not read yet", never "none recorded". Open the run to read it. Absent: the tools are known (a Muster turn, or a run whose tools were read). */
   toolsState?: 'unfetched';
@@ -365,7 +368,7 @@ export interface DashboardData {
   runs: DashboardDay[];
   tasksByDay: { day: string; counts: Partial<Record<WorkspaceStatus, number>> }[];
   /** `tokens`: input + output tokens this month, priced or not (a token budget works without prices). */
-  spend: { usd: number | null; pricedTurns: number; unpricedTurns: number; since: string; source: string; tokens: number };
+  spend: { usd: number | null; pricedTurns: number; unpricedTurns: number; /** Priced turns whose cost is an estimate (a message's final count never arrived, or cache writes billed at the input rate). Absent: none. */ estimatedTurns?: number; since: string; source: string; tokens: number };
   activity: { id: string; actor: string; summary: string; at: string; projectId: string | null; projectName: string | null; source: WorkspaceSource; refId: string | null }[];
   /** The linked Paperclip's budget policies (company, project, agent) with this month's utilisation, and open incidents. */
   budgets?: { policies: PaperclipBudgetPolicy[]; incidents: number; company: string };

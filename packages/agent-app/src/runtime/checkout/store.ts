@@ -129,7 +129,11 @@ export class CheckoutStore {
     const rows = taskId ? this.d().prepare('SELECT * FROM checkout_outbox WHERE posted_at IS NULL AND dead = 0 AND task_id = ? ORDER BY id').all(taskId) : this.d().prepare('SELECT * FROM checkout_outbox WHERE posted_at IS NULL AND dead = 0 ORDER BY id').all();
     return (rows as Record<string, unknown>[]).map(r => this.map(r));
   }
-  pendingCount(taskId?: string): number { return this.pending(taskId).length; }
+  /** How many posts wait (the same rows as `pending`), counted by SQLite: it runs on every outbox change, so no row is read or parsed. */
+  pendingCount(taskId?: string): number {
+    const r = (taskId ? this.d().prepare('SELECT COUNT(*) AS n FROM checkout_outbox WHERE posted_at IS NULL AND dead = 0 AND task_id = ?').get(taskId) : this.d().prepare('SELECT COUNT(*) AS n FROM checkout_outbox WHERE posted_at IS NULL AND dead = 0').get()) as { n: number } | undefined;
+    return Number(r?.n ?? 0);
+  }
   history(taskId: string, kind?: ReportKind): OutboxRow[] {
     const rows = this.d().prepare('SELECT * FROM checkout_outbox WHERE task_id = ? AND type = ? ORDER BY id').all(taskId, 'comment') as Record<string, unknown>[];
     return rows.map(r => this.map(r)).filter(r => !kind || r.kind === kind);

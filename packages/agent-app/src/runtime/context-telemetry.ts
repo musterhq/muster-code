@@ -86,6 +86,8 @@ export function applyProviderEvent(
   method: string,
   params: unknown,
   now: () => string = () => new Date().toISOString(),
+  /** #739: the model (`provider::model`) of the turn that produced this event; a window it reports is tagged with it. */
+  windowModel?: string,
 ): ContextTelemetry | null {
   if (method === 'thread/compacted') {
     return { ...prev, compacted: true, source: 'live', updatedAt: now() };
@@ -97,7 +99,8 @@ export function applyProviderEvent(
   if (!p) return null;
   if (method === 'thread/tokenUsage/updated') {
     const tu = asRecord(p.tokenUsage);
-    if (!tu) return null;
+    // A reconciliation (Claude Code's result adding what its messages under-reported) is spend, not context.
+    if (!tu || tu.reconciliation === true) return null;
     usage = asRecord(tu.last) ?? tu;
     window = windowSize(tu.modelContextWindow ?? p.modelContextWindow ?? p.contextWindow);
     breakdown = breakdownFrom(tu.breakdown ?? p.breakdown);
@@ -124,5 +127,6 @@ export function applyProviderEvent(
     compacted: used === null ? prev.compacted : false,
     updatedAt: now(),
     ...(breakdown ? { breakdown } : prev.breakdown && used === null ? { breakdown: prev.breakdown } : {}),
+    ...(window !== null ? (windowModel ? { windowModel } : {}) : prev.windowModel ? { windowModel: prev.windowModel } : {}),
   };
 }

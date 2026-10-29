@@ -12,10 +12,10 @@ import type { TaskState } from './projects-protocol.ts';
 
 // ── Wake reasons and heartbeats (C14, C30) ───────────────────────────────────
 /** Why an agent run started. Recorded on the run, shown in the task thread and the agent's Runtime tab. */
-export type RunReason = 'assignment' | 'on_demand' | 'automation' | 'timer' | 'comment' | 'mention' | 'decision' | 'continuation' | 'retry' | 'monitor' | 'watchdog' | 'review' | 'comment_required' | 'recovery' | 'user';
+export type RunReason = 'assignment' | 'on_demand' | 'automation' | 'timer' | 'comment' | 'mention' | 'decision' | 'continuation' | 'retry' | 'monitor' | 'watchdog' | 'review' | 'children_completed' | 'comment_required' | 'recovery' | 'user';
 export const RUN_REASON_LABEL: Record<RunReason, string> = {
   assignment: 'Assigned', on_demand: 'Woken on demand', automation: 'Automation', timer: 'Heartbeat timer', comment: 'Comment', mention: 'Mentioned', decision: 'Decision', continuation: 'Continued after an empty turn',
-  retry: 'Retry after a temporary failure', monitor: 'Monitor follow-up', watchdog: 'Watchdog', review: 'Review requested', comment_required: 'Asked to comment', recovery: 'Recovery', user: 'Started by you',
+  retry: 'Retry after a temporary failure', monitor: 'Monitor follow-up', watchdog: 'Watchdog', review: 'Review requested', children_completed: 'Subtasks finished', comment_required: 'Asked to comment', recovery: 'Recovery', user: 'Started by you',
 };
 /** Heartbeat policy (Paperclip's run policy). Everything is off until you turn it on; a timer wake never starts an idle agent. */
 export interface HeartbeatPolicy {
@@ -27,12 +27,14 @@ export interface HeartbeatPolicy {
   wakeOnComment: boolean;
   /** A review decision or an answer for the agent's task wakes it with the note attached. */
   wakeOnDecision: boolean;
+  /** Every subtask of one of the agent's tasks is done (verified or cancelled): it wakes once to pick the parent back up. */
+  wakeOnChildren: boolean;
   /** The least time between two wakes of this agent, in seconds. Wakes inside it are coalesced and delivered once. */
   minGapSec: number;
   /** Most task runs this agent works on at once (C15). 0: no limit beyond the project's concurrency. */
   maxConcurrent: number;
 }
-export const DEFAULT_HEARTBEAT: HeartbeatPolicy = { enabled: false, intervalSec: 3600, wakeOnAssignment: false, wakeOnComment: false, wakeOnDecision: true, minGapSec: 30, maxConcurrent: 0 };
+export const DEFAULT_HEARTBEAT: HeartbeatPolicy = { enabled: false, intervalSec: 3600, wakeOnAssignment: false, wakeOnComment: false, wakeOnDecision: true, wakeOnChildren: true, minGapSec: 30, maxConcurrent: 0 };
 export const HEARTBEAT_LIMITS = { minIntervalSec: 60, maxIntervalSec: 86_400, maxMinGapSec: 3_600, maxConcurrent: 8 } as const;
 
 export type WakeStatus = 'started' | 'coalesced' | 'throttled' | 'deferred' | 'skipped' | 'refused' | 'storm';
@@ -172,7 +174,7 @@ export type MonitorPolicy = 'wake_owner' | 'create_recovery_task' | 'escalate';
 export const MONITOR_POLICY_LABEL: Record<MonitorPolicy, string> = { wake_owner: 'Wake the owner', create_recovery_task: 'Create a recovery task', escalate: 'Escalate to you' };
 export type MonitorState = 'scheduled' | 'triggered' | 'cleared' | 'escalated';
 export interface TaskMonitor { id: string; projectId: string; taskId: string; key: string; title: string; dueAt: string; policy: MonitorPolicy; attempts: number; maxAttempts: number; note: string; state: MonitorState; createdAt: string; lastFiredAt: string | null }
-export type BreakerKind = 'wake_storm' | 'no_progress' | 'review_loop' | 'budget';
+export type BreakerKind = 'wake_storm' | 'no_progress' | 'review_loop' | 'budget' | 'start_failure';
 export interface BreakerEvent { id: string; projectId: string; kind: BreakerKind; subject: string; summary: string; evidence: string[]; state: 'open' | 'resumed' | 'dismissed'; createdAt: string; memberId: string | null }
 
 // ── Secrets (G23) ────────────────────────────────────────────────────────────
@@ -260,6 +262,15 @@ export const PROJECT_GOVERNANCE_COMMANDS = {
 /** A glob over text: `*` matches any run of characters, `?` one. Anchored, case-insensitive. */
 export function globMatches(pattern: string, text: string): boolean {
   if (!pattern) return false;
-  const source = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
-  try { return new RegExp(`^${source}$`, 'is').test(text); } catch { return false; }
+  // Iterative two-pointer match: a regex built from many `*` backtracks exponentially on a long command.
+  const p = pattern.toLowerCase(), t = text.toLowerCase();
+  let pi = 0, ti = 0, star = -1, mark = 0;
+  while (ti < t.length) {
+    if (pi < p.length && p[pi] === '*') { star = pi++; mark = ti; }
+    else if (pi < p.length && (p[pi] === '?' || p[pi] === t[ti])) { pi++; ti++; }
+    else if (star >= 0) { pi = star + 1; ti = ++mark; }
+    else return false;
+  }
+  while (pi < p.length && p[pi] === '*') pi++;
+  return pi === p.length;
 }

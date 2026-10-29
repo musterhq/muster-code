@@ -1,3 +1,4 @@
+import {musterCodexHome} from './codex-home.ts';
 import {createRequire} from 'node:module';
 import {createHash} from 'node:crypto';
 import * as nodeFs from 'node:fs';
@@ -10,7 +11,10 @@ import {CODEX_LAUNCHER, findBinary, locateCli, Validator} from './adapters/share
 import {unpackedPath} from './unpacked-path.ts';
 import {entryAcceptsImages,fetchModelList,type ListedModel} from './adapters/http-chat.ts';
 import {readCodexCatalog} from './codex-catalog.ts';
+import bundledCodex from './catalogs/codex-models.json' with {type: 'json'};
 import {codexAuthHeaders,inlineStringTable,type CodexProviderAuth} from './codex-provider-auth.ts';
+import {createClaudeLane,type ClaudeLane} from './claude-lane.ts';
+import {claudeCodeAdapter} from './adapters/claude-code.ts';
 
 export interface ProviderInstance {
   info: ProviderInfo;
@@ -19,6 +23,9 @@ export interface ProviderInstance {
   sessionsRoot: string;
   /** Set for non-Codex routes (Claude Code, OpenCode, HTTP APIs); run() delegates to it instead of the app-server. */
   adapter?: RunnableAdapter;
+  /** #688: a Codex gateway route that also serves Claude models over the router's Messages API. A turn picks it per turn
+   *  (provider.ts); every other turn keeps the Codex client. */
+  claudeLane?: ClaudeLane;
   /** Key of the live model listing behind this route (a gateway without a catalog), for waiting on it at send. */
   listingKey?: string;
 }
@@ -63,7 +70,7 @@ export function routerAgents(listed:readonly ListedModel[]):Models {
     const first=words(rest.length?head!:id);const title=first.charAt(0).toUpperCase()+first.slice(1);return rest.length?`${title} · ${words(rest.join('/'))}`:title;};
   // Named agents (planner, advisor, executor…) first, then auto/… routes.
   const combos=listed.filter(entry=>entry.owner==='combo'&&entry.chat!==false);
-  return [...combos.filter(entry=>!entry.id.includes('/')),...combos.filter(entry=>entry.id.includes('/'))].slice(0,200).map(entry=>({id:entry.id,name:entry.name&&entry.name!==entry.id?entry.name:pretty(entry.id),...(entry.images!==undefined?{images:entry.images}:{}),...(entry.contextWindow?{contextWindow:entry.contextWindow}:{})}));
+  return [...combos.filter(entry=>!entry.id.includes('/')),...combos.filter(entry=>entry.id.includes('/'))].slice(0,200).map(entry=>({id:entry.id,name:entry.name&&entry.name!==entry.id?entry.name:pretty(entry.id),...(entry.images!==undefined?{images:entry.images}:{}),...(entry.contextWindow?{contextWindow:entry.contextWindow,contextWindowSource:'listing' as const}:{})}));
 }
 export function catalogModels(family:'openai-direct'|'gateway'|(string&{}),list:readonly unknown[]):{models:ProviderInfo['models'];excluded:ExcludedModel[]} {
   const models:ProviderInfo['models']=[],excluded:ExcludedModel[]=[];
@@ -326,6 +333,8 @@ export const LISTING_WAIT_MS=15_000;
 export type ListingState=Validation<ListedModel[]> & {stale?:boolean};
 interface ListingEntry {validator:Validator<ListedModel[]>;key:string;failures:number;watching:boolean;timer?:unknown;persisted?:ListedModel[]|null}
 const listings=new Map<string,ListingEntry>();
+/** One Messages lane per gateway account, kept across instance-list rebuilds so its probe answers and saved conversations persist. */
+const claudeLanes=new Map<string,ClaudeLane>();
 const settleListeners=new Set<()=>void>();
 let listingDir:string|undefined;
 let scheduler:{set:(fn:()=>void,ms:number)=>unknown;clear:(handle:unknown)=>void}={set:(fn,ms)=>{const timer=setTimeout(fn,ms);timer.unref?.();return timer;},clear:handle=>clearTimeout(handle as NodeJS.Timeout)};
@@ -334,7 +343,7 @@ export function setProviderListingStore(dir:string|undefined):void {listingDir=d
 /** Tests drive the retry timers by hand. */
 export function setListingScheduler(next?:typeof scheduler):void {scheduler=next??{set:(fn,ms)=>{const timer=setTimeout(fn,ms);timer.unref?.();return timer;},clear:handle=>clearTimeout(handle as NodeJS.Timeout)};}
 /** Forgets every in-memory listing (tests). */
-export function resetProviderListings():void {for(const entry of listings.values())if(entry.timer!==undefined)scheduler.clear(entry.timer);listings.clear();}
+export function resetProviderListings():void {for(const entry of listings.values())if(entry.timer!==undefined)scheduler.clear(entry.timer);listings.clear();claudeLanes.clear();}
 /** Called when a model listing settles, so a cached instance list is rebuilt with its result. */
 export function onProviderListingSettled(listener:()=>void):()=>void {settleListeners.add(listener);return ()=>settleListeners.delete(listener);}
 /** Resolves once no model listing is in flight. */
@@ -394,6 +403,33 @@ export async function awaitProviderListing(listingKey:string|undefined,timeoutMs
   try {await Promise.race([entry.validator.settled().then(()=>undefined),timeout]);} finally {clearTimeout(timer as NodeJS.Timeout);}
   // The settle handler runs on the same promise; give it its turn so provider info is rebuilt before validating.
   await new Promise<void>(resolve=>setImmediate(resolve));
+}
+/** The Messages lane of a gateway route, shared by every rebuild of the instance list. Its credentials are the listing's own. */
+/** #730: Claude Code for router Claude turns, when it is installed: one adapter per binary, the binary looked up at most every 5s. */
+const routerClaudeCode=new Map<string,RunnableAdapter>();
+let claudeBinaryHit:{at:number;key:string;value?:string}|undefined;
+function installedClaudeCode(env:NodeJS.ProcessEnv,home:string):RunnableAdapter|undefined {
+  // Test runners use only an explicit MUSTER_CLAUDE_COMMAND, never the machine's own Claude Code.
+  if(process.env.NODE_TEST_CONTEXT&&!env.MUSTER_CLAUDE_COMMAND)return undefined;
+  const key=`${env.MUSTER_CLAUDE_COMMAND??''}|${env.PATH??''}|${home}`,at=Date.now();
+  if(!claudeBinaryHit||claudeBinaryHit.key!==key||at-claudeBinaryHit.at>=5000)claudeBinaryHit={at,key,value:env.MUSTER_CLAUDE_COMMAND||findBinary('claude',env,home,[join(home,'.claude/local/claude')])};
+  const binary=claudeBinaryHit.value;
+  if(!binary)return undefined;
+  let found=routerClaudeCode.get(binary);
+  if(!found){if(routerClaudeCode.size>=8)routerClaudeCode.clear();found=claudeCodeAdapter({binary,env});routerClaudeCode.set(binary,found);}
+  return found;
+}
+function claudeLaneFor(route:CodexRouteSpec,env:NodeJS.ProcessEnv,fetcher:typeof fetch|undefined,key:string,home:string):ClaudeLane {
+  const base=route.baseUrl!.replace(/\/+$/,''),auth=route.auth??{};
+  const headers=(force?:boolean)=>codexAuthHeaders(auth,env,{force:force===true});
+  let lane=claudeLanes.get(key);
+  if(lane)lane.configure({headers,...(fetcher?{fetch:fetcher}:{})});
+  else {
+    if(claudeLanes.size>=32)claudeLanes.delete(claudeLanes.keys().next().value!);
+    lane=createClaudeLane({endpoint:base,headers,label:route.name??route.modelProvider,...(fetcher?{fetch:fetcher}:{}),dir:providerDataDir,claudeCode:()=>installedClaudeCode(env,home)});
+    claudeLanes.set(key,lane);
+  }
+  return lane;
 }
 function listing(route:CodexRouteSpec,env:NodeJS.ProcessEnv,fetcher:typeof fetch|undefined):ListingState&{key:string} {
   const base=route.baseUrl!.replace(/\/+$/,''),auth=route.auth??{};
@@ -461,15 +497,15 @@ export function configuredProviderInstances(options:ProviderInstanceOptions={}):
   const node=providerNode(env,home);
   if(cli)track(cli);
   const validator=profileModule(directory);
-  const context={fs,directory,cli,node,env,track,validator,fetch:options.fetch};
+  const context={fs,directory,home,cli,node,env,track,validator,fetch:options.fetch};
   const extra=accountsFile?readAccounts(fs,track(accountsFile)).filter(account=>account.codexHome!==codexHome):[];
   const value=[...homeInstances({...context,codexHome}),...extra.flatMap(account=>homeInstances({...context,codexHome:account.codexHome,account}))];
   if(!memo&&memos.size>=MAX_MEMOS)memos.delete(memos.keys().next().value!);
   memos.set(key,{checkedAt:at,files,value});
   return value;
 }
-interface HomeContext {fs:ProviderInstanceFs;directory:string;codexHome:string;cli?:string;node:{node:string;env:Record<string,string>};env:NodeJS.ProcessEnv;track(file:string):string;validator?:CodexProfileModule;fetch?:typeof fetch;account?:ProviderAccount}
-function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetch:fetcher,account}:HomeContext):ProviderInstance[] {
+interface HomeContext {fs:ProviderInstanceFs;directory:string;home:string;codexHome:string;cli?:string;node:{node:string;env:Record<string,string>};env:NodeJS.ProcessEnv;track(file:string):string;validator?:CodexProfileModule;fetch?:typeof fetch;account?:ProviderAccount}
+function homeInstances({fs,directory,home,codexHome,cli,node,env,track,validator,fetch:fetcher,account}:HomeContext):ProviderInstance[] {
   let mcp:string[]=[];
   try {mcp=mcpServerNames(boundedFile(fs,track(join(codexHome,'config.toml'))));} catch {mcp=[];}
   const suffix=account?`_${accountHash(account.codexHome)}`:'';
@@ -491,12 +527,16 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
     const label=duplicate?`${names[index]} (${route.profile})`:names[index]!;
     const name=account?`${label} · ${account.label??email??`account ${suffix.slice(1,7)}`}`:label;
     const catalogPath=route.catalogPath&&isAbsolute(route.catalogPath)?route.catalogPath:undefined;
-    const childEnv:Record<string,string>={MUSTER_PROVIDER_NODE:node.node,...node.env,CODEX_HOME:codexHome,...(cli?{MUSTER_CODEX_COMMAND:cli}:{}),
-      ...(route.profile?{MUSTER_CODEX_PROFILE:route.profile}:{MUSTER_CODEX_PROVIDER:route.modelProvider,...(catalogPath?{MUSTER_CODEX_CATALOG:catalogPath}:{})})};
+    // #720: chats run in Muster's own home (shared sign-in and configuration, private threads). A sign-in kept outside
+    // auth.json (the Keychain) is tied to the home's path, so that route keeps the person's home.
+    const ownHome=registeredDataDir&&env.MUSTER_SHARED_CODEX_HOME!=='1'&&(route.kind!=='chatgpt'||Boolean(auth))?musterCodexHome(registeredDataDir,codexHome):undefined;
+    const childEnv:Record<string,string>={MUSTER_PROVIDER_NODE:node.node,...node.env,CODEX_HOME:ownHome??codexHome,...(ownHome?{MUSTER_CODEX_SOURCE_HOME:codexHome}:{}),...(cli?{MUSTER_CODEX_COMMAND:cli}:{}),
+      // The launcher picks a profile before a provider: an empty value clears the one Muster itself inherited (it may run from a Muster shell).
+      ...(route.profile?{MUSTER_CODEX_PROFILE:route.profile,MUSTER_CODEX_PROVIDER:'',MUSTER_CODEX_CATALOG:''}:{MUSTER_CODEX_PROFILE:'',MUSTER_CODEX_PROVIDER:route.modelProvider,MUSTER_CODEX_CATALOG:catalogPath??''})};
     const codex={modelProvider:route.modelProvider,kind:route.kind,...(route.profile?{profile:route.profile}:{}),...(account?{account:suffix.slice(1)}:{})} satisfies NonNullable<ProviderInfo['codex']>;
     const source=route.profile?`Codex profile ${route.profile}.config.toml${account?` in ${account.codexHome}`:''}`:route.kind==='chatgpt'?`Codex sign-in${account?` at ${account.codexHome}`:''}`:`[model_providers.${route.modelProvider}] in Codex config.toml${account?` at ${account.codexHome}`:''}`;
     const base={id,name,driver:'codex-app-server',codex,identityMasked:route.kind==='gateway'?'Gateway · account hidden':email??'ChatGPT account · hidden',models:[],available:false,source,...(route.baseUrl?{endpoint:route.baseUrl}:{})} satisfies ProviderInfo;
-    const sessionsRoot=join(codexHome,'sessions');
+    const sessionsRoot=join(ownHome??codexHome,'sessions');
     const fail=(error:string,status:'configured'|'error'='configured'):ProviderInstance=>({info:{...base,status,error,detail:`${error} No provider fallback will be used. ${mcpDetail(mcp)}`},command,env:childEnv,sessionsRoot});
     if(route.invalid)return fail(`${route.profile}.config.toml did not validate: ${route.invalid}`,'error');
     try {fs.accessSync(command,constants.X_OK);} catch {return fail('Muster’s bundled Codex launcher is missing. Reinstall Muster.','error');}
@@ -512,7 +552,9 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       // Read like a model catalog (16 MB bound, not the 1 MB config bound): the cache carries every model's instructions and grows with each Codex release.
       const cache=readCodexCatalog(track(join(codexHome,'models_cache.json')),fs);
       if(cache.ok){list=cache.models;catalogSource='Codex’s model cache';}
-      if(!list)return fail('Codex has not listed this account’s models yet. Run `codex` once, or set model_catalog_json in config.toml.');
+      // A readable provider list is authoritative, including its visibility and metadata.
+      // Only a missing or unreadable cache uses the shipped fallback.
+      if(!list){list=bundledCodex.models;catalogSource='Muster’s bundled Codex model catalog (account cache unavailable)';}
     }
     let models:Models,excluded:ExcludedModel[]=[],listingKey:string|undefined,listingInfo:Pick<ProviderInfo,'listing'|'listingError'>={};
     if(list){
@@ -520,6 +562,16 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       // Fallback: the model the user set in Codex's config.toml stays selectable (first, so it is the default) when a stale
       // or hand-written list does not carry it. A model the list marks hidden is respected, not resurrected.
       if(route.kind==='chatgpt'&&route.configuredModel&&!models.some(model=>model.id===route.configuredModel)&&!excluded.some(item=>item.id===route.configuredModel))models.unshift({id:route.configuredModel,name:gptNameFromId(route.configuredModel)});
+      // #588: a ChatGPT profile catalog is a snapshot that goes stale. Codex's own account cache also lists the models the
+      // account gained since; they follow the catalog's models, once each. Hidden entries (in either list) and non-OpenAI ids stay out.
+      if(route.kind==='chatgpt'&&catalogPath){
+        const cache=readCodexCatalog(track(join(codexHome,'models_cache.json')),fs);
+        if(cache.ok){
+          const known=new Set([...models.map(model=>model.id),...excluded.map(item=>item.id)]);
+          const newer=catalogModels('openai-direct',cache.models).models.filter(model=>!known.has(model.id));
+          if(newer.length){models.push(...newer);catalogSource+=` and ${newer.length} newer model${newer.length===1?'':'s'} from Codex’s model cache`;}
+        }
+      }
       // A gateway with a hand-written catalog also offers the router's own agents and combos (owned_by "combo":
       // planner, advisor, executor, auto routes), read live so new ones appear without editing the catalog.
       // While the listing loads, or if it fails, the catalog alone is offered.
@@ -531,13 +583,15 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
           for(const entry of routerAgents(live.value!))if(!models.some(model=>model.id===entry.id))models.push(entry);
           // Everything else the router serves is loaded too, off in the picker until switched on in Settings › Models.
           const known=new Set(models.map(model=>model.id));
+          const notChat=live.value!.filter(entry=>entry.chat===false).length;
+          if(notChat)excluded.push({id:'non-chat-models',name:`${notChat} image, audio and other models`,reason:'These models cannot run a chat.'});
           for(const entry of live.value!)if(entry.chat!==false&&entry.owner!=='combo'&&!known.has(entry.id)){known.add(entry.id);models.push({id:entry.id,name:entry.name,hiddenByDefault:true,...(entry.images!==undefined?{images:entry.images}:{}),...(entry.owner?{group:entry.owner}:{}),...(entry.contextWindow?{contextWindow:entry.contextWindow,contextWindowSource:'listing' as const}:{})});}
         }
       }
     }
     else if(route.baseUrl){
       const listed=listing(route,env,fetcher);listingKey=listed.key;
-      if(listed.status==='pending')return {info:{...base,status:'configured',listing:'loading',detail:`Loading models from ${name}… Scan again in a moment. ${mcpDetail(mcp)}`},command,env:childEnv,sessionsRoot,listingKey};
+      if(listed.status==='pending')return {info:{...base,status:'configured',checking:true,listing:'loading',detail:`Loading models from ${name}… Scan again in a moment. ${mcpDetail(mcp)}`},command,env:childEnv,sessionsRoot,listingKey};
       if(listed.status==='error'){
         const reason=`${name} didn’t answer: ${(listed.reason??'no reason given').replace(/[.\s]+$/,'')}. Retry.`;
         return {info:{...base,status:'error',listing:'failed',listingError:reason,error:reason,detail:`${reason} Add model_catalog_json to the profile to list models without asking the endpoint. ${mcpDetail(mcp)}`},command,env:childEnv,sessionsRoot,listingKey};
@@ -558,12 +612,16 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       accountId=typeof tokenAccount==='string'&&tokenAccount?tokenAccount:apiKey??'codex-sign-in';
     }
     const bindingId=createHash('sha256').update(JSON.stringify([route.modelProvider,route.profile??'',codexHome,cli,route.fingerprint,accountId])).digest('hex');
-    return {info:{...base,models,...(excluded.length?{excludedModels:excluded}:{}),...(incremental?{incrementalInput:true}:{}),...listingInfo,available:true,status:'ready',bindingId,detail:`Runs through the Codex CLI with ${catalogSource}. ${mcpDetail(mcp)} Upstream access is checked only when you run.`},command,env:childEnv,sessionsRoot,...(listingKey?{listingKey}:{})};
+    // #777: router models the catalog does not list get an entry in the launcher's merged copy, so Codex offers them the
+    // native apply_patch tool and their edits show as inline diffs.
+    if(catalogPath&&route.kind==='gateway'){const listed=new Set(list?.map(entry=>entry&&typeof entry==='object'?(entry as {slug?:unknown}).slug:undefined));const extra=models.filter(model=>!listed.has(model.id)).map(model=>({id:model.id,name:model.name,...(model.contextWindow?{contextWindow:model.contextWindow}:{})}));if(extra.length)childEnv.MUSTER_CODEX_EXTRA_MODELS=JSON.stringify(extra);}
+    const claudeLane=route.kind==='gateway'&&route.baseUrl?claudeLaneFor(route,env,fetcher,bindingId,home):undefined;
+    return {info:{...base,models,...(excluded.length?{excludedModels:excluded}:{}),...(incremental?{incrementalInput:true}:{}),...listingInfo,available:true,status:'ready',bindingId,detail:`Runs through the Codex CLI with ${catalogSource}. ${mcpDetail(mcp)} Upstream access is checked only when you run.`},command,env:childEnv,sessionsRoot,...(listingKey?{listingKey}:{}),...(claudeLane?{claudeLane}:{})};
   });
 }
 
 /** The Codex route behind a provider id, from the current instance list; undefined for non-Codex routes. */
 export function codexRouteFor(id:string,options:ProviderInstanceOptions={}):{codex:NonNullable<ProviderInfo['codex']>;codexHome:string;sessionsRoot:string;instance:ProviderInstance}|undefined {
   const instance=configuredProviderInstances(options).find(row=>row.info.id===id&&row.info.codex);
-  return instance?{codex:instance.info.codex!,codexHome:instance.env.CODEX_HOME!,sessionsRoot:instance.sessionsRoot,instance}:undefined;
+  return instance?{codex:instance.info.codex!,codexHome:instance.env.MUSTER_CODEX_SOURCE_HOME??instance.env.CODEX_HOME!,sessionsRoot:instance.sessionsRoot,instance}:undefined;
 }

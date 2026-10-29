@@ -2,7 +2,9 @@ import { Check, ChevronDown, ChevronRight, FileText, Pencil, Plus, Server, Shiel
 import React, { useCallback, useEffect, useState } from 'react';
 import { MCP_HOOK_LIMITS, type McpHook, type McpLogLine, type McpScope, type McpServer, type McpServerInput, type McpStage, type McpTestResult, type McpTool } from '../../shared/domains/mcp-protocol';
 import { invoke } from '../bridge';
-import { notifySuccess } from '../store';
+import { loadPlugins, notifySuccess } from '../store';
+import { mcpMark } from '../mcpIcons';
+import { PluginIcon } from './PluginIcon';
 import { useStore } from '../useStore';
 import { ModalSheet } from './ModalSheet';
 import './mcp-servers.css';
@@ -32,6 +34,7 @@ function toInput(draft: Draft): McpServerInput {
 /** MCP section of Plugins: user servers with connection tests, health, tool inspection, logs and revocation, plus plugin hook review. */
 export function McpServers(): React.ReactElement {
   const state = useStore();
+  useEffect(() => { if (state.plugins.phase === 'idle') void loadPlugins(); }, [state.plugins.phase]);
   const folders = state.snapshot?.folders ?? [], projects = state.snapshot?.projects ?? [];
   const [servers, setServers] = useState<McpServer[] | null>(null);
   const [hooks, setHooks] = useState<McpHook[]>([]);
@@ -94,9 +97,14 @@ export function McpServers(): React.ReactElement {
         const tone = !server.enabled ? 'dim' : health.ok === false ? 'danger' : health.ok ? 'ok' : 'dim';
         const status = !server.enabled ? 'Disabled' : health.ok === false ? `Failing${health.consecutiveFailures > 1 ? ` ×${health.consecutiveFailures}` : ''}` : health.ok ? 'Healthy' : 'Not tested';
         const detected = server.source && server.source !== 'user';
+        const mark = mcpMark(state.plugins.value, server.name);
         return <li key={server.id} className="mcp-server">
           <div className="mcp-server-row">
-            <span className={`mcp-dot is-${tone}`} aria-hidden />
+            {/* #729: the server's plugin mark (or a neutral server tile) with its health as a corner dot. */}
+            <span className="mcp-server-mark" aria-hidden data-plugin={mark?.plugin}>
+              {mark ? <PluginIcon icon={mark.icon} name={mark.plugin} brandColor={mark.brandColor} size={22} /> : <span className="mcp-server-tile"><Server size={13} /></span>}
+              <span className={`mcp-dot is-${tone}`} />
+            </span>
             <span className="mcp-server-text">
               <span className="mcp-server-title"><strong>{server.name}</strong>{detected && <span className="plugins-badge" title={`Detected from ${server.source === 'codex' ? "Codex's config.toml" : 'a Claude mcpServers config'}; its command, URL and environment values are read-only here`}>{server.source === 'codex' ? 'Codex' : 'Claude'}</span>}</span>
               <small><span className="mcp-tag">{server.transport === 'http' ? 'HTTP' : 'stdio'}</span>{server.transport === 'http' ? server.url : [server.command, ...server.args].join(' ')}</small>

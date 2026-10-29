@@ -1,3 +1,4 @@
+import type {PermissionResult} from '../permission-result.ts';
 import type {Chat} from '../../shared/protocol.ts';
 
 /** One turn for a non-Codex route. Events use the Codex app-server shapes service.ts
@@ -11,6 +12,8 @@ export interface AdapterRunInput {
   /** True when the selected model reports image input; tool reads of images (read_file) are then sent to it as pictures. */
   vision?: boolean;
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
+  /** Declared input window for direct HTTP request budgeting (including tool rounds). */
+  contextWindow?: number;
   /** Mode and domain instructions, already joined. */
   instructions?: string;
   /** Muster's own tool servers for this run (in-app browser, terminal, mailbox…), from the domains' `mcp_servers.*`
@@ -21,10 +24,17 @@ export interface AdapterRunInput {
   /** Extra environment for the run's process: the agent's git identity and the secrets lent to it. */
   env?: Record<string, string>;
   permissionMode: 'read-only' | 'workspace' | 'full';
-  /** Asked before a tool this adapter runs itself changes anything (a command, a file change). Resolves true to go ahead: the Project tool rules, the guard for the user's own processes and approval cards live behind it. */
-  authorize?(method: string, params: Record<string, unknown>): Promise<boolean>;
+  /** #653: the chat runs in the sandbox. permissionMode is then read-only, and routes that receive the sandbox tools also
+   *  deny their own host shell and edit tools (Claude Code --disallowedTools, the OpenCode plan agent, Grok's rejections). */
+  sandboxed?: boolean;
+  /** Asked before a tool this adapter runs itself changes anything (a command, a file change). Resolves allow to go ahead: the Project tool rules, the guard for the user's own processes and approval cards live behind it. */
+  authorize?(method: string, params: Record<string, unknown>, options?: {policyOnly?: boolean}): Promise<PermissionResult>;
+  /** ask_user (HTTP routes): posts the question card and resolves at once with the text for the model; it never waits for the user. */
+  askUser?(args: Record<string, unknown>): Promise<string>;
   /** The saved conversation to continue; only set when it belongs to this route and binding. */
   resumeThreadId?: string;
+  /** Asked when `resumeThreadId` names a conversation the adapter no longer holds: returns a summary of the earlier messages to send ahead of the prompt. */
+  onThreadReset?(previousThreadId: string): string | undefined;
   signal: AbortSignal;
   onThreadReady(threadId: string): void;
   onTurnAccepted(identity: {threadId: string; turnId: string}): void;
@@ -42,6 +52,7 @@ export interface AdapterRunResult {
   /** not-dispatched: the upstream refused before doing work (bad key, 4xx, missing binary). */
   dispatchState: 'not-dispatched' | 'dispatched';
   statusCode?: number;
+  retryAfterMs?: number;
 }
 export interface RunnableAdapter {
   /** 'http' runs are stateless requests; 'cli' runs own a local child process. Neither leaves remote work behind once settled. */

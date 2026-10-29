@@ -1,0 +1,324 @@
+# MUS-SPEC-08: Git, changes and review
+
+Muster shows what changed in a chat's folder and helps the user review, commit and ship it.
+
+What the user can do:
+- see changed files per turn and for the whole chat, with inline and side-by-side diffs;
+- pick what to compare against, discard changes (untracked files go to Trash after a confirm), resolve conflicts and see blame and history;
+- create branches and worktrees, commit, push, open a pull request and follow its CI checks.
+
+Boundaries:
+- Nothing is discarded, reset or force-pushed without a confirm.
+- Large comparisons say when they are cut short; exactly at the limit is not cut short.
+- CI checks that share a name across workflows are listed separately.
+
+## Acceptance cases
+
+| Case | What the assertions check | Test |
+|---|---|---|
+| [MUS-SPEC-08-570A](08-git-changes-and-review.md#mus-spec-08-570a) | With a tag and a branch both called "release", the current branch and the branch list say "release". | [`branch list names a branch correctly when a tag has the same name`](../../../packages/agent-app/tests/git-bughunt.test.ts) |
+| [MUS-SPEC-08-570B](08-git-changes-and-review.md#mus-spec-08-570b) | Blame on `-dash.txt` returns its one line. | [`blame accepts a file whose name starts with a dash`](../../../packages/agent-app/tests/git-bughunt.test.ts) |
+| [MUS-SPEC-08-570C](08-git-changes-and-review.md#mus-spec-08-570c) | After a merge conflict in `-c.txt` is fixed, marking it resolved leaves no conflicted files. | [`markResolved accepts a dash-named conflicted file`](../../../packages/agent-app/tests/git-bughunt.test.ts) |
+| [MUS-SPEC-08-570D](08-git-changes-and-review.md#mus-spec-08-570d) | An https remote with host GitHub.com and an ssh remote with host GITHUB.COM both give the same lower-case github.com web link. | [`GitHub remotes are recognised whatever the case of the host name`](../../../packages/agent-app/tests/git-bughunt.test.ts) |
+| [MUS-SPEC-08-570E](08-git-changes-and-review.md#mus-spec-08-570e) | A ref diff of a newly added submodule has an empty before and "Subproject commit <sha>" as after. | [`ref diff shows a submodule pointer as a Subproject commit line`](../../../packages/agent-app/tests/git-bughunt.test.ts) |
+| [MUS-SPEC-08-561A](08-git-changes-and-review.md#mus-spec-08-561a) | A created 3,000-line file lists 3,000 added rows, a deleted one 3,000 removed rows, and a 3,000-line block added between untouched text shows as 3,000 added rows with the 40 untouched lines as context. | [`a new, deleted or heavily extended file still previews instead of reporting a change that is too complex`](../../../packages/agent-app/tests/diff-model.test.ts) |
+| [MUS-SPEC-08-571A](08-git-changes-and-review.md#mus-spec-08-571a) | A renamed binary file is listed with its new name and marked binary. | [`review changes flags a renamed binary file as binary`](../../../packages/agent-app/tests/review-bughunt.test.ts) |
+| [MUS-SPEC-08-571B](08-git-changes-and-review.md#mus-spec-08-571b) | Undo of a deleted symlink leaves git status clean. | [`undoing a deleted symlink restores a symlink`](../../../packages/agent-app/tests/review-bughunt.test.ts) |
+| [MUS-SPEC-08-571C](08-git-changes-and-review.md#mus-spec-08-571c) | Undo of a staged symlink change keeps mode 120000 in the index. | [`undoing a staged symlink change keeps the index entry a symlink`](../../../packages/agent-app/tests/review-bughunt.test.ts) |
+| [MUS-SPEC-08-571D](08-git-changes-and-review.md#mus-spec-08-571d) | A binary file with the extension "constructor" gets no image preview. | [`a binary file whose extension is constructor has no image preview`](../../../packages/agent-app/tests/review-bughunt.test.ts) |
+| [MUS-SPEC-08-779A](08-git-changes-and-review.md#mus-spec-08-779a) | A successful shell apply_patch that adds calculator.py and edits util.py lists both files with their line counts as one turn's changes; a failed patch and a printed patch stay commands. | [`#779 files the model writes with a shell apply_patch show as inline diffs and in the files-changed pill; failed or printed patches do not`](../../../packages/agent-app/tests/shell-patch-diff-779.test.ts) |
+| [MUS-SPEC-08-777A](08-git-changes-and-review.md#mus-spec-08-777a) | A router agent missing from the gateway's catalog is launched with a catalog entry that has the freeform apply_patch tool and direct tools; the catalog's own models and file are unchanged. | [`#777 router models the catalog does not list run with the native apply_patch tool, so their edits show as inline diffs`](../../../packages/agent-app/tests/router-patch-tool-777.test.ts) |
+| [MUS-SPEC-08-781A](08-git-changes-and-review.md#mus-spec-08-781a) | Reloading saved shell edits restores all changed files and totals without modifying stored rows or revision cursors. | [`reopening a saved shell-edit chat recovers all diffs without rewriting history`](../../../packages/agent-app/tests/stored-shell-patch-781.test.ts) |
+| [MUS-SPEC-08-781B](08-git-changes-and-review.md#mus-spec-08-781b) | Failed, interrupted, running and printed patches remain commands; native changes are untouched and action-only records recover. | [`saved non-edits stay commands and native changes remain intact`](../../../packages/agent-app/tests/stored-shell-patch-781.test.ts) |
+| [MUS-SPEC-08-781C](08-git-changes-and-review.md#mus-spec-08-781c) | Streamed command evidence yields both file diffs before the reply ends, even when completion omits command details. | [`a streamed shell edit appears before the reply ends when completion omits command details`](../../../packages/agent-app/tests/shell-patch-diff-779.test.ts) |
+| [MUS-SPEC-08-781D](08-git-changes-and-review.md#mus-spec-08-781d) | Complete scratch-file review survives separated hunks and renames while rejecting unrelated reads. | [`a scratch chat opens a complete multi-edit renamed file without granting arbitrary file reads`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
+| [MUS-SPEC-08-781E](08-git-changes-and-review.md#mus-spec-08-781e) | Context matching retains whole files and rejects ambiguous or stale placement. | [`contextual shell hunks retain all source and refuse stale or ambiguous placement`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
+| [MUS-SPEC-08-781F](08-git-changes-and-review.md#mus-spec-08-781f) | The production editor renders all unchanged source and both change blocks in both themes. | [`opening a scratch edit renders unchanged source and every changed block in both themes`](../../../packages/agent-app/tests/full-inline-diff-781-dom.tsx) |
+| [MUS-SPEC-08-781G](08-git-changes-and-review.md#mus-spec-08-781g) | A file created in one turn and edited in a later one still opens whole in the first turn. | [`a file created in one turn and edited in a later one still opens whole in the first turn`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
+| [MUS-SPEC-08-781H](08-git-changes-and-review.md#mus-spec-08-781h) | Every edit of a file the chat edited again opens whole, also across a rename. | [`every edit of a file the chat edited again later opens as the whole file, also across a rename`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
+| [MUS-SPEC-08-781I](08-git-changes-and-review.md#mus-spec-08-781i) | An edit outside the chat's folder opens whole; a file next to it and a swapped-in link are refused. | [`a chat in one folder opens the whole file it edited in a worktree outside that folder, and nothing else there`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
+| [MUS-SPEC-08-781J](08-git-changes-and-review.md#mus-spec-08-781j) | In a scratch chat's real transcript, a file edited three times in one turn and again in the next opens every edit as the whole file, with the Edited row and the files-changed pill kept outside the folded work. | [`a scratch chat: every edit of a file edited again in a later turn opens as the whole file in the transcript`](../../../packages/agent-app/tests/inline-diff-transcript-781-dom.tsx) |
+| [MUS-SPEC-08-781K](08-git-changes-and-review.md#mus-spec-08-781k) | A file renamed twice after an edit is read under its final name; unnamed files and other chats stay refused. | [`the first edit of a file renamed twice afterwards reads the file under its final name, and only that`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
+| [MUS-SPEC-08-781L](08-git-changes-and-review.md#mus-spec-08-781l) | The same real-transcript workflow in a chat with a folder reads through the folder and opens every edit whole. | [`a folder chat: every edit of a file edited again in a later turn opens as the whole file in the transcript`](../../../packages/agent-app/tests/inline-diff-transcript-781-dom.tsx) |
+| [MUS-SPEC-08-781M](08-git-changes-and-review.md#mus-spec-08-781m) | The Changes popover opens the latest turn's file as the whole file, using the same later-edit history as the transcript. | [`the Changes popover opens the latest turn’s file as the whole file too`](../../../packages/agent-app/tests/inline-diff-transcript-781-dom.tsx) |
+
+### Refs, dash-named files and submodules
+
+<a id="mus-spec-08-781f"></a>
+#### MUS-SPEC-08-781F: The existing editor displays full scratch files
+
+- Precondition: A scratch-chat edit with two separated change blocks and unchanged header, middle and footer.
+- Action: Expand its existing inline editor in light and dark themes.
+- Expected result: All seven source/change rows, original line numbers and both added/deleted blocks render. There are no missing-context gaps and one scoped read per mount.
+- Test: `packages/agent-app/tests/full-inline-diff-781-dom.tsx::opening a scratch edit renders unchanged source and every changed block in both themes`
+- Environment: Production React component and bridge with deterministic filesystem response, linkedom.
+- Known gaps: Layout and syntax colours require the separate browser evidence.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781g"></a>
+#### MUS-SPEC-08-781G: A file created in one turn stays whole after a later turn edits it
+
+- Precondition: A turn creates a file with a shell `apply_patch`; a later turn in the same chat changes it.
+- Action: Expand the first turn's edit, then the later turn's edit.
+- Expected result: The first turn shows the whole file it created, every line added, built from its own patch without reading the disk (so it still opens if the file is gone); the later turn shows the whole current file with its change in place. An update patch that no longer applies is not shown as a whole file.
+- Test: `packages/agent-app/tests/full-inline-diff-781.test.ts::a file created in one turn and edited in a later one still opens whole in the first turn`
+- Environment: Node test runner; stored shell rows recovered as the store reads them, the transcript's patch normalisation and the production diff model.
+- Known gaps: Rendering of the editor is covered by MUS-SPEC-08-781F.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781h"></a>
+#### MUS-SPEC-08-781H: Every edit of a file the chat edited again opens whole, also across a rename
+
+- Precondition: A chat edits one file three times: an edit, then an edit that also renames it, then an edit under the new name.
+- Action: Expand each of the three edits.
+- Expected result: Each shows the whole file as that edit left it, with its own change in place: the chat's later edits to the file are undone from what is on disk now, and the first edit reads the file under its new name. Without the later edits the first edit cannot be placed, which is the snippet-only bug.
+- Test: `packages/agent-app/tests/full-inline-diff-781.test.ts::every edit of a file the chat edited again later opens as the whole file, also across a rename`
+- Environment: Node test runner; stored shell rows, `laterEdits` over the whole chat and the production diff model.
+- Known gaps: A file changed outside the chat after its edits (by the user or another tool) still shows the recorded patch, labelled.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781i"></a>
+#### MUS-SPEC-08-781I: An edit outside the chat's folder opens whole, and only that file is readable
+
+- Precondition: A chat in one folder whose model edits a file in a worktree outside that folder; another file sits next to it.
+- Action: Open the edit's inline diff, then ask for the file next to it, then replace the edited file with a link to that file and ask again.
+- Expected result: The edited file is read whole and the diff is complete. The file next to it is refused because no edit recorded it, and a link put in place of the edited file is refused rather than followed.
+- Test: `packages/agent-app/tests/full-inline-diff-781.test.ts::a chat in one folder opens the whole file it edited in a worktree outside that folder, and nothing else there`
+- Environment: Node test runner; the agent service with a fake provider; temp folders.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781j"></a>
+#### MUS-SPEC-08-781J: The real transcript opens every edit of a re-edited file as the whole file (scratch chat)
+
+- Precondition: A scratch chat's first turn edits one file three times (one stored shell `apply_patch` row recovered by the store, two native file changes) and a second turn edits it again; "Inline diff length" is the default Full file.
+- Action: Render the chat's timeline. Open the turn-1 Edited row, then unfold the turn's work and open the first of its three edits.
+- Expected result: Turn 1 keeps an "Edited" row outside the folded work and ends with the "N files changed" pill. Both opened editors list every line of the file in order (no "unchanged lines" gaps, no snippet note), with removed and added lines in place as `.is-del` / `.is-add` rows, as the file stood after that edit (the second turn's change undone). The file is read through the chat-scoped read.
+- Test: `packages/agent-app/tests/inline-diff-transcript-781-dom.tsx::a scratch chat: every edit of a file edited again in a later turn opens as the whole file in the transcript`
+- Environment: Production Timeline, TurnFileChanges, ToolCard and FileChangeView with rows read back through the real store; bridge faked; linkedom.
+- Known gaps: Colours and layout need the browser screenshots; a file changed outside the chat afterwards still shows the recorded patch, labelled.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781k"></a>
+#### MUS-SPEC-08-781K: A file renamed more than once after an edit is still readable by that edit, and only that file
+
+- Precondition: A chat edits `a.ts`, then renames it to `b.ts`, then renames that to `c.ts`; `c.ts` and an unrelated `other.ts` exist.
+- Action: Ask for `c.ts` through the first edit row, for `other.ts`, and for `c.ts` from another chat.
+- Expected result: The renderer's later-edit lookup names `c.ts` for the first edit, and the chat-scoped read returns `c.ts`. `other.ts` and the other chat's request are refused.
+- Test: `packages/agent-app/tests/full-inline-diff-781.test.ts::the first edit of a file renamed twice afterwards reads the file under its final name, and only that`
+- Environment: Node test runner; the agent service with a fake provider; temp folders.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781l"></a>
+#### MUS-SPEC-08-781L: The real transcript opens every edit of a re-edited file as the whole file (folder chat)
+
+- Precondition: The 781J chat, attached to a folder that contains the file.
+- Action: Render the timeline and open the turn-1 Edited row and the first edit.
+- Expected result: As 781J, read through the folder read of the file's folder-relative name.
+- Test: `packages/agent-app/tests/inline-diff-transcript-781-dom.tsx::a folder chat: every edit of a file edited again in a later turn opens as the whole file in the transcript`
+- Environment: As 781J.
+- Known gaps: As 781J.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781m"></a>
+#### MUS-SPEC-08-781M: The Changes popover opens the latest turn's file whole
+
+- Precondition: The 781J chat, latest turn edited the file after an earlier turn did.
+- Action: Open the "N files changed" popover and read its inline preview.
+- Expected result: The preview lists every line of the file with the latest change in place; no gaps and no snippet note.
+- Test: `packages/agent-app/tests/inline-diff-transcript-781-dom.tsx::the Changes popover opens the latest turn’s file as the whole file too`
+- Environment: As 781J, with the production TurnChanges component.
+- Known gaps: As 781J. The popover shows the latest turn, which has no later edits, so this case guards the popover's later-edit wiring and whole-file preview rather than failing on the previous code.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781d"></a>
+#### MUS-SPEC-08-781D: Scratch chats retain the original whole-file inline review
+
+- Precondition: A non-Git scratch chat renames and edits a file twice, with separated change blocks and unchanged header, middle and footer.
+- Action: Open the recorded file through the chat-scoped read and construct its inline review.
+- Expected result: All source lines remain in order, both original removed lines appear at their positions, and repeated edits reconstruct the pre-turn content. Other chats, unrelated files and symlink escapes cannot use the read.
+- Test: `packages/agent-app/tests/full-inline-diff-781.test.ts::a scratch chat opens a complete multi-edit renamed file without granting arbitrary file reads`
+- Environment: Real service, temporary filesystem and SQLite, deterministic provider events; no live app or network.
+- Known gaps: Historical files no longer on disk cannot supply missing context.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781e"></a>
+#### MUS-SPEC-08-781E: Contextual changes are placed only when unambiguous
+
+- Precondition: A shell patch has multiple context-based change blocks without numbered hunk headers.
+- Action: Reconstruct the complete inline file from its current source, then repeat with changed, duplicated or unanchored source.
+- Expected result: Every unchanged line and deletion is present for a unique match; ambiguous, stale, malformed or unanchored deletions never fabricate a whole-file review.
+- Test: `packages/agent-app/tests/full-inline-diff-781.test.ts::contextual shell hunks retain all source and refuse stale or ambiguous placement`
+- Environment: Node test runner, production editor model.
+- Known gaps: A historical edit without sufficient context intentionally remains an explicitly incomplete patch.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781a"></a>
+#### MUS-SPEC-08-781A: Saved shell edits recover without replay or database rewrites
+
+- Precondition: A saved chat and child transcript contain successful shell patch commands from an older app version, with additions and updates in a non-Git folder whose path contains spaces.
+- Action: Close and reopen the store, then request the full timeline, snapshot, incremental changes, individual item and child transcript.
+- Expected result: Every read restores both file patches and consistent totals, preserves command output, and leaves the persisted row and revision cursor unchanged.
+- Test: `packages/agent-app/tests/stored-shell-patch-781.test.ts::reopening a saved shell-edit chat recovers all diffs without rewriting history`
+- Environment: Node test runner, temporary real SQLite store, renderer change collector; no live database or network.
+- Known gaps: Historical shell writes without patch evidence cannot be reconstructed safely.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781b"></a>
+#### MUS-SPEC-08-781B: Recovery preserves non-edits and existing native diffs
+
+- Precondition: Stored commands include failed, interrupted, running, cancelled and printed patches alongside native file-change metadata and a successful command-actions-only edit.
+- Action: Load the saved tool rows and collect their changes.
+- Expected result: Non-edits remain commands without changes, existing native metadata is untouched, and successful action-only edits recover both files.
+- Test: `packages/agent-app/tests/stored-shell-patch-781.test.ts::saved non-edits stay commands and native changes remain intact`
+- Environment: Node test runner, temporary real SQLite store and renderer change collector.
+- Known gaps: Does not execute the recorded shell commands, intentionally.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-781c"></a>
+#### MUS-SPEC-08-781C: Live streamed patch evidence survives a sparse completion event
+
+- Precondition: A provider sends the command and working directory at start, streams the patch success output, then completes with only a final output chunk and exit code.
+- Action: Request the chat timeline while the provider's reply is still running.
+- Expected result: Both changed files and their diffs appear immediately, with the complete command output retained rather than waiting for chat reload or turn completion.
+- Test: `packages/agent-app/tests/shell-patch-diff-779.test.ts::a streamed shell edit appears before the reply ends when completion omits command details`
+- Environment: Real agent service and temporary SQLite state with a deterministic event-provider fixture; no network or live app.
+- Known gaps: Does not verify a specific upstream provider's current event format.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-570a"></a>
+#### MUS-SPEC-08-570A: A branch is named correctly when a tag has the same name
+
+- Precondition: A repository with a tag and a branch both named `release`, and that branch checked out.
+- Action: List the branches and read the repository info.
+- Expected result: The current branch is `release`, the local list has `release`, and the info branch is `release` (not `heads/release`).
+- Test: `packages/agent-app/tests/git-bughunt.test.ts::branch list names a branch correctly when a tag has the same name`
+- Environment: Node test runner; no network, no provider. Needs `git`; real temp repository.
+- Known gaps: Calls the git helpers directly, not the branch picker.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-570b"></a>
+#### MUS-SPEC-08-570B: Blame works for a file whose name starts with "-"
+
+- Precondition: A committed file named `-dash.txt`.
+- Action: Ask for blame on it.
+- Expected result: Blame returns one line, with no git error about an unknown option.
+- Test: `packages/agent-app/tests/git-bughunt.test.ts::blame accepts a file whose name starts with a dash`
+- Environment: Node test runner; no network, no provider. Needs `git`; real temp repository.
+- Known gaps: History for the same file shares the fix but is not tested here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-570c"></a>
+#### MUS-SPEC-08-570C: Mark resolved works for a conflicted file whose name starts with "-"
+
+- Precondition: A merge conflict in a file named `-c.txt`, which the user has fixed by hand.
+- Action: Mark it resolved.
+- Expected result: The conflict list is empty afterwards.
+- Test: `packages/agent-app/tests/git-bughunt.test.ts::markResolved accepts a dash-named conflicted file`
+- Environment: Node test runner; no network, no provider. Needs `git`; real temp repository.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-570d"></a>
+#### MUS-SPEC-08-570D: A GitHub remote with capital letters in the host is recognised
+
+- Precondition: A remote URL written with `GitHub.com` or `GITHUB.COM`.
+- Action: Build the GitHub web link for it.
+- Expected result: Both give the web link for owner o, repository r on github.com, with the host in lower case and no .git ending.
+- Test: `packages/agent-app/tests/git-bughunt.test.ts::GitHub remotes are recognised whatever the case of the host name`
+- Environment: Node test runner; no network, no provider.
+- Known gaps: Unit test of the link function; no pull request or compare link is opened.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-570e"></a>
+#### MUS-SPEC-08-570E: Comparing refs shows a moved submodule as a Subproject commit line
+
+- Precondition: A repository whose last commit adds a submodule `sm`.
+- Action: Compare `HEAD~1` with `HEAD` for the path `sm`.
+- Expected result: Before is empty and after is `Subproject commit <pinned sha>`.
+- Test: `packages/agent-app/tests/git-bughunt.test.ts::ref diff shows a submodule pointer as a Subproject commit line`
+- Environment: Node test runner; no network, no provider. Needs `git`; real temp repositories.
+- Known gaps: Covers an added submodule, not one that moved between two commits.
+- Evidence: UNVERIFIED
+
+### Large diffs
+
+<a id="mus-spec-08-561a"></a>
+#### MUS-SPEC-08-561A: A new, deleted or heavily extended file still shows its lines
+
+- Precondition: A file with 3,000 lines is created, another is deleted, and a third has a 3,000-line block added between 20 untouched lines at each end.
+- Action: Build the diff for each change.
+- Expected result: Each diff lists every line: all added for the new file, all removed for the deleted file, and for the third file 3,000 added lines with the 40 untouched lines as context. None reports that the change is too complex.
+- Test: `packages/agent-app/tests/diff-model.test.ts::a new, deleted or heavily extended file still previews instead of reporting a change that is too complex`
+- Environment: Node test runner; no git repository or app.
+- Known gaps: Calls the diff model, not the review pane that draws it. This is the only test for this behaviour.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-571a"></a>
+#### MUS-SPEC-08-571A: A renamed binary file is shown as binary
+
+- Precondition: A git repository where a committed binary file b.bin has been renamed to c.bin with git mv.
+- Action: Ask for the review changes against HEAD.
+- Expected result: c.bin is listed and is marked binary, so no text diff is tried on it.
+- Test: `packages/agent-app/tests/review-bughunt.test.ts::review changes flags a renamed binary file as binary`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: Calls the review function. It does not render the review pane.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-571b"></a>
+#### MUS-SPEC-08-571B: Undoing a deleted symlink brings back a symlink
+
+- Precondition: A repository with a committed symlink named link that points at a.txt, and the symlink deleted from disk.
+- Action: Undo the change to link from the review.
+- Expected result: The path is a symlink again, and git status shows a clean tree.
+- Test: `packages/agent-app/tests/review-bughunt.test.ts::undoing a deleted symlink restores a symlink`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: Calls the undo function. It does not click Undo in the review pane.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-571c"></a>
+#### MUS-SPEC-08-571C: Undoing a staged symlink change keeps the index entry a symlink
+
+- Precondition: A committed symlink that was replaced by a symlink to another target and staged.
+- Action: Undo the change to link against the staged baseline.
+- Expected result: The index entry is still a symlink (mode 120000) and no staged difference is left.
+- Test: `packages/agent-app/tests/review-bughunt.test.ts::undoing a staged symlink change keeps the index entry a symlink`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: Calls the undo function. It does not click Undo in the review pane.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-571d"></a>
+#### MUS-SPEC-08-571D: A file whose extension is "constructor" has no image preview
+
+- Precondition: A binary file named blob.constructor in a repository.
+- Action: Open its diff in the review.
+- Expected result: The diff is marked binary and carries no image preview.
+- Test: `packages/agent-app/tests/review-bughunt.test.ts::a binary file whose extension is constructor has no image preview`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: Checks the diff data. It does not render the preview pane.
+- Evidence: UNVERIFIED
+
+### Inline diffs for every model (protected)
+
+<a id="mus-spec-08-779a"></a>
+#### MUS-SPEC-08-779A: A file written with a shell apply_patch shows as an inline diff and in the pill
+
+- Precondition: A chat whose model has no native patch tool, in a folder that is not a Git repository.
+- Action: The model runs `apply_patch` through the shell; it adds `calculator.py` and edits `util.py`. A second patch fails and a third is only printed with `cat`.
+- Expected result: The turn's changes list `calculator.py` (added, 4 lines) and `util.py` (1 added, 1 removed) as inline diffs, the files-changed pill counts them, and the tool row keeps the command output. The failed and printed patches stay plain commands.
+- Test: `packages/agent-app/tests/shell-patch-diff-779.test.ts::#779 files the model writes with a shell apply_patch show as inline diffs and in the files-changed pill; failed or printed patches do not`
+- Environment: Node test runner; a fake provider adapter replays the app-server items; no network, no Git.
+- Known gaps: Edits made with `sed`, `cat >` or `tee` outside a Git repository are still not captured.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-777a"></a>
+#### MUS-SPEC-08-777A: Router models get the native patch tool
+
+- Precondition: A gateway profile with a model catalog, and a router that also lists an agent (`intelligent-planner`) the catalog does not.
+- Action: Muster lists the route's models and launches Codex for a chat on the router agent.
+- Expected result: Codex is given a catalog with an entry for the agent using the freeform apply_patch tool and direct tools, so the model edits files with apply_patch and the edits show as inline diffs. The catalog's own models are passed on unchanged and the person's catalog file is not modified.
+- Test: `packages/agent-app/tests/router-patch-tool-777.test.ts::#777 router models the catalog does not list run with the native apply_patch tool, so their edits show as inline diffs`
+- Environment: Node test runner; a stand-in Codex records the catalog it is given; the listing is a fake fetch.
+- Known gaps: Checks the catalog Codex receives. A manual probe with Codex 0.163 against a local fake server showed `intelligent-planner` offered `apply_patch` only with the merged catalog. Routes with no catalog file still use Codex's fallback metadata.
+- Evidence: UNVERIFIED

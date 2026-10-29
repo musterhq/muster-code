@@ -1,3 +1,5 @@
+import {permissionResult, requestReply, type RequestResult} from './permission-result.ts';
+import {networkReconnectGuard} from './network-failure.ts';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
@@ -7,8 +9,9 @@ import {createAdapterCatalog,type AdapterCatalog} from './adapters/index.ts';
 import {readOwnedCommandOutputs} from './command-output-recovery.ts';
 import {authFailureStatus, authRecovery, coreBudgetOptions, classifyProviderFailure, lifecycleDiagnostic, requestWhileOwned, providerAccessPolicy, type ProviderBudgets, type ProviderRecovery} from './provider-run-lifecycle.ts';
 import {currentProviderUsage, formatResetEta} from './provider-usage.ts';
-import {connectorPolicy, leanCodexFeatureOverrides} from './context-budget.ts';
-import type { Chat, ProviderInfo } from '../shared/protocol.ts';
+import {asSentence} from './admission-retry.ts';
+import {connectorAppIds, connectorCatalog, connectorPolicy, leanCodexFeatureOverrides} from './context-budget.ts';
+import type { Chat, ChatPermissionMode, ProviderInfo } from '../shared/protocol.ts';
 import {NativeUnavailableError} from './codex-native.ts';
 import {splitSecretOverrides} from './thread-config.ts';
 import {CODEX_LAUNCHER, envFromOverrides, mcpServersFromOverrides} from './adapters/shared.ts';
@@ -18,13 +21,22 @@ import {codexSubagentOverrides,subagentSupport} from './subagent-routes.ts';
 import {codexWindowOverrides, userCompactionKeys} from './codex-window-overrides.ts';
 import {unpackedPath} from './unpacked-path.ts';
 import {BROWSER_MCP, BROWSER_NOTE, browserToolStyle, routeBrowserNote} from '../shared/computer-use.ts';
+import {ASK_USER_METHOD, ASK_USER_RULE} from './ask-user.ts';
 import type {McpServerSpec} from './adapters/types.ts';
+import type {RunnableAdapter} from './adapters/types.ts';
+import {CLAUDE_CODE_LANE_DRIVER, CLAUDE_LANE_DRIVER} from '../shared/provider-lanes.ts';
+import {adoptCodexThread, prepareMusterCodexHome} from './codex-home.ts';
+import {claudeLaneAllowed, LANE_DROPPED_SERVERS, withoutUnavailableToolNotes} from './claude-lane.ts';
+import {SANDBOX_MCP_SERVER} from '../shared/sandbox-routes.ts';
+import {routeSandboxNote} from './sandbox-note.ts';
 
 /** Identity of the test-only route `createProviderAdapter({available})` builds. */
 export const FIXTURE_PROVIDER = {id: 'fixture', bindingId: 'fixture-binding', model: 'fixture-model'} as const;
 /** The legacy-core turn ceiling is logged once, so a killed long turn is never a silent failure. */
 let lifecycleWarned = false;
 
+/** A router answers a resumed Claude thread with this (HTTP 409) once its replay state is gone. */
+const REPLAY_STATE_EXPIRED = /replay state expired or is unavailable/i;
 /** No in-memory provider session holds the chat's thread (new process, switched provider, retired after a stopped or failed turn). */
 export const NO_LIVE_SESSION = 'No live provider session holds this thread. Send a message first, then compact.';
 export class ProviderPreDispatchError extends Error {
@@ -43,19 +55,32 @@ export interface ProviderInput {
   /** Extra `-c key=value` overrides from domain run-options contributors. Access policy keys are ignored. String[] values become a TOML array. */
   configOverrides?: Record<string, string | number | boolean | string[]>;
   developerInstructions?: string;
+  /** #729: the user picked a Claude Code skill or command. On a Claude Code run (its own route or the router's Claude Code
+   *  lane) the message is exactly `text` (`/<name> <request>`), which Claude Code expands itself, and `context` (what
+   *  `prompt` carries ahead of the request) joins this turn's system prompt. Every other run sends `prompt`, where Muster
+   *  inlined the expansion. */
+  claudeCommand?: {text: string; context: string};
+  /** #739: the context window the engine reported on this chat's last turn, when it reported one. */
+  engineWindow?: number;
+  /** Effective per-model window resolved by the service, including a user's override. */
+  contextWindow?: number;
   /** The user's request names a ChatGPT connector; Codex apps stay loaded for this chat from then on. */
   connectorsRequested?: boolean;
-  onThreadReady?(threadId: string): void;
-  onTurnAccepted?(identity: {threadId: string; turnId: string; dispatchState: 'dispatched'}): void;
+  /** #756: the connectors this turn named (see requestedConnectorNames); only these load on a model without tool search. */
+  connectorNames?: string[];
+  /** `driver` names the lane when the thread was not made by the route's own driver (the Messages lane, #688). */
+  onThreadReady?(threadId: string, driver?: string): void;
+  onTurnAccepted?(identity: {threadId: string; turnId: string; dispatchState: 'dispatched'; driver?: string}): void;
   onDelta(text: string): void;
   onReasoning(text: string): void;
   onEvent(method: string, params: Record<string, unknown>): void;
-  onRequest(method: string, params: Record<string, unknown>): Promise<Record<string, unknown> | undefined>;
+  /** `options` come from the adapter, never from the provider's parameters: policyOnly asks only for the rules, the guard and a card for a threat or an ask (an adapter that runs its own tools). */
+  onRequest(method: string, params: Record<string, unknown>, options?: {policyOnly?: boolean}): Promise<RequestResult>;
   /** The saved provider thread could not be resumed and a fresh one starts. Returns text (a digest of the earlier
    *  conversation) to send ahead of this turn's prompt. */
-  onThreadReset?(previousThreadId: string): string | undefined;
+  onThreadReset?(previousThreadId: string, reason?: 'lane' | 'expired' | 'forked'): string | undefined;
 }
-export interface ProviderResult { status: 'completed' | 'failed'; finalMessage: string; threadId?: string; errorMessage?: string; dispatchState?: 'not-dispatched' | 'dispatched' | 'unknown'; turnId?: string; recovery?: ProviderRecovery; threadReset?: boolean; failure?: {kind: 'rpc-rejected' | 'request-timeout' | 'aborted'; method?: string; statusCode?: number; retryAfterMs?: number; requestId?: string} }
+export interface ProviderResult { status: 'completed' | 'failed'; finalMessage: string; threadId?: string; errorMessage?: string; dispatchState?: 'not-dispatched' | 'dispatched' | 'unknown'; turnId?: string; recovery?: ProviderRecovery; threadReset?: boolean; /** The lane that ran the turn when it was not the route's own driver (#688). */ driver?: string; /** #729: the message was the picked `/command` and the turn's context went to the system prompt, not the thread. */ nativeCommand?: boolean; failure?: {kind: 'rpc-rejected' | 'request-timeout' | 'aborted'; method?: string; statusCode?: number; retryAfterMs?: number; requestId?: string} }
 export interface ProviderAdapter {
   run(input: ProviderInput): Promise<ProviderResult>;
   /** True means an owned stop request settled locally; inspect recovery for remote certainty. */
@@ -131,24 +156,42 @@ export function steerFailure(error: unknown): false | {refused: string} | 'retry
   return 'retry';
 }
 
+/** A steer that failed for a reason the user should see: the composer queues the message and shows this. */
+export function steerRefusal(error: unknown): {refused: string} {
+  const message = (error instanceof Error ? error.message : String(error)).replace(/[\x00-\x1f]+/g, ' ').trim().slice(0, 200);
+  return {refused: message ? `The agent couldn’t take this message mid-run (${message.replace(/[.\s]+$/, '')}).` : 'The agent couldn’t take this message mid-run.'};
+}
+
 /** Bundled from the existing headless core client; no VSCode or private provider APIs. */
 const modeInstructions = (mode: Chat['mode'], subagents = true) => mode === 'ask' ? 'Answer and inspect only. Do not modify files, execute mutations or request expanded access.' : mode === 'plan' ? 'Produce a reviewable plan. Do not change files or request expanded access. ' + (subagents ? 'Do not spawn sub-agents to implement changes: implementation starts only after the user executes the plan. ' : 'Implementation starts only after the user executes the plan. ') + 'Put the complete plan in your final message.' : undefined;
 /** Process ownership (F41/F50): the agent may only clean up what it started itself. */
-export const PROCESS_OWNERSHIP_RULE = 'Process ownership: only stop, kill or restart processes you started yourself in this conversation. Never kill processes by port or name without confirming you started them; the user\'s terminals and dev servers are theirs even when they look orphaned. If a port you need is busy, pick another port. Stop long-running processes you started (dev servers, watchers) before ending your turn unless the user asked you to keep them running.';
+export const PROCESS_OWNERSHIP_RULE = 'Process ownership (local machine only): do not stop, kill or restart local processes you did not start yourself in this conversation, such as the user\'s in-app terminals, Commands-tab commands and dev servers, even when they look orphaned. Never kill local processes by port or name without confirming you started them; if a local port you need is busy, pick another port. Stop long-running local processes you started (dev servers, watchers) before ending your turn unless the user asked you to keep them running. This rule does not apply to remote hosts (ssh, servers), systemd or launchd services, or anything the user explicitly asks you to stop, kill or restart: those are allowed.';
 /** #385: agent mode keeps going instead of ending turns with a permission question. Never added in ask or plan mode. */
 export const AGENT_AUTONOMY_RULE = 'Work autonomously until the task is done. Do the next obvious step without asking. Ask only before destructive or irreversible actions, or when a choice is genuinely ambiguous and changes the outcome. Do not end a turn with "Should I...?" or "Want me to...?" for work that is clearly part of the task: do it. End with a short summary of what you did and what is left, not a question.';
+/** Full access: the user already granted everything, so a turn never ends asking permission to proceed (same wording as the goal rules). */
+export const FULL_ACCESS_NO_ASKING_RULE = 'Never ask the user for permission or confirmation to proceed (no "should I push?", "reply go", "want me to continue?", "shall I…"): Full access is already granted. Commit, push, install, restart and run commands yourself. Stop to ask only before irreversibly deleting user data, or when you are truly blocked on information only the user has.';
+/** Agent mode never ends a turn on a promise: nothing wakes the agent up to keep it. */
+export const NO_PROMISE_RULE = 'Never end a turn promising future work ("I\'ll report back when the build finishes", "I\'ll check once it is done"): nothing wakes you up to keep that promise. If you are waiting on a build, test run, server or other process, wait for it in this turn with a tool call (wait for the process, or sleep and then poll its output or status) and report the result before you end the turn.';
 /** Every route, every mode: the app draws ```mermaid, ```chart and ```html-report fences (shared/rich-block.ts). */
-export const runInstructions = (mode: Chat['mode'], extra?: string, subagents = true) => [modeInstructions(mode, subagents), mode === 'agent' ? AGENT_AUTONOMY_RULE : undefined, mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, RICH_CONTENT_GUIDANCE, extra].filter(Boolean).join('\n\n') || undefined;
+export const runInstructions = (mode: Chat['mode'], extra?: string, subagents = true, permissionMode?: ChatPermissionMode) => [modeInstructions(mode, subagents), mode === 'agent' ? AGENT_AUTONOMY_RULE : undefined, mode === 'agent' ? ASK_USER_RULE : undefined, mode === 'agent' ? NO_PROMISE_RULE : undefined, mode === 'agent' && permissionMode === 'full' ? FULL_ACCESS_NO_ASKING_RULE : undefined, mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, RICH_CONTENT_GUIDANCE, extra].filter(Boolean).join('\n\n') || undefined;
 /** #424: the instructions, Muster's MCP servers and the native browser flag for a non-Codex route. Each route names the
  *  browser tools exactly as its model sees them, or says plainly that it has none; the browser server goes only to routes
  *  that load it (Claude Code, OpenCode, Grok), and HTTP routes get native browser tools wired to the same bridge. */
-export function adapterBrowser(driver: string | undefined, mode: Chat['mode'], developerInstructions: string | undefined, overrides: ProviderInput['configOverrides'], subagents = true): {instructions?: string; mcpServers?: Record<string, McpServerSpec>; browserTools?: true} {
+export function adapterBrowser(driver: string | undefined, mode: Chat['mode'], developerInstructions: string | undefined, overrides: ProviderInput['configOverrides'], subagents = true, permissionMode?: ChatPermissionMode): {instructions?: string; mcpServers?: Record<string, McpServerSpec>; browserTools?: true} {
   const style = browserToolStyle(driver), offered = !!developerInstructions?.includes(BROWSER_NOTE);
   const servers = mcpServersFromOverrides(overrides);
   if (style === 'native' || style === 'none') delete servers[BROWSER_MCP];
-  const instructions = runInstructions(mode, routeBrowserNote(developerInstructions, style), subagents);
+  if (driver === CLAUDE_LANE_DRIVER) for (const name of LANE_DROPPED_SERVERS) delete servers[name];
+  const instructions = runInstructions(mode, routeSandboxNote(routeBrowserNote(driver === CLAUDE_LANE_DRIVER ? withoutUnavailableToolNotes(developerInstructions) : developerInstructions, style), driver), subagents, permissionMode);
   return {...(instructions ? {instructions} : {}), ...(Object.keys(servers).length ? {mcpServers: servers} : {}), ...(offered && style === 'native' ? {browserTools: true as const} : {})};
 }
+/** #653: a run carries the muster_sandbox server only while its chat is sandboxed (domains/sandbox.ts adds it). */
+export const sandboxedRun = (overrides: ProviderInput['configOverrides']): boolean => typeof overrides?.[`mcp_servers.${SANDBOX_MCP_SERVER}.command`] === 'string';
+/** #653: a sandboxed run's host access is read-only whatever the chat's own setting says, so no route can change this Mac
+ *  while the Sandbox chip shows. Raising access goes through leaving the sandbox (sandbox.chatEnvironment.set). */
+export const runAccessPolicy = (chat: Chat, overrides: ProviderInput['configOverrides']) => providerAccessPolicy(sandboxedRun(overrides) ? {...chat, permissionMode: 'read-only'} : chat);
+/** #653: Codex's own shell tools are switched off for a sandboxed run; its read-only OS sandbox already refuses host writes. */
+export const CODEX_SANDBOX_FEATURES = ['features.shell_tool=false', 'features.unified_exec=false'] as const;
 /** Test runners construct many services; they opt into real CLI/API adapters by passing a catalog. */
 const defaultCatalog = () => process.env.NODE_TEST_CONTEXT && process.env.MUSTER_PROVIDER_ADAPTERS !== '1' ? undefined : createAdapterCatalog();
 interface AdapterRun {controller: AbortController; completed: Promise<void>; /** Set by adapters that accept mid-turn messages (Claude Code). */ steer?: (text: string) => boolean}
@@ -163,7 +206,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
   const sessions = new Map<string, OwnedSession>();
   const adapterRuns = new Map<string, AdapterRun>();
   /** Chats that asked for a ChatGPT connector: apps stay on for them, so a thread's tool list does not flip back and forth. */
-  const connectorChats = new Set<string>();
+  const connectorChats = new Map<string, Set<string>>();
   const idleListeners = new Set<(chatId: string, method: string, params: Record<string, unknown>) => void>();
   const catalog = options.catalog ?? (options.instances || options.available ? undefined : defaultCatalog());
   // Start CLI probes and model listings now so the first providers.list is already settled.
@@ -206,8 +249,8 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     return session.stop;
   };
   /** Claude Code, OpenCode and HTTP routes: one owned local attempt per chat, no app-server session. */
-  async function runAdapter(route: ProviderInstance, input: ProviderInput, resumeThreadId: string | undefined): Promise<ProviderResult> {
-    const access = beforeDispatch(() => providerAccessPolicy(input.chat));
+  async function runAdapter(route: ProviderInstance, adapter: RunnableAdapter, input: ProviderInput, resumeThreadId: string | undefined, lane?: {driver: string; seed?: string; env?: Record<string, string>}): Promise<ProviderResult> {
+    const access = beforeDispatch(() => runAccessPolicy(input.chat, input.configOverrides));
     const model = input.chat.model || route.info.models[0]?.id;
     if (!model) throw new ProviderPreDispatchError('The selected provider reports no models.');
     let finish!: () => void;
@@ -215,23 +258,35 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     adapterRuns.set(input.chat.id, owned);
     const live = () => !owned.controller.signal.aborted && !disposed;
     let activity = false;
+    // A slash command must open the message to be expanded, so a turn that also carries the earlier conversation (a lane
+    // seed) keeps the inlined form: the summary has to stay in the thread.
+    const native = (lane?.driver ?? route.info.driver) === CLAUDE_CODE_LANE_DRIVER && input.claudeCommand && !lane?.seed?.trim() ? input.claudeCommand : undefined;
+    const browser = adapterBrowser(lane?.driver ?? route.info.driver, input.chat.mode, input.developerInstructions, input.configOverrides, subagentSupport(lane?.driver ?? route.info.driver) !== 'none', access.permissionMode);
+    const instructions = native?.context ? [browser.instructions, native.context].filter(Boolean).join('\n\n') : browser.instructions;
     try {
-      const result = await route.adapter!.run({
-        chat: input.chat, cwd: input.cwd, prompt: input.prompt, model, permissionMode: access.permissionMode, signal: owned.controller.signal,
+      const result = await adapter.run({
+        chat: input.chat, cwd: input.cwd, prompt: native ? native.text : lane?.seed?.trim() ? `${lane.seed.trim()}\n\nCurrent user request:\n${input.prompt}` : input.prompt, model, permissionMode: access.permissionMode, signal: owned.controller.signal,
+        contextWindow: input.contextWindow ?? route.info.models.find(entry => entry.id === model)?.contextWindow,
+        ...(sandboxedRun(input.configOverrides) ? {sandboxed: true} : {}),
         ...(input.images?.length ? {images: input.images} : {}), ...(route.info.models.find(entry => entry.id === model)?.images === true ? {vision: true} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),
         ...(resumeThreadId ? {resumeThreadId} : {}),
-        ...adapterBrowser(route.info.driver, input.chat.mode, input.developerInstructions, input.configOverrides, subagentSupport(route.info.driver) !== 'none'),
-        ...(Object.keys(envFromOverrides(input.configOverrides)).length ? {env: envFromOverrides(input.configOverrides)} : {}),
+        ...browser, ...(instructions ? {instructions} : {}),
+        ...(Object.keys({...envFromOverrides(input.configOverrides), ...lane?.env}).length ? {env: {...envFromOverrides(input.configOverrides), ...lane?.env}} : {}),
         // The adapter runs its own tools (HTTP routes): they meet the same Project tool rules, user-process guard and approval cards as Codex's.
-        authorize: async (method, params) => {
-          if (!live()) return false;
-          const answer = await requestWhileOwned(owned.controller.signal, () => input.onRequest(method, params));
-          if (owned.controller.signal.aborted) return false;
-          const decision = answer?.decision;
-          return answer === undefined || decision === 'accept' || decision === 'acceptForSession';
+        authorize: async (method, params, options) => {
+          if (!live()) return 'deny';
+          const answer = await requestWhileOwned(owned.controller.signal, () => input.onRequest(method, params, options)).catch(() => undefined);
+          return owned.controller.signal.aborted ? 'deny' : permissionResult(answer);
         },
-        onThreadReady: threadId => { if (live()) input.onThreadReady?.(threadId); },
-        onTurnAccepted: identity => { activity = true; if (live()) input.onTurnAccepted?.({...identity, dispatchState: 'dispatched'}); },
+        // ask_user never waits: the service posts the card and answers with the default at once.
+        askUser: async args => {
+          const answer = requestReply(live() ? await input.onRequest(ASK_USER_METHOD, args).catch(() => undefined) : undefined);
+          return typeof answer?.text === 'string' ? answer.text : 'The question could not be shown. Continue with your default.';
+        },
+        onThreadReady: threadId => { if (live()) input.onThreadReady?.(threadId, lane?.driver); },
+        onTurnAccepted: identity => { activity = true; if (live()) input.onTurnAccepted?.({...identity, dispatchState: 'dispatched', ...(lane ? {driver: lane.driver} : {})}); },
+        // A saved conversation this lane cannot find (a restart that lost it, a first turn that failed before saving): the earlier messages go again as a summary.
+        onThreadReset: previousThreadId => live() ? input.onThreadReset?.(previousThreadId) : undefined,
         onDelta: text => { activity = true; if (live()) input.onDelta(text); },
         onReasoning: text => { activity = true; if (live()) input.onReasoning(text); },
         onEvent: (method, params) => { activity = true; if (live()) input.onEvent(method, params); },
@@ -243,13 +298,13 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       // attempts are terminal: cancelled or failed, never 'recovery-needed'.
       const recovery: ProviderRecovery | undefined = cancelled ? {kind: 'cancelled', retryable: false, reason: 'Stopped. This attempt will not resume automatically.'}
         : result.status === 'completed' ? undefined
-        : notDispatched && (result.statusCode === 429 || result.statusCode === 503) ? {kind: 'admission-rejected', retryable: true, reason: `${result.errorMessage ?? 'The provider is at capacity.'} No turn was dispatched; retry manually later.`}
+        : notDispatched && (result.statusCode === 429 || result.statusCode === 503) ? {kind: 'admission-rejected', retryable: true, reason: `${asSentence(result.errorMessage ?? 'The provider is temporarily unavailable.')} The request was not accepted. Try again later.`}
         : authFailureStatus(result.statusCode, notDispatched ? result.errorMessage : '') ? authRecovery(route.info, authFailureStatus(result.statusCode, notDispatched ? result.errorMessage : '')!, result.errorMessage)
         : {kind: 'failed', retryable: notDispatched, reason: result.errorMessage ? `The provider attempt failed: ${result.errorMessage}` : 'The provider attempt failed.'};
-      return {status: cancelled ? 'failed' : result.status, finalMessage: result.finalMessage, dispatchState: result.dispatchState,
+      return {status: cancelled ? 'failed' : result.status, finalMessage: result.finalMessage, dispatchState: result.dispatchState, ...(lane ? {driver: lane.driver} : {}), ...(native ? {nativeCommand: true} : {}),
         ...(result.threadId ? {threadId: result.threadId} : {}), ...(result.turnId ? {turnId: result.turnId} : {}),
-        ...(recovery ? {recovery, errorMessage: recovery.reason} : {}),
-        ...(result.statusCode ? {failure: {kind: 'rpc-rejected' as const, statusCode: result.statusCode}} : {})};
+        ...(recovery ? {recovery, errorMessage: result.errorMessage ?? recovery.reason} : {}),
+        ...(result.statusCode ? {failure: {kind: 'rpc-rejected' as const, statusCode: result.statusCode, retryAfterMs: result.retryAfterMs}} : {})};
     } catch (error) {
       const reason = `The provider attempt failed: ${error instanceof Error ? error.message : String(error)}`;
       return {status: 'failed', finalMessage: '', dispatchState: activity ? 'dispatched' : 'not-dispatched', errorMessage: reason, recovery: {kind: owned.controller.signal.aborted ? 'cancelled' : 'failed', retryable: !activity && !owned.controller.signal.aborted, reason}};
@@ -258,6 +313,18 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       finish();
     }
   }
+  /** #688: does this turn of a Codex gateway route go over the Messages API? Full access, no tool server only Codex can run,
+   *  and a Claude model (by its id, or by asking the router once for a combo). Anything else keeps the Codex client. */
+  function claudeLaneModel(route: ProviderInstance, input: ProviderInput): {model: string; code?: RunnableAdapter} | undefined {
+    const model = input.chat.model || route.info.models[0]?.id;
+    if (!route.claudeLane || route.adapter || !model || input.connectorsRequested) return undefined;
+    // #730: with Claude Code installed, a Claude turn runs through it at any access level and with every tool server;
+    // only a goal (a Codex feature) keeps it on the Codex client.
+    const code = route.claudeLane.claudeCode();
+    if (code) return input.configOverrides?.['features.goals'] === true ? undefined : {model, code};
+    try { return claudeLaneAllowed(providerAccessPolicy(input.chat).permissionMode, input.configOverrides) ? {model} : undefined; } catch { return undefined; }
+  }
+
   return {
     info() { return instances().map(instance=>({...instance.info,available:!disposed&&instance.info.available})); },
     async awaitListing(providerId, timeoutMs) { await awaitProviderListing(instances().find(instance => instance.info.id === providerId)?.listingKey, timeoutMs); },
@@ -280,17 +347,36 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       if (input.chat.model && !route.info.models.some(model=>model.id===input.chat.model)) throw new ProviderPreDispatchError('This model is unavailable through the selected provider.');
       const bindingId=route.info.bindingId??route.info.id;
       if (input.chat.providerBindingId && input.chat.providerBindingId!==bindingId) throw new ProviderPreDispatchError('The selected provider account or profile changed. Select it again before running.');
+      // #688: this turn runs over the router's Messages API instead of the Codex client (see claude-lane.ts for the rules).
+      const laneModel = claudeLaneModel(route, input);
+      // Only a turn that may use the lane waits (for the router's answer about a combo); every other turn dispatches in the same tick.
+      const useLane = laneModel !== undefined && await route.claudeLane!.isClaude(laneModel.model);
+      const laneDriver = useLane ? (laneModel!.code ? CLAUDE_CODE_LANE_DRIVER : CLAUDE_LANE_DRIVER) : undefined;
+      if (laneModel !== undefined) {
+        previous = sessions.get(input.chat.id);
+        if (previous?.active || previous?.stop || adapterRuns.has(input.chat.id)) throw new ProviderPreDispatchError('This chat already owns a provider attempt. Wait for it to settle before continuing.');
+      }
       if (previous && (previous.providerId!==route.info.id || previous.bindingId!==bindingId)) {
         if (busyWithBackground(previous)) throw new ProviderPreDispatchError('Background provider work must finish before switching providers.');
         previous.controller.abort();close(previous);sessions.delete(input.chat.id);previous=undefined;
       }
-      const resumeThread = input.chat.providerThreadProviderId===route.info.id && input.chat.providerThreadBindingId===bindingId ? input.chat.providerThreadId : undefined;
-      if (route.adapter) {
+      const sameThreadRoute = input.chat.providerThreadProviderId===route.info.id && input.chat.providerThreadBindingId===bindingId;
+      // A thread made by the other lane cannot be continued here: the earlier messages go again as a summary (the thread-reset path).
+      const laneMatches = laneDriver ? input.chat.providerThreadDriver===laneDriver : !input.chat.providerThreadDriver;
+      const resumeThread = sameThreadRoute && laneMatches ? input.chat.providerThreadId : undefined;
+      const laneSeed = sameThreadRoute && !laneMatches && input.chat.providerThreadId ? input.onThreadReset?.(input.chat.providerThreadId, 'lane') : undefined;
+      const adapter = route.adapter ?? (useLane ? laneModel!.code ?? route.claudeLane!.adapter : undefined);
+      let laneEnv: Record<string, string> | undefined;
+      if (laneDriver === CLAUDE_CODE_LANE_DRIVER) {
+        try { laneEnv = await route.claudeLane!.claudeCodeEnv(laneModel!.model); }
+        catch (error) { throw new ProviderPreDispatchError(`The router credentials could not be read: ${error instanceof Error ? error.message : String(error)}`); }
+      }
+      if (adapter) {
         if (previous) {
           if (busyWithBackground(previous)) throw new ProviderPreDispatchError('Background provider work must finish before switching providers.');
           previous.controller.abort();close(previous);sessions.delete(input.chat.id);
         }
-        return runAdapter(route, input, resumeThread);
+        return runAdapter(route, adapter, input, resumeThread, laneDriver ? {driver: laneDriver, ...(laneSeed ? {seed: laneSeed} : {}), ...(laneEnv ? {env: laneEnv} : {})} : undefined);
       }
       if(previous && input.chat.providerThreadId && !resumeThread) {
         if(busyWithBackground(previous)) throw new ProviderPreDispatchError('Background provider work must finish before replacing a stale continuation.');
@@ -299,7 +385,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       const lifecycleSupported = beforeDispatch(() => client().CODEX_RUN_LIFECYCLE_VERSION === 1);
       if (!lifecycleSupported && !lifecycleWarned) { lifecycleWarned = true; console.warn(lifecycleDiagnostic(false)); }
       const budgetOptions = beforeDispatch(() => coreBudgetOptions(input.budgets, lifecycleSupported));
-      const access = beforeDispatch(() => providerAccessPolicy(input.chat));
+      const access = beforeDispatch(() => runAccessPolicy(input.chat, input.configOverrides));
       // Retire the prior observer before changing callbacks or mode. The core
       // normally keeps this process warm; the same chat owner remains stable.
       previous?.controller.abort();
@@ -312,12 +398,16 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       const model0 = input.chat.model || route.info.models[0]?.id;
       if (!model0) throw new ProviderPreDispatchError('The selected provider reports no models.');
       // Mirrors the core's scope key (instruction-only changes are already evicted by the core).
-      if (input.connectorsRequested) connectorChats.add(input.chat.id);
+      if (input.connectorsRequested) { const named = connectorChats.get(input.chat.id) ?? new Set<string>(); for (const name of input.connectorNames ?? []) named.add(name); connectorChats.set(input.chat.id, named); }
+      const connectorHome = route.env.CODEX_HOME ?? route.env.MUSTER_CODEX_SOURCE_HOME ?? (route.sessionsRoot ? dirname(route.sessionsRoot) : undefined);
+      const namedConnectors = [...connectorChats.get(input.chat.id) ?? []];
+      const connectorApps = namedConnectors.length && connectorHome ? connectorAppIds(namedConnectors, [...connectorCatalog(connectorHome), ...(route.env.MUSTER_CODEX_SOURCE_HOME && route.env.MUSTER_CODEX_SOURCE_HOME !== connectorHome ? connectorCatalog(route.env.MUSTER_CODEX_SOURCE_HOME) : [])]) : [];
       // Context budget: Codex features Muster does not use, and connector (apps) tool schemas a model without deferred
       // tool search would otherwise receive inline on every request, stay off unless this chat asked for a connector.
-      const featureOverrides = leanCodexFeatureOverrides({toolSearch: route.info.models.find(entry => entry.id === model0)?.toolSearch, connectorsRequested: connectorChats.has(input.chat.id), policy: connectorPolicy()});
+      const featureOverrides = [...leanCodexFeatureOverrides({toolSearch: route.info.models.find(entry => entry.id === model0)?.toolSearch, connectorsRequested: connectorChats.has(input.chat.id), policy: connectorPolicy(), apps: connectorApps}),
+        ...(sandboxedRun(input.configOverrides) ? CODEX_SANDBOX_FEATURES : [])];
       // #426: the model's own window and compaction point (catalog or router listing), unless the user set them in config.toml.
-      const windowOverrides = codexWindowOverrides(route.info.models.find(entry => entry.id === model0), userCompactionKeys(route.sessionsRoot ? dirname(route.sessionsRoot) : undefined));
+      const windowOverrides = codexWindowOverrides(route.info.models.find(entry => entry.id === model0), userCompactionKeys(route.sessionsRoot ? dirname(route.sessionsRoot) : undefined), input.engineWindow);
       const signature = JSON.stringify([access, model0, input.reasoningEffort ?? 'medium', input.configOverrides ?? {}, featureOverrides, windowOverrides, input.cwd, route.command, route.info.id, route.env]);
       if (previous && ((previous.signature !== undefined && previous.signature !== signature) || previous.stale) && !busyWithBackground(previous)) close(previous);
       if (!previous && sessions.size >= 64) {
@@ -332,21 +422,34 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       const completed = new Promise<void>(resolve => { finish = resolve; });
       const session: OwnedSession = { owner: previous?.owner ?? `${OWNER}:${instance}:${input.chat.id}:${route.info.id}:${bindingId}`, key:key(input.chat.id,route.info.id,bindingId), providerId:route.info.id,bindingId, controller: new AbortController(), active: true, activity: false, terminalTurns: new Set(), liveTurns: previous?.liveTurns ?? new Set(), workOverflow: previous?.workOverflow, threadId: resumeThread ?? previous?.threadId, completed, finish, signature, mode: input.chat.mode };
       sessions.set(input.chat.id, session);
+      // Set when bounded network reconnects give up: later callbacks from the abandoned transport are dropped.
+      let networkGaveUp = false;
       const lateCancellation = () => {
-        if (!session.controller.signal.aborted && !disposed) return false;
+        if (!session.controller.signal.aborted && !disposed && !networkGaveUp) return false;
         // Legacy core has no pre-dispatch AbortSignal. Its late client is
         // closed on first callback/settlement; new core checks signal before dispatch.
         if (sessions.get(input.chat.id) === session) close(session);
         return true;
       };
+      const reconnect = networkReconnectGuard();
+      let networkError: string | undefined;
+      const networkStopped: Promise<ProviderResult> = reconnect.failed.then(reason => {
+        networkError = `${reason} Automatic reconnects stopped. Earlier work may have reached the provider; review it before retrying.`;
+        networkGaveUp = true;
+        session.retired = true;
+        close(session);
+        return {status: 'failed' as const, finalMessage: '', dispatchState: 'unknown' as const, errorMessage: networkError, threadId: session.threadId, turnId: session.turnId};
+      });
       try {
         const node = providerNode();
         const commands=new Map<string,{params:Record<string,unknown>;item:Record<string,unknown>;turnId:string;output:string}>();
         const model = model0;
         const reasoning = input.reasoningEffort ?? 'medium';
-        const developerInstructions = runInstructions(input.chat.mode, input.developerInstructions);
+        const developerInstructions = runInstructions(input.chat.mode, input.developerInstructions, true, providerAccessPolicy(input.chat).permissionMode);
         const split = splitSecretOverrides(input.configOverrides);
         const extraOverrides = Object.entries(split.args).filter(([name]) => /^[A-Za-z0-9_.-]{1,128}$/.test(name) && !/^(sandbox|approval_policy)/.test(name)).map(([name, value]) => `${name}=${JSON.stringify(value)}`);
+        // #720: link the person's shared configuration into Muster's own home, and bring over a thread from before.
+        if (route.env.MUSTER_CODEX_SOURCE_HOME && route.env.CODEX_HOME) { prepareMusterCodexHome(route.env.MUSTER_CODEX_SOURCE_HOME, route.env.CODEX_HOME); adoptCodexThread(route.env.MUSTER_CODEX_SOURCE_HOME, route.env.CODEX_HOME, resumeThread); }
         const launch = {
           cwd: input.cwd, command: route.command, model, reasoning,
           env: { MUSTER_PROVIDER_NODE: node.node, ...node.env, ...route.env }, transportOwner: session.owner, cacheKey: session.key,
@@ -355,6 +458,9 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           // #427: sub-agents on, defaulting to the chat's own model (which this provider serves) in every chat type.
           configOverrides: [...codexSubagentOverrides(model, reasoning), ...featureOverrides, ...windowOverrides, ...extraOverrides, `sandbox_workspace_write.network_access=${access.networkAccess}`],
         };
+        // What the model produced in the current attempt: reply or thinking text, or a request (an approval, a question).
+        // Accepting a turn, or the user message coming back as an item, is not output: the router refuses after both (#716).
+        let produced = false;
         const observers = {
           onEvent(method:string,params:Record<string,unknown>){
             const turn = params.turn as Record<string, unknown> | undefined;
@@ -381,12 +487,18 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
                 if (session.terminalTurns.size < 64) session.terminalTurns.add(identity);
               }
             }
-            if (method.startsWith('item/') || method === 'turn/started') session.activity = true;
+            const itemEvent = method.startsWith('item/');
+            if (itemEvent || method === 'turn/started') session.activity = true;
             if (lateCancellation()) return;
             if (routeIdle && sessions.get(input.chat.id) === session) {
               // Between Muster runs the warm session still reports turns the app-server starts itself.
               for (const listener of idleListeners) { try { listener(input.chat.id, method, params); } catch { /* observers must not break the stream */ } }
               if (method === 'turn/completed' && params.threadId === session.threadId && turn?.id === session.idleTurnId) session.idleTurnId = undefined;
+            }
+            // The core forwards every streamed delta here first as its item/* notification, so this is the one progress signal.
+            if ((itemEvent ? reconnect.armed : method === 'error') && session.active
+              && (!session.threadId || !params.threadId || params.threadId === session.threadId)) {
+              if (itemEvent) reconnect.progress(); else reconnect.observe(params);
             }
             input.onEvent(method,params);
             const item=params.item as Record<string,unknown>|undefined;
@@ -395,16 +507,16 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
             }
           },
           onRequest(method: string, params: Record<string, unknown>) {
-            session.activity = true;
+            session.activity = true; produced = true;
             if (lateCancellation()) return Promise.resolve(undefined);
-            return requestWhileOwned(session.controller.signal, () => input.onRequest(method, params));
+            return requestWhileOwned(session.controller.signal, () => input.onRequest(method, params)).then(answer => requestReply(answer, method));
           },
         };
         // The same app-server launch and observers re-open this thread when /compact finds the idle timer closed it.
         session.reopen = {...launch, ...observers};
-        const result=await client().runCodexAppServer({
-          ...launch, ...observers,
-          prompt: input.prompt,
+        const dispatch = (threadId: string | undefined, seed: string | undefined, forkFromThreadId?: string) => client().runCodexAppServer({
+          ...launch, ...observers, ...(forkFromThreadId ? {forkFromThreadId} : {}),
+          prompt: seed?.trim() ? `${seed.trim()}\n\nCurrent user request:\n${input.prompt}` : input.prompt,
           ...(input.images?.length ? { images: input.images } : {}),
           ...budgetOptions,
           ...(lifecycleSupported ? {
@@ -416,15 +528,35 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
             },
           } : {}),
           ...(input.onThreadReset ? { onThreadReset: (previousThreadId: string) => lateCancellation() ? undefined : input.onThreadReset?.(previousThreadId) } : {}),
-          keepAlive: true, threadId: resumeThread,
+          keepAlive: true, threadId,
           // Codex keeps a turn's collaboration mode for later turns and for sub-agents spawned
           // in them. Leaving Plan must reset it explicitly, or "Execute plan" workers stay in
           // Plan mode and can only describe patches (F53).
           collaborationMode: input.chat.mode === 'plan' ? { mode: 'plan', settings: { model, reasoning_effort: reasoning } }
-            : previous?.mode === 'plan' || (!previous && resumeThread) ? { mode: 'default', settings: { model, reasoning_effort: reasoning } } : undefined,
-          onDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onDelta(text); },
-          onReasoningDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onReasoning(text); },
+            : previous?.mode === 'plan' || (!previous && threadId) ? { mode: 'default', settings: { model, reasoning_effort: reasoning } } : undefined,
+          onDelta(text: string) { session.activity = true; produced = true; if (!lateCancellation()) input.onDelta(text); },
+          onReasoningDelta(text: string) { session.activity = true; produced = true; if (!lateCancellation()) input.onReasoning(text); },
         });
+        // #716/#767: a router keeps Claude replay state only for a while and then refuses every request for that thread's
+        // session ("replay state expired or is unavailable", HTTP 409), even with the same history sent as text. The turn
+        // is accepted and the user message recorded first, but no output comes. Continue in a copy of the thread
+        // (`thread/fork`: the full history under a new session). Only when no copy can be made, or the copy is refused
+        // too, start one fresh thread seeded with a summary. Each step runs at most once.
+        type Attempt = Awaited<ReturnType<typeof dispatch>>;
+        const refusedBeforeOutput = (attempt: Attempt) => attempt.status === 'failed' && !produced && !commands.size
+          && !session.controller.signal.aborted && !disposed && REPLAY_STATE_EXPIRED.test(attempt.errorMessage ?? '');
+        const result=await Promise.race([networkStopped, dispatch(resumeThread, laneSeed).then(async first => {
+          if (!resumeThread || !input.onThreadReset || !refusedBeforeOutput(first)) return first;
+          input.onThreadReset(resumeThread, 'forked');
+          let copy: Attempt | undefined;
+          try { copy = await dispatch(undefined, undefined, resumeThread); } catch { copy = undefined; }
+          if (lateCancellation()) return copy ?? first;
+          if (copy && copy.dispatchState !== 'not-dispatched' && !refusedBeforeOutput(copy)) return copy;
+          const seed = input.onThreadReset(resumeThread, 'expired');
+          if (lateCancellation()) return copy ?? first;
+          session.threadId = undefined; session.turnId = undefined;
+          return dispatch(undefined, seed);
+        })]);
         if(commands.size&&result.threadId&&!session.controller.signal.aborted&&!disposed){
           try{
             const response=await client().callCodexConversation(session.key,'thread/read',{threadId:result.threadId,includeTurns:false},{transportOwner:session.owner,requireOwner:true,timeoutMs:2500});
@@ -442,15 +574,17 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         // A resets-in-N-min ETA, when the provider is near capacity, is appended to an
         // admission-rejected reason so the user knows roughly when to retry instead of guessing.
         const resetEta = formatResetEta(currentProviderUsage(route.info.id, route.sessionsRoot, route.info.codex?.modelProvider));
-        const recovery = classifyProviderFailure(result, { activity: session.activity, terminal, cancelled: session.controller.signal.aborted, resetEta, provider: route.info });
+        const recovery: ProviderRecovery | undefined = networkError && !session.controller.signal.aborted ? {kind: 'failed', retryable: true, reason: networkError} : classifyProviderFailure(result, { activity: session.activity, terminal, cancelled: session.controller.signal.aborted, resetEta, provider: route.info });
         if (result.status === 'failed') session.retired = true;
-        return { ...result, ...(session.controller.signal.aborted ? { status: 'failed' as const, errorMessage: recovery?.reason } : {}), ...(recovery ? { recovery } : {}) };
+        return { ...result, ...(networkError ? {status: 'failed' as const, errorMessage: networkError, threadId: session.threadId, turnId: session.turnId} : {}), ...(session.controller.signal.aborted ? { status: 'failed' as const, errorMessage: recovery?.reason } : {}), ...(recovery ? { recovery } : {}) };
       } catch (error) {
         session.retired = true;
         close(session);
         const result: ProviderResult = { status: 'failed', finalMessage: '', errorMessage: error instanceof Error ? error.message : String(error), dispatchState: 'unknown', ...(session.threadId ? { threadId: session.threadId } : {}), ...(session.turnId ? { turnId: session.turnId } : {}) };
+        if (networkError && !session.controller.signal.aborted) return {...result, errorMessage: networkError, recovery: {kind: 'failed', retryable: true, reason: networkError}};
         return { ...result, recovery: classifyProviderFailure(result, { activity: session.activity, terminal: false, cancelled: session.controller.signal.aborted, resetEta: formatResetEta(currentProviderUsage(route.info.id, route.sessionsRoot, route.info.codex?.modelProvider)), provider: route.info }) };
       } finally {
+        reconnect.dispose();
         session.active = false;
         if (session.retired) session.controller.abort();
         if (session.controller.signal.aborted || disposed) close(session);
@@ -493,6 +627,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       const session = sessions.get(id);
       if (disposed || !session?.active || session.stop || session.controller.signal.aborted || !core) return false;
       // Codex `turn/steer` always names the turn it expects, so a steer never lands in a newer turn.
+      let failure: unknown;
       if (session.threadId && session.turnId) {
         try {
           await core.callCodexConversation(session.key, 'turn/steer', {threadId: session.threadId, expectedTurnId: session.turnId, input: [{type: 'text', text}]}, {transportOwner: session.owner, requireOwner: true, timeoutMs: 15_000});
@@ -503,10 +638,19 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           if (verdict === 'uncertain') return true;
           if (verdict !== 'retry') return verdict;
           // Mismatch or transport trouble: retry once against the core's own view of the active turn.
+          failure = error;
         }
       }
-      if (!core.steerActiveCodexTurn) return false;
-      try { return (await core.steerActiveCodexTurn(text, session.owner, session.key)) === true; } catch { return false; }
+      // The message queues instead; the error says why, so it is never swallowed.
+      if (!core.steerActiveCodexTurn) return failure === undefined ? false : steerRefusal(failure);
+      try {
+        if ((await core.steerActiveCodexTurn(text, session.owner, session.key)) === true) return true;
+        return failure === undefined ? false : steerRefusal(failure);
+      } catch (error) {
+        const verdict = steerFailure(error);
+        if (verdict === 'uncertain') return true;
+        return verdict === 'retry' ? steerRefusal(error) : verdict;
+      }
     },
     async compact(id) {
       const session = sessions.get(id);

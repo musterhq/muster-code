@@ -17,7 +17,199 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Open 3D models in Muster. GLB, glTF (with Draco or meshopt compression), OBJ with MTL, STL, PLY and FBX files open as an interactive preview in the file viewer, from chat attachments and from the Outputs tab: drag to rotate with momentum, scroll to zoom, shift-drag to pan, arrow keys to orbit, Front / 3/4 / Top / Right views, wireframe, model info (vertices, triangles, size), and save an image of the current view. Text formats (OBJ, glTF) keep a Source toggle.
 - Large models stay smooth: files are read in 4 MiB pieces, parsed in a background worker, and sent to the graphics card a few megabytes per frame, so a 50 MB model opens without freezing the window. Textures and companion files are read only from the model's own folder.
 - The 3D view draws only when something changes. Idle, hidden or inactive windows cost no graphics work, and closing a model releases its graphics memory.
+
+## 0.3.16
+
+Chats on your own router keep their sub-agents and tools when you use a connector, Codex and computer use no longer need another app or npm on the Mac, your Claude Code skills and commands show up in Muster, and long chats compact at the right time.
+
+- Code stays coloured everywhere: files up to the 512 KB read limit now keep their syntax colours in the file view, the edited-file and blame views, and while searching with Find (matches are marked on top of the colours, with the current one highlighted). Large files colour only the rows on screen, a block at a time off the main thread, so they open as fast as before. `.cjs` files and more file types (such as `.json5`, `.ini`, `.less`, `.zig`, `.hs`, `.astro`) are coloured too (#778).
+- Every edit's inline diff opens as the whole file again, with its changes in place in the editor's Git colours: saved shell-edit chats show their diffs and changed-file totals again, live turns keep their streamed patches, and earlier edits of a file the chat edited again, edits made outside the chat's folder (for example in a worktree) and files the chat created no longer fall back to a few lines around the change (#781).
+- Router models (planner, advisor and the other router agents) edit files with the native patch tool again, so their changes show as inline diffs and in the files-changed pill (#777).
+- A patch a model runs through the shell shows as an inline diff and counts in the files-changed pill, instead of appearing only as a command (#779).
+- A reply whose stream stops partway is saved with its full text, and a streamed piece without an id no longer hides later replies (#762).
+- When a router refuses to continue a conversation, the chat carries on in a copy of it with the full history, instead of restarting from a short summary that lost the context (#767).
+- Unanswered permissions now decline, Stop ends tool process trees, and startup leaves reused process IDs alone (#407).
+- Chat titles keep their punctuation, New chat returns to your last project folder, matching chat names get a small suffix, and one-turn chats no longer show a stray minimap dash (#403).
+- A temporary provider failure after work has started now gets up to two automatic continuations on the same thread, with a countdown and a notice for each failure. A turn that ends after a tool call without replying gets one chance to finish, and live plan updates show their checklist (#386).
+- UI fixes from the 0.3.11 sweep (#398). Only one sidebar item is highlighted at a time, and Memory is highlighted while it is open. Two folders with the same name now show their parent folder in the sidebar and in search. Memory suggestions start as one line you can expand to edit. A turn's time no longer counts an import notice added later, so it no longer reads hundreds of hours. A gateway that hasn't been checked says Not checked yet instead of Ready. An empty project no longer shows In progress. The sidebar folds away below 960px.
+- Workspace writes and edits can no longer leave empty files or folders outside the chat’s folder when another process swaps a parent folder for a link (#710).
+- Chats on router models keep their sub-agents, file edits and MCP tools after you ask for a connector such as Figma or Google Drive. Muster now loads only the connectors the chat named instead of every connector's tools, which the router cut off past 128 (#756).
+- MCP credentials stay out of process command lines, saved API keys are cleared when their endpoint changes host, and release builds require a signing identity and pinned build actions (#406).
+- Chats on API-key and local router routes remember earlier tool results, fit requests to the model's window and retry brief outages without repeating commands. Long command output keeps its opening and final summary, files can be searched and read in pages, and the agent only gets instructions for tools it can use (#384).
+- In a narrow window the browser preview card now sits above the chat instead of covering its text (#637).
+- Installing Codex from Muster no longer needs npm, Node or another app on the machine. Muster downloads Codex's own build for your Mac, checks it against the published checksum and runs it directly, so a clean machine can sign in and chat (#721).
+- Your Claude Code skills and commands now show up in Muster. Skills from `~/.claude/skills` and a project's `.claude/skills`, and commands from `~/.claude/commands` and `.claude/commands`, appear in the `/` picker and the + menu. Picking a command inserts `/name` and runs it, and the chat shows the prompt it ran. Plugins and MCP servers also show their own logos across Skills & plugins, Settings › MCP servers, the + menu's Connectors & MCP section (now in New chat too), composer chips and tool rows. Plugins that ship without a logo pick one up once and keep it cached, and a logo that can't be drawn falls back to the plugin's initials. When a project command shares a name with one of yours, or a command with a skill, the one you picked is the one that runs; typing `/name` by hand runs the same one Claude Code would. A quoted argument such as `"Button primary"` stays one argument, as in Claude Code.
+- Long chats now compact before they fill the window the model really runs with, and the context meter shows the right percentage. A chat on a router model listed at 1M but run at about 258K used to read 15% when it was 58% full and overshoot before compacting. Switching a chat to another model no longer carries the old model's window over (#739).
+- A Codex route set up in config.toml now starts on its own provider when Muster itself was opened from a Muster terminal; it used to pick up that terminal's profile and fail to load (#740).
+- Claude models on your own router now run through Claude Code when it is installed, pointed at the router with the route's own key. They no longer go through the coding client, so the repeated "Reconnecting…" and "stream closed" failures are gone, and your own tool servers, approvals and steering work as they do with the Claude Code sign-in. GPT models, connector turns and goals stay on the coding client.
+- Claude chats on your own router no longer reset to a summary when the router has lost the saved thinking for an earlier tool call. Muster resends that part of the history as plain text, so the chat keeps its full history and thread and carries on. Starting fresh is now a last resort.
+- Chats on your coding-client sign-ins and profiles no longer show up in your other coding apps. Muster now keeps its own threads in its data folder while sharing your sign-in, profiles, skills and plugins; existing chats continue where they left off.
+- Switching a chat to a model on another provider or account no longer loses the conversation. The first message on the new model now carries a summary of the earlier messages, as forks and compaction already do, and the chat says so.
+- Computer use no longer needs another desktop app installed. Muster ships its own computer-use helper for macOS: every agent chat, on Codex, Claude Code or your own router, can read an app's controls, click, type, press keys and scroll. Each step answers with only what changed on screen, so runs are quicker and use less context; read-only chats can look but not act. An orange Muster cursor shows where the agent is working, in the browser and in desktop apps, and fades out when it stops.
+
+## 0.3.15
+
+Claude chats on your own router recover on their own when an older conversation can no longer be continued, and notification toasts move to the bottom-right corner, clear of your messages.
+
+- Claude chats on your own router that continue an older conversation no longer fail with "replay state expired or is unavailable". When the router has dropped the earlier conversation, Muster says so, starts a fresh one with a summary of the earlier messages and sends your message once more.
+- Notification toasts now stack in the bottom-right corner of the window, just above the status row, instead of the top-right where they sat over your messages. They stay clear of the message box and the chat summary card; in a narrow window they lift above the message box, and with the right pane open they stay in the window corner and follow the status row when it moves.
+
+## 0.3.14
+
+Chats keep working through quits, crashes and usage limits; Claude on your own router works in Full access; secrets are masked everywhere a chat is saved; and many fixes to queues, receipts, files, git and right-to-left text.
+
+- A side chat now has a Back to chat button in its header that returns to the conversation it was opened from, restores a maximized resource pane and focuses the message box. The button is hidden when the side chat has no parent conversation.
+- Large files stay quick to open when the last turn edited them or when you turn on Blame: only the lines near the view are drawn, and the change markers, Keep/Undo, Next/Previous change, copy and find keep working.
+- Receipts no longer count files a checkout, merge or rebase brought in as the turn's own edits: when the branch moves during a turn, only files the agent changed or committed are listed. A tool the provider never closed is shown as Stopped once its turn ends, and after Muster restarts, instead of running forever.
+- Secrets you saved in Muster, and environment variables named like credentials (`*_TOKEN`, `*_API_KEY`, `*_SECRET`, `*_PASSWORD`…), are masked as `••••(NAME)` wherever a chat is saved: the thread, tool output logs, chat titles and exports, including chats exported after the secret was saved.
+- After a crash, a message you had queued is no longer sent twice when you choose Continue anyway and then Steer: it goes once, and the saved copy Codex kept for it is deleted.
+- Files written by an API-key or router chat in Workspace access can no longer be pushed outside the chat's folder by a folder or link swapped during the write, and a swapped folder no longer leaves empty folders outside.
+- The OpenAI (ChatGPT sign-in) model list no longer hides newer models when a profile sets an older `model_catalog_json`: models your account gained since, from Codex's own model cache, are listed after the catalog's. Hidden models and other providers' ids stay out.
+- Claude models on a router you configured (for example `cc/claude-opus-5-5`, or the router's planner and advisor agents when they run Claude) no longer fail with "thinking blocks cannot be modified" errors in Full access chats. These turns now talk to the router's Messages API with Muster's own shell, file and browser tools, and every thinking block goes back exactly as received. Workspace and Read-only chats, chats in a sandbox, and turns that use Project, mailbox, terminal, SSH or your own tool servers still run through the Codex client. The in-app browser works on this route; canvases, background commands and computer use are not offered on it. Moving a chat between the two ways of running continues from a summary of the earlier messages.
+- A task with a very long thread (thousands of messages) now still wakes its agent: the agent gets the newest messages and a count of the older ones, and the task activity shows how big the packet was. A long prompt now goes to Gemini through standard input instead of the command line. If a task fails to start with the same error three times in a row, it stops retrying and one Problem appears in the Inbox until you resolve it.
+- Sub-agents are now named after what they were asked to do ("Count the lines in data/lines.txt") instead of the first words of their prompt, so three agents started in the same folder no longer show three identical rows. Names are unique within a chat, and the Subagents panel counts finished agents as completed.
+- If Muster fails part-way through starting, or wakes from sleep after shutting down, the automations scheduler no longer runs against a closed database.
+- The agent's rule about not stopping processes it did not start now applies to local processes only. Remote hosts, systemd or launchd services, and anything you explicitly ask it to stop or restart are no longer refused.
+- In Full access the agent no longer ends a turn asking whether to push, commit, install or continue; it just does it.
+- Chats on API-key routes only ask before irreversibly deleting user data, not before push, install or restart.
+- Switching a chat to another provider now always hands the new provider the task: the first request, your last five messages, the last assistant summary and the folder's git branch and status come first, before tool activity.
+- After you stop a run, sending a new message no longer asks whether to clear the queue and never drops it: the held messages stay queued and run, in order, after the new one.
+- If a run is stopped before your message was sent, your text comes back into the composer instead of disappearing.
+- Memory suggestions no longer appear inside the chat transcript. They collect in the Memory inbox, and each chat lists at most one new suggestion per day (later ones are kept, not shown).
+- Enter while a run is going now steers it by default (Cmd/Ctrl+Enter queues instead). Settings › Chat › "Enter while running" switches the default back to Queue.
+- Steering is more reliable: on the Claude Code route a steer folds into the current task instead of ending it, a message an API route can no longer read is queued instead of being lost, and a Codex steer error is shown with the message queued.
+- When a run stops on a provider usage or rate limit, the chat now shows **Limited** with the reset time (from the usage windows Muster reads, or the provider's own message) and continues by itself at the reset. Queued messages wait and then send in order. Each chat can choose "Resume at reset" or "Don't resume", and Settings › General › "Continue when a usage limit resets" turns it off everywhere. The wait survives a restart. If the provider still refuses, Muster backs off, says so once, and stops after a few tries instead of looping. A rate limit or outage (429, 503) is retried sooner than a usage window.
+- A limited chat can opt in to a fallback model: pick one in the Limited row and the chat continues on it straight away, with the earlier conversation as a summary. Off by default.
+- Quitting Muster no longer counts as stopping your runs. A turn that was working when Muster quit or crashed now continues after the next start: Codex threads and Claude Code (and other CLI) sessions resume the same session, other routes get a short "Muster restarted…" message. A chat waiting for your approval or answer is left for you, a chat that needs its provider status checked keeps "Continue anyway", and a continuation is never repeated if Muster closes again during it. Turn it off in Settings › General › "Continue interrupted chats after a restart".
+- Installing an update no longer quits over running work: Muster says it will update when the work finishes, then installs.
+- Launch and connection failures that never reached the provider are now retried five times with growing waits (1 to 16 seconds) instead of twice.
+- Queued messages can no longer be lost or sent twice around a quit: a message leaves the queue only in the same step that records it as sent, a message already sent is dropped at launch, and messages the Codex app-server held come back to Muster's own queue.
+- Tool rows no longer keep spinning after a Stop, a crash or a quit; they show as interrupted.
+- Browser pages without their own background now render on white instead of the app's dark background.
+- The browser preview reserves room beside the conversation instead of covering transcript text.
+- Closing a terminal that already ended no longer fails, a terminal opened as its tab is dismissed is closed instead of left running, and terminal errors show plain text instead of the raw IPC message
+- The agent can ask you a question without stopping: it shows the usual question card with the choice it is continuing with, and keeps working. Answer whenever you like; the answer reaches the running agent right away, or becomes the next message once the run has ended.
+- Stop failed network reconnects after three attempts or 30 seconds, explain proxy, DNS, TLS and refused connections, and offer Retry.
+- Security: the agent's background-process and terminal tools now prove which chat is calling with the same per-chat token as Muster's other agent tools, so one chat can no longer start, read or stop processes, or read a terminal, as another chat. A call whose chat and token don't match is refused with a plain message.
+- The Ledger's chain check now also catches deleted or rewritten recent receipts, not only edits in the middle. It names the first receipt affected, and adding new receipts afterwards does not hide it.
+- Installing a plugin or MCP connector while a chat is working now makes it usable right away: the chat restarts on a fresh session (keeping its conversation) and re-sends your last message, with a short notice saying so. Idle chats whose last message asked for that plugin get the same treatment; unrelated chats are left alone.
+- Memory: facts and preferences you told Muster once now carry into project and folder chats, and recall looks at your task and recent messages (not just "continue"), with a longer wait for the memory service.
+- Memory context is sent again on the next turn after a compaction or a model/provider change.
+- The browser tab an agent is working in now stays usable when you close the browser panel mid-run: it is no longer frozen or discarded while in use, live previews revive it, and browser tool calls retry safely after a dropped connection (never repeating a click or keystroke).
+- Project task runs now keep working while a build, test or deploy is running instead of stopping to wait, and only stop for decisions the user must make.
+- Agents post the task handoff comment themselves instead of drafting it and asking whether to post it.
+- A task you checked out and then left idle for days now shows up in the Inbox under Needs you, saying how long it has been idle, with Hand back, Release and Keep. The task on the server gets one note saying how long it has been idle. Nothing is handed back or released until you choose.
+- Usage stats and Receipts now count only approvals that actually showed you a card; requests accepted automatically in Full access are no longer counted as prompts.
+- Agent mode no longer ends a turn with a promise like "I'll report back when the build finishes": the agent is told to wait for the work inside the turn, and a run that ends on such a promise is no longer counted as completed.
+- In Agent mode with Full access, the agent can start a long build, test run or deploy as a background process of the chat (shown in Commands as the agent's). If it is still running when the turn ends, its exit sends the chat one follow-up (exit code and the last 40 lines of output) through the message queue, so the agent picks up where it left off.
+- Configured Responses routers no longer reconnect and fail when a completed response omits cache or reasoning usage counters. Existing counts, authentication, and chat history are preserved; truncated streams still report a failure.
+- Claude Code cache writes are now priced at the provider's cache-write rate (1.25× the input price for Claude models unless you set one) in Ledger receipts, Settings usage and the Dashboard. Settings › Models prices and catalog prices can set a cache-write rate; a receipt whose cost rests on a guess (a message whose final count never arrived, or cache writes billed at the input rate for a model with no cache-write price) says "estimate", and the Dashboard counts those turns.
+- Imported chats keep the model and provider their own session ran (for example a Codex session on GPT, or a Claude Code session on Claude). The note at the top of the chat names them as read-only text, and the Ledger attributes the imported turns to that model instead of the app default.
+- The Linux app's terminal works again on Ubuntu 24.04. Linux builds are made on Ubuntu 24.04, so the terminal module runs there and on newer releases.
+- Claude Code chats in Workspace access can now run shell commands and other tools Claude Code does not allow on its own: Muster shows the usual approval card and passes your answer back. A background sub-agent is no longer marked interrupted 30 minutes after its turn ends; it runs until it reports back, and Stop ends it.
+- Long replies stay smooth while they stream: the message box and every link in the transcript no longer redraw on each new word
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
+- The Changes tab, Processes tab, Subagents tab and branch picker no longer redraw on every streamed word or keystroke while open
+- Cloning refuses a repository URL that has an access token in place of a username, so the token is never saved in the new repository's settings.
+- The "connected" notice for a provider now appears only on a real change (a new provider, or signing in again after it was signed out or failed) instead of on every launch or each time Claude Code re-checks its sign-in.
+- Cloning a repository from the setup guide no longer leaves a background timer running that could reopen the guide minutes later when you add a folder another way
+- Chat exports and memory notes now redact secrets whose key name is longer than about 64 characters (long dotted or prefixed names such as `spring.datasource.hikari...password`), and the scan stays linear on large input.
+- Switching chats with the terminal dock open no longer starts a shell for each chat. A shell starts when you explicitly open Terminal or choose New terminal.
+- The check-out lease and memory scoping now record the right branch name when a tag shares the branch's name, instead of `heads/<name>`.
+- Settings › Muster Server buttons (invite, revoke, connector and agent actions) ignore a second click while the first is still running, so they no longer fire twice.
+- Help › Third-Party Notices now lists the license of every bundled package. The `buffers` package, which declared none, is recorded as MIT.
+- The Dashboard prices turns the provider reported no cost for from the model catalog or your Settings › Models prices; turns with no known price still count as unpriced.
+- Sandboxes now have a disk limit (10 GB by default, set under Resources next to memory and CPUs). A file write that would go past it is refused with a plain message, and a command or service that keeps filling the disk is stopped with a notice, so a runaway command can no longer fill your Mac's disk. A sandbox also no longer gets swap on top of its memory limit, so a 512 MB sandbox really stops at 512 MB. Deleting a chat now removes its sandbox container and files; archiving a chat stops its sandbox and keeps its files. A Project's shared sandbox keeps running while other chats in the Project still use it.
+- Claude Code token counts match what Claude Code reports: each model response is counted once with its final output, cache reads count as cached input, and a turn's result fills in anything missing. Earlier usage rows are unchanged.
+- Ledger receipts use your Settings › Models prices: a custom provider model now shows a cost, and a price you set wins over the catalog price, matching Settings usage. A price change applies to new turns only.
+- Release settled and superseded turn-ledger state and bound retained runs when settlement never arrives.
+- A sub-agent that finished is announced once in the transcript, and one /compact leaves a single compaction row instead of two.
+- Agent wakes that were waiting (for the gap between wakes, or for a run to end) are no longer lost when you quit: they resume when Muster opens, start once, and carry every reason and comment they collected. An agent also wakes once when every subtask of its task is done, including subtasks finished while Muster was closed; turn this off per agent with "Wake when all its subtasks are done".
+- A comparison with exactly 1000 changed files is no longer marked truncated, and CI checks that share a name across different workflows are listed separately (named "Workflow / job") instead of merged, while a workflow that ran again on the same commit still shows only its newest run.
+- The checkout outbox retry wait starts over when the queue empties by any route (Sync, Retry, discard, a lease ending), so a later failure is retried after 30 seconds instead of the old long wait.
+- Each organisation in the sidebar now has All tasks (the org's whole board), Dashboard and Roster rows. Opening one switches to that org first, so they work for every org, not only the active one.
+- The sidebar's organisations and My work show the last copy straight away on start while the slow server read refreshes them, instead of appearing late or staying empty.
+- Stopping a turn settles unfinished tool rows as Stopped, retaining partial output after reopening; denied, rule-blocked and timed-out commands say Did not run instead of Ran or failed, and activity summaries count them the same way.
+- A chat started in a new worktree from an existing chat now keeps that chat's access mode, and its model and reasoning effort while that model is still available, instead of the app defaults
+- Back and Forward (⌘[ / ⌘]) work like a browser: they return through Settings sections, Inbox, Projects, Automations and Memory as well as chats, instead of skipping everything but chats. A two-finger trackpad swipe (or three-finger, if macOS is set that way) does the same; code blocks, diffs and tables that scroll sideways keep their swipe.
+- When the selected provider has used up its limit, the composer says so before you send, with when it resets and a Dismiss button; the model picker marks that provider "Limit reached".
+- The diff tab header keeps the file name readable in narrow panes and wraps the compare picker and file actions onto their own row instead of cutting them off.
+- The dark theme is darker and less grey: near-black surfaces and a deeper sidebar glass tint, with the blur kept.
+- Chats show a quiet "Today 0:52" divider where a conversation starts or resumes after a 30-minute pause or on a new day.
+- 19 more built-in themes in Settings › Appearance (13 dark, 6 light), each holding WCAG AA contrast on every text pair.
+- Codex offers GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna when its model cache is unavailable; a readable provider catalog keeps precedence.
+- Preserve single line breaks in assistant prose while keeping code blocks and tables unchanged; Markdown file previews still reflow hard-wrapped paragraphs.
+- Untracked files can be discarded to Trash with confirmation from Changes or a diff, file actions stay visible, and opening a diff preserves the Changes compare mode.
+- Sandbox chats say what runs where: commands and edits made with the sandbox tools run in the container, and the agent can still read files on this Mac. The Sandbox environment is offered only on models whose tools can use it. While a chat is sandboxed, the agent's own shell and edit tools on this Mac are turned off on every model, and choosing Ask for approval or Full access first asks "Leave the sandbox?".
+- Commands stopped during startup now remain stopped when a launch error arrives, avoiding failure follow-ups.
+- Retrying suggested task creation after a failure reuses each suggestion’s tasks, and failed task batches roll back together.
+- Trim default model names in settings and reject unknown or inherited permission pane names.
+- Plugin pages and files now allow names beginning with two dots while still blocking path traversal and symlinks outside the plugin folder.
+- Notification toasts stay clear of the summary card, including when the right pane is open.
+- Rate limit retries respect Retry-After on every attempt, show the provider’s explanation and retry time, and no longer claim an unsent message is in the composer. When the provider asks to wait more than five minutes, Muster stops and says when to try again instead of retrying early.
+- Terminal panes retry failed loads twice and offer a Retry action if loading still fails.
+- The window loads less code before it first paints: the new-task form and the project task page now load when first opened, cutting the startup JavaScript by about 87 KB (1.90 MB to 1.81 MB).
+- Large text files use a bounded source view, keeping full-file search and selection responsive when loading the full file.
+- Files downloaded in the in-app browser no longer keep invisible text-direction characters in their names, so a name can't disguise its real extension.
+- On Windows, a link to a network share in a reply is no longer inspected or opened, which could contact an untrusted server.
+- Pending approvals and questions badge the Dock (or taskbar) again when you switch away from Muster, instead of staying unbadged until the count changes.
+- Arabic, Hebrew and other right-to-left messages, replies, lists and chat titles now read and align right-to-left instead of left-to-right
+- Typing in Arabic or Hebrew in the message box now flows right-to-left, and sidebar chat titles follow their own direction
+- Context you attach while a message is still sending is kept for the next message instead of being cleared with the one that was sent
+- Alt+Arrow reordering of queued follow-ups keeps working after the message you were editing was sent
+- After switching org, a slower earlier read of the workspace or My work can no longer bring the previous org's projects and tasks back onto the page
+- Opening a task or project from another org now says why when the org cannot be opened, instead of doing nothing
+- My work now offers Retry when it could not be read, instead of an error with no way out
+- A confirmation or Undo notice now appears even when four unread error notices are already on screen, instead of being dropped silently
+- Diff previews of a newly created or deleted file with more than about 2,000 lines, or of a long block added to an otherwise unchanged file, show the lines instead of saying the change is too complex
+- The update button now recovers if the first update check fails while the app is starting, instead of staying missing until you restart
+- A long text file with accents, symbols or non-Latin text no longer shows a false "not valid UTF-8" warning (and a stray replacement character) at the end of its preview.
+- Saving a script from Muster's editor no longer removes its executable permission.
+- Searching file contents no longer lists results as "./src/a.ts" when ripgrep is installed, so a result opens the same tab as the file tree entry.
+- A folder added at a drive root (D:\\ or /) now lists, reads and searches normally instead of reporting that every path escapes the folder.
+- Moving a folder into itself from the Files pane now says "A folder cannot be moved into itself" instead of a raw system error.
+- Renaming a file or folder only by capitalisation (Readme.md to README.md) now works on macOS and Windows instead of saying the destination already exists.
+- A regular expression that backtracks without end no longer freezes Muster during file content search: the search stops at its 5 second limit and says results are partial.
+- Quick open now finds files you or the agent just created, moved or changed instead of showing a list up to 30 seconds old.
+- Building a project no longer makes the Files pane and Changes list refresh continuously: changes inside .next, .turbo and __pycache__ are ignored, and so are changes inside dist, target, build or out when git ignores that folder. A committed dist folder still refreshes.
+- The Dashboard follows the org you switched to. Before, a read of the previous org that was still running when you switched could answer for the new one, so the Dashboard showed the old org's spend, budget and tasks by day.
+- The Dashboard's Recent activity and the Activity list name the agent or person who acted instead of a short id such as "agent a8782383".
+- The Dashboard opens faster on a large org: it reuses the org's last read instead of reading every task page again.
+- Token totals no longer read as 1000K, very large ones show in billions, and a negative cost shows a dash
+- A turn's receipt no longer shows 1000.0k tokens, and counts in the billions show a B
+- An organisation whose name starts with an emoji shows the whole emoji in its avatar instead of a broken character
+- Stop now ends the commands a Claude Code or OpenCode chat started (a dev server, a test watcher), and the run settles right away. Before, the command kept running and the chat stayed "stopping" until it exited on its own.
+- A message that starts with "-" (a list bullet, or "--version is wrong…") now reaches Gemini CLI and OpenCode as the message. Before, the CLI read it as options and the message was lost.
+- On router and API routes, command output and files read by the agent keep every character: accented and other multi-byte characters no longer turn into "�" where the output was split.
+- edit_file on router and API routes now refuses a file that is not UTF-8 text instead of quietly changing bytes elsewhere in it.
+- Long chats on the Anthropic API route no longer break after a message sent mid-reply or a reply with no text: the history sent to the model always starts with your message and never holds an empty reply.
+- The branch list and repository info name your branch correctly when a tag has the same name (it showed "heads/<name>").
+- Blame, history and "mark resolved" work for files whose names start with "-".
+- A GitHub remote written with capital letters in the host name (GitHub.com) is recognised for pull requests and compare links.
+- Comparing two refs where a submodule moved shows the "Subproject commit" change instead of a commit log or an error.
+- Two wakes for the same agent arriving together now merge into one instead of leaving a stuck "throttled" wake and a stray timer, and the minimum gap between wakes counts from when the last wake actually ran.
+- A Project tool rule with many "*" no longer freezes the app when the agent runs a long command.
+- The Ledger's integrity check now reports entries removed from the end of the chain.
+- Double-clicking Check out, or Hand back, on a Muster Server task no longer runs it twice (two worktrees and chats, or two pushes and two posts).
+- A device name containing "-->" is shown correctly in check-out markers.
+- The Inbox no longer shows an empty list when the group you filtered by has no items left
+- Archive and delete project confirmations offer Try again when the impact check fails
+- In Settings > Memory, a failed save no longer undoes a later toggle that went through
+- In Settings, a quiet-hours or device-name value the app rejects is put back to the saved one instead of staying on screen as if saved
+- The file editor no longer lets you save over a file it could not read faithfully (not valid UTF-8, or larger than the full-read limit), and text typed while a save is finishing is no longer thrown away
+- In the file editor, "Discard your edit and reload" now keeps the conflict notice and shows the error if the file cannot be re-read
+- Pressing Enter to confirm a Japanese, Chinese or Korean composition in search, quick open, renaming and the branch and owner pickers no longer also runs the highlighted row or saves a half-typed name
+- Searching with an emoji in the command palette and chat search highlights the whole emoji instead of showing a broken character
+- The single-key shortcuts (c, g then i, j, k and the rest) now work on Russian, Greek and other non-Latin keyboard layouts
+- Review marks a renamed binary file as binary.
+- Undo on a deleted or changed symbolic link restores the link, not a text file holding its target.
+- A binary file named like `x.constructor` no longer gets a broken image preview in review.
+- Git error messages hide the whole password of a remote URL even when the password contains "@".
+- Task priorities, search prefixes and custom theme settings are checked strictly: words like "constructor" are treated as plain text, and a custom theme with extra fields is rejected instead of being saved as given.
+- Very long text from Muster Server (task descriptions, comments) no longer stalls the app while secrets are removed from it.
+- A server status or kind named like "constructor" falls back to the default label instead of breaking the display.
+- Long streamed replies cost much less: the reply is saved about 30 times a second instead of on every token. With 20 chats streaming 600 KB replies at once, the runtime finishes in about a third of the time.
+- Search highlights in messages containing the Turkish "İ" now mark the matched words instead of text shifted beside them.
 
 ## 0.3.13
 

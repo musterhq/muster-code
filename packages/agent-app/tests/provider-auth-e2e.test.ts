@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createRequire} from 'node:module';
 import {existsSync} from 'node:fs';
-import {mkdtemp, mkdir, rm, writeFile, chmod} from 'node:fs/promises';
+import {mkdtemp, mkdir, writeFile, chmod} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
@@ -20,6 +20,7 @@ import {createProviderAdapter, type CoreClient, type ProviderInput} from '../src
 import {createAdapterCatalog} from '../src/runtime/adapters/index.ts';
 import {CustomProviders} from '../src/runtime/custom-providers.ts';
 import {SecretStore} from '../src/runtime/secret-store.ts';
+import {removeTmp} from './fixtures/tmp-dir.ts';
 import {withAdmissionRetry} from '../src/runtime/admission-retry.ts';
 import {configuredProviderInstances, invalidateProviderInstances, providerListingsSettled} from '../src/runtime/provider-instances.ts';
 import {clearCommandTokens} from '../src/runtime/codex-provider-auth.ts';
@@ -31,7 +32,7 @@ const coreBundle = join(appDir, 'dist/runtime/core-client.cjs');
 const codexBin = (() => { if (process.env.MUSTER_CODEX_COMMAND) return process.env.MUSTER_CODEX_COMMAND; try { return execFileSync('/bin/sh', ['-c', 'command -v codex'], {encoding: 'utf8'}).trim() || undefined; } catch { return undefined; } })();
 const codexSkip = !codexBin ? 'the Codex CLI is not installed' : !existsSync(coreBundle) ? 'dist/runtime/core-client.cjs is missing; run npm run build' : false;
 
-async function tmp(t: {after(fn: () => Promise<void>): void}, prefix: string) { const dir = await mkdtemp(join(tmpdir(), prefix)); t.after(() => rm(dir, {recursive: true, force: true})); return dir; }
+async function tmp(t: {after(fn: () => Promise<void>): void}, prefix: string) { const dir = await mkdtemp(join(tmpdir(), prefix)); t.after(() => removeTmp(dir)); return dir; }
 function fakeSecrets(dir: string) {
   return new SecretStore(dir, () => ({isEncryptionAvailable: () => true, encryptString: (value: string) => Buffer.from(value).reverse(), decryptString: (value: Buffer) => Buffer.from(value).reverse().toString()}));
 }
@@ -93,6 +94,11 @@ async function codexHome(t: {after(fn: () => Promise<void>): void}, router: Mock
     await writeFile(join(root, 'mock.json'), codexCatalog(['claude/claude-opus-4.1', 'codex/gpt-5.6-terra']));
     await writeFile(join(codex, 'mock-gateway.config.toml'), `model = "claude/claude-opus-4.1"\nmodel_provider = "mockroute"\nmodel_catalog_json = "${join(root, 'mock.json')}"\n${table}`);
   }
+  // #740: Muster started from a Muster shell inherits that shell's Codex profile, and the launcher spawns Codex
+  // with Muster's own environment; no route may launch with that profile.
+  const inherited = process.env.MUSTER_CODEX_PROFILE;
+  process.env.MUSTER_CODEX_PROFILE = 'inherited-from-parent';
+  t.after(async () => { if (inherited === undefined) delete process.env.MUSTER_CODEX_PROFILE; else process.env.MUSTER_CODEX_PROFILE = inherited; });
   const env = {...process.env, CODEX_HOME: codex, HOME: home, MUSTER_CODEX_COMMAND: codexBin!, MUSTER_PROVIDER_NODE: process.execPath};
   delete (env as Record<string, string | undefined>).OPENAI_API_KEY;
   return {root, home, codex, cwd, env};
@@ -118,6 +124,7 @@ async function codexChat(t: {after(fn: () => Promise<void>): void}, router: Mock
   assert.ok(turns.every(entry => entry.model === 'claude/claude-opus-4.1'), 'the slash model id reaches the router untouched');
 }
 
+// Spec: MUS-SPEC-03-740A (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-740a)
 test('(b) a Codex config.toml provider with [auth] command: models listed and a chat answered with the command’s token', {skip: codexSkip, timeout: 120_000}, async t => {
   const router = await startMockRouter(TOKEN); t.after(() => router.close());
   await codexChat(t, router, 'config-table');

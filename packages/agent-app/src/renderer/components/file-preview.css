@@ -263,6 +263,15 @@
 .file-find-bar input::placeholder { color: var(--text-faint); }
 .file-find-count { flex: none; font-size: var(--fs-11); font-variant-numeric: tabular-nums; min-width: 3.5ch; text-align: right; }
 .file-find-bar .icon-button.is-active { color: var(--text); background: var(--bg-active); }
-.file-find-plain { margin: 0; padding: 10px 14px; font-family: var(--mono); font-size: var(--fs-12); line-height: 1.55; white-space: pre-wrap; word-break: break-word; color: var(--text-dim); }
-.file-find-plain mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--text); border-radius: var(--radius-2); }
-.file-find-plain mark[data-current='true'] { background: var(--accent); color: var(--bg); }
+
+/* Large source files keep the existing gutter, typography and row height with bounded rows. */
+.virtual-file-source { min-height: 100%; outline: none; }
+.virtual-file-source .virtual-file-spacer td { padding: 0; border: 0; line-height: 0; }
+/* Find matches sit over the syntax colours in every source table; the current match is the solid one, in plain text colour. */
+.source-code-table mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--text); border-radius: var(--radius-2); }
+.source-code-table mark[data-current='true'] { background: var(--accent); color: var(--bg); }
+.source-code-table mark[data-current='true'] span { color: inherit !important; }
+
+/* Edited-file and blame views of large files: same windowing as .virtual-file-source. */
+.virtual-row-source { min-height: 100%; outline: none; }
+.virtual-row-source .virtual-row-spacer td { padding: 0; border: 0; line-height: 0; }

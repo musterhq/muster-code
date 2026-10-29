@@ -122,7 +122,7 @@ function ProjectList({ projects, workspace, onOpen, onCreate }: { projects: Proj
           {r.edited && <span className="ws-chip" data-tone="faint" title="You changed this project’s name or goal here. Importing from Muster Server again keeps your version.">edited here</span>}
           {r.tasks !== null && <span className="ws-row-count">{r.tasks} {r.tasks === 1 ? 'task' : 'tasks'}</span>}
           {r.targetDate && <span className="ws-chip" data-tone={isOverdue(r.status, r.targetDate) ? 'danger' : undefined} title="Target date">{dayLabel(r.targetDate)}</span>}
-          <span className="ws-chip" data-tone={r.archived ? 'faint' : r.paused ? 'warn' : r.status === 'completed' ? 'ok' : r.status === 'cancelled' || r.status === 'backlog' ? 'faint' : 'accent'}>{r.archived ? 'archived' : r.paused ? 'paused' : PROJECT_STATUS_LABEL[r.status].toLowerCase()}</span>
+          {(r.archived || r.paused || r.status !== 'in_progress' || (r.tasks !== null && r.tasks > 0)) && <span className="ws-chip" data-tone={r.archived ? 'faint' : r.paused ? 'warn' : r.status === 'completed' ? 'ok' : r.status === 'cancelled' || r.status === 'backlog' ? 'faint' : 'accent'}>{r.archived ? 'archived' : r.paused ? 'paused' : PROJECT_STATUS_LABEL[r.status].toLowerCase()}</span>}
         </button>
         {r.source === 'local' && <><StarButton starred={r.starred} label={r.name} onToggle={() => mark(r.id, { starred: !r.starred })}/>
           <Tip label={r.hidden ? `Show ${r.name}` : `Hide ${r.name}`}><button type="button" className="icon-button" aria-pressed={r.hidden} aria-label={r.hidden ? `Show ${r.name}` : `Hide ${r.name}`} onClick={() => mark(r.id, { hidden: !r.hidden })}>{r.hidden ? <Eye size={14}/> : <EyeOff size={14}/>}</button></Tip></>}

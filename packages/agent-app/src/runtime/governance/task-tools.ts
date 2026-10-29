@@ -44,9 +44,9 @@ export const TASK_PROTOCOL = [
   '1. Check out. Read your task with task_get before you change anything; if you picked a task yourself, take it with task_checkout.',
   '2. Work in small steps against the acceptance criteria, and keep the work in the task’s folder. Sub-agents are allowed for parallel pieces of this task when your tools offer them.',
   '3. Comment as you go with task_comment: what you did, what changed, what is left. Every run ends with a comment.',
-  '4. Hand off with task_update: implemented when the acceptance criteria are met and you can say how you checked, or blocked with the reason and who can unblock it.',
+  '4. Hand off with task_update: implemented when the acceptance criteria are met and you can say how you checked, or blocked with the reason and who can unblock it. Post the handoff comment yourself with task_comment as soon as the work is implemented; never draft it and ask the user whether to post it.',
   '5. Delegate with task_create under your task when you are allowed to; give each subtask an owner and acceptance criteria.',
-  '6. Escalate with task_ask_questions or task_request_confirmation when only the user can decide, then end your turn. Do not wait or poll.',
+  '6. Escalate with task_ask_questions or task_request_confirmation when only the user can decide something (an approval, a credential, a product choice), then end your turn. For work that is merely running (a build, tests, a deploy, a long command), do not end your turn: wait for it, polling with a tool call, and carry on once it finishes.',
   '7. Never write a secret into a comment or document. Ask for one with a secret request.',
 ].join('\n');
 
@@ -388,15 +388,19 @@ export function createTaskTools(d: TaskToolDeps) {
       const sug = d.store().getSuggestion(String(i.id ?? '')); if (!sug || sug.projectId !== projectId) throw new Error('That suggestion no longer exists.');
       const parent = d.tasks().getTask(sug.taskId); if (!parent) throw new Error('The task is gone.');
       const picks = Array.isArray(i.picks) ? new Set(i.picks.map(Number)) : null; let made = 0;
-      for (const [n, item] of sug.items.entries()) {
-        if (item.created || (picks && !picks.has(n))) continue;
-        const assignee = item.assignee ? findAgent(projectId, item.assignee) : undefined;
-        const t = d.tasks().createTask({ projectId, title: item.title, acceptance: item.acceptance, dependencies: [], owner: assignee ? { kind: 'agent', id: assignee.id } : parent.owner, parentId: parent.id, ...(item.priority === 0 || item.priority === 1 || item.priority === 2 || item.priority === 3 ? { priority: item.priority as TaskPriority } : {}) }, 'user');
-        item.created = t.id; made++;
-        if (assignee) d.onAssigned(projectId, t.id);
-      }
+      const assigned: string[] = [];
+      d.tasks().tx(() => {
+        for (const [n, item] of sug.items.entries()) {
+          if (item.created || (picks && !picks.has(n))) continue;
+          const assignee = item.assignee ? findAgent(projectId, item.assignee) : undefined;
+          const t = d.tasks().createSuggestedTask(JSON.stringify([sug.id, n]), { projectId, title: item.title, acceptance: item.acceptance, dependencies: [], owner: assignee ? { kind: 'agent', id: assignee.id } : parent.owner, parentId: parent.id, ...(item.priority === 0 || item.priority === 1 || item.priority === 2 || item.priority === 3 ? { priority: item.priority as TaskPriority } : {}) });
+          item.created = t.id; made++;
+          if (assignee) assigned.push(t.id);
+        }
+      });
       if (!made) throw new Error('Nothing left to create.');
       sug.state = sug.items.every(x => x.created) ? 'done' : 'open'; d.store().saveSuggestion(sug);
+      for (const taskId of assigned) d.onAssigned(projectId, taskId);
       d.record(projectId, 'task.delegated', `You created ${made} of ${sug.memberName}'s suggested ${made === 1 ? 'subtask' : 'subtasks'} under ${d.keyOf(parent)}.`, parent.id, 'user'); d.changed(projectId, parent.id, true);
       return sug;
     },

@@ -1,6 +1,6 @@
 {
   "name": "@muster/server",
-  "version": "0.3.13",
+  "version": "0.3.16",
   "private": true,
   "description": "Muster Server: self-hosted, headless Muster Agent runtime with a web UI, accounts, connectors and the muster-server CLI.",
   "license": "MIT",
@@ -19,9 +19,9 @@
     "package": "node scripts/package.mjs"
   },
   "devDependencies": {
-    "@types/node": "26.6.1",
+    "@types/node": "26.6.5",
     "esbuild": "0.28.2",
-    "tsc-rs": "0.7.0",
+    "tsc-rs": "0.8.0",
     "typescript": "7.0.2"
   },
   "homepage": "https://github.com/musterhq/muster-code",

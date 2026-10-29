@@ -3,15 +3,16 @@ import {ArrowRight, ChevronRight, Eye, GitCompare, ListCollapse, ListTree, Minus
 import type {ChangedFile, GitLocalFile} from '../../shared/protocol';
 import type {ReviewChange} from '../../shared/domains/review-protocol';
 import {loadGitChanges, openConflictTab, openDiff} from '../store';
-import {useStore} from '../useStore';
+import {useStoreSlice} from '../useStore';
 import {nextChangeIndex} from '../changesNavigation';
-import {baselineKey, refreshReviewChanges, setReviewBaseline, useReviewBaseline, useReviewChanges} from '../reviewState';
+import {baselineKey, refreshReviewChanges, useReviewBaseline, useReviewChanges} from '../reviewState';
 import {reviewViewedKey, useViewedVersion, viewedState} from '../diff-preferences';
 import {porcelainStatus, type GitFileStatus} from '../gitStatus';
 import {FileTypeIcon} from './FileTypeIcon';
 import {isBinaryChange} from './filePresentation';
 import {ResourceState} from './ResourceState';
 import {ReviewBaselineMenu} from './ReviewBaselineMenu';
+import {DiscardUntracked} from './DiscardUntracked';
 import {CommitBox, type GitRepository} from './GitActions';
 import {GitCounts, GitStatusBadge} from './GitStatus';
 import {Tip} from './Tooltip';
@@ -96,8 +97,7 @@ function StatusRow({file, side, folderId, change, under, repo}: {file: GitLocalF
     if (side === 'conflict') { openConflictTab(folderId, file.path); return; }
     if (directory) { setOpen(value => !value); return; }
     // Open the diff for the side the row stands for: staged rows show index vs HEAD, the rest the working tree vs the index.
-    if (!file.untracked) setReviewBaseline(folderId, side === 'staged' ? 'staged' : 'unstaged');
-    void openDiff(folderId, file.path);
+    void openDiff(folderId, file.path, side === 'staged' ? 'staged' : 'unstaged');
   };
   const title = side === 'conflict' ? `${file.path}: both sides changed this file. Open to resolve.`
     : directory ? `${file.path} (new folder; staging it adds every file inside)`
@@ -113,6 +113,7 @@ function StatusRow({file, side, folderId, change, under, repo}: {file: GitLocalF
         {binary ? <span className="change-binary">Binary</span> : <GitCounts adds={adds} dels={dels}/>}
         <GitStatusBadge resolved={status}/>
       </button>
+      {file.untracked && !directory && <DiscardUntracked folderId={folderId} path={file.path} disabled={disabled} className="icon-button change-action" onDiscard={() => { void repo.refresh(); void loadGitChanges(folderId); }}/>}
       {side === 'conflict'
         ? <Tip label="Open the conflict resolver"><button type="button" className="change-action is-text" onClick={open_}>Resolve</button></Tip>
         : side === 'staged'
@@ -151,7 +152,7 @@ function StatusSection({side, files, children, action}: {side: Side; files: GitL
  * top. "Compare against" switches to a read-only list of what differs from a branch, commit or agent turn.
  */
 export function ChangesView({folderId, repo}: {folderId: string; repo: GitRepository}): React.ReactElement {
-  const state = useStore();
+  const state = useStoreSlice('gitChanges');
   const [baseline, setBaseline] = useReviewBaseline(folderId);
   // HEAD keeps the store's list (shared with the rest of the app); every baseline also reads the review host, which adds
   // binary/mode metadata and per-file revisions for Viewed marks (DIF-11). Other baselines come only from the host.

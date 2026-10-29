@@ -125,7 +125,7 @@ export function CanvasTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
         onChange={event => edit(event.currentTarget.value)}
         onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void save(); } }}/>}
       {shown !== 'edit' && <div className="canvas-preview" aria-label="Preview">
-        {kind === 'markdown' ? <div className="canvas-markdown"><MessageBody text={draft} reports/></div>
+        {kind === 'markdown' ? <div className="canvas-markdown"><MessageBody text={draft} asDocument reports/></div>
           // The shared untrusted-HTML frame (reports use it too): scripts, forms, popups and same-origin access are all off; the page is shown, never run.
           : <SandboxedHtml className="canvas-html" html={draft} title={`${canvas.title} preview`} storeKey={`canvas:${id}`}/>}
       </div>}

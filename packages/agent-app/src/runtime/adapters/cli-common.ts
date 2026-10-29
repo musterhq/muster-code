@@ -1,4 +1,5 @@
-import {execFile, spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
+import {spawnOwned} from '../owned-process.ts';
+import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {cliSpawn, jsonLines, text} from './shared.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
@@ -33,13 +34,8 @@ export function cleanAgentEnv(base: NodeJS.ProcessEnv, own: readonly string[], r
   return env;
 }
 
-/** Stop a CLI and everything it started: the process group on macOS/Linux, `taskkill /T` on Windows. */
-export function killTree(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): void {
-  const pid = child.pid;
-  if (pid && process.platform === 'win32') { try { execFile('taskkill', ['/pid', String(pid), '/T', '/F'], {windowsHide: true}, () => {}); } catch { /* fall through */ } }
-  else if (pid) { try { process.kill(-pid, signal); return; } catch { /* not a group leader */ } }
-  try { child.kill(signal); } catch { /* already gone */ }
-}
+export {killOwned as killTree} from '../owned-process.ts';
+import {killOwned as killTree} from '../owned-process.ts';
 
 export const stripAnsi = (value: string) => value.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').replace(/\u001b\][^\u0007]*\u0007/g, '');
 
@@ -57,7 +53,7 @@ export function probeCli(binary: string, args: string[], options: {spawn?: Agent
   return new Promise((resolve, reject) => {
     const spawn = options.spawn ?? (nodeSpawn as unknown as AgentSpawn), launch = cliSpawn(binary, args, options.env ?? process.env);
     let child: ChildProcess, out = '';
-    try { child = spawn(launch.command, launch.args, {cwd: options.cwd ?? process.cwd(), env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32'}); } catch (error) { reject(error); return; }
+    try { child = spawnOwned(launch.command, launch.args, {cwd: options.cwd ?? process.cwd(), env: launch.env, stdio: ['pipe', 'pipe', 'pipe']}, spawn); } catch (error) { reject(error); return; }
     const timer = setTimeout(() => { killTree(child, 'SIGKILL'); reject(new Error(`${binary} ${args.join(' ')} did not answer within ${(options.timeoutMs ?? 8000) / 1000}s.`)); }, options.timeoutMs ?? 8000);
     child.stdin?.on('error', () => {}); child.stdin?.end();
     const take = (chunk: Buffer | string) => { if (out.length < 256 * 1024) out += String(chunk); };
@@ -83,8 +79,14 @@ export interface TurnApi {
   answer(): string;
 }
 
+/** #157: a prompt this long goes to the CLI on stdin instead of argv (one argument is capped near 128 KB on Linux and 32 KB on Windows). Only for a CLI whose own docs say it reads stdin; the others keep argv. */
+export const ARGV_PROMPT_MAX_BYTES = 24_000;
+export const fitsArgv = (body: string): boolean => Buffer.byteLength(body) <= ARGV_PROMPT_MAX_BYTES;
+
 export interface CliTurnSpec {
   label: string; binary: string; args: string[]; env: NodeJS.ProcessEnv; spawn?: AgentSpawn; killGraceMs?: number;
+  /** The prompt, when it did not fit in argv: written to the CLI's stdin before it is closed. */
+  stdin?: string;
   onEvent(event: Record<string, unknown>, api: TurnApi): void;
   /** Called when the process closes, for items still open. */
   onClose?(api: TurnApi): void;
@@ -100,7 +102,7 @@ export function runJsonLinesTurn(spec: CliTurnSpec, input: AdapterRunInput): Pro
   return new Promise<AdapterRunResult>(resolve => {
     const spawn = spec.spawn ?? (nodeSpawn as unknown as AgentSpawn), turnId = randomUUID(), launch = cliSpawn(spec.binary, spec.args, spec.env);
     let child: ChildProcess;
-    try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32'}); }
+    try { child = spawnOwned(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe']}, spawn); }
     catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `${spec.label} could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
     let session = input.resumeThreadId, accepted = false, settled = false, failure = '', stderr = '', answer = '', verdict: {ok: boolean; message: string} | undefined, killer: ReturnType<typeof setTimeout> | undefined;
     const abort = () => { killTree(child, 'SIGTERM'); killer = setTimeout(() => killTree(child, 'SIGKILL'), spec.killGraceMs ?? 3000); };
@@ -120,6 +122,7 @@ export function runJsonLinesTurn(spec: CliTurnSpec, input: AdapterRunInput): Pro
     };
     child.stderr?.setEncoding('utf8'); child.stderr?.on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-4096); });
     jsonLines(child.stdout!, event => { try { spec.onEvent(event, api); } catch { /* a malformed event must not end the turn */ } });
+    child.on('exit', () => { if (input.signal.aborted) killTree(child, 'SIGKILL'); });
     child.on('error', error => finish({status: 'failed', finalMessage: '', dispatchState: accepted ? 'dispatched' : 'not-dispatched', errorMessage: `${spec.label} could not start: ${error.message}`}));
     child.on('close', code => {
       spec.onClose?.(api);
@@ -129,7 +132,7 @@ export function runJsonLinesTurn(spec: CliTurnSpec, input: AdapterRunInput): Pro
       const reason = failure || (verdict && !verdict.ok ? verdict.message : '') || stderr.trim().split('\n').slice(-3).join(' ') || `${spec.label} exited with code ${code}.`;
       finish({status: 'failed', finalMessage: '', dispatchState: accepted ? 'dispatched' : 'not-dispatched', ...identity, errorMessage: stripAnsi(reason).replace(/[\x00-\x1f]+/g, ' ').slice(0, 400)});
     });
-    child.stdin?.on('error', () => {}); child.stdin?.end();
+    child.stdin?.on('error', () => {}); child.stdin?.end(spec.stdin);
   });
 }
 

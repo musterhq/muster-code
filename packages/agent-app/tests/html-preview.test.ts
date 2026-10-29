@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {test} from 'node:test';
 import {BrowserBridge, agentBrowserOwner} from '../src/main/agent-tools/browser-bridge.ts';
-import {BROWSER_TOOL_SPECS, PREVIEW_TOOL_NAMES, cursorScript} from '../src/main/agent-tools/browser-tools.ts';
+import {BROWSER_TOOL_SPECS, PREVIEW_TOOL_NAMES} from '../src/main/agent-tools/browser-tools.ts';
 import {HtmlRenderStore} from '../src/main/agent-tools/html-render-store.ts';
 import {ReportRegistry, reportCsp} from '../src/main/report-origin.ts';
 import {WebProbe} from '../src/runtime/listening-ports.ts';
@@ -215,16 +215,6 @@ test('the preview tools are offered on every tool route, are not page actions, a
   assert.equal(computerAction({type: 'mcpToolCall', server: 'muster_browser', tool: 'preview_open', arguments: {url: 'http://localhost:5173'}})!.label, 'Opened preview of localhost:5173');
   assert.equal(computerAction({type: 'mcpToolCall', server: 'muster_browser', tool: 'preview_open', arguments: {file: '/w/dist/index.html'}})!.object, 'index.html');
   assert.equal(computerAction({type: 'mcpToolCall', server: 'muster_browser', tool: 'preview_close', arguments: {}})!.label, 'Closed the preview');
-});
-
-test('the agent cursor is inert: one fixed, pointer-transparent host in a closed shadow root, no text, and valid script', () => {
-  const script = cursorScript('e1', '', 'click');
-  assert.doesNotThrow(() => new Function(`return ${script}`));
-  assert.match(script, /attachShadow\(\{mode: 'closed'\}\)/);
-  assert.match(script, /pointer-events:none/);
-  assert.match(script, /aria-hidden/);
-  assert.match(script, /prefers-reduced-motion/);
-  assert.doesNotMatch(script, /innerText|textContent\s*=/, 'adds no text that a snapshot or page text would pick up');
 });
 
 // ---- spin-up detection ------------------------------------------------------------------------------------------------

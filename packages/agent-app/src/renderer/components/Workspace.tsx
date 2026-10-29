@@ -221,7 +221,7 @@ function TabBody({ tab, visible, onToggleResourceMaximize, resourceMaximized }: 
     case 'canvas':
       return <CanvasTab tab={tab} />;
     case 'sideChat':
-      return <SideChatTab tab={tab} />;
+      return <SideChatTab tab={tab} {...(onToggleResourceMaximize ? {onToggleResourceMaximize} : {})} resourceMaximized={resourceMaximized ?? false} />;
     case 'pluginUi':
       return <PluginUiTab tab={tab} />;
     case 'rich':

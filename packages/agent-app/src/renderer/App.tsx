@@ -1,3 +1,4 @@
+import {useNoticePlacement} from './noticePlacement';
 import {transitionLayout} from './layoutMotion';
 import {AlertCircle,ArrowLeft,ArrowRight,Check,CircleCheck,Info,PanelLeft,X} from 'lucide-react';
 import React, { useCallback, useRef,useEffect,useState } from 'react';
@@ -46,6 +47,7 @@ function saveNavWidth():void { try { persistNavWidth(); } catch {} }
 
 export function App(): React.ReactElement {
   const state = useStoreSlice('activeChatId','boot','memoryFolderId','navHidden','navWidth','notices','screen','settings');
+  const noticeStack=useNoticePlacement(state.notices.length);
   const draft = useNewChatDraft();
   const dragging = useRef(false);
   const history=useNavHistory();
@@ -101,9 +103,9 @@ export function App(): React.ReactElement {
   return (
     <TipProvider><div className="app" data-nav-hidden={state.navHidden} data-screen={state.screen}>
       <Tip label={state.navHidden?'Show sidebar':'Hide sidebar'} shortcut="⌘B"><button type="button" className="nav-toggle icon-button" style={{left:state.navHidden?100:state.navWidth-38}} aria-label={state.navHidden?'Show left sidebar':'Hide left sidebar'} aria-expanded={!state.navHidden} aria-keyshortcuts="Meta+B Control+B" onClick={()=>transitionLayout(()=>setNavHidden(!getState().navHidden))}><PanelLeft size={16}/></button></Tip>
-      <div className="nav-history" role="group" aria-label="Chat history" style={{left:state.navHidden?132:84}}>
-        <Tip label="Back" shortcut="⌘[" disabledReason="No earlier chat in this window"><button type="button" className="icon-button" aria-label="Back" aria-keyshortcuts="Meta+[" disabled={!history.canBack} onClick={()=>goBack()}><ArrowLeft size={16}/></button></Tip>
-        <Tip label="Forward" shortcut="⌘]" disabledReason="No later chat to return to"><button type="button" className="icon-button" aria-label="Forward" aria-keyshortcuts="Meta+]" disabled={!history.canForward} onClick={()=>goForward()}><ArrowRight size={16}/></button></Tip>
+      <div className="nav-history" role="group" aria-label="History" style={{left:state.navHidden?132:84}}>
+        <Tip label="Back" shortcut="⌘[" disabledReason="Nothing earlier in this window"><button type="button" className="icon-button" aria-label="Back" aria-keyshortcuts="Meta+[" disabled={!history.canBack} onClick={()=>goBack()}><ArrowLeft size={16}/></button></Tip>
+        <Tip label="Forward" shortcut="⌘]" disabledReason="Nothing later to return to"><button type="button" className="icon-button" aria-label="Forward" aria-keyshortcuts="Meta+]" disabled={!history.canForward} onClick={()=>goForward()}><ArrowRight size={16}/></button></Tip>
       </div>
       <nav
         className="nav"
@@ -164,7 +166,7 @@ export function App(): React.ReactElement {
       <AreaBoundary area="the right pane" scope="pane"><ResourcePane suspended={state.screen!=='work'} /></AreaBoundary>
       <MenuRename/>
       {state.notices.length > 0 && (
-        <div className="notices" role="log" aria-live="polite" aria-label="Notifications" onPointerEnter={()=>holdNotices(true)} onPointerLeave={()=>holdNotices(false)}>
+        <div ref={noticeStack.ref} style={noticeStack.style} className="notices" role="log" aria-live="polite" aria-label="Notifications" onPointerEnter={()=>holdNotices(true)} onPointerLeave={()=>holdNotices(false)}>
           {state.notices.map((n) => (
             <div key={n.id} className="notice" data-kind={n.kind}>
               <span className="notice-icon" aria-hidden="true">{n.kind==='error'?<AlertCircle size={14}/>:n.kind==='success'?<CircleCheck size={14}/>:<Info size={14}/>}</span>

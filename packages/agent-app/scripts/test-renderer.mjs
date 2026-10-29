@@ -3,10 +3,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-// renderer-lifecycle plus the DOM suites that have no tests/run-*.mjs runner. Each sets up its own
-// linkedom globals, so each gets its own process, one at a time.
-const suites = ['renderer-lifecycle', 'folder-default-model', 'model-picker-dom', 'memory-recall-chip', 'summary-scheduled-dom', 'processes-components', 'skill-attach-components', 'subagent-components', 'mailbox-inbox-components', 'providers-components', 'browser-components', 'pip-components', 'message-meta', 'markdown-fade-dom', 'timeline-navigation-dom', 'scoped-computer-components', 'sandbox-controls-components', 'settings-shell', 'workspace-refresh-e2e', 'stop-keeps-workspace', 'review-fixes-dom', 'file-tree-multiselect', 'pdf-thumbnails', 'artifact-viewer', 'project-team-components', 'project-surface-components', 'plugins-screen-components', 'parallel-run-guard-e2e', 'area-boundary-dom', 'setup-guide-dom', 'new-project-sources-components', 'hub-components', 'projects-parity-components', 'paperclip-integration-dom', 'connected-views-dom', 'paperclip-signin-dom', 'muster-server-components', 'governance-components', 'work-components', 'nav-components', 'org-components', 'orgs-dom', 'server-outputs-dom', 'chat-polish-dom', 'device-noun-dom-win32', 'device-noun-dom-linux', 'add-provider-components', 'store-selectors', 'chat-image-dom', 'image-gallery-dom', 'reply-gap-dom', 'broken-image-gallery-dom', 'markdown-table-dom', 'rich-block-components', 'html-preview-components'];
-const SPLIT = new Set(['orgs-dom', 'markdown-table-dom', 'browser-components', 'hub-components', 'projects-parity-components', 'paperclip-integration-dom', 'paperclip-signin-dom', 'work-components', 'nav-components', 'org-components', 'server-outputs-dom', 'chat-polish-dom', 'device-noun-dom-win32', 'device-noun-dom-linux', 'rich-block-components', 'html-preview-components']);
+import { suites, runners, split as SPLIT } from './renderer-suites.mjs';
 let failed = 0;
 // DOM suites drive React through linkedom with real timers; a loaded CI runner occasionally starves the first
 // render past a suite's waits. A failing suite gets one clean re-run in a fresh process: a real regression fails
@@ -30,8 +27,5 @@ for (const name of suites) {
   // without a cap that exhausted a 24 GB machine. Fail fast instead.
   if (!runSuite(name, outfile)) failed++;
 }
-// Suites that need their own build (code splitting) ship a standalone runner.
-for (const runner of ['run-git-history-components.mjs', 'run-spotlight-palette-dom.mjs', 'run-three-model.mjs', 'run-model-viewer-dom.mjs', 'run-html-sandbox-security.mjs']) {
-  if (!runSuite(runner, path.join(root, 'tests', runner))) failed++;
-}
+for (const file of runners) if (!runSuite(file, path.join(root, file))) failed++;
 process.exitCode = failed ? 1 : 0;

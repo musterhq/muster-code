@@ -1,9 +1,9 @@
 import {computerAction,parseArguments,type ComputerAction} from '../../shared/computer-use.ts';
 import {htmlRenderIdOf,htmlRenderTitle,isHtmlRenderTool} from '../../shared/html-render.ts';
 import {countPatch,itemPatches} from '../patchModel.ts';
-export type ToolKind = 'read' | 'edit' | 'search' | 'list' | 'command' | 'subagent' | 'mcp' | 'computer' | 'generic';
+export type ToolKind = 'read' | 'edit' | 'search' | 'list' | 'command' | 'subagent' | 'mcp' | 'computer' | 'skill' | 'generic';
 export interface FileStat {path:string;adds:number;dels:number}
-export interface ToolPresentation {kind:ToolKind;verb:string;runningVerb:string;subject:string;paths?:string[];/** Reads that only looked at images (Codex "Viewed 4 images"). */images?:string[];files?:FileStat[];adds?:number;dels?:number;plan?:boolean;/** The plan's own markdown text (ExitPlanMode, or a native plan item) when it wasn't submitted as a steps array. */planText?:string;computer?:ComputerAction;/** render_html: the stored page the row draws inline (#html-preview). */htmlRender?:{id?:string;title:string}}
+export interface ToolPresentation {kind:ToolKind;verb:string;runningVerb:string;subject:string;paths?:string[];/** Reads that only looked at images (Codex "Viewed 4 images"). */images?:string[];files?:FileStat[];adds?:number;dels?:number;plan?:boolean;/** The plan's own markdown text (ExitPlanMode, or a native plan item) when it wasn't submitted as a steps array. */planText?:string;computer?:ComputerAction;/** #729: a Claude Code slash command, shown with the picker's slash glyph. */slash?:boolean;/** render_html: the stored page the row draws inline (#html-preview). */htmlRender?:{id?:string;title:string}}
 const string=(value:unknown):string=>typeof value==='string'?value:'';
 const objects=(value:unknown):Record<string,unknown>[]=>Array.isArray(value)?value.filter(v=>v&&typeof v==='object'):[];
 export function classifyTool(data:Record<string,unknown>|undefined):ToolPresentation {
@@ -18,6 +18,8 @@ export function classifyTool(data:Record<string,unknown>|undefined):ToolPresenta
  if(type==='fileChange'){const files=fileStats(data),paths=files.map(file=>file.path);return {kind:'edit',verb:'Edited',runningVerb:'Editing',subject:paths.join(', ')||subject,paths,files,adds:files.reduce((n,file)=>n+file.adds,0),dels:files.reduce((n,file)=>n+file.dels,0)};}
  if(type==='fileRead'){const path=string(data?.path)||subject;return path?readOf([path]):{kind:'read',verb:'Read',runningVerb:'Reading',subject};}
  if(type==='imageView'){const path=string(data?.path)||subject;return {kind:'read',verb:'Viewed image',runningVerb:'Viewing image',subject:path,paths:path?[path]:[],images:path?[path]:[]};}
+ // #729: Claude Code ran a picked command ("Ran /bar") or skill ("Used foo skill"); its output is what the command expanded to.
+ if(type==='claudeCommand'){const name=string(data?.name).replace(/^\//,'')||subject.replace(/^\//,'');return data?.kind==='skill'?{kind:'skill',verb:'Used',runningVerb:'Using',subject:`${name} skill`}:{kind:'skill',verb:'Ran',runningVerb:'Running',subject:[`/${name}`,string(data?.arguments).trim()].filter(Boolean).join(' '),slash:true};}
  if(type==='webSearch')return {kind:'search',verb:'Searched',runningVerb:'Searching',subject:string(data?.query)||subject};
  if(type==='todoList'||type==='plan'||PLAN_TOOLS.has(string(data?.tool))||PLAN_TOOLS.has(subject)){
   const steps=planSteps(data),text=steps.length?undefined:planText(data);
@@ -72,6 +74,16 @@ export function fileStats(data:Record<string,unknown>|undefined):FileStat[] {
 /** F60: a started tool the provider has blocked on an approval card is waiting, not running (runtime sets `awaitingApproval`). */
 export const APPROVAL_WAIT_LABEL='Waiting for approval';
 export function awaitingApproval(item:{status?:string;data?:Record<string,unknown>}):boolean {return item.status==='running'&&typeof item.data?.awaitingApproval==='string';}
+/** #580: the user denied the card, a tool rule refused it, or the card timed out. It never ran, whatever status the provider closed it with. */
+export const executionDenied=(data:Record<string,unknown>|undefined):boolean=>data?.executionDenied===true;
+/** Terminal verbs must not imply that a refused tool executed. */
+export function toolState(item:{status?:string;data?:Record<string,unknown>},presentation:ToolPresentation,failed=false):string {
+ if(awaitingApproval(item))return APPROVAL_WAIT_LABEL;
+ if(executionDenied(item.data))return 'Did not run';
+ if(item.status==='interrupted')return 'Stopped';
+ if(item.status==='running')return presentation.runningVerb;
+ return item.status==='completed'||failed||item.status==='cancelled'?presentation.verb:'Tool';
+}
 export const basename=(path:string)=>path.split('/').filter(Boolean).at(-1)||path;
 /**
  * VS Code-style disambiguation: every path gets the shortest path-segment suffix that is
@@ -112,8 +124,10 @@ export interface CommandOutcome {exitCode?:number;duration?:string;failed:boolea
 export function commandOutcome(data:Record<string,unknown>|undefined,status:string|undefined,output=''):CommandOutcome {
  const exitCode=typeof data?.exitCode==='number'?data.exitCode:undefined;
  const duration=typeof data?.durationMs==='number'&&status!=='running'?formatToolDuration(data.durationMs):undefined;
- const failed=status==='failed'||(exitCode!=null&&exitCode!==0&&status!=='running');
- const suffix=failed?(exitCode!=null?`failed (exit ${exitCode})`:'failed'):status==='interrupted'?'interrupted':status==='cancelled'?'cancelled':'';
+ // A refused tool is not a failure: adapters close it as failed with the refusal as its output.
+ const denied=executionDenied(data);
+ const failed=!denied&&(status==='failed'||(exitCode!=null&&exitCode!==0&&status!=='running'));
+ const suffix=denied?(data?.deniedReason==='timeout'?'not approved':'denied'):failed?(exitCode!=null?`failed (exit ${exitCode})`:'failed'):status==='cancelled'?'cancelled':'';
  const source=string(data?.stderr)||output||(()=>{const error=data?.error;if(typeof error==='string'){try{const parsed=JSON.parse(error);return typeof parsed==='string'?parsed:typeof parsed?.message==='string'?parsed.message:error;}catch{return error;}}return '';})();
  return {exitCode,duration,failed,suffix,excerpt:failed?lastLines(source,2):[]};
 }

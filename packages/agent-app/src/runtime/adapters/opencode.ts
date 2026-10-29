@@ -1,6 +1,8 @@
+import {spawnOwned} from '../owned-process.ts';
 import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {cliSpawn, jsonLines, text} from './shared.ts';
+import {killTree} from './cli-common.ts';
 import type {Spawn} from './claude-code.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
 import {launcherSpec} from '../launcher-script.ts';
@@ -8,17 +10,30 @@ import {BROWSER_MCP} from '../../shared/computer-use.ts';
 
 /** #424: Muster's tool servers (the in-app browser among them) as OpenCode `mcp` config, merged into any inline config the
  *  user already set. OpenCode reads OPENCODE_CONFIG_CONTENT on top of its config files and names the tools `<server>_<tool>`. */
-export function openCodeMcpEnv(servers: AdapterRunInput['mcpServers'], existing?: string): Record<string, string> {
+export function openCodeMcpEnv(servers: AdapterRunInput['mcpServers'], existing?: string, sandboxed = false): Record<string, string> {
   const names = Object.keys(servers ?? {});
-  if (!names.length) return {};
+  if (!names.length && !sandboxed) return {};
   let config: Record<string, unknown> = {};
   try { const parsed = existing ? JSON.parse(existing) : {}; if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) config = parsed; } catch { /* not JSON: replaced */ }
   const mcp = {...(config.mcp && typeof config.mcp === 'object' ? config.mcp as Record<string, unknown> : {})};
-  for (const [name, spec] of Object.entries(servers!)) {
+  for (const [name, spec] of Object.entries(servers ?? {})) {
     const run = spec.args ? spec : {...spec, ...launcherSpec(spec.command)};
     mcp[name] = {type: 'local', command: [run.command, ...(run.args ?? [])], enabled: true, ...(spec.env ? {environment: spec.env} : {})};
   }
-  return {OPENCODE_CONFIG_CONTENT: JSON.stringify({...config, mcp})};
+  return {OPENCODE_CONFIG_CONTENT: JSON.stringify(sandboxed ? openCodeSandboxConfig({...config, mcp}) : {...config, mcp})};
+}
+
+const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+/** #653: OpenCode's host tools that run commands or change files. */
+export const OPENCODE_SANDBOX_DENIED_TOOLS = ['bash', 'edit', 'write', 'patch'] as const;
+/** #653: a sandboxed run uses the plan agent with its host shell and edit tools removed and denied (globally too, so a
+ *  sub-agent cannot pick them up). Reads stay; commands and edits go through the muster_sandbox tools. */
+export function openCodeSandboxConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const off = Object.fromEntries(OPENCODE_SANDBOX_DENIED_TOOLS.map(tool => [tool, false]));
+  const deny = {edit: 'deny', bash: 'deny'};
+  const agents = record(config.agent), plan = record(agents.plan);
+  return {...config, tools: {...record(config.tools), ...off}, permission: {...record(config.permission), ...deny},
+    agent: {...agents, plan: {...plan, tools: {...record(plan.tools), ...off}, permission: {...record(plan.permission), ...deny}}}};
 }
 
 /** Run a short CLI probe with a hard timeout and output cap. */
@@ -26,9 +41,9 @@ export function probe(binary: string, args: string[], spawn: Spawn = nodeSpawn a
   return new Promise((resolve, reject) => {
     let out = '', child: ChildProcess;
     const launch = cliSpawn(binary, args);
-    try { child = spawn(launch.command, launch.args, {cwd: process.cwd(), env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true}); } catch (error) { reject(error); return; }
-    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`${binary} did not answer within ${timeoutMs / 1000}s.`)); }, timeoutMs);
-    child.stdin?.end();
+    try { child = spawnOwned(launch.command, launch.args, {cwd: process.cwd(), env: launch.env, stdio: ['pipe', 'pipe', 'pipe']}, spawn); } catch (error) { reject(error); return; }
+    const timer = setTimeout(() => { killTree(child, 'SIGKILL'); reject(new Error(`${binary} did not answer within ${timeoutMs / 1000}s.`)); }, timeoutMs);
+    child.stdin?.on('error', () => {}); child.stdin?.end();
     const take = (chunk: Buffer | string) => { if (out.length < 256 * 1024) out += String(chunk); };
     child.stdout?.on('data', take); child.stderr?.on('data', take);
     child.on('error', error => { clearTimeout(timer); reject(error); });
@@ -73,22 +88,25 @@ export function openCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEn
   return {kind: 'cli', run(input) {
     return new Promise<AdapterRunResult>(resolve => {
       const model = input.model.replace(/^opencode\//, ''), turnId = randomUUID();
-      const args = ['run', '--format', 'json', '--agent', input.permissionMode === 'read-only' ? 'plan' : 'build',
+      const args = ['run', '--format', 'json', '--agent', input.permissionMode === 'read-only' || input.sandboxed ? 'plan' : 'build',
         ...(model && model !== 'default' ? ['--model', model] : []), ...(input.resumeThreadId ? ['--session', input.resumeThreadId] : []),
-        input.instructions ? `${input.instructions}\n\n${input.prompt}` : input.prompt,
+        // A message starting with "-" would be parsed as an option (yargs); a leading space keeps it the message.
+        ((message: string) => message.startsWith('-') ? ` ${message}` : message)(input.instructions ? `${input.instructions}\n\n${input.prompt}` : input.prompt),
         // After the message: `--file` is an array option and would swallow a following positional.
         ...(input.images ?? []).flatMap(path => ['--file', path])];
       let child: ChildProcess;
       const baseEnv = options.env ?? process.env;
-      const mcpEnv = openCodeMcpEnv(input.mcpServers, input.env?.OPENCODE_CONFIG_CONTENT ?? baseEnv.OPENCODE_CONFIG_CONTENT);
+      const mcpEnv = openCodeMcpEnv(input.mcpServers, input.env?.OPENCODE_CONFIG_CONTENT ?? baseEnv.OPENCODE_CONFIG_CONTENT, input.sandboxed);
       const launch = cliSpawn(options.binary, args, input.env || Object.keys(mcpEnv).length ? {...baseEnv, ...input.env, ...mcpEnv} : baseEnv);
-      try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true}); }
+      try { child = spawnOwned(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe']}, spawn); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `OpenCode could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let session = input.resumeThreadId, settled = false, failure = '', stderr = '', answer = '', killer: ReturnType<typeof setTimeout> | undefined;
       const started = new Set<string>();
       // The first session id is the turn's own; a later id (a child session) must not re-bind the chat.
       const accept = (id: string) => { if (started.has('\0accepted')) return; session = id; started.add('\0accepted'); input.onThreadReady(id); input.onTurnAccepted({threadId: id, turnId}); };
-      const abort = () => { child.kill('SIGINT'); killer = setTimeout(() => child.kill('SIGKILL'), options.killGraceMs ?? 3000); };
+      // SIGINT first, then the whole process group: a command OpenCode started must not outlive Stop or hold the run open.
+      const abort = () => { killTree(child, 'SIGINT'); killer = setTimeout(() => killTree(child, 'SIGKILL'), options.killGraceMs ?? 3000); };
+      child.on('exit', () => { if (input.signal.aborted) killTree(child, 'SIGKILL'); });
       if (input.signal.aborted) abort(); else input.signal.addEventListener('abort', abort, {once: true});
       const finish = (result: AdapterRunResult) => { if (settled) return; settled = true; clearTimeout(killer); input.signal.removeEventListener('abort', abort); resolve(result); };
       child.stderr?.setEncoding('utf8'); child.stderr?.on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-4096); });

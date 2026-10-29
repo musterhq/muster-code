@@ -119,7 +119,7 @@ export function AttachmentTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
       const preview = richText && mode === 'preview';
       if (preview && presentation === 'html') content = <HtmlPreview html={text} name={name}/>;
       else if (preview && presentation === 'markdown') content = <div className="file-markdown" data-kind={presentation} role="region" aria-label={`Preview of ${name}`} tabIndex={0}>
-        <MessageBody text={text}/>
+        <MessageBody text={text} asDocument/>
         {!text && <p className="file-empty">This document is empty.</p>}
       </div>;
       else if (preview) content = <StructuredFile text={text} kind={presentation as 'json' | 'csv' | 'tsv'}/>;

@@ -4,5 +4,6 @@
 :root[data-theme='light'] img.item-icon.is-monochrome { filter: none; }
 :root[data-theme='light'] img.item-icon.is-monochrome-light { filter: invert(1) brightness(.35); }
 /* A manifest dark logo (interface.logoDark) ships as a second <img>: exactly one of the pair shows. */
-:root[data-theme='light'] img.item-icon.is-theme-dark,
-:root:not([data-theme='light']) img.item-icon.is-theme-light { display: none; }
+/* With only the dark logo drawable, a monogram stands in on the light surface. */
+:root[data-theme='light'] .item-icon.is-theme-dark,
+:root:not([data-theme='light']) .item-icon.is-theme-light { display: none; }

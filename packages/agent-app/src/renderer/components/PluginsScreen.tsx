@@ -20,6 +20,7 @@ import { plural } from '../../shared/wording.ts';
 import { ResourceState } from './ResourceState';
 import {Tip} from './Tooltip';
 import { device } from '../../shared/device-noun.ts';
+import { skillLabel } from './ComposerMenu';
 
 type Tab = 'discover' | 'installed' | 'sources' | 'mcp';
 type Kind = 'all' | 'plugin' | 'skill';
@@ -61,7 +62,7 @@ export function PluginsScreen(): React.ReactElement {
       setData({ sources, catalog, installed, enablement, skills: inventory.skills, plugins: inventory.plugins }); setPhase('ready'); setError(null);
     } catch (cause) { setError(message(cause)); setPhase('error'); }
   }, []);
-  useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => { void reload(); }, [reload, state.pluginIconsRevision]);
   /** The composer's lists drop disabled items, so they refresh after every lifecycle change. */
   const changed = async () => { await reload(); void loadSkills(true); void loadPlugins(true); };
   const run = async (key: string, label: string, work: () => Promise<unknown>, done?: string) => {
@@ -140,7 +141,7 @@ export function PluginsScreen(): React.ReactElement {
         {phase === 'ready' && tab === 'installed' && <div className="plugins-installed">
           <p className="plugins-scope-note">Toggles apply {scopeLabel}. Folder settings override project settings, which override user settings.</p>
           {installs.length > 0 && <InstalledGroup title="From marketplace">{installs.map(entry => <InstalledRow key={entry.id} name={entry.manifest?.displayName ?? entry.name} icon={<ItemTile icon={iconFor(icons, data.catalog.find(pkg => pkg.id === entry.packageId)?.icon, entry.name, entry.manifest?.displayName)} name={entry.manifest?.displayName ?? entry.name} seed={entry.name} shape={entry.kind === 'skill' ? 'skill' : 'square'} size={28} />} meta={`${entry.version} · ${entry.manifest?.source.label ?? entry.sourceId}`} badge={pending[entry.id] ?? (failed[entry.id] ? 'Failed' : entry.state)} tone={failed[entry.id] || entry.state === 'Failed' ? 'danger' : entry.state === 'Needs connection' ? 'warn' : entry.state === 'Ready' ? 'ok' : 'dim'} enabled={enabled(entry.id)} busy={!!pending[`enable:${entry.id}`]} onToggle={value => toggle(entry.id, value)} onOpen={() => setSelection({ kind: 'installed', id: entry.id })} />)}</InstalledGroup>}
-          {(kind !== 'plugin') && <InstalledGroup title="Local skills" action={<button type="button" className="plugins-link" onClick={() => setSelection({ kind: 'editor', name: null })}><Plus size={12} />New skill</button>}>{localSkills.length ? localSkills.map(skill => { const id = skillExtensionId(skill), shadow = shadows.get(skill.id); return <InstalledRow key={skill.id} name={skill.displayName ?? skill.name} icon={<ItemTile icon={skill.icon} name={skill.displayName ?? skill.name} seed={skill.name} shape="skill" size={28} />} meta={qualifiedSkillName(skill)} badge={shadow ? `Shadowed by ${shadow}` : undefined} tone="dim" enabled={enabled(id)} busy={!!pending[`enable:${id}`]} onToggle={value => toggle(id, value)} onOpen={() => setSelection({ kind: 'skill', id: skill.id })} />; }) : <p className="plugins-group-empty">No local skills. Create one, or put folders with a SKILL.md in {LOCAL_SKILLS}.</p>}</InstalledGroup>}
+          {(kind !== 'plugin') && <InstalledGroup title="Local skills" action={<button type="button" className="plugins-link" onClick={() => setSelection({ kind: 'editor', name: null })}><Plus size={12} />New skill</button>}>{localSkills.length ? localSkills.map(skill => { const id = skillExtensionId(skill), shadow = shadows.get(skill.id); return <InstalledRow key={skill.id} name={skillLabel(skill)} icon={<ItemTile icon={skill.icon} name={skill.displayName ?? skill.name} seed={skill.name} shape="skill" size={28} />} meta={qualifiedSkillName(skill)} badge={shadow ? `Shadowed by ${shadow}` : skill.claude ? 'Claude Code' : undefined} tone="dim" enabled={enabled(id)} busy={!!pending[`enable:${id}`]} onToggle={value => toggle(id, value)} onOpen={() => setSelection({ kind: 'skill', id: skill.id })} />; }) : <p className="plugins-group-empty">No local skills. Create one, put folders with a SKILL.md in {LOCAL_SKILLS}, or add Claude Code skills and commands under ~/.claude.</p>}</InstalledGroup>}
           {codexPlugins.length > 0 && <InstalledGroup title="Codex plugins">{codexPlugins.map(plugin => { const id = pluginExtensionId(plugin); return <InstalledRow key={plugin.id} name={plugin.displayName ?? plugin.name} icon={<ItemTile icon={plugin.icon} name={plugin.displayName ?? plugin.name} seed={plugin.name} brandColor={plugin.brandColor} size={28} />} meta={`${plugin.version} · ${plugin.provenance}`} badge={plugin.readError ? 'Manifest warning' : undefined} tone={plugin.readError ? 'warn' : 'dim'} enabled={enabled(id)} busy={!!pending[`enable:${id}`]} scopeLocked={scopeKind !== 'user'} onToggle={value => toggle(id, value)} onOpen={() => setSelection({ kind: 'codex', id: plugin.id })} />; })}</InstalledGroup>}
           {!installs.length && !codexPlugins.length && kind === 'plugin' && <EmptyState icon={<Boxes size={24} />} title="No plugins installed" text="Install one from Discover." action={<button type="button" className="plugins-primary" onClick={() => switchTab('discover')}>Browse plugins</button>} />}
           {Object.entries(failed).filter(([key]) => key.startsWith('enable:')).map(([key, text]) => <p key={key} className="settings-error" role="alert">{text}</p>)}
@@ -176,10 +177,11 @@ function PackageCard({ card, busy, failed, onOpen, onInstall, onUpdate, onManage
     : installed ? (onManage ? <button type="button" className="plugins-card-action is-manage" onClick={event => { event.stopPropagation(); onManage(); }} aria-label={`Manage ${pkg.displayName}`} title={card.installedAs?.kind === 'codex' ? 'Installed in Codex' : 'Installed'}>Manage</button> : <span className="plugins-card-state is-ok"><Check size={12} />Installed</span>)
     : !pkg.compatibility.supported ? <span className="plugins-card-state" title={pkg.compatibility.unsupported.join('\n')}>Unsupported</span>
     : <button type="button" className="plugins-card-action" onClick={event => { event.stopPropagation(); onInstall(); }} aria-label={`Install ${pkg.displayName}`}><Plus size={13} /></button>;
-  const provenance = [pkg.publisher, card.sources.join(', ')].filter(Boolean).join(' · ');
+  const fullProvenance = [pkg.publisher, card.sources.join(', ')].filter(Boolean).join(' · ');
+  const provenance = [pkg.publisher, card.sources.map(source => source.replace(/^Codex:\s*/, '')).join(', ')].filter(Boolean).join(' · ');
   return <div className={`plugins-card${installed ? ' is-installed' : ''}`} role="button" tabIndex={0} aria-label={`${pkg.displayName}${installed ? ', installed' : ''}`} onClick={onOpen} onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(); } }}>
     <ItemTile icon={card.icon} name={pkg.displayName} seed={pkg.id} shape={pkg.kind === 'skill' ? 'skill' : 'square'} size={36} />
-    <span className="plugins-card-text"><strong>{pkg.displayName}</strong><small>{pkg.description ?? (pkg.kind === 'skill' ? 'Skill' : 'Plugin')}</small><em>{installed && <span className="plugins-card-installed"><Check size={11} />Installed{card.installedAs?.kind === 'codex' ? ' in Codex' : ''}</span>}{installed && provenance ? ' · ' : ''}{provenance}{failed ? ' · install failed' : ''}</em></span>
+    <span className="plugins-card-text"><strong>{pkg.displayName}</strong><small>{pkg.description ?? (pkg.kind === 'skill' ? 'Skill' : 'Plugin')}</small><em title={fullProvenance}>{installed && <span className="plugins-card-installed"><Check size={11} />Installed{card.installedAs?.kind === 'codex' ? ' in Codex' : ''}</span>}{installed && provenance ? ' · ' : ''}{provenance}{failed ? ' · install failed' : ''}</em></span>
     {action}
   </div>;
 }
@@ -248,12 +250,12 @@ function InstalledRow({ name, icon, meta, badge, tone, enabled, busy, scopeLocke
 function SkillDetail({ skill, shadowedBy, onEdit, onForked }: { skill: SkillEntry; shadowedBy?: string; onEdit?: () => void; onForked: (name: string) => void }): React.ReactElement {
   return <div className="plugin-detail">
     <div className="plugin-detail-hero"><PluginIcon icon={skill.icon} name={skill.displayName ?? skill.name} seed={skill.name} shape="skill" size={48} />
-      <div><h2 className="plugin-detail-name">{skill.displayName ?? skill.name}</h2><div className="plugin-detail-provenance">{qualifiedSkillName(skill)} · {skillTier(skill.provenance)}</div></div>
+      <div><h2 className="plugin-detail-name">{skillLabel(skill)}</h2><div className="plugin-detail-provenance">{qualifiedSkillName(skill)} · {skillTier(skill.provenance)}{skill.claude ? ` · Claude Code ${skill.claude}` : ''}</div></div>
       {onEdit && <button type="button" className="plugins-secondary" onClick={onEdit}><Pencil size={13} />Edit</button>}
     </div>
     {shadowedBy && <p className="plugin-detail-notice-inline">Shadowed by {shadowedBy}: a folder skill beats a user skill, which beats an installed one with the same name.</p>}
     <div className="plugin-detail-path">{skill.path}</div>
-    {skill.readError ? <div className="plugin-detail-read-error"><p>Could not read SKILL.md</p><code>{skill.readError}</code></div> : skill.readme ? <MessageBody text={skill.readme} /> : <p className="plugin-detail-empty">No SKILL.md found in this skill directory.</p>}
+    {skill.readError ? <div className="plugin-detail-read-error"><p>Could not read SKILL.md</p><code>{skill.readError}</code></div> : skill.readme ? <MessageBody text={skill.readme} asDocument /> : <p className="plugin-detail-empty">No SKILL.md found in this skill directory.</p>}
     {(skill.provenance === LOCAL_SKILLS || skill.provenance === '~/.codex/skills') && !skill.readError && <SkillStudio name={skill.name} canFork={skill.provenance === LOCAL_SKILLS} onForked={onForked} />}
   </div>;
 }

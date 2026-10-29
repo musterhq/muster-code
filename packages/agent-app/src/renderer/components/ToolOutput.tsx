@@ -36,12 +36,12 @@ export function AddOutputToChat({text,id,language,path,root}:{text:string;id:str
  return <Tip label="Add output (or the selected part) to the chat"><button type="button" className="md-copy tool-add-context" aria-label={state==='added'?'Added to chat':state==='copied'?'Copied: no chat composer open':'Add to chat'} onMouseDown={event=>event.preventDefault()} onClick={add}>{state?<Check size={13}/>:<MessageSquarePlus size={13}/>}</button></Tip>;
 }
 /** Progressive output preview; source text remains literal, never interpreted as UI. */
-export function ToolOutput({text,id,language='plaintext',sourceTruncated=false,path,chatId}:{text:string;id:string;language?:string;sourceTruncated?:boolean;path?:string;chatId?:string}){
+export function ToolOutput({text,id,language='plaintext',title,sourceTruncated=false,path,chatId}:{text:string;id:string;language?:string;/** Header label when the output is not a language ("Expanded prompt"). */title?:string;sourceTruncated?:boolean;path?:string;chatId?:string}){
  const [expanded,setExpanded]=useDisclosure('output:'+id);
  const {preview,truncated}=outputPreview(text,language==='diff'?PATCH_PREVIEW_LINES:PREVIEW_LINES);
  const body=React.useRef<HTMLDivElement>(null);
  return <div ref={body} className="tool-result" data-preview={truncated&&!expanded}>
-  <header><span>{language}</span><AddOutputToChat text={text} id={id} language={language} path={path} root={body}/><CopyButton getText={()=>text} label={sourceTruncated?"Copy retained output":"Copy output"}/></header>
+  <header><span>{title??language}</span><AddOutputToChat text={text} id={id} language={language} path={path} root={body}/><CopyButton getText={()=>text} label={sourceTruncated?"Copy retained output":"Copy output"}/></header>
   {sourceTruncated&&(chatId?<EarlierOutput chatId={chatId} itemId={id} tail={text}/>:<p className="tool-output-limit">Only the end of this long output was retained.</p>)}
   {language==='diff'?<InlineDiff text={expanded?text:preview} path={path}/>:expanded&&lineCount(text)>VIRTUAL_OUTPUT_LINES?<VirtualOutput text={text}/>:<pre className="tool-result-text" tabIndex={0}>{expanded?text:preview}</pre>}
   {truncated&&<button className="tool-result-expand" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?'Show less':sourceTruncated?'Show retained output':'Show full output'}</button>}

@@ -4,6 +4,9 @@ import type { ContextTelemetry } from '../../shared/protocol';
 import {invoke} from '../bridge';
 import {cleanIpcError} from './resourceErrors';
 import {contextView} from '../contextView';
+import {useModelPolicy} from '../modelPolicy';
+import {modelKey} from '../../shared/model-catalog';
+import {withUserWindow} from '../../shared/context-window';
 export {contextView};
 import {useStoreSelector} from '../useStore';
 import {ChatUsageSection} from './UsageCost';
@@ -24,19 +27,23 @@ export function ContextMeter({ telemetry }: { telemetry: ContextTelemetry }): Re
   const chatId = useStoreSelector(state => state.activeChatId);
   const running = useStoreSelector(state => { const chat = state.snapshot?.chats.find(c => c.id === state.activeChatId); return !chat || chat.status === 'running' || chat.status === 'stopping'; });
   // #426: the chat's model entry (window, its source, catalog compaction limit): the meter and Muster's compaction share one basis.
-  const model = useStoreSelector(state => {
+  const catalogModel = useStoreSelector(state => {
     const chat = state.snapshot?.chats.find(c => c.id === state.activeChatId);
     return chat ? state.providers.value?.find(p => p.id === chat.providerId)?.models.find(m => m.id === chat.model) : undefined;
   });
+  // #668: your own window for this model (Settings › Models) beats every other source.
+  const key = useStoreSelector(state => { const chat = state.snapshot?.chats.find(c => c.id === state.activeChatId); return chat ? modelKey(chat.providerId ?? '', chat.model) : ''; });
+  const userWindow = useModelPolicy().contextWindows[key];
+  const model = withUserWindow(catalogModel, userWindow);
   const [compacting, setCompacting] = useState(false), [compactError, setCompactError] = useState('');
   const { compacted, source } = telemetry;
-  const { estimated, usedTokens, windowTokens, percent, remaining, source: sourceLabel, compactAt } = contextView(telemetry, model);
+  const { estimated, usedTokens, windowTokens, percent, remaining, source: sourceLabel, compactAt, windowSource } = contextView(telemetry, model, key || undefined);
   const usedLabel = usedTokens === null ? 'Unavailable' : formatTokens(usedTokens);
   const limitLabel = windowTokens === null ? 'Unavailable' : formatTokens(windowTokens);
   const detail = percent !== null
     ? `Context${estimated ? ' (estimated)' : ''}: ${usedLabel} of ${limitLabel} tokens (${percent}%), ${formatTokens(remaining!)} left`
     : usedTokens !== null
-      ? `Context: ${usedLabel} tokens used; window Unavailable`
+      ? `Context: ${usedLabel} tokens used; window ${windowSource === 'observed' ? `at least ${limitLabel}` : 'Unavailable'}`
       : 'Context usage Unavailable';
   const level = percent === null || estimated ? 'unknown' : percent >= 90 ? 'critical' : percent >= 70 ? 'high' : 'normal';
   const compact = async () => {
@@ -62,13 +69,14 @@ export function ContextMeter({ telemetry }: { telemetry: ContextTelemetry }): Re
       <Popover.Positioner side="top" align="end" sideOffset={10} className="context-positioner">
         <Popover.Popup className="context-popup" data-native-preview-overlay>
           <Popover.Title>Context window{estimated && <span className="context-meter-badge context-meter-restored">Estimated</span>}</Popover.Title>
-          <Popover.Description>{estimated ? 'No usage reported yet. The window below is the selected model’s catalog size.' : percent === null ? 'The provider has not reported complete context usage yet.' : `${percent}% of the reported context window is in use.`}</Popover.Description>
+          <Popover.Description>{estimated ? 'No usage reported yet. The window below is the selected model’s catalog size.' : windowSource === 'observed' ? 'The provider accepted this much, so the window is at least this large. Set the real size in Settings › Models.' : percent === null ? 'The provider has not reported complete context usage yet.' : windowSource === 'default' ? `About ${percent}% of an estimated window is in use; the provider did not report its size.` : windowSource === 'override' ? `${percent}% of your context window (Settings › Models) is in use.` : `${percent}% of the reported context window is in use.`}</Popover.Description>
           <dl>
             <div><dt>Tokens used</dt><dd>{usedTokens?.toLocaleString() ?? 'Unavailable'}</dd></div>
             <div><dt>Remaining</dt><dd>{remaining?.toLocaleString() ?? 'Unavailable'}</dd></div>
-            <div><dt>Window size</dt><dd>{windowTokens?.toLocaleString() ?? 'Unavailable'}</dd></div>
+            <div><dt>Window size</dt><dd>{windowTokens === null ? 'Unavailable' : `${windowSource === 'observed' ? 'At least ' : ''}${windowTokens.toLocaleString()}`}</dd></div>
             <div><dt>Source</dt><dd>{sourceLabel}</dd></div>
             {compactAt !== null && <div><dt>Compacts at</dt><dd>{compactAt.toLocaleString()}</dd></div>}
+            {compactAt === null && windowTokens !== null && <div><dt>Compacts at</dt><dd>Only if the provider refuses a turn (window not known)</dd></div>}
           </dl>
           <section className="context-breakdown" aria-label="Context breakdown">
             <h3>Breakdown</h3>

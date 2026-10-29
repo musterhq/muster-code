@@ -106,6 +106,7 @@ const builds = [
   },
   // The muster_browser MCP server Codex spawns per chat (Electron as node); it only forwards to main's local bridge.
   { ...common, entryPoints: [src('main', 'agent-tools', 'browser-mcp.ts')], outfile: dist('main', 'browser-mcp.cjs'), platform: 'node', format: 'cjs', target: 'node22' },
+  { ...common, entryPoints: [src('main', 'agent-tools', 'computer-mcp.ts')], outfile: dist('main', 'computer-mcp.cjs'), platform: 'node', format: 'cjs', target: 'node22' },
   {
     ...common,
     entryPoints: [src('preload', 'index.ts')],
@@ -185,13 +186,15 @@ function copyRendererStatic() {
 `);
 }
 
+execFileSync(process.execPath,[path.join(root,'scripts/build-write-helper.mjs')],{stdio:'inherit'});
 execFileSync(process.execPath,[path.join(root,'scripts/build-quick-look.mjs')],{stdio:'inherit'});
+execFileSync(process.execPath,[path.join(root,'scripts/build-computer-helper.mjs')],{stdio:'inherit'});
 copyRendererStatic();
 mkdirSync(dist('runtime', 'resources'), {recursive: true});
 // One generic launcher: the route (profile file or config.toml provider) comes from the user's own Codex config.
 // Vendored in packages/agent-app/resources so the app builds from its own directory alone (no packages/builtin).
 // The app owns these (generic, any provider); packages/builtin keeps the IDE's own launcher untouched.
-for (const name of ['codex-launch.sh', 'codex-profile.cjs']) cpSync(path.join(root, 'resources', name), dist('runtime', 'resources', name));
+for (const name of ['codex-launch.sh', 'codex-profile.cjs', 'responses-compat.cjs']) cpSync(path.join(root, 'resources', name), dist('runtime', 'resources', name));
 
 if (watch) {
   const contexts = await Promise.all(builds.map((options) => esbuild.context(options)));

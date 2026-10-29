@@ -34,7 +34,7 @@ async function fixture(t:TestContext){
   const prompts:{cwd:string;prompt:string}[]=[];
   const provider:ProviderAdapter={info:()=>[{id:'hybrow',name:'Hybrow',available:true,identityMasked:'configured',models:[{id:'m',name:'m'}]}],stop:async()=>true,dispose(){},async run(input){prompts.push({cwd:input.cwd,prompt:input.prompt});return {status:'completed',finalMessage:'done'};}};
   const service=createAgentService({dataDir,provider,onEvent(){}});
-  t.after(async()=>{globalThis.fetch=realFetch;await service.dispose();await rm(dataDir,{recursive:true,force:true});});
+  t.after(async()=>{globalThis.fetch=realFetch;await service.dispose();await rm(dataDir,{recursive:true,force:true,maxRetries:10,retryDelay:100});});
   return {raw,service,calls,repo,prompts};
 }
 function route(raw:Json,path:string,q:URLSearchParams):unknown{

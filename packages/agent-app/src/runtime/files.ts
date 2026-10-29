@@ -1,8 +1,9 @@
 /** Scoped folder browsing: bounded listings and bounded text reads. */
-import { promises as fs, type Dir } from 'node:fs';
+import { constants as fsConstants, promises as fs, type Dir } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { join, relative } from 'node:path';
+import { createContext, Script } from 'node:vm';
 import type { FileEntry } from '../shared/protocol.ts';
 import { resolveInside } from './paths.ts';
 
@@ -27,6 +28,18 @@ function looksBinary(buffer: Buffer): boolean {
 function hasInvalidUtf8(buffer: Buffer): boolean {
   try { new TextDecoder('utf-8', {fatal: true}).decode(buffer); return false; }
   catch { return true; }
+}
+
+/** A byte-limited preview can end inside a multi-byte character; drop that partial tail so it is neither shown as U+FFFD nor mistaken for bad encoding. */
+function withoutPartialUtf8Tail(buffer: Uint8Array): Buffer {
+  for (let back = 1; back <= Math.min(3, buffer.length); back++) {
+    const byte = buffer[buffer.length - back]!;
+    if ((byte & 0xc0) === 0x80) continue; // continuation byte: keep looking for its lead byte
+    const needed = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1;
+    const kept = needed > back ? buffer.subarray(0, buffer.length - back) : buffer;
+    return Buffer.from(kept.buffer, kept.byteOffset, kept.byteLength);
+  }
+  return Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 }
 
 function fileRevision(stat: {mtimeMs: number; size: number}): string {
@@ -70,11 +83,14 @@ export async function listFiles(root: string, rel: string, options: { showHidden
   return entries.slice(0, MAX_ENTRIES);
 }
 
-export async function readFile(root: string, rel: string): Promise<{ path: string; text: string; truncated: boolean; revision: string; encodingWarning: boolean }> {
+export async function readFile(root: string, rel: string, options: { noFollow?: boolean } = {}): Promise<{ path: string; text: string; truncated: boolean; revision: string; encodingWarning: boolean }> {
   const abs = await resolveInside(root, rel);
-  const stat = await fs.stat(abs);
-  if (!stat.isFile()) throw new Error(`Not a file: ${rel}`);
-  const handle = await fs.open(abs, 'r');
+  // noFollow: the file itself must not be a link (one swapped in after it was checked is refused at open).
+  let handle: fs.FileHandle;
+  try { handle = await fs.open(options.noFollow ? join(root, rel) : abs, options.noFollow ? fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW : 'r'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ELOOP') throw new Error(`Not a file: ${rel}`); throw error; }
+  const stat = await handle.stat().catch(async error => { await handle.close(); throw error; });
+  if (!stat.isFile()) { await handle.close(); throw new Error(`Not a file: ${rel}`); }
   try {
     const table = /\.(csv|tsv)$/i.test(rel);
     const limit = table ? MAX_TABLE_BYTES : MAX_TEXT_BYTES;
@@ -85,9 +101,10 @@ export async function readFile(root: string, rel: string): Promise<{ path: strin
       if (!chunk.bytesRead) break;
       bytesRead += chunk.bytesRead;
     }
-    const shown = buffer.subarray(0, Math.min(bytesRead, limit));
+    let shown: Buffer = buffer.subarray(0, Math.min(bytesRead, limit));
     // Excel Unicode Text exports have a UTF-16 BOM. Never guess binary encoding.
     const utf16 = table && shown.length >= 2 && (shown[0] === 255 && shown[1] === 254 ? 'utf-16le' : shown[0] === 254 && shown[1] === 255 ? 'utf-16be' : '');
+    if (!utf16 && bytesRead > limit) shown = withoutPartialUtf8Tail(shown);
     if (!utf16 && looksBinary(shown)) throw new Error(`Binary file (no text preview): ${rel}`);
     const text = utf16 ? new TextDecoder(utf16).decode(shown) : shown.toString('utf8');
     return { path: rel, text, truncated: bytesRead > limit, revision: fileRevision(stat), encodingWarning: !utf16 && hasInvalidUtf8(shown) };
@@ -112,7 +129,8 @@ export async function readFileFull(root: string, rel: string): Promise<{ path: s
       if (!chunk.bytesRead) break;
       bytesRead += chunk.bytesRead;
     }
-    const shown = buffer.subarray(0, Math.min(bytesRead, limit));
+    let shown: Buffer = buffer.subarray(0, Math.min(bytesRead, limit));
+    if (bytesRead > limit) shown = withoutPartialUtf8Tail(shown);
     if (looksBinary(shown)) throw new Error(`Binary file (no text preview): ${rel}`);
     return { path: rel, text: shown.toString('utf8'), truncated: bytesRead > limit, revision: fileRevision(stat), encodingWarning: hasInvalidUtf8(shown) };
   } finally {
@@ -129,8 +147,10 @@ export async function writeFile(root: string, rel: string, text: string, expecte
     if (current !== expectedRevision) return { conflict: true };
   }
   const tmp = `${abs}.muster-tmp-${randomBytes(6).toString('hex')}`;
+  // The replacement keeps the original's permission bits (a saved script stays executable).
+  const mode = await fs.stat(abs).then(stat => stat.mode & 0o7777, () => undefined);
   await fs.writeFile(tmp, text, 'utf8');
-  try { await fs.rename(tmp, abs); }
+  try { if (mode !== undefined) await fs.chmod(tmp, mode).catch(() => {}); await fs.rename(tmp, abs); }
   catch (error) { await fs.rm(tmp, {force: true}).catch(() => {}); throw error; }
   return { conflict: false, revision: fileRevision(await fs.stat(abs)) };
 }
@@ -216,7 +236,8 @@ function searchWithRipgrep(base: string, query: string, options: ContentSearchOp
         buffered = buffered.slice(newline + 1);
         const match = /^(.*?):(\d+):(.*)$/.exec(line);
         if (!match) continue;
-        if (matches.length < SEARCH_CAP) matches.push({path: match[1], line: Number(match[2]), text: match[3].slice(0, 500)});
+        // ripgrep prefixes "./" when given "."; the JS walk never does, so results stay folder-relative either way.
+        if (matches.length < SEARCH_CAP) matches.push({path: match[1].replace(/^\.[\\/]/, ''), line: Number(match[2]), text: match[3].slice(0, 500)});
         else truncated = true;
       }
     });
@@ -228,8 +249,11 @@ function searchWithRipgrep(base: string, query: string, options: ContentSearchOp
   });
 }
 
+/** The regex scan of one file's lines, run where the search deadline can interrupt it. */
+const SCAN_LINES = new Script('(function(){var r=[];for(var i=0;i<lines.length;i++){pattern.lastIndex=0;if(pattern.test(lines[i]))r.push(i);}return r;})()');
 async function searchWithJs(base: string, query: string, options: ContentSearchOptions, signal: AbortSignal): Promise<ContentSearchResult> {
   const deadline = Date.now() + SEARCH_TIMEOUT_MS;
+  let scanContext: ReturnType<typeof createContext> | undefined;
   let pattern: RegExp | null = null;
   try { pattern = options.regex ? new RegExp(query, options.caseSensitive ? 'g' : 'gi') : null; } catch { throw new Error('Invalid regular expression.'); }
   const needle = options.caseSensitive ? query : query.toLowerCase();
@@ -254,8 +278,17 @@ async function searchWithJs(base: string, query: string, options: ContentSearchO
         text = buffer.toString('utf8');
       } catch { continue; }
       const lines = text.split('\n');
+      // A pattern with catastrophic backtracking would freeze the app: scan the file in a context that can be interrupted at the deadline.
+      let hits: Set<number> | null = null;
+      if (pattern) {
+        // One context per search, not per file: creating a context costs about a millisecond.
+        scanContext ??= createContext({pattern, lines: [] as string[]});
+        scanContext.lines = lines;
+        try { hits = new Set(SCAN_LINES.runInContext(scanContext, {timeout: Math.max(50, deadline - Date.now())}) as number[]); }
+        catch { truncated = true; break; }
+      }
       for (let i = 0; i < lines.length; i++) {
-        const found = pattern ? (pattern.lastIndex = 0, pattern.test(lines[i])) : lines[i].toLowerCase().includes(needle);
+        const found = hits ? hits.has(i) : lines[i].toLowerCase().includes(needle);
         if (!found) continue;
         matches.push({path: rel, line: i + 1, text: lines[i].slice(0, 500)});
         if (matches.length >= SEARCH_CAP) { truncated = true; break; }
@@ -284,6 +317,9 @@ export async function searchContent(root: string, rel: string, query: string, op
 const QUICK_OPEN_TTL_MS = 30_000;
 const QUICK_OPEN_MAX_FILES = 20_000;
 const quickOpenCache = new Map<string, {files: string[]; expires: number}>();
+
+/** Drop cached quick-open lists (a file was created, moved, removed or changed on disk). */
+export function forgetQuickOpen(): void { quickOpenCache.clear(); }
 
 async function listAllFiles(root: string): Promise<string[]> {
   const files: string[] = [];

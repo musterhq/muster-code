@@ -1,6 +1,6 @@
 import {existsSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {cleanAgentEnv, jsonRunnable, num, obj, parseVersion, probeCli, type AgentSpawn, type TurnApi} from './cli-common.ts';
+import {cleanAgentEnv, fitsArgv, jsonRunnable, num, obj, parseVersion, probeCli, type AgentSpawn, type TurnApi} from './cli-common.ts';
 import {text} from './shared.ts';
 import type {AdapterRunInput, RunnableAdapter} from './types.ts';
 
@@ -23,11 +23,14 @@ export function geminiPermissionArgs(mode: AdapterRunInput['permissionMode'], fl
   return ['--approval-mode', mode === 'full' ? 'yolo' : mode === 'workspace' ? 'auto_edit' : flags.plan ? 'plan' : 'default'];
 }
 
+export const geminiBody = (input: AdapterRunInput): string => [input.instructions, input.prompt, (input.images ?? []).map(path => `@${path}`).join(' ')].filter(Boolean).join('\n\n');
+
+/** Gemini's docs (Headless mode, "Stdin Input" and "Combining with File Input": `cat README.md | gemini --prompt "Summarize this documentation"`) say piped stdin is read together with `--prompt`: a body too long for argv goes on stdin and `--prompt` carries one short line. */
 export function geminiArgs(input: AdapterRunInput, flags: GeminiFlags): string[] {
-  const model = input.model.replace(/^gemini-cli\//, ''), refs = (input.images ?? []).map(path => `@${path}`).join(' ');
-  const body = [input.instructions, input.prompt, refs].filter(Boolean).join('\n\n');
+  const model = input.model.replace(/^gemini-cli\//, ''), body = geminiBody(input);
   return ['--output-format', 'stream-json', ...geminiPermissionArgs(input.permissionMode, flags), ...(model && model !== 'default' ? ['--model', model] : []),
-    ...(input.resumeThreadId && flags.resume ? ['--resume', input.resumeThreadId] : []), '--prompt', body];
+    // `--prompt=<body>`: as a separate token, a prompt starting with "-" (a markdown bullet) is read as flags and the prompt is lost.
+    ...(input.resumeThreadId && flags.resume ? ['--resume', input.resumeThreadId] : []), `--prompt=${fitsArgv(body) ? body : 'Carry out the request that was sent on standard input.'}`];
 }
 
 /** Signed in when an API key / Vertex / Code Assist login is configured. Reads local files only; no network. */
@@ -68,7 +71,7 @@ const gemTool = (id: string, name: string, args: Record<string, unknown>, cwd: s
 export function geminiAdapter(options: {binary: string; flags: () => GeminiFlags; env?: NodeJS.ProcessEnv; spawn?: AgentSpawn; killGraceMs?: number}): RunnableAdapter {
   return jsonRunnable(input => {
     const open = new Map<string, Record<string, unknown>>();
-    return {label: 'Gemini CLI', binary: options.binary, args: geminiArgs(input, options.flags()), env: cleanAgentEnv(options.env ?? process.env, GEMINI_ENV, input.env, options.binary), spawn: options.spawn, killGraceMs: options.killGraceMs,
+    return {label: 'Gemini CLI', binary: options.binary, args: geminiArgs(input, options.flags()), ...(fitsArgv(geminiBody(input)) ? {} : {stdin: geminiBody(input)}), env: cleanAgentEnv(options.env ?? process.env, GEMINI_ENV, input.env, options.binary), spawn: options.spawn, killGraceMs: options.killGraceMs,
       onEvent(event, api: TurnApi) {
         if (event.type === 'init' && typeof event.session_id === 'string') { api.accept(event.session_id); return; }
         if (event.type === 'message' && event.role === 'assistant') api.delta(text(event.content));

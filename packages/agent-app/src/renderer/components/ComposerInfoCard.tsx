@@ -3,8 +3,10 @@ import React, { useEffect, useState } from 'react';
 import type { Chat, ContextTelemetry, PluginEntry } from '../../shared/protocol';
 import type { McpServer } from '../../shared/domains/mcp-protocol';
 import { formatCount, plural } from '../../shared/wording.ts';
-import type { ModelWindowInfo } from '../../shared/context-window.ts';
+import { withUserWindow, type ModelWindowInfo } from '../../shared/context-window.ts';
 import { contextView } from '../contextView';
+import { useModelPolicy } from '../modelPolicy';
+import { modelKey } from '../../shared/model-catalog';
 import { useStoreSelector } from '../useStore';
 import { invoke } from '../bridge';
 import { copyText } from '../clipboard';
@@ -15,11 +17,11 @@ import {Tip} from './Tooltip';
 export type InfoView = 'status' | 'mcp';
 
 /** `/status` context line: "42% used · 84K of 200K tokens", or why it is unknown. */
-export function contextUsageLine(telemetry: ContextTelemetry | null | undefined, model?: ModelWindowInfo): string {
+export function contextUsageLine(telemetry: ContextTelemetry | null | undefined, model?: ModelWindowInfo, key?: string): string {
   if (!telemetry || telemetry.usedTokens === null) return 'Not reported yet · the provider reports usage after a turn';
   const used = formatCount(telemetry.usedTokens);
   // #426: the same per-model window as the meter and Muster's compaction trigger.
-  const {windowTokens, percent} = contextView(telemetry, model);
+  const {windowTokens, percent} = contextView(telemetry, model, key);
   if (!windowTokens || percent === null) return `${used} tokens used`;
   return `${percent}% used · ${used} of ${formatCount(windowTokens)} tokens${telemetry.compacted ? ' · compacted' : ''}`;
 }
@@ -40,13 +42,14 @@ function StatusCard({ chat, modelName, accessLabel }: { chat: Chat; modelName: s
     return () => { live = false; };
   }, [chat.id]);
   const providerId = chat.providerId || undefined, usage = useProviderUsage(providerId, true);
-  const model = useStoreSelector(state => state.providers.value?.find(p => p.id === chat.providerId)?.models.find(m => m.id === chat.model));
+  const catalogModel = useStoreSelector(state => state.providers.value?.find(p => p.id === chat.providerId)?.models.find(m => m.id === chat.model));
+  const model = withUserWindow(catalogModel, useModelPolicy().contextWindows[modelKey(chat.providerId ?? "", chat.model)]);
   return <dl className="composer-info-rows">
     <div><dt>Chat ID</dt><dd><code>{chat.id}</code><Tip label="Copy chat ID"><button type="button" className="composer-info-copy" aria-label="Copy chat ID" onClick={() => void copyText(chat.id).catch(notifyError)}><Copy size={11} /></button></Tip></dd></div>
     {chat.providerThreadId && <div><dt>Provider thread</dt><dd><code>{chat.providerThreadId}</code></dd></div>}
     <div><dt>Model</dt><dd>{modelName} · {providerId}</dd></div>
     <div><dt>Access</dt><dd>{accessLabel}</dd></div>
-    <div><dt>Context</dt><dd data-testid="status-context">{telemetry === undefined ? 'Reading…' : contextUsageLine(telemetry, model)}</dd></div>
+    <div><dt>Context</dt><dd data-testid="status-context">{telemetry === undefined ? 'Reading…' : contextUsageLine(telemetry, model, modelKey(chat.providerId ?? '', chat.model))}</dd></div>
     <div className="is-block"><dt>Rate limits</dt><dd>{reportsUsage(providerId) ? <ProviderUsageMeters usage={usage.usage} loaded={usage.loaded} /> : 'This provider does not report rate limits.'}</dd></div>
   </dl>;
 }

@@ -91,7 +91,7 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
   const gate = <T>(base: ProviderInfo, check: Validation<T>, ready: (value: T) => {models: ProviderInfo['models']; detail: string}, run: () => RunnableAdapter): ProviderInstance => {
     if (check.status === 'ok') { const {models, detail} = ready(check.value!); if (models.length) return route({...base, models, available: true, status: 'ready', detail}, run()); return route({...base, status: 'error', error: 'No usable chat models were reported.', detail: 'No usable chat models were reported. No provider fallback will be used.'}); }
     if (check.status === 'error') return route({...base, status: 'error', error: check.reason, detail: `${check.reason} No provider fallback will be used.`});
-    return route({...base, status: 'configured', detail: 'Checking this provider… Scan again in a moment.'});
+    return route({...base, status: 'configured', checking: true, detail: 'Checking this provider… Scan again in a moment.'});
   };
 
   /** The version check, held back to "not signed in" (or "checking") until the sign-in check passes. */

@@ -1,6 +1,9 @@
-import {spawn} from 'node:child_process';
+import {permissionResult} from '../permission-result.ts';
+import {spawnOwned} from '../owned-process.ts';
+import {StringDecoder} from 'node:string_decoder';
 import {constants as fsc, promises as fs} from 'node:fs';
-import {basename, dirname, extname, isAbsolute, join, relative, sep} from 'node:path';
+import {basename, dirname, extname, isAbsolute, join, matchesGlob, relative, sep} from 'node:path';
+import {headAndTail} from './shared.ts';
 import {isInsidePath, normalizeFsPath} from '../../shared/path-normalize.ts';
 import {agentCommandEnvironment} from '../command-environment.ts';
 import {killTreeAndEscapees, WINDOWS} from '../process-tree.ts';
@@ -8,6 +11,8 @@ import {redactSecrets} from '../secret-redaction.ts';
 import type {AdapterRunInput} from './types.ts';
 import {BROWSER_TOOL_SPECS, type McpToolResult} from '../../main/agent-tools/browser-tools.ts';
 import {BROWSER_MCP, browserNote} from '../../shared/computer-use.ts';
+import {ASK_MCP, ASK_USER_SPEC, ASK_USER_TOOL} from '../ask-user.ts';
+import {writeWorkspaceFile} from '../workspace-write.ts';
 
 /**
  * Tools for OpenAI-compatible HTTP routes (a local OmniRoute or Ollama server, an API key route, a saved connection).
@@ -24,9 +29,9 @@ export interface ToolCall { id: string; name: string; arguments: string }
 /** An image a tool read, for the model to see (OpenAI `image_url` part on the next request). */
 export interface ToolImage { mediaType: string; data: string; name: string }
 export interface ToolResult { content: string; ok: boolean; image?: ToolImage }
-/** Resolves true to proceed. The service answers with the Project tool policy, the user-process guard and approval cards. */
-export type Authorize = (method: string, params: Record<string, unknown>) => Promise<boolean>;
-export interface ToolContext { /** The chat whose browser tab the browser tools drive (#424). */ chatId?: string; /** Offer Muster's in-app browser tools. */ browser?: boolean; cwd: string; access: ToolAccess; signal: AbortSignal; emit: AdapterRunInput['onEvent']; threadId: string; turnId: string; authorize?: Authorize; env?: Record<string, string>; deadline?: number; /** True when the model reports image input. read_file of an image returns the picture only then. */ vision?: boolean; /** Shared across one turn so the "this model cannot see images" explanation is given once. */ visionNote?: {told: boolean} }
+/** Resolves allow to proceed. The service answers with the Project tool policy, the user-process guard and approval cards. */
+export type Authorize = NonNullable<AdapterRunInput['authorize']>;
+export interface ToolContext { /** The chat whose browser tab the browser tools drive (#424). */ chatId?: string; /** Offer Muster's in-app browser tools. */ browser?: boolean; cwd: string; access: ToolAccess; signal: AbortSignal; emit: AdapterRunInput['onEvent']; threadId: string; turnId: string; authorize?: Authorize; /** ask_user: posts the question card and resolves at once with the reply for the model. */ askUser?: (args: Record<string, unknown>) => Promise<string>; env?: Record<string, string>; deadline?: number; /** True when the model reports image input. read_file of an image returns the picture only then. */ vision?: boolean; /** Shared across one turn so the "this model cannot see images" explanation is given once. */ visionNote?: {told: boolean} }
 
 export const MAX_TOOL_OUTPUT = 64 * 1024, MAX_FILE_READ = 256 * 1024, MAX_EDIT_FILE = 5 * 1024 * 1024, MAX_TIMELINE_OUTPUT = 8 * 1024;
 const DEFAULT_TIMEOUT_S = 120, MAX_TIMEOUT_S = 600;
@@ -49,33 +54,36 @@ export const browserCaller = (): BrowserCaller | undefined => {
 /** Browser tools are offered only when asked for and when Muster's bridge is there to run them. */
 export const browserOffered = (browser: boolean | undefined) => !!browser && !!browserCaller();
 
-export function toolSpecs(access: ToolAccess, browser = false): FunctionSpec[] {
+export function toolSpecs(access: ToolAccess, browser = false, ask = false): FunctionSpec[] {
   const tools = [
-    spec('read_file', 'Read a text file (the first 256 KB). Relative paths are inside the working folder.', {path: string('File path')}, ['path']),
+    spec('read_file', 'Read a text file (up to 256 KB per call). Relative paths are inside the working folder.', {path: string('File path'), offset: {type: 'integer', minimum: 0, description: 'Byte offset; defaults to 0. Use the next offset in a partial result to continue.'}, limit: {type: 'integer', minimum: 1, maximum: MAX_FILE_READ, description: 'Maximum bytes to read; defaults to 256 KB.'}}, ['path']),
     spec('list_directory', 'List the entries of a folder.', {path: string('Folder path; defaults to the working folder')}, []),
+    spec('search_files', 'Find file paths by glob and optionally lines containing literal text. Searches at most 10000 entries and returns at most 200 matches; links are skipped.', {path: string('Folder to search; defaults to the working folder'), glob: string('File glob relative to that folder; defaults to **/*'), query: string('Optional literal text to find in text files (first 256 KB of each)')}, []),
   ];
   if (access !== 'read-only') tools.push(
     spec('write_file', 'Create or overwrite a text file (parent folders are created).', {path: string('File path'), content: string('Complete new file content')}, ['path', 'content']),
     spec('edit_file', 'Replace one exact occurrence of old_string with new_string in a file.', {path: string('File path'), old_string: string('Exact text to replace; must occur once'), new_string: string('Replacement text')}, ['path', 'old_string', 'new_string']),
   );
   if (browser) tools.push(...browserToolSpecs(access));
+  // Non-blocking question to the user: allowed at every access level, since it changes nothing and never waits.
+  if (ask) tools.push({type: 'function', function: {name: ASK_USER_SPEC.name, description: ASK_USER_SPEC.description, parameters: ASK_USER_SPEC.inputSchema}});
   if (access === 'full') tools.push(spec('run_command', `Run a shell command (${WINDOWS ? 'PowerShell' : 'sh'}) in the working folder and return its output.`, {command: string('The command line'), timeout_sec: {type: 'number', description: `Seconds before it is stopped (default ${DEFAULT_TIMEOUT_S}, max ${MAX_TIMEOUT_S})`}}, ['command']));
   return tools;
 }
 
 /** What the model is told about its tools, so it never claims to have none (or to be unable to add them). */
-export function toolInstructions(access: ToolAccess, cwd: string, browser = false): string {
-  const names = toolSpecs(access).map(tool => tool.function.name).join(', ');
+export function toolInstructions(access: ToolAccess, cwd: string, browser = false, ask = false): string {
+  const names = toolSpecs(access, false, ask).map(tool => tool.function.name).join(', ');
   const web = browser ? ` ${browserNote('native')}${access === 'read-only' ? ' In this read-only chat the browser tools can open and read pages but not click or type.' : ''}` : '';
   const limits = access === 'read-only' ? 'Access is read-only: you can look at files in the working folder but not change them or run commands.'
     : access === 'workspace' ? 'You can edit files inside the working folder; running commands needs Full access, which the user can switch on in the composer.'
-    : 'You have Full access: commands and files anywhere the user can reach. Ask the user in chat before anything destructive or irreversible (deleting data, force-pushing, changing system settings).';
+    : 'You have Full access: commands and files anywhere the user can reach. Do not ask for permission to proceed (commit, push, install, restart and the like are yours to do); ask in chat only before irreversibly deleting user data (files, databases, branches).';
   return `You have these tools in this chat: ${names}. Working folder: ${normalizeFsPath(cwd)}. ${limits} There is no sub-agent tool in this chat, so do the work directly and don't mention it.${web}`;
 }
 
 const clip = (text: string, max = MAX_TOOL_OUTPUT) => text.length > max ? text.slice(0, max) + `\n[output cut at ${max} characters]` : text;
 /** What the timeline stores of a tool's output: capped, with the pattern-based secret redaction. The model still gets the real output. */
-const stored = (text: string) => redactSecrets(clip(text, MAX_TIMELINE_OUTPUT));
+const stored = (text: string) => redactSecrets(headAndTail(text, MAX_TIMELINE_OUTPUT));
 
 /** The same event with secret shapes masked in the command line and in each file change's diff. */
 function redactedItem(params: Record<string, unknown>): Record<string, unknown> {
@@ -121,43 +129,17 @@ async function resolvePath(raw: unknown, ctx: ToolContext): Promise<Resolved> {
   }
   return {path: join(base, ...parts), base, confined: true};
 }
-/** After the parent exists: its real path must still be inside the folder (the folder may have changed since the check). */
-async function parentStillInside(path: string, base: string): Promise<void> {
-  const real = await fs.realpath(dirname(path));
-  if (!isInsidePath(base, real)) throw new Error('That location leads outside the working folder.');
-}
-
-/** Writes through a handle opened without following links, then checks where the file really is; removes it if it landed outside. */
+/** Workspace writes walk pinned directory handles; no creating syscall resolves a checked parent by path. */
 async function writeConfined(resolved: Resolved, content: string): Promise<void> {
   const {path, base, confined} = resolved;
-  await fs.mkdir(dirname(path), {recursive: true});
-  if (!confined) { await fs.writeFile(path, content, 'utf8'); return; }
-  await parentStillInside(path, base);
-  const existed = await fs.lstat(path).then(() => true, () => false);
-  const noFollow = typeof fsc.O_NOFOLLOW === 'number' ? fsc.O_NOFOLLOW : 0;
-  const handle = await fs.open(path, fsc.O_WRONLY | fsc.O_CREAT | noFollow, 0o644);
-  let real: string | undefined;
-  try {
-    const info = await handle.stat();
-    if (!info.isFile()) throw new Error('That is not a regular file.');
-    if (existed && info.nlink > 1) throw new Error('That file has other hard links, so it is not changed outside Full access.');
-    real = await fs.realpath(path);
-    if (!isInsidePath(base, real)) throw new Error('That file leads outside the working folder.');
-    await handle.truncate(0);
-    await handle.writeFile(content, 'utf8');
-  } catch (error) {
-    await handle.close().catch(() => {});
-    // The file was created by this call and turned out to be elsewhere: take it away again.
-    if (!existed && real && !isInsidePath(base, real)) await fs.unlink(real).catch(() => {});
-    throw error;
-  }
-  await handle.close();
-  const after = await fs.realpath(path).catch(() => undefined);
-  if (after && !isInsidePath(base, after)) { if (!existed) await fs.unlink(after).catch(() => {}); throw new Error('That file ended up outside the working folder and was removed.'); }
+  if (!confined) { await fs.mkdir(dirname(path), {recursive: true}); await fs.writeFile(path, content, 'utf8'); return; }
+  const parts = relative(base, path).split(sep).filter(Boolean);
+  if (!parts.length) throw new Error('A file path is required.');
+  await writeWorkspaceFile(base, parts, content);
 }
 
 /** At most `limit` bytes of a regular file, never the whole thing. */
-async function readLimited(path: string, limit: number, refuseHardLinked = false): Promise<{text: string; size: number}> {
+async function readLimited(path: string, limit: number, refuseHardLinked = false, offset = 0): Promise<{text: string; size: number; bytesRead: number}> {
   // stat first: opening a FIFO or device for reading can block forever.
   if (!(await fs.stat(path)).isFile()) throw new Error(`${path} is not a regular file.`);
   const handle = await fs.open(path, fsc.O_RDONLY);
@@ -166,10 +148,43 @@ async function readLimited(path: string, limit: number, refuseHardLinked = false
     if (!info.isFile()) throw new Error(`${path} is not a regular file.`);
     // A hardlink planted in the folder can name a file that lives outside it; whether its other names are outside cannot be known, so refuse.
     if (refuseHardLinked && info.nlink > 1) throw new Error(`${path} has other hard links, so it is not read outside Full access (it may be the same file as one outside the working folder).`);
-    const buffer = Buffer.alloc(Math.min(info.size, limit));
-    const {bytesRead} = await handle.read(buffer, 0, buffer.length, 0);
-    return {text: buffer.subarray(0, bytesRead).toString('utf8'), size: info.size};
+    const buffer = Buffer.alloc(Math.min(Math.max(0, info.size - offset), limit));
+    const {bytesRead} = await handle.read(buffer, 0, buffer.length, offset);
+    // A cut at the limit can fall inside a character: the decoder holds back that partial character instead of emitting U+FFFD.
+    const text = offset + bytesRead < info.size ? new StringDecoder('utf8').write(buffer.subarray(0, bytesRead)) : buffer.subarray(0, bytesRead).toString('utf8');
+    return {text, size: info.size, bytesRead: Buffer.byteLength(text)};
   } finally { await handle.close(); }
+}
+
+/** Read-only discovery with the same confinement and hard-link checks as read_file; no shell or external binary. */
+async function searchFiles(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
+  const root = await resolvePath(args.path ?? '.', ctx), pending = [root.path], found: string[] = [];
+  const glob = typeof args.glob === 'string' ? args.glob : '**/*', query = typeof args.query === 'string' ? args.query : undefined;
+  let visited = 0, incomplete = false;
+  while (pending.length && !incomplete) {
+    const dir = await fs.opendir(pending.pop()!);
+    for await (const entry of dir) {
+      ctx.signal.throwIfAborted();
+      if (++visited > 10000 || found.length >= 200) { incomplete = true; break; }
+      if (entry.isSymbolicLink()) continue;
+      const path = join(dir.path, entry.name);
+      // Recheck the entire path in case an entry was replaced after readdir.
+      let resolved: Resolved;
+      try { resolved = await resolvePath(join(ctx.cwd, relative(root.base, path)), ctx); } catch { continue; }
+      if (entry.isDirectory()) { pending.push(resolved.path); continue; }
+      if (!entry.isFile()) continue;
+      const name = relative(root.path, path).split(sep).join('/');
+      if (!matchesGlob(name, glob)) continue;
+      if (query === undefined) { found.push(name); continue; }
+      try {
+        const {text} = await readLimited(resolved.path, MAX_FILE_READ, resolved.confined);
+        if (text.includes('\0')) continue;
+        const lines = text.split('\n');
+        for (let i = 0; i < lines.length && found.length < 200; i++) if (lines[i]!.includes(query)) found.push(`${name}:${i + 1}:${headAndTail(lines[i]!, 1000)}`);
+      } catch { /* unreadable or hard-linked files are skipped */ }
+    }
+  }
+  return headAndTail(found.join('\n') || '(no matches)', MAX_TOOL_OUTPUT) + (incomplete ? '\n[search limit reached; narrow the folder or glob]' : '');
 }
 
 const IMAGE_TYPES: Record<string, string> = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp'};
@@ -213,16 +228,21 @@ function runCommand(command: string, timeoutSeconds: number, ctx: ToolContext): 
     const cwd = normalizeFsPath(ctx.cwd);
     const {file, args} = shellInvocation(command);
     // Its own process group on POSIX (so Stop can end everything it started); taskkill /T does the same job on Windows.
-    const child = spawn(file, args, {cwd, windowsHide: true, detached: !WINDOWS, stdio: ['ignore', 'pipe', 'pipe'], env: agentCommandEnvironment(ctx.env)});
-    let output = '', done = false;
-    const add = (chunk: Buffer) => { if (output.length < MAX_TOOL_OUTPUT * 2) output += chunk.toString('utf8'); };
-    child.stdout.on('data', add); child.stderr.on('data', add);
+    const child = spawnOwned(file, args, {cwd, windowsHide: true, detached: !WINDOWS, stdio: ['ignore', 'pipe', 'pipe'], env: agentCommandEnvironment(ctx.env)});
+    let head = '', tail = '', total = 0, done = false;
+    // One decoder per stream: a multi-byte character split across two pipe chunks is joined, not turned into U+FFFD.
+    const reader = (decoder: StringDecoder) => (chunk: Buffer) => {
+      const piece = decoder.write(chunk); total += piece.length;
+      const take = Math.min(piece.length, MAX_TOOL_OUTPUT - head.length);
+      head += piece.slice(0, take); tail = (tail + piece.slice(take)).slice(-MAX_TOOL_OUTPUT);
+    };
+    child.stdout!.on('data', reader(new StringDecoder('utf8'))); child.stderr!.on('data', reader(new StringDecoder('utf8')));
     const end = () => {
       if (child.pid === undefined) return;
       try { killTreeAndEscapees(child.pid, 'SIGTERM'); } catch { /* already gone */ }
       if (!WINDOWS) setTimeout(() => { try { killTreeAndEscapees(child.pid!, 'SIGKILL'); } catch { /* already gone */ } }, 2000).unref();
     };
-    const finish = (exitCode: number | null, extra = '') => { if (done) return; done = true; clearTimeout(timer); ctx.signal.removeEventListener('abort', stop); resolvePromise({output: clip(output + extra), exitCode}); };
+    const finish = (exitCode: number | null, extra = '') => { if (done) return; done = true; clearTimeout(timer); ctx.signal.removeEventListener('abort', stop); const output = total <= MAX_TOOL_OUTPUT ? head : headAndTail(head + tail, MAX_TOOL_OUTPUT); resolvePromise({output: output + extra, exitCode}); };
     const stop = () => { end(); finish(null, '\n[stopped]'); };
     const timer = setTimeout(() => { end(); finish(null, `\n[stopped after ${timeoutSeconds}s]`); }, timeoutSeconds * 1000);
     if (ctx.signal.aborted) { stop(); return; }
@@ -265,6 +285,14 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
     return result;
   };
   if (BROWSER_TOOL_SPECS.some(tool => tool.name === call.name)) return browserTool(call, args, ctx);
+  if (call.name === ASK_USER_TOOL && ctx.askUser) {
+    // Shown as the same muster_ask tool row the MCP routes produce; returns at once with the default.
+    const item = {type: 'mcpToolCall', server: ASK_MCP, tool: ASK_USER_TOOL, arguments: args};
+    emit('item/started', {...base, item: {...item, id}});
+    let content: string, ok = true;
+    try { content = await ctx.askUser(args); } catch (error) { content = `The question could not be shown (${error instanceof Error ? error.message : String(error)}). Continue with your default.`; ok = false; }
+    return finish(item, {content, ok});
+  }
   const kindOf = call.name === 'run_command' ? 'commandExecution' : call.name === 'read_file' ? 'fileRead' : call.name === 'write_file' || call.name === 'edit_file' ? 'fileChange' : 'commandExecution';
   const allowed = toolSpecs(ctx.access).some(tool => tool.function.name === call.name);
   if (!allowed) {
@@ -273,7 +301,7 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
     return finish({type: 'commandExecution', command: `${call.name} (blocked)`, cwd}, {content: why, ok: false});
   }
   /** Project rules and the user-process guard; false when declined. */
-  const approved = async (method: string, params: Record<string, unknown>) => { if (!ctx.authorize) return true; try { return await ctx.authorize(method, {...params, itemId: id, policyOnly: true}); } catch { return false; } };
+  const approved = async (method: string, params: Record<string, unknown>) => { if (!ctx.authorize) return ctx.access === 'full'; try { return permissionResult(await ctx.authorize(method, {...params, itemId: id}, {policyOnly: true})) === 'allow'; } catch { return false; } };
   const declined: ToolResult = {content: 'This was declined (a Project tool rule, the protection for your own processes, or your answer).', ok: false};
   let item: Record<string, unknown> = {type: kindOf};
   try {
@@ -288,6 +316,11 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
       const {output, exitCode} = await runCommand(command, timeout, ctx);
       emit('item/completed', {...base, item: {...item, id, status: exitCode === 0 ? 'completed' : 'failed', exitCode, aggregatedOutput: stored(output)}});
       return {content: output || (exitCode === 0 ? '(no output)' : `Exited with code ${exitCode}`), ok: exitCode === 0};
+    }
+    if (call.name === 'search_files') {
+      item = {type: 'commandExecution', command: `search_files ${typeof args.path === 'string' ? args.path : '.'}`, cwd, commandActions: [{type: 'search', query: args.query, path: args.path ?? '.'}]};
+      emit('item/started', {...base, item: {...item, id}});
+      return finish(item, {content: await searchFiles(args, ctx), ok: true});
     }
     const resolved = await resolvePath(call.name === 'list_directory' && args.path === undefined ? '.' : args.path, ctx);
     const path = resolved.path;
@@ -305,10 +338,13 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
         const image = await readImageLimited(path, resolved.confined);
         return finish(item, {content: `${name} (${image.mediaType}, ${image.size} bytes) is attached as an image below.`, ok: true, image: {mediaType: image.mediaType, data: image.data, name}}, `Viewed ${name} (${image.size} bytes)`);
       }
-      const {text, size} = await readLimited(path, MAX_FILE_READ, resolved.confined);
-      const content = (text || '(empty file)') + (size > MAX_FILE_READ ? `\n[file is ${size} bytes; the first ${MAX_FILE_READ} are shown]` : '');
+      const offset = args.offset === undefined ? 0 : args.offset, limit = args.limit === undefined ? MAX_FILE_READ : args.limit;
+      if (typeof offset !== 'number' || !Number.isSafeInteger(offset) || offset < 0 || typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 1 || limit > MAX_FILE_READ) throw new Error(`offset must be a non-negative byte offset and limit must be 1–${MAX_FILE_READ} bytes.`);
+      const {text, size, bytesRead} = await readLimited(path, limit, resolved.confined, offset);
+      const range = offset === 0 ? `the first ${bytesRead} are shown` : `bytes ${offset}–${offset + bytesRead} are shown`;
+      const content = (text || '(empty file range)') + (offset + bytesRead < size ? `\n[file is ${size} bytes; ${range}; continue with offset ${offset + bytesRead}]` : '');
       // The timeline row shows that the file was read, not its body.
-      return finish(item, {content, ok: true}, `Read ${Math.min(size, MAX_FILE_READ)} of ${size} bytes`);
+      return finish(item, {content, ok: true}, `Read ${bytesRead} of ${size} bytes at offset ${offset}`);
     }
     if (call.name === 'list_directory') {
       item = {type: 'commandExecution', command: `ls ${path}`, cwd, commandActions: [{type: 'listFiles', path}]};
@@ -332,7 +368,9 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
       if (!await approved('item/fileChange/requestApproval', {changes: [{path, kind: 'update'}]})) return finish(item, declined);
       const info = await fs.stat(path);
       if (!info.isFile() || info.size > MAX_EDIT_FILE) return finish(item, {content: `${path} is not a regular file under ${MAX_EDIT_FILE / 1024 / 1024} MB.`, ok: false});
-      const current = await fs.readFile(path, 'utf8');
+      const bytes = await fs.readFile(path), current = bytes.toString('utf8');
+      // Decoding replaces bytes that are not UTF-8 and the write would save those replacements over the whole file.
+      if (!Buffer.from(current, 'utf8').equals(bytes)) return finish(item, {content: `${path} is not valid UTF-8 text, so edit_file would change bytes outside the edit. Use run_command or ask the user.`, ok: false});
       const first = oldText ? current.indexOf(oldText) : -1;
       if (first < 0) return finish(item, {content: 'old_string was not found in the file.', ok: false});
       if (current.indexOf(oldText, first + 1) >= 0) return finish(item, {content: 'old_string occurs more than once; include more context.', ok: false});

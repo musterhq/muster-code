@@ -11,8 +11,12 @@ import type {ExcludedModel, ModelPricing} from './model-catalog.ts';
 /** One slice of a 3D model file (or companion texture); `size` is the whole file's length. */
 export interface ModelChunk { size: number; offset: number; bytes: Uint8Array }
 export type ChatPermissionMode = 'read-only' | 'workspace' | 'full';
-/** 'waiting' (approval or question open), 'queued' and 'reconnecting' are display states derived in the renderer; the runtime never persists them. */
-export type ChatStatus = 'idle' | 'running' | 'stopping' | 'completed' | 'failed' | 'interrupted' | 'waiting' | 'queued' | 'reconnecting';
+/** 'waiting' (approval or question open), 'queued', 'reconnecting' and 'limited' (a usage limit is waiting to reset) are display states derived in the renderer; the runtime never persists them. */
+export type ChatStatus = 'idle' | 'running' | 'stopping' | 'completed' | 'failed' | 'interrupted' | 'waiting' | 'queued' | 'reconnecting' | 'limited';
+/** #448: a run stopped on a provider usage limit. `resume` is this chat's "Resume at reset" choice; `gaveUp` once repeated refusals stopped the retries. */
+/** #448: an opt-in per-chat fallback model, used when the chat's model is limited. */
+export interface ChatFallback { providerId: string; model: string }
+export interface ChatAutoResume { resumeAt: string | null; resume: boolean; attempts: number; /** 'usage': a usage window or quota · 'rate': a rate limit or outage (429/503). */ reason: 'usage' | 'rate'; gaveUp?: boolean }
 /** `missing` is set when the folder path was not a directory at snapshot time (cached ~10s); the sidebar offers Relink. */
 export interface Folder { id: string; path: string; name: string; missing?: boolean }
 export interface ChatRecovery { kind: 'admission-rejected' | 'recovery-needed' | 'failed' | 'cancelled'; retryable: boolean; reason: string; /** The provider rejected the credentials (401/403); fixed in Accounts & providers. */ auth?: {providerId: string; status: 401 | 403} }
@@ -21,8 +25,8 @@ export interface QueuedMessage {id:string; text:string; requestId:string; attach
 /** Codex limits: 100 queued items per thread, 1 MiB of text per item. */
 export const MAX_QUEUED_MESSAGES = 100;
 export const MAX_QUEUED_TEXT = 1024 * 1024;
-/** Why a chat's queue is not dispatching: the user interrupted the run, or the run failed. */
-export type QueuePause = 'interrupted' | 'failed';
+/** Why a chat's queue is not dispatching: the user interrupted the run, the run failed, or it waits for a usage limit to reset (#448). */
+export type QueuePause = 'interrupted' | 'failed' | 'limited';
 /** While a turn runs, a follow-up queues or steers; the invert shortcut does the other for one message. */
 export type FollowUpMode = 'queue' | 'steer';
 /** A file staged in a chat's composer ('staged') or delivered with a message ('sent'). Bytes stay in main. */
@@ -30,7 +34,7 @@ export interface AttachmentRef {id:string; chatId:string; name:string; mime:stri
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
 export const ATTACHMENT_IMAGE_MIMES = ['image/png','image/jpeg','image/gif','image/webp'] as const;
-export interface Chat { id: string; folderId?: string; projectId?: string; title: string; pinned: boolean; pinOrder?: number; archived: boolean; draft: string; status: ChatStatus; updatedAt: string; providerId?: string; providerBindingId?: string; providerThreadProviderId?: string; providerThreadBindingId?: string; providerThreadId?: string; providerTurnId?: string; recovery?: ChatRecovery; model: string; unread?: boolean; lastViewedAt?: string; mode: 'ask' | 'plan' | 'agent'; permissionMode?: ChatPermissionMode; error?: string; queue?: QueuedMessage[]; queuePaused?: QueuePause; goal?: ChatGoal;
+export interface Chat { id: string; folderId?: string; projectId?: string; title: string; pinned: boolean; pinOrder?: number; archived: boolean; draft: string; status: ChatStatus; updatedAt: string; providerId?: string; providerBindingId?: string; providerThreadProviderId?: string; providerThreadBindingId?: string; /** #688: the lane that made the thread when it is not the route's own driver (the Messages lane); absent for Codex. */ providerThreadDriver?: string; providerThreadId?: string; providerTurnId?: string; recovery?: ChatRecovery; model: string; unread?: boolean; lastViewedAt?: string; mode: 'ask' | 'plan' | 'agent'; permissionMode?: ChatPermissionMode; error?: string; queue?: QueuedMessage[]; queuePaused?: QueuePause; autoResume?: ChatAutoResume; /** #448: opt-in fallback models (off when absent). */ fallbacks?: ChatFallback[]; goal?: ChatGoal;
   /** 'default' until the first exchange names it, 'generated' after, 'user' once renamed (never overwritten). */
   titleSource?: ChatTitleSource;
   /** Set on a fork: the chat and item it branched from. */
@@ -57,7 +61,9 @@ export const ARCHIVE_RUNNING_WARNING = 'Archiving stops nothing; the agent keeps
 export interface ChatExport { text: string; omitted: string[]; fileName: string }
 export interface PendingQuestionOption { label: string; description?: string; value?: string }
 export interface PendingQuestion { id: string; header: string; question: string; options: PendingQuestionOption[]; allowCustomAnswer: boolean; multiSelect: boolean; isSecret?: boolean; isOther?: boolean }
-export interface PendingQuestionData { method: 'item/tool/requestUserInput'; questions: PendingQuestion[]; expiresAt?: string; expiredReason?: 'restart' | 'timeout' | 'stale'; reaskedAt?: string }
+export interface PendingQuestionData { method: 'item/tool/requestUserInput'; questions: PendingQuestion[]; expiresAt?: string; expiredReason?: 'restart' | 'timeout' | 'stale'; reaskedAt?: string;
+  /** ask_user: the run did not wait; it continued with `defaultAnswer`, and a later answer is delivered as a steer or the next turn. */
+  nonBlocking?: true; defaultAnswer?: string; delivered?: 'steered' | 'queued' }
 export interface TimelineItem { id: string; chatId: string; kind: 'user' | 'assistant' | 'reasoning' | 'tool' | 'approval' | 'question' | 'notice'; text: string; status?: string; createdAt: string; data?: Record<string, unknown> }
 /** `data` of an approval item. `kind` picks the card body; every field is optional because providers omit them. */
 export interface ApprovalData { method: string; kind: 'command' | 'fileChange' | 'mcp'; command?: string; cwd?: string; reason?: string; diff?: Array<{path: string; diff?: string; kind?: string}>; server?: string; tool?: string; args?: string; expiredReason?: 'restart' | 'timeout' | 'stale'; /** ISO deadline stored with the request; whether it has expired is decided at read time. */ expiresAt?: string; /** Set once the user asked the agent again after it expired. */ reaskedAt?: string; /** R5: the command would stop a process the user started; never approvable for the whole session. */ protectsUserProcess?: boolean }
@@ -97,7 +103,7 @@ export const REASONING_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', '
 /** `monochrome`: a black-only mark (inverted on dark surfaces); `monochromeLight`: a white-only mark (inverted on light surfaces);
  *  `darkDataUrl`: the manifest's own dark-theme logo (`interface.logoDark`), preferred over inversion in dark theme (CS-C3-2). */
 export type ItemIcon = { kind: 'image'; dataUrl: string; monochrome?: boolean; monochromeLight?: boolean; darkDataUrl?: string } | { kind: 'monogram'; text: string; hue: number };
-export interface ProviderInfo { id: string; driver?: string; bindingId?: string; name: string; available: boolean; identityMasked: string; models: { id: string; name: string; efforts?: ReasoningEffort[]; defaultEffort?: ReasoningEffort; /** Catalog context window (Codex `context_window`); the meter's estimate before the first report. */ contextWindow?: number; /** Where contextWindow came from: the model catalog/JSON, or the router's own `/models` listing (`context_length`). */ contextWindowSource?: 'catalog' | 'listing'; /** Catalog `auto_compact_token_limit`: the model's own compaction threshold, when declared. */ autoCompactTokenLimit?: number; /** False when the model cannot take image input (Codex catalog `input_modalities` without "image", or a CLI without file attachments). Attached images are then withheld and the chat is told so. */ images?: boolean; /** Codex catalog `supports_search_tool`: true when the model can defer connector/MCP tools behind `tool_search` instead of receiving every schema inline. */ toolSearch?: boolean; /** Dollars per million tokens when the catalog declares a price; absent means unknown (cost shows "—"). */ pricing?: ModelPricing; /** False when the model cannot run commands or edit files here (a chat-only route such as the Anthropic API, or a model its endpoint refused tool definitions for). Absent means it can. The composer says so before sending. */ tools?: boolean; /** Off in the picker until the user switches it on (a router's third-party models). */ hiddenByDefault?: boolean; /** Where a router got the model (its `owned_by`), for grouping in Settings. */ group?: string }[]; /** Catalog entries Muster will not offer, each with the reason (PRO-04: nothing is dropped silently). */ excludedModels?: ExcludedModel[]; error?: string; status?: 'ready' | 'configured' | 'installed' | 'not-detected' | 'error'; /** A gateway without a model catalog lists its models live: loading (first answer pending), live, stale (last saved list while a refresh runs or after a failure) or failed (no list at all). */ listing?: 'loading' | 'live' | 'stale' | 'failed'; /** Why the live listing failed (set when listing is stale or failed). */ listingError?: string; source?: string; detail?: string; canReveal?: boolean; custom?: boolean; endpoint?: string; apiKeyEnv?: string; checkedAt?: string;
+export interface ProviderInfo { id: string; driver?: string; bindingId?: string; name: string; available: boolean; identityMasked: string; models: { id: string; name: string; efforts?: ReasoningEffort[]; defaultEffort?: ReasoningEffort; /** Catalog context window (Codex `context_window`); the meter's estimate before the first report. */ contextWindow?: number; /** Where contextWindow came from: the model catalog/JSON, or the router's own `/models` listing (`context_length`). */ contextWindowSource?: 'catalog' | 'listing'; /** Catalog `auto_compact_token_limit`: the model's own compaction threshold, when declared. */ autoCompactTokenLimit?: number; /** False when the model cannot take image input (Codex catalog `input_modalities` without "image", or a CLI without file attachments). Attached images are then withheld and the chat is told so. */ images?: boolean; /** Codex catalog `supports_search_tool`: true when the model can defer connector/MCP tools behind `tool_search` instead of receiving every schema inline. */ toolSearch?: boolean; /** Dollars per million tokens when the catalog declares a price; absent means unknown (cost shows "—"). */ pricing?: ModelPricing; /** False when the model cannot run commands or edit files here (a chat-only route such as the Anthropic API, or a model its endpoint refused tool definitions for). Absent means it can. The composer says so before sending. */ tools?: boolean; /** Off in the picker until the user switches it on (a router's third-party models). */ hiddenByDefault?: boolean; /** Where a router got the model (its `owned_by`), for grouping in Settings. */ group?: string }[]; /** Catalog entries Muster will not offer, each with the reason (PRO-04: nothing is dropped silently). */ excludedModels?: ExcludedModel[]; error?: string; status?: 'ready' | 'configured' | 'installed' | 'not-detected' | 'error'; /** Its check (sign-in, version or model listing) is still running: not ready, and not failed either. */ checking?: boolean; /** A gateway without a model catalog lists its models live: loading (first answer pending), live, stale (last saved list while a refresh runs or after a failure) or failed (no list at all). */ listing?: 'loading' | 'live' | 'stale' | 'failed'; /** Why the live listing failed (set when listing is stale or failed). */ listingError?: string; source?: string; detail?: string; canReveal?: boolean; custom?: boolean; endpoint?: string; apiKeyEnv?: string; checkedAt?: string;
   /** Set for routes that run through the Codex CLI: the `model_provider` id from the user's own Codex config, whether it is
    *  OpenAI's own ChatGPT sign-in or a gateway, the profile file stem it came from, and the extra-account hash. */
   codex?: { modelProvider: string; kind: 'chatgpt' | 'gateway'; profile?: string; account?: string };
@@ -108,7 +114,12 @@ export interface ProviderInfo { id: string; driver?: string; bindingId?: string;
 /** Read-only local skill inventory. Skills are inspected, never installed or executed here. */
 export interface SkillEntry { id: string; name: string; provenance: string; path: string; readme: string | null; readError: string | null;
   /** From agents/openai.yaml `interface` or SKILL.md front matter; absent on older runtimes. */
-  displayName?: string; shortDescription?: string; icon?: ItemIcon; pluginId?: string }
+  displayName?: string; shortDescription?: string; icon?: ItemIcon; pluginId?: string;
+  /** #729: a Claude Code skill (`.claude/skills/<name>/SKILL.md`) or command (`.claude/commands/<name>.md`); `name` is how
+   *  Claude Code invokes it (`/<name>`), nested commands as `dir:name`. */
+  claude?: 'skill' | 'command';
+  /** A Claude Code command's `argument-hint` front matter, e.g. `<file> [focus]`. */
+  argumentHint?: string }
 /** Metadata-only installed plugin inventory. Executable config and secrets never cross into the renderer. */
 export interface PluginEntry { id:string; name:string; version:string; provenance:string; path:string; skills:string[]; mcpServers:Array<{name:string;transport:'local'|'remote'|'unknown'}>; apps:Array<{name:string;id:string;required:boolean;category?:string;/** EXT-10: plugin-relative .html entry rendered in a sandboxed frame. */ui?:string}>; readError:string|null;
   /** From `.codex-plugin/plugin.json` `interface`; icon is the composerIcon/logo (sanitized) or a monogram. */
@@ -117,7 +128,7 @@ export interface PluginEntry { id:string; name:string; version:string; provenanc
 export type ContextSource = 'live' | 'restored';
 /** Context-window occupancy telemetry. Unknown values are null ("Unavailable"), never zero. */
 export interface ContextBreakdownEntry { label: string; tokens: number }
-export interface ContextTelemetry { usedTokens: number | null; windowTokens: number | null; source: ContextSource | null; compacted: boolean; updatedAt: string | null; /** Only when the provider reports one; never estimated. */ breakdown?: ContextBreakdownEntry[] }
+export interface ContextTelemetry { usedTokens: number | null; windowTokens: number | null; source: ContextSource | null; compacted: boolean; updatedAt: string | null; /** #739: the model (`provider::model`) whose turn reported windowTokens; absent on rows written before reports were tagged. */ windowModel?: string; /** Only when the provider reports one; never estimated. */ breakdown?: ContextBreakdownEntry[] }
 export type AgentEvent = DomainEvent | ProcessEvent | BrowserEvent | ScopedComputerEvent | UpdateEvent | {type:'fileMoved';folderId:string;from:string;to:string} | {type:'workspaceChanged';folderId:string} | {type:'projectChanged';projectId:string;taskId:string;seq?:number} | {type:'chatSelected'; chatId:string} | {type:'chatWoke'; chatId:string; title:string; reason:WakeReason} | { type: 'snapshot'; snapshot: Snapshot } | { type: 'timeline'; chatId: string; items: TimelineItem[] } | { type: 'timelinePatch'; chatId: string; patch: TimelinePatch } | { type: 'notice'; message: string } | { type: 'contextTelemetry'; chatId: string; telemetry: ContextTelemetry };
 export interface MemoryEntry { id: string; kind: string; summary: string; sourceUri?: string; observedAt: string; confidence: number; provenance: string[]; scopes: Array<{kind: string; id: string}>; redactionState: 'none' | 'redacted' | 'hashed' | 'blocked'; links?: string[] }
 export interface HindsightStatus { configured: boolean; endpoint?: string; bankId?: string; error?: string; revision?: number; connection?: 'unchecked' | 'verified' | 'failed'; checkedAt?: string; connectionError?: string }
@@ -137,7 +148,7 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'app.snapshot': { input: undefined; output: Snapshot };
  'folder.add': { input: {path: string}; output: Folder };
  'folder.pick': { input: undefined; output: Folder | null };
- 'chat.create': { input: {folderId?: string; projectId?: string}; output: Chat };
+ 'chat.create': { input: {folderId?: string; projectId?: string; inheritFrom?: string}; output: Chat };
  'chat.select': { input: {id: string}; output: TimelineItem[] };
  /** Native chat menu (sidebar row and header ⋯). Main performs data actions itself (pin, unread, archive, delete, move, copy, export)
   *  and returns only the actions the renderer owns. `surface:'header'` adds the header-only entries. */
@@ -230,6 +241,10 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'chat.reconcile': {input: {id: string}; output: {chat: Chat; resolved: boolean; reason: string; stillRunning?: boolean}};
  /** Clears an unconfirmed-attempt block so the user is never stuck; the earlier attempt is left as it is. */
  'chat.continueAnyway': {input: {id: string}; output: Chat};
+ /** #448: this chat's choice after a usage limit: continue at reset, or not. */
+ 'chat.autoResume': {input: {id: string; resume: boolean}; output: Chat};
+ /** #448: this chat's fallback models, in order; an empty list turns fallback off. A limited chat continues on the first one at once. */
+ 'chat.fallbacks': {input: {id: string; fallbacks: ChatFallback[]}; output: Chat};
  /** Codex `thread/compact/start` on the chat's live provider session; a timeline row tracks intent, completion and failure. */
  'chat.compact': {input: {id: string; /** Skip the provider: continue in a fresh provider thread seeded with a summary of the transcript. */ fresh?: boolean}; output: void};
  /** Asks the agent again after an approval or question expired or was lost to a restart. */
@@ -265,6 +280,7 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'paperclip.output.save': {input:{id:string;projectId?:string};output:{saved:boolean;fileName?:string}};
  'files.search': { input: {folderId: string; path?: string; query: string}; output: {entries: FileEntry[]; truncated: boolean} };
  'files.read': { input: {folderId: string; path: string}; output: {path: string; text: string; truncated: boolean} };
+ 'files.chatEdit': { input: {chatId: string; itemId: string; path: string}; output: {path: string; text: string; truncated: boolean} };
  /** An image this chat's own tool rows named (a path outside every folder is fine); read by the runtime, never by arbitrary renderer input. */
  'files.chatImage': { input: {chatId: string; path: string}; output: {mime: string; dataUrl: string; size: number; width: number; height: number} };
  'files.asset': { input: {folderId: string; path: string}; output: {mime: string; dataUrl: string; size: number; width: number; height: number} };

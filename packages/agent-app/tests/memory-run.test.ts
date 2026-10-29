@@ -27,7 +27,7 @@ const core = {
 
 const box = {isEncryptionAvailable: () => true, encryptString: (text: string) => Buffer.from(`enc:${[...text].reverse().join('')}`), decryptString: (data: Buffer) => [...data.toString().slice(4)].reverse().join('')};
 
-async function fixture(t: TestContext, options: {client?: Partial<HindsightClientLike>; env?: Record<string, string | undefined>; entries?: MemoryEntry[]; fetch?: typeof fetch} = {}) {
+async function fixture(t: TestContext, options: {client?: Partial<HindsightClientLike>; env?: Record<string, string | undefined>; entries?: MemoryEntry[]; fetch?: typeof fetch; sessionOnly?: boolean} = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), 'muster-memory-run-'));
   const store = new AgentStore(dataDir);
   t.after(async () => { store.close(); await rm(dataDir, {recursive: true, force: true}); });
@@ -56,11 +56,11 @@ async function fixture(t: TestContext, options: {client?: Partial<HindsightClien
     reflect: async () => ({bankId: 'bank', text: 'answer'}),
     ...options.client,
   } as HindsightClientLike;
-  const domain = createMemoryDomainWith({env: options.env ?? {HINDSIGHT_API_URL: 'http://memory.local'}, identity, core, createClient: () => client, secretBox: () => box, recallTimeoutMs: 150, fetch: options.fetch})(context);
+  const domain = createMemoryDomainWith({env: options.env ?? {HINDSIGHT_API_URL: 'http://memory.local'}, identity, core, createClient: () => client, secretBox: () => options.sessionOnly ? undefined : box, recallTimeoutMs: 150, fetch: options.fetch})(context);
   t.after(() => domain.dispose?.());
   const call = async (command: string, input: Record<string, unknown> = {}): Promise<any> => domain.handlers[command]!(input);
   /** A second domain over the same database and data dir — an app restart. The first stops listening. */
-  const restart = () => { domain.dispose?.(); const next = createMemoryDomainWith({env: options.env ?? {HINDSIGHT_API_URL: 'http://memory.local'}, identity, core, createClient: () => client, secretBox: () => box, recallTimeoutMs: 150, fetch: options.fetch})(context); t.after(() => next.dispose?.()); return next; };
+  const restart = () => { domain.dispose?.(); const next = createMemoryDomainWith({env: options.env ?? {HINDSIGHT_API_URL: 'http://memory.local'}, identity, core, createClient: () => client, secretBox: () => options.sessionOnly ? undefined : box, recallTimeoutMs: 150, fetch: options.fetch})(context); t.after(() => next.dispose?.()); return next; };
   return {dataDir, store, folder, chat, entries, added, retained, events, runtime, call, restart};
 }
 
@@ -129,20 +129,21 @@ test('remembered text and run lessons retain with scope tags, a timestamp and a 
   await assert.rejects(f.call('memory.retainFromRun', {chatId: f.chat.id, runId: 'run-7', summary: 'again'}), /already remembered/);
   assert.equal((await f.call('memory.offers', {folderId: f.folder.id})).offers.length, 0, 'a saved offer leaves the Memory screen');
 
-  f.store.appendItem(f.chat.id, 'user', 'Speed up the build');
-  f.store.appendItem(f.chat.id, 'tool', 'Edited tsconfig.json', 'completed', {type: 'fileChange'});
-  f.store.appendItem(f.chat.id, 'tool', 'npm run build', 'completed');
-  f.store.appendItem(f.chat.id, 'assistant', 'Cached the TypeScript program between builds.');
-  f.runtime.runSettled({chat: f.chat, runId: 'run-8', status: 'completed'});
+  const second = f.store.createChat({folderId: f.folder.id, model: 'm', mode: 'agent'}); // the first chat already used today's offer
+  f.store.appendItem(second.id, 'user', 'Speed up the build');
+  f.store.appendItem(second.id, 'tool', 'Edited tsconfig.json', 'completed', {type: 'fileChange'});
+  f.store.appendItem(second.id, 'tool', 'npm run build', 'completed');
+  f.store.appendItem(second.id, 'assistant', 'Cached the TypeScript program between builds.');
+  f.runtime.runSettled({chat: second, runId: 'run-8', status: 'completed'});
   await new Promise(resolve => setTimeout(resolve, 20));
   const pending = (await f.call('memory.offers', {folderId: f.folder.id})).offers;
   assert.equal(pending.length, 1);
   assert.equal(pending[0].runId, 'run-8');
   assert.match(pending[0].summary, /^Speed up the build\nCached/);
   assert.equal((await f.call('memory.offers', {})).offers.length, 0, 'offers stay in their chat scope');
-  assert.deepEqual(await f.call('memory.offer.dismiss', {chatId: f.chat.id, runId: 'run-8'}), {dismissed: true});
+  assert.deepEqual(await f.call('memory.offer.dismiss', {chatId: second.id, runId: 'run-8'}), {dismissed: true});
   assert.equal((await f.call('memory.offers', {folderId: f.folder.id})).offers.length, 0);
-  assert.deepEqual(await f.call('memory.offer.dismiss', {chatId: f.chat.id, runId: 'run-8'}), {dismissed: false});
+  assert.deepEqual(await f.call('memory.offer.dismiss', {chatId: second.id, runId: 'run-8'}), {dismissed: false});
 });
 
 test('settings persist encrypted, drive Hindsight and report stage-specific test failures', async t => {
@@ -265,6 +266,26 @@ test('offer history survives a restart and is dropped for deleted chats', async 
   assert.equal(rows(f.chat.id), 0, 'a deleted chat\'s history is pruned');
 });
 
+// Spec: MUS-SPEC-11-471B (docs/spec/clauses/11-memory.md#mus-spec-11-471b)
+test('many turns in one chat list at most one offer per day, the rest are held, and the throttle survives a restart', async t => {
+  const f = await fixture(t);
+  const turn = async (n: number) => {
+    f.store.appendItem(f.chat.id, 'user', ['Rotate the signing keys', 'Translate the onboarding emails', 'Profile the checkout latency', 'Archive stale feature flags', 'Document the retry budget', 'Tighten the upload limits'][n - 1]!);
+    f.store.appendItem(f.chat.id, 'tool', `Edited module${n}.ts`, 'completed', {type: 'fileChange'});
+    f.store.appendItem(f.chat.id, 'assistant', ['Signing keys now rotate nightly through the vault job.', 'Onboarding emails now ship in nine locales with fallbacks.', 'Checkout latency was the tax lookup, so it is cached now.', 'Removed forty dead feature flags from the config files.', 'Retries now cap at five attempts with random jitter added.', 'Uploads now reject any file larger than fifty megabytes.'][n - 1]!);
+    f.runtime.runSettled({chat: f.chat, runId: `run-day-${n}`, status: 'completed'});
+    await new Promise(resolve => setTimeout(resolve, 20));
+  };
+  for (let n = 1; n <= 5; n++) await turn(n);
+  const offerRows = () => f.store.timeline(f.chat.id).filter((entry: TimelineItem) => entry.data?.kind === 'memory-offer');
+  assert.equal(offerRows().filter(row => row.status === 'offer').length, 1, 'one listed offer per chat per day');
+  assert.equal(offerRows().length, 5, 'every candidate is still recorded');
+  assert.equal((await f.call('memory.offers', {folderId: f.folder.id})).offers.length, 1);
+  f.restart();
+  await turn(6);
+  assert.equal(offerRows().filter(row => row.status === 'offer').length, 1, 'a restart does not reset the daily throttle');
+});
+
 test('MEM-X2: the recall chip previews the next turn locally and a removed note stays out of the run', async t => {
   let recalls = 0;
   const f = await fixture(t, {client: {recall: async () => { recalls++; return {bankId: 'bank', results: []}; }}});
@@ -289,4 +310,75 @@ test('MEM-X2: the recall chip previews the next turn locally and a removed note 
   assert.deepEqual((await f.call('memory.recall.exclude', {chatId: f.chat.id, id: 'mem_a', excluded: false})).excluded, []);
   const restored = await f.runtime.contributePrompt({chat: f.chat, folder: f.folder, prompt: 'Run the staging pipeline'});
   assert.match(restored.text, /id mem_a/, 'restoring brings it back');
+});
+
+// Spec: MUS-SPEC-11-467A (docs/spec/clauses/11-memory.md#mus-spec-11-467a)
+test('folder chats still get Personal directives and Personal facts the user already gave', async t => {
+  const f = await fixture(t);
+  await f.call('memory.directives.save', {directive: {kind: 'directive', text: 'Always answer in British English', priority: 5, tags: [], enabled: true}});
+  f.entries.push(note('mem_p', 'My name is Priya and I prefer pnpm over npm', {kind: 'user', id: 'local'}));
+  const result = await f.runtime.contributePrompt({chat: f.chat, folder: f.folder, prompt: 'Which package manager do I prefer, pnpm or npm?'});
+  assert.match(result.text, /British English/, 'the Personal directive reaches a folder chat');
+  assert.match(result.text, /prefer pnpm/, 'the Personal fact reaches a folder chat');
+});
+
+// Spec: MUS-SPEC-11-467B (docs/spec/clauses/11-memory.md#mus-spec-11-467b)
+test('recall query uses the task and recent user messages, so a bare "continue" still recalls', async t => {
+  const queries: string[] = [];
+  const f = await fixture(t, {client: {recall: async input => { queries.push(String(input.query)); return {bankId: 'bank', results: []}; }}});
+  f.store.appendItem(f.chat.id, 'user', 'Build the invoice exporter with the Acme staging pipeline');
+  f.store.appendItem(f.chat.id, 'assistant', 'Working on it');
+  f.store.appendItem(f.chat.id, 'user', 'Use the CSV format');
+  f.entries.push(note('mem_a', 'Acme staging pipeline needs the deploy token from vault', {kind: 'workspace', id: f.folder.id}));
+  const result = await f.runtime.contributePrompt({chat: f.chat, folder: f.folder, prompt: 'continue'});
+  assert.ok(queries.length >= 1);
+  for (const query of queries) { assert.match(query, /invoice exporter/); assert.match(query, /CSV format/); assert.match(query, /continue$/); assert.ok(query.length <= 1_600); }
+  assert.match(result.text, /deploy token/, 'a note matching the task is recalled for "continue"');
+  f.store.appendItem(f.chat.id, 'user', 'x'.repeat(5_000));
+  queries.length = 0;
+  await f.runtime.contributePrompt({chat: f.chat, folder: f.folder, prompt: 'y'.repeat(5_000)});
+  assert.ok(queries.length >= 1 && queries.every(query => query.length <= 1_600), 'the query stays bounded');
+  assert.ok(queries.every(query => query.endsWith('y'.repeat(1_500))), 'a long current message keeps most of the budget');
+});
+
+// Spec: MUS-SPEC-11-467C (docs/spec/clauses/11-memory.md#mus-spec-11-467c)
+test('the default recall timeout is raised to about four seconds', async () => {
+  const {RECALL_TIMEOUT_MS} = await import('../src/runtime/domains/memory.ts');
+  assert.equal(RECALL_TIMEOUT_MS, 4_000);
+});
+
+test('memory context goes out again after a compaction or a provider change', async () => {
+  const {ContextLedger} = await import('../src/runtime/context-budget.ts');
+  const ledger = new ContextLedger(), block = {label: 'Memory (1)', text: 'My name is Priya'};
+  ledger.delivered('c', 'thread-1', [block]);
+  assert.deepEqual(ledger.pending('c', 'thread-1', [block]), [], 'unchanged and already in the thread: not re-sent');
+  ledger.forget('c');
+  assert.deepEqual(ledger.pending('c', 'thread-1', [block]), [block], 'after compaction it is re-sent');
+  ledger.delivered('c', 'thread-1', [block]);
+  assert.deepEqual(ledger.pending('c', 'thread-2', [block]), [block], 'a new provider thread gets it');
+  ledger.forget('c'); // a provider change forgets the chat's ledger (service.ts), so even a reused thread id is re-sent
+  assert.deepEqual(ledger.pending('c', 'thread-1', [block]), [block], 'switching back to an older thread id does not trust the stale ledger');
+});
+
+// Spec: MUS-SPEC-19-406D (docs/spec/clauses/19-security-and-redaction.md#mus-spec-19-406d)
+test('editing the memory endpoint never sends the old key to a different origin', async t => {
+  for (const sessionOnly of [false, true]) {
+    const requests: {url: string; authorization: string | null}[] = [];
+    const f = await fixture(t, {env: {}, sessionOnly, fetch: async (url, init) => { requests.push({url: String(url), authorization: new Headers(init?.headers).get('authorization')}); return Response.json({}); }});
+    const settings = {autoRecall: true, autoRetain: 'ask'};
+    await f.call('memory.config.set', {...settings, endpoint: 'https://memory.example/v1', apiKey: 'memory-private-406'});
+    await f.call('memory.config.set', {...settings, endpoint: 'https://memory.example/v2'});
+    await f.call('memory.config.test');
+    assert.equal(requests.at(-1)!.authorization, 'Bearer memory-private-406', 'same-origin path edits keep the key');
+    for (const endpoint of ['https://other.example', 'https://other.example:8443', 'http://other.example:8443']) {
+      const view = await f.call('memory.config.set', {...settings, endpoint});
+      await f.call('memory.config.test');
+      assert.equal(requests.at(-1)!.authorization, null, 'host, port and scheme changes do not reuse the old key');
+      assert.equal(view.hasApiKey, false);
+      await f.call('memory.config.set', {...settings, endpoint, apiKey: 'memory-private-406'});
+    }
+    await f.call('memory.config.set', {...settings, endpoint: 'https://replacement.example', apiKey: 'new-private-406'});
+    await f.call('memory.config.test');
+    assert.equal(requests.at(-1)!.authorization, 'Bearer new-private-406', 'an explicitly supplied replacement key belongs to the new endpoint');
+  }
 });

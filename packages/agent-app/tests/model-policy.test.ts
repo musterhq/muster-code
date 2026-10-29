@@ -67,7 +67,7 @@ test('PRO-05: capability badges state context, images, tool search and reasoning
 });
 
 test('PRO-06: cost is estimated only with a known price; unknown shows —', () => {
-  const totals = {inputTokens: 1_000_000, cachedInputTokens: 400_000, outputTokens: 100_000, reasoningOutputTokens: 50_000, requests: 3};
+  const totals = {inputTokens: 1_000_000, cachedInputTokens: 400_000, cacheWriteTokens: 0, outputTokens: 100_000, reasoningOutputTokens: 50_000, requests: 3};
   assert.equal(estimateCostUsd(totals, {inputPerMTok: 2, outputPerMTok: 8, cachedInputPerMTok: 0.5}), (600_000 * 2 + 400_000 * 0.5 + 100_000 * 8) / 1_000_000);
   assert.equal(estimateCostUsd(totals, {inputPerMTok: 2, outputPerMTok: 8}), (1_000_000 * 2 + 100_000 * 8) / 1_000_000, 'cached input falls back to the input rate');
   assert.equal(estimateCostUsd(totals, null), null);
@@ -171,5 +171,5 @@ test('PRO-04: the visibility policy persists, validates and resets', async t => 
   assert.equal(isModelHidden(shownAgain, 'hybrow', 'cursor/other', true), true, 'off by default until switched on');
   assert.equal(isModelHidden(shownAgain, 'hybrow', 'cursor/other'), false, 'a normal model is on unless switched off');
   await call(reread, 'models.policy.setPricing', {key, pricing: {inputPerMTok: 1, outputPerMTok: 2}});
-  assert.deepEqual(await call(reread, 'models.policy.reset'), {hidden: [], shown: [], pricing: {}});
+  assert.deepEqual(await call(reread, 'models.policy.reset'), {hidden: [], shown: [], pricing: {}, contextWindows: {}});
 });

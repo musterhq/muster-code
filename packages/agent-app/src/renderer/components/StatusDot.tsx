@@ -1,5 +1,5 @@
 import React from 'react';
-import {CircleAlert,CirclePause,Clock,LoaderCircle,MessageCircle,Octagon,WifiOff,XCircle} from 'lucide-react';
+import {CircleAlert,CirclePause,Clock,Hourglass,LoaderCircle,MessageCircle,Octagon,WifiOff,XCircle} from 'lucide-react';
 import type { ChatStatus } from '../../shared/protocol';
 import './status-dot.css';
 
@@ -13,6 +13,7 @@ const LABEL: Record<ChatStatus, string> = {
   waiting: 'Needs input',
   queued: 'Queued',
   reconnecting: 'Reconnecting',
+  limited: 'Limited',
 };
 
 /** Settled chats share one quiet chat glyph (Codex); only live or exceptional states get colour or motion. */
@@ -27,6 +28,8 @@ const ICON: Record<ChatStatus,typeof MessageCircle> = {
   waiting: CirclePause,
   queued: Clock,
   reconnecting: WifiOff,
+  // #448: waiting for a usage limit to reset.
+  limited: Hourglass,
 };
 
 /** An unseen result replaces the quiet chat glyph with a blue dot until the chat is opened; failures keep their icon. */

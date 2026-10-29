@@ -35,7 +35,10 @@ asar: true
 asarUnpack:
   - node_modules/node-pty/**
   - dist/runtime/resources/**
+  - dist/runtime/muster-write{,.exe}
   - dist/main/browser-mcp.cjs
+  - dist/main/computer-mcp.cjs
+  - dist/main/muster-computer
   - dist/main/*.node
   - dist/renderer/THIRD-PARTY-LICENSES.txt
 # Chromium/Electron locales: the app UI is English only; Chromium strings fall back to en-US.

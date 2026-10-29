@@ -3,8 +3,9 @@ import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {configuredProviderInstances,type ProviderInstance} from './provider-instances.ts';
 import {isAdapterProvider} from './adapters/index.ts';
+import {inProcessLane} from '../shared/provider-lanes.ts';
 
-export interface ReconciliationInput {threadId: string; turnId: string; cwd: string; providerId?:string; providerBindingId?:string}
+export interface ReconciliationInput {threadId: string; turnId: string; cwd: string; providerId?:string; providerBindingId?:string; /** The lane that made the thread (#688); the Messages lane runs inside Muster. */ providerThreadDriver?:string}
 export interface ReconciliationResult {resolved: boolean; reason: string; terminalStatus?: 'completed' | 'failed' | 'interrupted'}
 export type ProviderStatusQuery = (method: 'thread/read', params: {threadId:string;includeTurns:true}, options: {command:string;cwd:string;timeoutMs:number;env:Record<string,string>}) => Promise<Record<string,unknown>>;
 
@@ -22,7 +23,7 @@ export async function reconcileProviderTurn(input: ReconciliationInput, query: P
   if (!input.threadId || !input.turnId) return {resolved:false,reason:'Muster did not receive a complete provider thread and turn identity. Automatic verification is unavailable; inspect the existing provider work before continuing.'};
   // Claude Code/OpenCode runs are child processes of this app and HTTP routes are single
   // streamed requests: once Muster restarted or the attempt settled, nothing is still running.
-  if (isAdapterProvider(input.providerId??'')) return {resolved:true,terminalStatus:'interrupted',reason:'This provider runs inside Muster, so the unfinished attempt ended with it. Check the chat folder for partial changes, then send a new message; nothing was resent.'};
+  if (inProcessLane(input.providerThreadDriver) || isAdapterProvider(input.providerId??'')) return {resolved:true,terminalStatus:'interrupted',reason:'This provider runs inside Muster, so the unfinished attempt ended with it. Check the chat folder for partial changes, then send a new message; nothing was resent.'};
   try {
     const route=(instances??configuredProviderInstances({directory:runtimeDirectory})).find(instance=>instance.info.id===input.providerId);
     if(!route?.info.available || !input.providerBindingId || route.info.bindingId!==input.providerBindingId) return {resolved:false,reason:'The saved provider account or profile binding is unavailable or has changed. Restore that binding before verifying this attempt; no alternate provider was queried.'};

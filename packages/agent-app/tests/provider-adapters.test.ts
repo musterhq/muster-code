@@ -7,7 +7,7 @@ import {mkdtemp,rm,mkdir,writeFile,copyFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {openAICompatibleAdapter,anthropicAdapter} from '../src/runtime/adapters/http-chat.ts';
-import {claudeCodeAdapter,claudeArgs,claudeToolItem,type Spawn} from '../src/runtime/adapters/claude-code.ts';
+import {claudeCodeAdapter,claudeArgs,claudeSteerText,claudeToolItem,type Spawn} from '../src/runtime/adapters/claude-code.ts';
 import {openCodeAdapter,openCodeCapabilities} from '../src/runtime/adapters/opencode.ts';
 import {createAdapterCatalog} from '../src/runtime/adapters/index.ts';
 import {ConversationMemory,Validator} from '../src/runtime/adapters/shared.ts';
@@ -96,6 +96,75 @@ test('Claude Code adapter runs in the chat folder and maps stream-json to timeli
   assert.deepEqual(methods,['item/started:commandExecution:','thread/tokenUsage/updated::','item/completed:commandExecution:completed','item/started:fileRead:','item/completed:fileRead:interrupted']);
   assert.equal((log.events[2]?.[1].item as Record<string,unknown>).aggregatedOutput,'a.txt');
   assert.equal(log.events[3]?.[1].threadId,`${sessionId}:task1`);
+});
+
+// Usage shapes as Claude Code 2.1.293 emits them with --include-partial-messages (numbers from a real two-turn run):
+// every content block's `assistant` event repeats its API message's usage with the message_start output count, the
+// message's `message_delta` carries the final count, and each `result` totals its own turn.
+const ccUsage=(input:number,read:number,write:number,output:number)=>({input_tokens:input,cache_read_input_tokens:read,cache_creation_input_tokens:write,output_tokens:output});
+const ccStart=(id:string,usage:unknown,parent?:string)=>({type:'stream_event',...(parent?{parent_tool_use_id:parent}:{}),event:{type:'message_start',message:{id,usage}}});
+const ccDelta=(usage:unknown,parent?:string)=>({type:'stream_event',...(parent?{parent_tool_use_id:parent}:{}),event:{type:'message_delta',usage}});
+const ccBlock=(id:string,block:Record<string,unknown>,usage:unknown,parent?:string)=>({type:'assistant',...(parent?{parent_tool_use_id:parent}:{}),message:{id,content:[block],usage}});
+const ccResult=(usage?:unknown)=>({type:'result',subtype:'success',result:'Done',...(usage?{usage}:{})});
+async function claudeUsage(lines:unknown[]) {
+  const fake=fakeChild(), {input,log}=capture();
+  const running=claudeCodeAdapter({binary:'/bin/claude',spawn:()=>fake.child as unknown as ChildProcess}).run(input);
+  fake.emit(...lines); fake.close(0); await running;
+  const events=log.events.filter(([method])=>method==='thread/tokenUsage/updated').map(([,params])=>params);
+  assert.ok(events.every(params=>params.threadId===log.threads[0] && typeof params.turnId==='string'));
+  assert.ok(events.every(params=>!/reasoning|cost/i.test(JSON.stringify(params))),'no inferred reasoning counts or prices');
+  const usage=events.map(params=>params.tokenUsage as {last:Record<string,number>;partial?:true;reconciliation?:true});
+  const sum=(key:string)=>usage.reduce((total,entry)=>total+(entry.last[key]??0),0);
+  return {usage,totals:{input:sum('inputTokens'),cached:sum('cachedInputTokens'),output:sum('outputTokens')}};
+}
+
+test('Claude Code reports each API message once with its final usage, matching the result totals',async()=>{
+  const {usage,totals}=await claudeUsage([
+    {type:'system',subtype:'init',session_id:'s'},
+    ccStart('m1',ccUsage(2,0,26269,16)), ccBlock('m1',{type:'tool_use',id:'t1',name:'Bash',input:{command:'ls'}},ccUsage(2,0,26269,16)), ccDelta(ccUsage(2,0,26269,74)),
+    {type:'user',message:{content:[{type:'tool_result',tool_use_id:'t1',content:'a.txt'}]}},
+    ccStart('m2',ccUsage(2,26269,3515,4)), ccBlock('m2',{type:'thinking',thinking:'…'},ccUsage(2,26269,3515,4)), ccBlock('m2',{type:'text',text:'a.txt'},ccUsage(2,26269,3515,4)), ccDelta(ccUsage(2,26269,3515,86)),
+    ccResult(ccUsage(4,26269,29784,160)),
+    // A steer answered by a second result in the same process: that result totals only its own turn.
+    ccStart('m3',ccUsage(2,29784,2007,5)), ccBlock('m3',{type:'text',text:'done'},ccUsage(2,29784,2007,5)), ccDelta(ccUsage(2,29784,2007,5)),
+    ccResult(ccUsage(2,29784,2007,5)),
+  ]);
+  assert.deepEqual(usage,[
+    {last:{inputTokens:26271,cachedInputTokens:0,cacheWriteTokens:26269,outputTokens:74}},
+    {last:{inputTokens:29786,cachedInputTokens:26269,cacheWriteTokens:3515,outputTokens:86}},
+    {last:{inputTokens:31793,cachedInputTokens:29784,cacheWriteTokens:2007,outputTokens:5}},
+  ]);
+  // The CLI's own session totals for that run: 6 input + 56,053 cache reads + 31,791 cache writes, 165 output.
+  assert.deepEqual(totals,{input:87850,cached:56053,output:165});
+});
+
+test('Claude Code result usage fills in what its messages under-reported, and nothing is invented',async()=>{
+  const cases:{name:string;lines:unknown[];expected:unknown[]}[]=[
+    {name:'no message_delta: partial message counts, then the result adds the missing output',lines:[
+      ccBlock('m1',{type:'text',text:'a'},ccUsage(10,20,5,1)), ccBlock('m1',{type:'text',text:'b'},ccUsage(10,20,5,1)), ccBlock('m2',{type:'text',text:'c'},ccUsage(3,35,0,2)),
+      ccResult(ccUsage(13,55,5,90)),
+    ],expected:[
+      {last:{inputTokens:35,cachedInputTokens:20,cacheWriteTokens:5,outputTokens:1},partial:true},
+      {last:{inputTokens:38,cachedInputTokens:35,outputTokens:2},partial:true},
+      {last:{inputTokens:0,cachedInputTokens:0,outputTokens:87},reconciliation:true},
+    ]},
+    {name:'result only',lines:[ccResult(ccUsage(10,20,5,42))],expected:[{last:{inputTokens:35,cachedInputTokens:20,cacheWriteTokens:5,outputTokens:42},reconciliation:true}]},
+    {name:'missing result keeps the partial counts, marked',lines:[ccBlock('m1',{type:'text',text:'a'},{input_tokens:10,output_tokens:3}),{type:'result',subtype:'success',result:'Done'}],
+      expected:[{last:{inputTokens:10,cachedInputTokens:0,outputTokens:3},partial:true}]},
+    {name:'a stream cut off before any result keeps the partial counts',lines:[ccStart('m1',ccUsage(10,0,0,1)), ccBlock('m1',{type:'text',text:'a'},ccUsage(10,0,0,1))],
+      expected:[{last:{inputTokens:10,cachedInputTokens:0,outputTokens:1},partial:true}]},
+    {name:'output only stays partial',lines:[ccResult({output_tokens:42})],expected:[{last:{outputTokens:42},reconciliation:true}]},
+    {name:'input only stays partial',lines:[ccBlock('m1',{type:'text',text:'a'},{input_tokens:10})],expected:[{last:{inputTokens:10,cachedInputTokens:0},partial:true}]},
+    {name:'a subagent\'s usage is not the parent\'s',lines:[
+      ccStart('c1',ccUsage(100,0,0,1),'task'), ccBlock('c1',{type:'text',text:'x'},ccUsage(100,0,0,1),'task'), ccDelta(ccUsage(100,0,0,100),'task'),
+      ccStart('m1',ccUsage(10,0,0,1)), ccDelta(ccUsage(10,0,0,42)), ccResult(ccUsage(10,0,0,42)),
+    ],expected:[{last:{inputTokens:10,cachedInputTokens:0,outputTokens:42}}]},
+    {name:'a late event for a reported message adds nothing',lines:[
+      ccStart('m1',ccUsage(10,0,0,1)), ccDelta(ccUsage(10,0,0,42)), ccBlock('m1',{type:'text',text:'a'},ccUsage(10,0,0,1)), ccResult(ccUsage(10,0,0,42)),
+    ],expected:[{last:{inputTokens:10,cachedInputTokens:0,outputTokens:42}}]},
+    {name:'unknown and invalid stay unknown',lines:[ccResult(),{type:'result',subtype:'success',usage:{}},ccResult({input_tokens:-1,output_tokens:'42'}),ccResult({input_tokens:Infinity,output_tokens:NaN})],expected:[]},
+  ];
+  for (const scenario of cases) assert.deepEqual((await claudeUsage(scenario.lines)).usage,scenario.expected,scenario.name);
 });
 
 test('Claude Code resume, permission mapping, stop and failures',async()=>{
@@ -266,9 +335,9 @@ test('Claude Code gets Muster\'s own tool servers (in-app browser, terminal…) 
   const {mcpServersFromOverrides}=await import('../src/runtime/adapters/shared.ts');
   const servers=mcpServersFromOverrides({'mcp_servers.muster_browser.command':'/app/browser-mcp','mcp_servers.muster_browser.env.MUSTER_CHAT_ID':'c1','mcp_servers.muster_browser.tool_timeout_sec':120,'mcp_servers.half.env.X':'1','model_reasoning_summary':'detailed'});
   assert.deepEqual(servers,{muster_browser:{command:'/app/browser-mcp',env:{MUSTER_CHAT_ID:'c1'}}},'Codex-only keys and servers without a command are dropped');
-  const args=claudeArgs({chat:{id:'c1'} as any,cwd:'/w',prompt:'p',model:'claude-code/sonnet',permissionMode:'workspace',mcpServers:servers,signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){}},'s1');
+  const args=claudeArgs({chat:{id:'c1'} as any,cwd:'/w',prompt:'p',model:'claude-code/sonnet',permissionMode:'workspace',mcpServers:servers,signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){}},'s1','/private/mcp-config.json');
   const at=args.indexOf('--mcp-config');
-  assert.ok(at>0);assert.deepEqual(JSON.parse(args[at+1]!),{mcpServers:servers});
+  assert.ok(at>0);assert.equal(args[at+1],'/private/mcp-config.json');
   assert.equal(args[at+2],'--allowedTools');assert.deepEqual(args.slice(at+3,at+6),['Task','Agent','mcp__muster_browser']);
   assert.ok(args[at+6]!.startsWith('--'),'a flag closes the variadic lists');
   assert.equal(claudeArgs({chat:{id:'c1'} as any,cwd:'/w',prompt:'p',model:'claude-code/sonnet',permissionMode:'workspace',signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){}},'s1').includes('--mcp-config'),false);
@@ -286,7 +355,7 @@ test('Claude Code takes a steer mid-turn: the message joins the run, stdin close
   fake.emit({type:'system',subtype:'init',session_id:'s'},{type:'assistant',message:{content:[{type:'text',text:'Counting'}]}});
   assert.equal(send!('Also say BANANA'),true);
   const lines=fake.stdin().trim().split('\n').map(line=>JSON.parse(line));
-  assert.deepEqual(lines.map(line=>line.message.content[0].text),['hello','Also say BANANA']);
+  assert.deepEqual(lines.map(line=>line.message.content[0].text),['hello',claudeSteerText('Also say BANANA')]);
   fake.emit({type:'result',subtype:'success',result:'1 2 3'});
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(ended,false,'one result per message: the run waits for the steer’s answer');

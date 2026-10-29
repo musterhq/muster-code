@@ -97,7 +97,7 @@ export function rankSections<T extends {score:number}>(sections:{title:string;ro
 /** `/query` at the caret when the slash starts a line or follows whitespace; `src/a` and URLs stay text. */
 export function readSlashQuery(text:string,start:number,end=start):{query:string;start:number}|null {
   if(start!==end || start<1)return null;
-  const match=/(^|\s)\/([\w.-]{0,64})$/.exec(text.slice(0,start));
+  const match=/(^|\s)\/([\w.:-]{0,64})$/.exec(text.slice(0,start));
   if(!match || /^\S/.test(text.slice(start)))return null;
   return {query:match[2],start:start-match[2].length-1};
 }
@@ -144,6 +144,8 @@ const quote=(value:string)=>/[\s"]/.test(value)?JSON.stringify(value):value;
 export function chipToken(kind:ChipKind,value:string):string{
   return kind==='skill'?`$${value}`:kind==='plugin'?`@${value}`:kind==='chat'?`@chat:${quote(value)}`:kind==='mcp'?`@mcp:${quote(value)}`:kind==='app'?`@app:${quote(value)}`:`@${quote(value)}`;
 }
+/** #729: a Claude Code command keeps the token it is typed with there (`/fe:comp`); every other skill is `$name`. */
+export function skillToken(skill:{name:string;claude?:'skill'|'command'}):string{return skill.claude==='command'?`/${skill.name}`:chipToken('skill',skill.name);}
 /** Every whole-token occurrence of a known chip; tokens touching other word characters stay plain text. */
 export function findChipRanges(text:string,chips:readonly ComposerChip[]):ChipRange[]{
   const ranges:ChipRange[]=[];
@@ -157,16 +159,18 @@ export function findChipRanges(text:string,chips:readonly ComposerChip[]):ChipRa
   return ranges.sort((a,b)=>a.start-b.start).filter((range,index,all)=>index===0||range.start>=all[index-1].end);
 }
 /** Names the composer recognises in typed text without a pick: `/command`, `$skill`, `@plugin`. */
-export interface TokenVocabulary {commands?:readonly {command:string;label:string}[];skills?:readonly {name:string;id:string;label:string}[];plugins?:readonly {name:string;id:string;label:string}[]}
+export interface TokenVocabulary {commands?:readonly {command:string;label:string}[];skills?:readonly {name:string;id:string;label:string;/** A Claude Code command, recognised as `/name` (a built-in command of the same name wins). */command?:boolean;/** A Claude Code skill, also reached as `/name`; it wins a name it shares with a command, as in Claude Code. */claudeSkill?:boolean}[];plugins?:readonly {name:string;id:string;label:string}[]}
 /** Chips for typed tokens that name a known command, skill or plugin (so `$pdf` typed by hand still attaches it). */
 export function implicitChips(text:string,vocab:TokenVocabulary):ComposerChip[]{
   const found=new Map<string,ComposerChip>();
   for(const match of text.matchAll(/(?:^|[\s([{"'])([/$@])([\w.:-]{1,64})/g)){
     const [,sigil,name]=match,token=`${sigil}${name}`;
     if(found.has(token))continue;
-    const hit=sigil==='/'?vocab.commands?.find(entry=>entry.command===name):sigil==='$'?vocab.skills?.find(entry=>entry.name===name):vocab.plugins?.find(entry=>entry.name===name);
+    const builtin=sigil==='/'?vocab.commands?.find(entry=>entry.command===name):undefined;
+    const claudeCommand=sigil==='/'&&!builtin?vocab.skills?.find(entry=>entry.claudeSkill&&entry.name===name)??vocab.skills?.find(entry=>entry.command&&entry.name===name):undefined;
+    const hit=sigil==='/'?builtin??claudeCommand:sigil==='$'?vocab.skills?.find(entry=>!entry.command&&entry.name===name):vocab.plugins?.find(entry=>entry.name===name);
     if(!hit)continue;
-    found.set(token,sigil==='/'?{token,kind:'command',id:name,label:hit.label}:{token,kind:sigil==='$'?'skill':'plugin',id:(hit as {id:string}).id,label:hit.label});
+    found.set(token,builtin?{token,kind:'command',id:name,label:hit.label}:{token,kind:sigil==='@'?'plugin':'skill',id:(hit as {id:string}).id,label:hit.label});
   }
   return [...found.values()];
 }
@@ -380,7 +384,8 @@ export function setFullAccessSkip(folderId:string|undefined,skip:boolean):void{
 export function pendingQuestionItem(items:readonly TimelineItem[]|undefined):{item:TimelineItem;data:PendingQuestionData}|null{
   for(const item of items??[]){
     const data=item.data;
-    if(item.kind!=='question'||item.status!=='pending'||!data||data.method!=='item/tool/requestUserInput'||!Array.isArray(data.questions)||!data.questions.length)continue;
+    // An ask_user question (nonBlocking) stays in the timeline: the agent is still working, so the composer stays free to steer.
+    if(item.kind!=='question'||item.status!=='pending'||!data||data.nonBlocking===true||data.method!=='item/tool/requestUserInput'||!Array.isArray(data.questions)||!data.questions.length)continue;
     return {item,data:data as unknown as PendingQuestionData};
   }
   return null;

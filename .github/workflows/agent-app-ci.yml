@@ -6,11 +6,17 @@ on:
     branches: [main, 'release/**']
     paths:
       - "packages/agent-app/**"
+      - "packages/server/**"
       - ".github/workflows/agent-app-ci.yml"
+      - "docs/spec/**"
+      - "scripts/check-spec.mjs"
   pull_request:
     paths:
       - "packages/agent-app/**"
+      - "packages/server/**"
       - ".github/workflows/agent-app-ci.yml"
+      - "docs/spec/**"
+      - "scripts/check-spec.mjs"
   workflow_dispatch:
 
 concurrency:
@@ -34,9 +40,9 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: packages/agent-app/.nvmrc
           cache: npm
@@ -46,7 +52,7 @@ jobs:
         # Download caches only (never node_modules): keyed on OS, CPU and the locked Electron version.
         shell: bash
         run: echo "version=$(node -p "require(process.env.GITHUB_WORKSPACE + '/packages/agent-app/package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             ~/Library/Caches/electron
@@ -62,6 +68,11 @@ jobs:
       - name: Install
         run: npm ci --no-audit --no-fund
 
+      # Every acceptance case names one real, non-skipped test and that test names the case back (docs/spec/acceptance-cases.md).
+      - name: Spec links
+        working-directory: .
+        run: node scripts/check-spec.mjs
+
       - name: Typecheck (tsc-rs)
         run: npm run typecheck
 
@@ -74,12 +85,27 @@ jobs:
           (cd ../server && npm ci --no-audit --no-fund --ignore-scripts)
           node scripts/typecheck-parity.mjs
 
+      # Muster Server imports the agent runtime, so a change here can break its typecheck. The release builds the server
+      # with `npx tsc --noEmit`; the same check here fails the PR instead of the release (#712).
+      - name: Typecheck Muster Server
+        working-directory: packages/server
+        run: npx tsc --noEmit
+
       # Some runtime tests load the bundled core from dist/, so build before testing.
       - name: Build
         run: npm run build
+
+      - name: Server tests
+        working-directory: packages/server
+        run: npm test
 
       - name: Unit tests
         run: npm test
 
       - name: Renderer tests
         run: npm run test:renderer
+
+      - name: Router workflows with the real coding client
+        env:
+          MUSTER_REQUIRE_CODEX_E2E: "1"
+        run: npm exec --yes --package=@openai/codex@0.163.0 -- node --experimental-transform-types --import ./tests/pin-device-platform.mjs --test tests/router-usage-workflow.test.ts

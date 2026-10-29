@@ -4,13 +4,28 @@ import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
 const require=createRequire(import.meta.url);
 const {parseHTML}=require('linkedom');
-const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
+import {check} from './dom-check.ts';
+const {window}=parseHTML('<html><body><main class="center"><div class="chat"><div class="timeline-shell"><div class="timeline"></div></div></div></main><div id="root"></div></body></html>');
 const storage=new Map<string,string>();
 const memory={getItem:(key:string)=>storage.get(key)??null,setItem:(key:string,value:string)=>{storage.set(key,String(value));},removeItem:(key:string)=>{storage.delete(key);}};
 Object.assign(globalThis,{window,document:window.document,HTMLElement:window.HTMLElement,Element:window.Element,Node:window.Node,MutationObserver:window.MutationObserver,ResizeObserver:class{observe(){}disconnect(){}},requestAnimationFrame:(callback:any)=>setTimeout(callback,0),cancelAnimationFrame:clearTimeout,localStorage:memory,sessionStorage:memory,CustomEvent:window.CustomEvent});
 const styles=()=>({getPropertyValue:()=>'',direction:'ltr',position:'static',overflow:'visible',overflowX:'visible',overflowY:'visible',display:'block',animationName:'none',transitionProperty:'none',transitionDuration:'0s',animationDuration:'0s'});
 Object.assign(globalThis,{getComputedStyle:styles});(window as any).getComputedStyle=styles;
-window.HTMLElement.prototype.getBoundingClientRect=()=>({x:0,y:0,width:300,height:188,top:0,left:0,right:300,bottom:188});
+let narrow=false;
+window.HTMLElement.prototype.getBoundingClientRect=function(){
+  if(narrow&&this.matches('main.center'))return {x:260,y:0,width:920,height:700,top:0,left:260,right:1180,bottom:700};
+  if(narrow&&this.matches('.summary-card'))return {x:846,y:56,width:320,height:600,top:56,left:846,right:1166,bottom:656};
+  if(this.matches('.timeline-shell'))return {x:260,y:56,width:920,height:600,top:56,left:260,right:1180,bottom:656};
+  if(this.matches('main.center'))return {x:0,y:0,width:1000,height:900,top:0,left:0,right:1000,bottom:900};
+  if(this.matches('.timeline')){
+    const center=document.querySelector<HTMLElement>('main.center')!;
+    const reserve=Number.parseFloat(center.style.getPropertyValue('--pip-reserve'))||0;
+    const left=center.dataset.pipSide==='left'?reserve:0;
+    const right=center.dataset.pipSide==='right'?1000-reserve:1000;
+    return {x:left,y:0,width:right-left,height:900,top:0,left,right,bottom:900};
+  }
+  return {x:0,y:0,width:300,height:188,top:0,left:0,right:300,bottom:188};
+};
 (window as any).innerWidth=1400;(window as any).innerHeight=900;
 const calls:{command:string;input:any}[]=[];
 const chat={id:'c1',title:'Research',folderId:'repo',pinned:false,archived:false,draft:'',status:'running',updatedAt:'',model:'test',mode:'agent'};
@@ -53,6 +68,35 @@ const tabsText=()=>[...document.querySelectorAll('[role="tab"]')].map(tab=>tab.t
 // 5. No auto-start: two idle PiPs, no tab, no sidebar, no browser session.
 assert.deepEqual(errors,[]);
 assert.equal(cards().length,2,'both live sessions show as PiPs, the past transcript session does not');
+// Spec: MUS-SPEC-09-629A (docs/spec/clauses/09-browser-and-previews.md#mus-spec-09-629a)
+await check('the visible browser preview never covers transcript text',async()=>{
+  const stack=document.querySelector<HTMLElement>('.pip-stack')!;
+  // The 804px column centres in the 1000px pane, so its text ends at 870px; the card either clears that or gets a reserve.
+  const previewLeft=window.innerWidth-Number.parseFloat(stack.style.right)-Number.parseFloat(stack.style.width);
+  const center=document.querySelector<HTMLElement>('main.center')!;
+  assert.ok(previewLeft>=870+8||Number.parseFloat(center.style.getPropertyValue('--pip-reserve'))>0,'the visible browser preview never covers transcript text');
+  assert.equal(!!center.dataset.pipSide,previewLeft<870+8,'space is reserved only when the card would cover text');
+});
+// Spec: MUS-SPEC-09-637A (docs/spec/clauses/09-browser-and-previews.md#mus-spec-09-637a)
+await check('a narrow window keeps the transcript below the preview without squeezing its text',async()=>{
+  const center=document.querySelector<HTMLElement>('main.center')!;
+  const summary=document.createElement('div');summary.className='summary-card';center.append(summary);
+  narrow=true;(window as any).innerWidth=1180;
+  window.dispatchEvent(new window.Event('resize'));await delay(50);
+  const stack=document.querySelector<HTMLElement>('.pip-stack')!;
+  const bottom=Number.parseFloat(stack.style.top)+ui.stackHeight(Number.parseFloat(stack.style.width),2);
+  assert.ok(Number.parseFloat(center.style.getPropertyValue('--pip-block-reserve'))>=bottom-56+8,'the scrollable transcript starts below every preview card');
+  assert.equal(center.dataset.pipBlock,'top','the preview stays above the transcript viewport');
+  assert.equal(center.dataset.pipSide,undefined,'the narrow transcript is not squeezed beside the preview');
+  document.querySelector<HTMLButtonElement>('[aria-label="Hide the live view"]')!.click();await delay(30);
+  assert.equal(center.dataset.pipBlock,undefined,'hiding the preview gives the transcript its height back');
+  document.querySelector<HTMLButtonElement>('.pip-pill')!.click();await delay(30);
+  assert.equal(center.dataset.pipBlock,'top','showing the preview clears the transcript again');
+  narrow=false;(window as any).innerWidth=1400;summary.remove();
+  window.dispatchEvent(new window.Event('resize'));await delay(50);
+  assert.equal(center.dataset.pipBlock,undefined,'widening the window restores the full transcript height');
+  assert.equal(center.style.getPropertyValue('--pip-block-reserve'),'','no stale vertical space after widening');
+});
 assert.equal(document.querySelector('.pip-empty'),null,'a card with a frame never shows a placeholder');
 assert.equal(cards().every(card=>!!card.querySelector('img')),true,'every card shows its real frame');
 assert.ok(!document.body.textContent!.includes('Ended'),'live sessions are not labelled ended');

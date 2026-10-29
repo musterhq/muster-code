@@ -1,13 +1,16 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { BROWSER_MCP, BROWSER_NOTE, COMPUTER_USE_NOTE, READ_ONLY_NOTE } from '../../shared/computer-use.ts';
+import { BROWSER_MCP, BROWSER_NOTE, COMPUTER_MCP, COMPUTER_USE_NOTE, MUSTER_COMPUTER_NOTE, READ_ONLY_NOTE } from '../../shared/computer-use.ts';
 import type { ComputerControlOwner } from '../../shared/domains/computer-protocol.ts';
 import { setToolImageStore, TOOL_IMAGE_ID, TOOL_IMAGE_MIME, imageSize } from '../tool-event-details.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
 /** Main sets this to the stdio launcher of the in-app browser MCP bridge once its local endpoint is listening. */
 export const BROWSER_MCP_LAUNCHER_ENV = 'MUSTER_BROWSER_MCP_LAUNCHER';
+/** #721: main sets this to the launcher of Muster's own computer-use server (macOS, when the helper shipped). */
+export const COMPUTER_MCP_LAUNCHER_ENV = 'MUSTER_COMPUTER_MCP_LAUNCHER';
+const runnable = (file: string | undefined): file is string => !!file && path.isAbsolute(file) && fs.existsSync(file);
 const leases = new Map<string, ComputerControlOwner>();
 /** Who holds the input lease for a chat's agent browser; the service consults it before answering computer-use prompts. */
 export function computerControlOwner(chatId: string): ComputerControlOwner { return leases.get(chatId) ?? 'agent'; }
@@ -20,14 +23,19 @@ const run = (file: string, args: string[]) => new Promise<void>((resolve, reject
 const SETTINGS: Record<string, string> = { accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility', screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture' };
 
 /** Turn notes (and, when main runs the bridge, the per-chat browser MCP) for an agent-mode chat. */
-export function computerRunOptions(chat: { id: string; mode: string; permissionMode?: string }, launcher = process.env[BROWSER_MCP_LAUNCHER_ENV]) {
+export function computerRunOptions(chat: { id: string; mode: string; permissionMode?: string }, launcher = process.env[BROWSER_MCP_LAUNCHER_ENV], computerLauncher = process.env[COMPUTER_MCP_LAUNCHER_ENV]) {
   if (chat.mode !== 'agent') return null;
   const readOnly = (chat.permissionMode ?? 'workspace') === 'read-only';
-  const browser = !!launcher && path.isAbsolute(launcher) && fs.existsSync(launcher);
-  return {
-    developerInstructions: [browser ? BROWSER_NOTE : '', COMPUTER_USE_NOTE, readOnly ? READ_ONLY_NOTE : ''].filter(Boolean).join('\n\n'),
+  const browser = runnable(launcher), computer = runnable(computerLauncher);
+  const configOverrides: Record<string, string | number> = {
     // Codex spawns the bridge per chat; the chat id tells main which browser tab and lease it drives.
-    ...(browser ? { configOverrides: { [`mcp_servers.${BROWSER_MCP}.command`]: launcher!, [`mcp_servers.${BROWSER_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${BROWSER_MCP}.tool_timeout_sec`]: 120 } } : {}),
+    ...(browser ? { [`mcp_servers.${BROWSER_MCP}.command`]: launcher!, [`mcp_servers.${BROWSER_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${BROWSER_MCP}.tool_timeout_sec`]: 120 } : {}),
+    // #721: Muster's own computer use; a read-only chat gets the read tools only (the server enforces it).
+    ...(computer ? { [`mcp_servers.${COMPUTER_MCP}.command`]: computerLauncher!, [`mcp_servers.${COMPUTER_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${COMPUTER_MCP}.env.MUSTER_COMPUTER_READ_ONLY`]: readOnly ? '1' : '0', [`mcp_servers.${COMPUTER_MCP}.tool_timeout_sec`]: 90 } : {}),
+  };
+  return {
+    developerInstructions: [browser ? BROWSER_NOTE : '', computer ? MUSTER_COMPUTER_NOTE : COMPUTER_USE_NOTE, readOnly ? READ_ONLY_NOTE : ''].filter(Boolean).join('\n\n'),
+    ...(Object.keys(configOverrides).length ? { configOverrides } : {}),
   };
 }
 
@@ -76,7 +84,7 @@ export function createComputerDomain(context: DomainContext): DomainModule {
       // Main answers with Electron's real probe; this is the honest answer outside the desktop shell.
       'computer.permissions': () => ({ platform: process.platform, accessibility: 'unknown', screen: 'unknown' }),
       'computer.openPermissionSettings': async input => {
-        const url = typeof input.pane === 'string' ? SETTINGS[input.pane] : undefined;
+        const url = typeof input.pane === 'string' && Object.hasOwn(SETTINGS, input.pane) ? SETTINGS[input.pane] : undefined;
         if (!url) throw new Error('Unknown settings pane.');
         if (process.platform !== 'darwin') throw new Error('Privacy settings are available on macOS only.');
         await run('/usr/bin/open', [url]);

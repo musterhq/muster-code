@@ -5,6 +5,7 @@ import { Check, Code, Copy, Quote, WrapText, X } from 'lucide-react';
 import {addComposerContext} from '../composerContext';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
+import type { PluggableList } from 'unified';
 import {ResourceLink, type ResourceContext} from './ResourceLink';
 import {ChatImage} from './ChatImage';
 import {invoke} from '../bridge';
@@ -17,6 +18,7 @@ import { createIncrementalMarkdownPlugin } from '../markdown-incremental';
 import {markdownHeadingId} from './markdownAnchors';
 import {HighlightedCode} from './HighlightedCode';
 import {inferMarkdownCodeLanguages} from './codeLanguage';
+import {remarkProseBreaks} from '../markdown-breaks';
 import {remarkRichFences} from '../markdown-rich-fences';
 import {richKindOfFence} from '../../shared/rich-fence';
 import {RichFence, RichPreload} from './RichFence';
@@ -158,6 +160,12 @@ function Heading({
 
 const components: Components = {
   pre: Pre,
+  // Right-to-left prose: each block takes its direction (and list-marker side) from its own first strong character.
+  p: ({node: _node, ...props}) => <p dir="auto" {...props}/>,
+  ul: ({node: _node, ...props}) => <ul dir="auto" {...props}/>,
+  ol: ({node: _node, ...props}) => <ol dir="auto" {...props}/>,
+  li: ({node: _node, ...props}) => <li dir="auto" {...props}/>,
+  blockquote: ({node: _node, ...props}) => <blockquote dir="auto" {...props}/>,
   table: ({node: _node, ...props}) => <MarkdownTable {...props}/>,
   a: ({ children, href, ...props }: any) => <ResourceLink href={href} auto={props['data-auto-file'] === 'true'}>{children}</ResourceLink>,
   h1: ({node, children, ...props}) => <Heading level={1} node={node} {...props}>{children}</Heading>,
@@ -235,9 +243,16 @@ export function localImagePath(src?: string): string | undefined {
   return (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)) && /\.(?:png|jpe?g|gif|webp|bmp|avif|svg)$/i.test(path) ? path : undefined;
 }
 
-function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false, reports = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean; reports?: boolean }): React.ReactElement {
+function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false, asDocument = false, reports = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean; asDocument?: boolean; reports?: boolean }): React.ReactElement {
   // Replies link the files they mention (markdown-file-links.ts); documents and previews render as written.
-  const remarkPlugins = React.useMemo(() => linkFiles ? [remarkGfm, createIncrementalMarkdownPlugin(), remarkRichFences, remarkLeadingLabels, remarkFileLinks] : [remarkGfm, createIncrementalMarkdownPlugin(), remarkRichFences], [linkFiles]);
+  // Agent prose keeps its single line breaks (markdown-breaks.ts); a Markdown document keeps CommonMark soft
+  // breaks, so a hard-wrapped README still reads as flowing paragraphs.
+  const remarkPlugins = React.useMemo(() => {
+    const plugins: PluggableList = [remarkGfm, createIncrementalMarkdownPlugin(), remarkRichFences];
+    if (linkFiles) plugins.push(remarkLeadingLabels, remarkFileLinks);
+    if (!asDocument) plugins.push(remarkProseBreaks);
+    return plugins;
+  }, [linkFiles, asDocument]);
   const renderedText = React.useMemo(() => inferMarkdownCodeLanguages(text), [text]);
   // Streaming fade (markdown-fade.ts): text that arrives after the first render fades in.
   const fade = useRef<FadeState | null>(null);
@@ -291,6 +306,7 @@ export const MessageBody = React.memo(MessageBodyContent, (previous, next) =>
   previous.text === next.text &&
   previous.animate === next.animate &&
   previous.linkFiles === next.linkFiles &&
+  previous.asDocument === next.asDocument &&
   previous.reports === next.reports &&
   previous.resourceContext?.folderId === next.resourceContext?.folderId &&
   previous.resourceContext?.path === next.resourceContext?.path,

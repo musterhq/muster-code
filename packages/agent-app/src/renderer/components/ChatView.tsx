@@ -43,7 +43,9 @@ import { MessageBody, localImagePath } from './MessageBody';
 import {LiveAnnouncer,LiveTurnHeader,TurnHeader,WorkingTail} from './TurnStatus';
 import {ReasoningRow} from './ReasoningRow';
 import {TurnFileChanges} from './TurnFileChanges';
+import {LaterEditsContext,laterEdits} from '../turnFileChanges';
 import {describeTurns,foldable,rowStart} from './turnStatusModel';
+import {dividerLabel,dividerRows} from '../dayDividers';
 import {attachmentPreview} from '../timelineBridge';
 import {attachmentPdfThumbnail,isPdf} from '../pdfThumbnail';
 import {openAttachment, openAttachmentOnKey} from '../attachmentOpen';
@@ -108,7 +110,7 @@ function UserMessage({item,reveal}:{item:TimelineItem;reveal:boolean}) {
   return <>
     {attachments.length>0&&<div className="msg-attachments" aria-label="Attachments">{attachments.map(attachment=><Attachment key={attachment.id} chatId={item.chatId} attachment={attachment}/>)}</div>}
     <div className={`msg msg-user${long&&!expanded?' is-clamped':''}`}>
-      <div className="msg-text"><MentionText chatId={item.chatId} text={item.text}/></div>
+      <div className="msg-text" dir="auto"><MentionText chatId={item.chatId} text={item.text}/></div>
       {long&&<button type="button" className="msg-user-more" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?'Show less':'Show more'}</button>}
     </div>
   </>;
@@ -120,7 +122,7 @@ interface LiveTurnProps {live:string}
 interface EditingProps {onSubmit:(text:string,mode:EditResendMode,restoreFiles?:Array<{path:string;afterHash:string}>)=>Promise<boolean>;onCancel:()=>void}
 function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, editing, plan=false, meta=true, gallery }: { gallery?:readonly string[]; item: TranscriptEntry; nextAt?:string; reveal?:string; turn?:TurnHeaderProps|LiveTurnProps; tail?:boolean; actions?:MessageActions; editing?:EditingProps; plan?:boolean; meta?:boolean }): React.ReactElement {
   switch (item.kind) {
-    case 'activity': return <ActivityGroup items={item.items} reveal={reveal} live={tail}/>;
+    case 'activity': return <ActivityGroup items={item.items} prior={item.prior} agents={item.agents} reveal={reveal} live={tail}/>;
     case 'user':
       return (
         <div className="user-message-row">
@@ -172,6 +174,12 @@ const highlightApi=()=>{const css=(globalThis as {CSS?:{highlights?:HighlightReg
  *  streamed token only re-reads the row that grew. */
 const MARKDOWN_IMAGE=/!\[[^\]]*\]\(\s*<?([^)\s>]+)>?[^)]*\)/g;
 const scanned=new WeakMap<object,{size:number;paths:string[]}>();
+/** "Today 0:52" above a message that opens the chat or resumes it after a pause. */
+const DayDivider=React.memo(function DayDivider({at}:{at:number}){
+  const {day,time}=dividerLabel(at);
+  return <div className="day-divider" role="separator" aria-label={`${day} ${time}`}><time dateTime={new Date(at).toISOString()}><b>{day}</b> {time}</time></div>;
+});
+
 function rowImages(row:TranscriptEntry):string[] {
   if(row.kind!=='activity'&&row.kind!=='assistant')return [];
   const size=row.kind==='activity'?row.items.length+row.items.reduce((n,item)=>n+(item.status==='completed'?1:0),0):row.text.length,hit=scanned.get(row);
@@ -186,6 +194,7 @@ const TAIL_HEIGHT=40;
 export function Timeline({ items, chatId, onScrolled, running, planMode=false }: { items: TimelineItem[]; chatId:string; onScrolled?: (scrolled:boolean)=>void; running?:boolean; planMode?:boolean }): React.ReactElement {
   const project=useMemo(()=>createTimelineProjection(),[]);
   const {rows,turns,rowIndexes}=useMemo(()=>project(items),[items,project]);
+  const dividers=useMemo(()=>dividerRows(rows),[rows]);
   const live=running??items.some(item=>item.status==='running');
   // Plan mode: the settled final answer of the latest turn is the plan.
   const planId=useMemo(()=>planCardId(items,planMode,live),[items,planMode,live]);
@@ -194,6 +203,8 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
     for(const row of rows){if(row.kind==='user'){if(candidate)last.add(candidate);candidate=undefined;}else if(row.kind==='assistant')candidate=row.id;}
     if(candidate)last.add(candidate);return last;},[rows]);
   const turnModel=useMemo(()=>describeTurns(rows,live),[rows,live]);
+  // Every edit row's later history over the whole chat (not just the mounted rows), so each opens whole.
+  const editHistory=useMemo(()=>laterEdits(items),[items]);
   // Per turn: its tool items, a Codex summary for the folded header, and whether it edited files.
   const turnWork=useMemo(()=>{
     const map=new Map<string,{items:TimelineItem[];summary:string;edits:boolean}>();
@@ -400,7 +411,7 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
   return (
     <div className={`timeline-shell${turns.length?' timeline-with-navigation':''}`}>
     <TimelineNavigation turns={turns} currentId={currentTurn} canGoBack={backCount>0} onTurn={jumpToTurn} onBack={jumpBack} onLatest={jumpToLatest} searchQuery={searchQuery} onSearch={setSearchQuery} searchCount={searchMatches.length} searchIndex={searchIndex} onSearchStep={stepSearch}/>
-    <div className="timeline" ref={scrollRef} onScroll={onScroll}>
+    <LaterEditsContext.Provider value={editHistory}><div className="timeline" ref={scrollRef} onScroll={onScroll}>
       <div
         className="timeline-inner"
         style={{ height: totalSize }}
@@ -421,6 +432,7 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
             data-kind={row.kind}
             style={{ transform: `translateY(${v.start}px)` }}
           >
+            {!hidden&&dividers.has(v.index)&&<DayDivider at={dividers.get(v.index)!}/>}
             {!hidden&&<AreaBoundary area="this message" scope="item" resetKey={row}><GalleryCoverage.Provider value={galleries.get(turnModel.rowTurn[v.index]??'')?.covered??NO_COVERAGE}><TimelineCard gallery={galleryByReply.get(row.id)?.paths} item={row} meta={row.kind!=='assistant'||finalReplies.has(row.id)} plan={row.kind==='assistant'&&row.id===planId} actions={actionsFor(row)} editing={editingFor(row)} tail={live&&v.index===rows.length-1} nextAt={row.kind==='reasoning'?rowStart(rows[v.index+1]):undefined}
               reveal={activeMatch?.rowIndex===v.index?activeMatch.itemId:undefined}
               turn={info&&info.complete&&info.work>0?{durationMs:info.durationMs,open:isTurnOpen(info.id),onToggle:()=>setTurn(info.id,!isTurnOpen(info.id)),summary:turnWork.get(info.id)?.summary}:info&&!info.complete&&live&&info.id===turnModel.last?{live:rowStart(row)??''}:undefined}/></GalleryCoverage.Provider></AreaBoundary>}
@@ -433,7 +445,7 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
         })}
         {live&&<div className="timeline-row timeline-tail" style={{transform:`translateY(${totalSize-TAIL_HEIGHT}px)`}}><WorkingTail items={items}/></div>}
       </div>
-    </div>
+    </div></LaterEditsContext.Provider>
     {away&&<button className="jump-latest" onClick={jumpToLatest} aria-label={unread?'New activity — jump to latest':'Jump to latest'}><ArrowUp size={14} style={{transform:'rotate(180deg)'}}/>{unread&&<span>New activity</span>}</button>}
     {navigationNotice&&<div className="turn-navigation-status" role="status">{navigationNotice}</div>}
     </div>
@@ -461,13 +473,14 @@ export function ChatView(): React.ReactElement {
   const timeline = state.timelines[chat.id] ?? { phase: 'idle' as const };
   const project = chat.projectId ? state.snapshot?.projects.find(p=>p.id===chat.projectId) : undefined;
   const headStatus = displayStatus(chat, liveItems, stalled);
+  const retryId = retryTarget(liveItems, chat.status === 'running' || chat.status === 'stopping');
   const place = project?.name ?? folder?.name, placeTitle = project ? project.goal || project.name : folder?.path;
 
   return (
     <div className="chat">
       <header className="chat-head" data-scrolled={scrolled||undefined}>
         <StatusDot status={headStatus} showLabel={headStatus!=='idle'&&headStatus!=='completed'} />
-        <span className="chat-head-title" title={folder ? `${chat.title} — ${folder.path}` : chat.title}>
+        <span className="chat-head-title" dir="auto" title={folder ? `${chat.title} — ${folder.path}` : chat.title}>
           {chat.title}
         </span>
         {folder && <span className="chat-head-folder" title={folder.path}><Folder size={12} aria-hidden="true"/>{folder.name}</span>}
@@ -475,7 +488,7 @@ export function ChatView(): React.ReactElement {
       </header>
       {chat.originChatId&&(()=>{const origin=state.snapshot?.chats.find(c=>c.id===chat.originChatId);return <ForkOrigin title={origin?.title} onOpen={origin?()=>void selectChat(origin.id):undefined}/>;})()}
       {timeline.phase==='ready'&&(()=>{const imported=timeline.value?.find(item=>item.kind==='notice'&&item.data?.kind==='imported');return imported?.data?<ImportOrigin data={imported.data}/>:null;})()}
-      <RecoveryNotice key={`${chat.id}:${chat.providerThreadId ?? ""}:${chat.providerTurnId ?? ""}:${chat.recovery?.kind ?? ""}`} chat={chat}/>
+      <RecoveryNotice key={`${chat.id}:${chat.providerThreadId ?? ""}:${chat.providerTurnId ?? ""}:${chat.recovery?.kind ?? ""}`} chat={chat} onRetry={retryId?()=>retryTurn(chat.id,retryId):undefined}/>
       {timeline.phase === 'loading' || timeline.phase === 'idle' ? (
         <div className="chat-loading" role="status">
           Loading conversation…

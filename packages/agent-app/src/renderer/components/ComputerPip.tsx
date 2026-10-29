@@ -1,6 +1,6 @@
 /** Codex-style computer-use picture-in-picture (CUA-01/02/03/07/09) and the right-pane screenshot viewer (CUA-06). */
 import {startActiveInterval} from '../windowActivity';
-import React,{useEffect,useMemo,useRef,useState} from 'react';
+import React,{useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {AppWindow,Download,ExternalLink,Eye,Globe,Hand,PanelRightOpen,Paperclip,Play,Square,X} from 'lucide-react';
 import {invoke} from '../bridge';
 import {closeTab,getState,notifyError,notifySuccess,openTab,stopChat,type WorkspaceTab} from '../store';
@@ -14,6 +14,7 @@ import {PIP_STACK_MAX,agentBrowserBinding,bindAgentBrowser,liveViewTabId,STACK_P
 import {clampPipPosition,exceedsDragThreshold,loadPipCorner,pipCornerOrigin,savePipCorner,settlePipDrop,springSettled,springStep,type PipCorner,type PipPoint,type PipRect,type PipSize,type SpringState} from '../pipLayout';
 import {AppGlyph} from './AppGlyph';
 import './pip.css';
+import {pipReserveFor} from '../pipReserve';
 import {Tip} from './Tooltip';
 
 const loadImage=(id:string)=>invoke('computer.image',{id});
@@ -268,6 +269,16 @@ export function openScreenshotTab(source:PipSource):void {
 /** The sidebar tab that is on screen right now, or null when the sidebar is closed or showing something else. */
 const selectVisibleTab=(state:ReturnType<typeof getState>)=>!state.resourcesHidden&&state.rightPaneMode==='resources'&&state.screen==='work'?state.activeTabId:null;
 
+/** Space to keep beside the transcript so the preview card never covers its text, or undefined when it does not
+ *  overlap the (centred, max-width) column at all, or when reserving would leave the transcript too narrow to read. */
+function pipReserve(center:HTMLElement,anchor:{right:number;width:number},side:'left'|'right',minColumn?:number):{side:'left'|'right';px:number}|undefined {
+  // The column centres inside the timeline's content box: the pane minus the summary card's own reserve (its padding).
+  const timeline=center.querySelector<HTMLElement>('.chat > .timeline-shell > .timeline');
+  const pad=timeline?getComputedStyle(timeline):undefined,box=center.getBoundingClientRect();
+  const left=box.left+(parseFloat(pad?.paddingLeft??'')||0),right=box.right-(parseFloat(pad?.paddingRight??'')||0);
+  return pipReserveFor({left,right,width:right-left},parseFloat(getComputedStyle(center).getPropertyValue('--timeline-max'))||804,window.innerWidth,anchor,side,minColumn);
+}
+
 /** Codex-style picture-in-picture: a frameless cluster of live window thumbnails at the conversation's right,
  *  under the summary card; one card per app or page the agent used lately. The user can raise any card, drag the
  *  cluster to a corner, and open a session as a sidebar tab, at which point its card steps aside. */
@@ -292,6 +303,32 @@ export function ComputerPip({paneVisible=true}:{paneVisible?:boolean}={}) {
   const [corner,setCorner]=useState<PipCorner|undefined>(loadPipCorner);
   const frozen=useRef(false),stack=useRef<HTMLDivElement>(null);
   const [anchor,setAnchor]=useStackAnchor(shown,ui.minimized?1:Math.max(1,open.length),corner,frozen);
+  useLayoutEffect(()=>{
+    const center=document.querySelector<HTMLElement>('main.center')??document.querySelector<HTMLElement>('.center');
+    if(!center)return;
+    const active=shown&&open.length&&!ui.minimized,side=corner?.endsWith('left')?'left':'right';
+    const reserve=active?pipReserve(center,anchor,side):undefined;
+    const clear=()=>{
+      delete center.dataset.pipSide;center.style.removeProperty('--pip-reserve');
+      delete center.dataset.pipBlock;center.style.removeProperty('--pip-block-reserve');
+    };
+    clear();
+    if(reserve){
+      center.dataset.pipSide=reserve.side;
+      center.style.setProperty('--pip-reserve',`${reserve.px}px`);
+    }else if(active&&pipReserve(center,anchor,side,-Infinity)){
+      // Clearing the card sideways would squeeze the text below 440px. Keep the scroll viewport
+      // above or below it instead, so scrolling cannot bring transcript text underneath the card.
+      const shell=center.querySelector<HTMLElement>('.chat > .timeline-shell');
+      if(shell){
+        const box=shell.getBoundingClientRect(),height=Math.max(stackHeight(anchor.width,open.length),stack.current?.getBoundingClientRect().height??0);
+        const top=Math.max(0,anchor.top+height+8-box.top),bottom=Math.max(0,box.bottom-anchor.top+8);
+        center.dataset.pipBlock=top<=bottom?'top':'bottom';
+        center.style.setProperty('--pip-block-reserve',`${Math.ceil(Math.min(top,bottom))}px`);
+      }
+    }
+    return clear;
+  },[shown,open.length,ui.minimized,corner,anchor]);
   const drag=usePipDrag(stack,frozen,(next,target,width)=>{
     savePipCorner(next);setCorner(next);setAnchor({right:Math.max(0,window.innerWidth-target.x-width),top:target.y,width});
   });

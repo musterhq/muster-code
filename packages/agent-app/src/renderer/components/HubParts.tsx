@@ -25,7 +25,7 @@ export function Monogram({ name, kind = 'agent' }: { name: string; kind?: 'agent
 
 export const AGENT_STATE_LABEL: Record<AgentState, string> = { active: 'Active', idle: 'Idle', running: 'Working', paused: 'Paused', error: 'Error', pending: 'Pending approval', terminated: 'Terminated' };
 export const RUN_STATE_LABEL: Record<RunState, string> = { queued: 'Queued', running: 'Running', succeeded: 'Succeeded', failed: 'Failed', cancelled: 'Cancelled', timed_out: 'Timed out', interrupted: 'Interrupted' };
-export const INBOX_KIND_LABEL: Record<InboxKind, string> = { review: 'Review', blocked: 'Blocked', approval: 'Approval', question: 'Question', failed_run: 'Failed run', agent_error: 'Agent error', mention: 'Mention', mail: 'Mail', budget: 'Budget', other: 'Attention' };
+export const INBOX_KIND_LABEL: Record<InboxKind, string> = { review: 'Review', blocked: 'Blocked', approval: 'Approval', question: 'Question', failed_run: 'Failed run', agent_error: 'Agent error', mention: 'Mention', mail: 'Mail', budget: 'Budget', checkout: 'Idle check-out', other: 'Attention' };
 
 export type Tone = 'ok' | 'warn' | 'danger' | 'accent' | 'faint' | 'violet';
 export function StateChip({ tone, children }: { tone: Tone; children: React.ReactNode }): React.ReactElement {
@@ -70,12 +70,13 @@ export function LiveCount({ count }: { count: number }): React.ReactElement | nu
   return <span className="ws-live" aria-label={`${count} live`}><span className="ws-live-dot" aria-hidden="true"/>{count} live</span>;
 }
 
-const k = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+const k = (n: number) => n >= 999_950_000 ? `${(n / 1_000_000_000).toFixed(1)}B` : n >= 999_950 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 const short = (hash: string | null) => hash ? hash.slice(0, 7) : '—';
 /** Cost is never shown as $0: an unknown price says so, and a priced turn that rounds to nothing is a lower bound. */
-export function costText(entry: Pick<LedgerEntry, 'costUsd' | 'tokens'>): string | null {
-  if (entry.costUsd !== null && entry.costUsd >= 0.01) return formatUsd(entry.costUsd);
-  if (entry.costUsd !== null && entry.costUsd > 0) return '< $0.01';
+export function costText(entry: Pick<LedgerEntry, 'costUsd' | 'tokens' | 'estimated'>): string | null {
+  // An estimate (a message's final count never arrived, or cache writes billed at the input rate) is said so, never shown as exact.
+  if (entry.costUsd !== null && entry.costUsd >= 0.01) return `${formatUsd(entry.costUsd)}${entry.estimated ? ' estimate' : ''}`;
+  if (entry.costUsd !== null && entry.costUsd > 0) return `< $0.01${entry.estimated ? ' estimate' : ''}`;
   if (!entry.tokens || entry.tokens.input + entry.tokens.output === 0) return null;
   return entry.costUsd === 0 ? '≥ $0.01' : 'unpriced';
 }
@@ -98,7 +99,7 @@ export function Receipt({ entry, defaultOpen = false }: { entry: LedgerEntry; de
     {open && <dl className="ws-receipt-body">
       <div><dt>Agent</dt><dd>{entry.agent}{entry.model ? ` · ${entry.model}` : ''}{entry.provider ? ` · ${entry.provider}` : ''}</dd></div>
       <div><dt>Trigger</dt><dd>{entry.trigger}</dd></div>
-      <div><dt>Tokens</dt><dd>{entry.tokens ? `${entry.tokens.input.toLocaleString()} in (${entry.tokens.cached.toLocaleString()} cached) · ${entry.tokens.output.toLocaleString()} out (${entry.tokens.reasoning.toLocaleString()} reasoning)` : entry.source === 'history' ? 'Not stored per turn before the Ledger (the chat’s total is in its usage)' : 'Not reported by this runtime'}</dd></div>
+      <div><dt>Tokens</dt><dd>{entry.tokens ? `${entry.tokens.input.toLocaleString()} in (${entry.tokens.cached.toLocaleString()} cached${entry.tokens.cacheWrite ? `, ${entry.tokens.cacheWrite.toLocaleString()} cache write` : ''}) · ${entry.tokens.output.toLocaleString()} out (${entry.tokens.reasoning.toLocaleString()} reasoning)` : entry.source === 'history' ? 'Not stored per turn before the Ledger (the chat’s total is in its usage)' : 'Not reported by this runtime'}</dd></div>
       <div><dt>Tools</dt><dd>{entry.tools.length ? entry.tools.map(t => `${t.name} ×${t.count}`).join(', ') : entry.toolsState === 'unfetched' ? 'Not fetched from the server (open the run to read them)' : 'None recorded'}{entry.approvals ? ` · ${entry.approvals} approvals` : ''}</dd></div>
       <div><dt>Files</dt><dd>{entry.files === null ? 'Not observed (no Git baseline for this turn)' : entry.files.length === 0 ? 'No changes' : <ul className="ws-receipt-files">{entry.files.map(f => <li key={f.path}><code>{f.status === 'added' ? '+' : f.status === 'deleted' ? '−' : '~'}</code><span>{f.path}</span>{f.added !== null && <code className="ws-diff-count">+{f.added} −{f.removed ?? 0}</code>}<code className="ws-faint">{short(f.before)} → {short(f.after)}</code></li>)}</ul>}</dd></div>
       <div><dt>Time</dt><dd>{entry.startedAt ? new Date(entry.startedAt).toLocaleString() : '—'} → {new Date(entry.endedAt).toLocaleString()}</dd></div>

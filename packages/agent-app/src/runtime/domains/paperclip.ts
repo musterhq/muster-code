@@ -44,6 +44,7 @@ import { importFromPaperclip, planImport, SqliteImportStore } from '../paperclip
 import { ImportedHistory, within } from '../checkout/imported-history.ts';
 import { realGit } from '../checkout/git-port.ts';
 import { buildCosts, groupsFromReceipts } from '../insight/costs.ts';
+import { effectivePricing, EMPTY_MODEL_POLICY, type ModelPolicy } from '../../shared/model-catalog.ts';
 import { buildDashboard, DASHBOARD_DAYS, ledgerAggregates, monthStart } from '../workspace-dashboard.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 import { device } from '../../shared/device-noun.ts';
@@ -56,7 +57,7 @@ const POLL_FAST_MS = 2_500, POLL_IDLE_MS = 15_000, POLL_QUIET_AFTER_MS = 60_000,
 /** Frames that fire many times a second while an agent works and change nothing the UI shows. */
 const NOISY = new Set(['heartbeat.run.log', 'heartbeat.run.event', 'heartbeat.run.progress', 'plugin.ui.updated']);
 /** Needs you + Problems: the only kinds that badge. */
-const URGENT = new Set(['question', 'approval', 'blocked', 'failed_run', 'agent_error', 'budget', 'mention']);
+const URGENT = new Set(['question', 'approval', 'blocked', 'failed_run', 'agent_error', 'budget', 'mention', 'checkout']);
 
 /** Kept for callers that read it from here (tests, older code): the entry migrated Paperclip tokens stay in. */
 export const PAPERCLIP_SECRET_ID = LEGACY_PAPERCLIP_SECRET;
@@ -172,6 +173,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   let built: { generation: number; companyId: string; part: PaperclipPart; agents: Map<string, WorkspaceAgent> } | null = null;
   let companies: PaperclipLink['companies'] = [];
   let inflight: Promise<PaperclipPart> | null = null, lastError: string | undefined;
+  /** Bumped when the connection or its org changes: a read started before that belongs to the old org (#445). */
+  let orgEpoch = 0, inflightEpoch = -1;
   const REFRESH_COALESCE_MS = options.refreshCoalesceMs ?? 2500;
   let readDoneAt = 0, readEpoch = -1, changeEpoch = 0;
   const chooseCompany = async (api: ServerBackend) => {
@@ -181,17 +184,20 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     return chosen;
   };
   const readPaperclip = async (api: ServerBackend): Promise<PaperclipPart> => {
+    const epoch = orgEpoch;
     const company = await chooseCompany(api);
     const fresh = live.fresh; live.fresh = false;
     const part = await api.read(company, built ? { generation: built.generation, companyId: built.companyId, part: built.part } : undefined, { fresh });
+    // The org was switched while this read ran: what it read is the old org's, so it must not become what every screen reads.
+    if (epoch !== orgEpoch) return part;
     if (built && built.part === part && built.companyId === company.id) return part;
     built = { generation: api.generation, companyId: company.id, part, agents: new Map(part.agents.map(a => [a.id, a])) };
     return part;
   };
   /** The connection changed (here, or by signing in from Settings): drop what was read from the old one and tell the screens. */
   /** The session cookie arrived, expired or was cleared: only the live socket is rebuilt; the next read tries it first. */
-  const offSession = conn.onSession(() => { live.refusedAt = 0; closeSocket(); backend = null; built = null; if (conn.sessionState() !== 'expired') ensureSocket(); queueEmit(['config']); });
-  const offConnection = conn.onChange(() => { changeEpoch++; hub.reader?.reset(); live.refusedAt = 0; closeSocket(); stopPoll(); built = null; backend = null; companies = []; lastError = undefined; queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']); });
+  const offSession = conn.onSession(() => { orgEpoch++; live.refusedAt = 0; closeSocket(); backend = null; built = null; if (conn.sessionState() !== 'expired') ensureSocket(); queueEmit(['config']); });
+  const offConnection = conn.onChange(() => { changeEpoch++; orgEpoch++; hub.reader?.reset(); live.refusedAt = 0; closeSocket(); stopPoll(); built = null; backend = null; companies = []; lastError = undefined; queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']); });
   /** Records the last read's outcome. Going offline (ok → stale) or coming back (stale → ok) is an update the screens
    *  must see at once: the banner and "· offline" come from it, so it is emitted rather than waiting for a reload. */
   const linkError = (next: string | undefined) => {
@@ -211,14 +217,20 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     if (refresh && !coalesced) api.invalidate();
     if (!coalesced) {
       const startedAt = changeEpoch;
+      // A read still running for the org before a switch is not joined: it would answer with the old org.
+      if (inflight && inflightEpoch !== orgEpoch) inflight = null;
+      if (!inflight) inflightEpoch = orgEpoch;
       inflight ??= readPaperclip(api).then(part => { linkError(undefined); ensureSocket(); readDoneAt = Date.now(); readEpoch = startedAt; return part; }, cause => {
         linkError(cause instanceof Error ? cause.message : String(cause));
         if (built) return built.part;
         throw cause;
-      }).finally(() => { inflight = null; });
+      });
+      const mine = inflight;
+      void mine.finally(() => { if (inflight === mine) inflight = null; }).catch(() => undefined);
     }
+    const pending = inflight;
     try {
-      const part = coalesced ? built!.part : await inflight!;
+      const part = coalesced ? built!.part : await pending!;
       return { part, link: { origin: originLabel(), company: companies.find(c => c.id === built?.companyId) ?? null, companies, live: live.channel, ...(conn.view().reconnect && live.channel !== 'socket' ? { reconnect: true, baseUrl: conn.baseUrl() } : {}), ...(lastError ? { stale: lastError, cached: true } : {}) } };
     } catch (cause) {
       return { part: null, link: { origin: originLabel(), company: null, companies, live: 'off', stale: cause instanceof Error ? cause.message : String(cause), cached: false } };
@@ -273,7 +285,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const gates: WorkspaceInboxItem[] = (over?.inbox ?? []).map(g => ({ ...g, taskId: null, agentId: null, runId: null, source: 'local' as const }));
     // The server's Inbox lists only what asks the signed-in person (never another person's task), from every ticked org, each tagged with its org.
     const serverInbox = await scopedServerInbox(p, theirs.link?.company ?? null);
-    const inbox = [...mine.inbox.map(carried), ...gates, ...await budgetInbox(mine.projects), ...serverInbox.filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
+    let idleCheckouts: WorkspaceInboxItem[] = []; try { idleCheckouts = hub.checkoutInbox?.() ?? []; } catch { /* the checkout store is unavailable: its rows wait */ }
+    const inbox = [...mine.inbox.map(carried), ...gates, ...idleCheckouts, ...await budgetInbox(mine.projects), ...serverInbox.filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
     return {
       paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects: projects2, goals: p?.goals ?? [], runs, inbox, ...(p ? { approvals: p.approvals, labels: p.labels, people: await peopleOf(p) } : {}), agentCounts: p ?  { active: p.agents.filter(a => a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending').length, paused: p.agents.filter(a => a.status === 'paused').length, resumable: resumable(p) } : { active: 0, paused: 0, resumable: resumable(null) },
       counts: { liveRuns: runs.filter(r => r.status === 'running').length, inbox: inbox.filter(i => i.kind !== 'mail').length, failedRuns: runs.filter(r => r.status === 'failed').length, openTasks: tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length },
@@ -597,7 +610,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       try {
         await paperclipPart(false);
         if (!built) throw new Error(lastError ?? 'not reachable');
-        remote = await c.rows(kind, companies.find(x => x.id === built!.companyId) ?? { id: built.companyId, name: originLabel(), prefix: '' });
+        remote = await c.rows(kind, companies.find(x => x.id === built!.companyId) ?? { id: built.companyId, name: originLabel(), prefix: '' }, { agents: built.agents, people: new Map((built.part.people ?? []).map(p => [p.id, p.name])) });
         // An event about a task belongs to that task's project: what lets a project's Activity show only its own.
         if (kind === 'audit') { const projectOfTask = new Map(built.part.tasks.map(t => [t.id, t.projectId])); remote = remote.map(r => r.projectId || !r.taskId ? r : { ...r, projectId: projectOfTask.get(r.taskId) ?? null }); }
       } catch (cause) { note = `Muster Server could not be read: ${cause instanceof Error ? cause.message : String(cause)}`; }
@@ -794,23 +807,32 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   });
 
   // --- the Dashboard (#132) -------------------------------------------------------------------------------------------------
+  // The price the Costs tab uses for a turn the Ledger left unpriced: the user's own price (Settings › Models), else the catalog's.
+  const pricingLookup = async () => {
+    const policy: ModelPolicy = await context.invoke('models.policy.get', {}).catch(() => EMPTY_MODEL_POLICY);
+    let providers: ReturnType<NonNullable<DomainContext['modelCatalog']>>['providers'] = [];
+    try { providers = context.modelCatalog?.().providers ?? []; } catch { /* no catalog: only the user's prices apply */ }
+    return (providerId: string, model: string) => effectivePricing(policy, providerId, model, providers.find(p => p.id === providerId)?.models.find(m => m.id === model)?.pricing);
+  };
   const dashboard = async (offset: number, projectId?: string) => {
     const now = Date.now(), since = new Date(now - (DASHBOARD_DAYS + 1) * 86_400_000).toISOString();
     ledger();
     const c = connection();
     let paperclip: Parameters<typeof buildDashboard>[0]['paperclip'] = null, budgets: DashboardData['budgets'];
     if (c && (!projectId || await owner('project', projectId) === 'paperclip')) {
-      await paperclipPart(false);
+      // The Dashboard refetches when the workspace snapshot changes, so the org's last read is current: it is reused instead of
+      // reading every task page again (#445). A switched org has no read yet (`built` was dropped) and is read here.
+      if (!built) await paperclipPart(false);
       if (built) {
         const company = companies.find(x => x.id === built!.companyId) ?? { id: built.companyId, name: originLabel(), prefix: '' };
-        const remote = await c.dashboard(company, built.agents);
+        const remote = await c.dashboard(company, built.agents, new Map((built.part.people ?? []).map(p => [p.id, p.name])));
         if (remote.budgets) budgets = { ...mapBudgets(remote.budgets), company: company.name };
         const inProject = projectId ? new Set(built.part.tasks.filter(t => t.projectId === projectId).map(t => t.id)) : null;
         paperclip = { receipts: remote.receipts.filter(r => !inProject || (r.taskId !== null && inProject.has(r.taskId))), tasks: built.part.tasks.filter(t => !projectId || t.projectId === projectId), activity: remote.activity, name: company.name };
       }
     }
     const [aggregates, stats] = [
-      ledgerAggregates(context.db(), { since, monthStart: monthStart(now, offset), offset, skipImportedPaperclip: paperclip !== null, ...(projectId ? { projectId } : {}) }),
+      ledgerAggregates(context.db(), { since, monthStart: monthStart(now, offset), offset, skipImportedPaperclip: paperclip !== null, priceOf: await pricingLookup(), ...(projectId ? { projectId } : {}) }),
       // A project's Dashboard tab and Budget read that project's tasks, runs and activity; a Paperclip project has none here.
       projectId && paperclip ? null : await context.invoke('project.stats', { days: DASHBOARD_DAYS + 1, utcOffsetMinutes: offset, activityLimit: 12, ...(projectId ? { projectId } : {}) }).catch(() => null),
     ];

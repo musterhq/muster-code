@@ -35,6 +35,8 @@ export function describeTurns(rows:readonly TranscriptEntry[],running:boolean):{
     if(row.kind==='user'){finish(false);current={id:row.id,row:index,end:index,durationMs:null,complete:false,work:0};turns.set(row.id,current);live=false;latest=time(row.createdAt);latestAt=row.createdAt;rowTurn[index]=row.id;continue;}
     rowTurn[index]=current?.id;if(!current)continue;
     current.end=index;if(row.kind==='activity'||row.kind==='reasoning')current.work++;if(busy(row))live=true;
+    // Import and stop notices are stamped when recorded, not when the turn did its work.
+    if(row.kind==='notice')continue;
     const at=rowEnd(row),ms=time(at);if(ms>latest){latest=ms;latestAt=at;}
   }
   finish(true);
@@ -50,9 +52,9 @@ export function tailStatus(items:readonly TimelineItem[]):TailStatus {
   const since=items[start]?.createdAt??items[0]?.createdAt;
   for(let index=items.length-1;index>start;index--){
     const item=items[index];
-    if(item.kind==='notice'&&item.data?.kind==='admission-retry'&&item.status==='running'){const at=typeof item.data.retryAt==='string'||typeof item.data.retryAt==='number'?new Date(item.data.retryAt).getTime():NaN;return {label:'Retrying',kind:'retry',since,retryAt:Number.isFinite(at)?at:undefined};}
+    if(item.kind==='notice'&&(item.data?.kind==='admission-retry'||item.data?.kind==='turn-retry')&&item.status==='running'){const at=typeof item.data.retryAt==='string'||typeof item.data.retryAt==='number'?new Date(item.data.retryAt).getTime():NaN;return {label:'Retrying',kind:'retry',since,retryAt:Number.isFinite(at)?at:undefined};}
     if(item.kind==='approval'&&item.status==='pending')return {label:'Waiting for approval',kind:'approval',since};
-    if(item.kind==='question'&&item.status==='pending')return {label:'Waiting for your answer',kind:'approval',since};
+    if(item.kind==='question'&&item.status==='pending'&&item.data?.nonBlocking!==true)return {label:'Waiting for your answer',kind:'approval',since};
     if(item.status!=='running')continue;
     if(item.kind==='tool'&&awaitingApproval(item))return {label:APPROVAL_WAIT_LABEL,kind:'approval',since};
     if(item.kind==='tool'){const p=classifyTool(item.data);const subject=p.kind==='read'||p.kind==='edit'?p.subject.split(', ').map(path=>path.split('/').filter(Boolean).at(-1)||path).join(', '):p.subject;return {label:`${p.runningVerb}${subject?' '+subject:''}`,kind:'tool',since};}

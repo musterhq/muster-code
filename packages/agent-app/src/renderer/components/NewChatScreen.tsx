@@ -2,6 +2,7 @@ import {ArrowUp,Brain,Check,ChevronDown,CircleAlert,Cpu,FolderKanban,FolderOpen,
 import {Menu} from '@base-ui/react/menu';
 import React,{useEffect,useLayoutEffect,useRef,useState} from 'react';
 import type {ComputerCaptureSource} from '../../shared/domains/computer-protocol';
+import type {McpServer} from '../../shared/domains/mcp-protocol';
 import {type FileEntry,type PluginEntry,type Project,type ReasoningEffort,type SkillEntry} from '../../shared/protocol';
 import {invoke,subscribe} from '../bridge';
 import {resolveTarget,targetOptions,type TargetOption} from '../chatNavigation';
@@ -11,14 +12,15 @@ import {closeNewChat,getNewChatDraft,setNewChatTarget,setNewChatText,submitNewCh
 import {loadPlugins,loadProviders,loadSkills,notifyError,notifySuccess,openAppSettings,openPluginsScreen,selectChat,sendMessage,setComposerDraft,type SendExtras} from '../store';
 import {useStore} from '../useStore';
 import {AttachmentStrip,type ComposerAttachment} from './AttachmentStrip';
-import {baseFileName,buildAddRows,buildMentionRows,buildSlashRows,ComposerMenuList,firstRow,nextRow,pluginLabel,skillUsable,type MenuRow} from './ComposerMenu';
+import {baseFileName,buildAddRows,buildMentionRows,buildSlashRows,ComposerMenuList,connectorEntries,firstRow,nextRow,pluginLabel,skillLabel,skillUsable,type MenuRow} from './ComposerMenu';
 import {ChipMirror} from './ComposerTokens';
 import {seedChatEffort,useMentionEntries} from './Composer';
 import {CaptureSourcePicker,type CaptureResult} from './CaptureSourcePicker';
 import {accessibilityAttachment} from '../captureRegion';
 import {ACCESS_OPTIONS,FullAccessConfirm} from './FullAccessConfirm';
-import {attachmentKey,attachmentName,imageBlindModel,imageBlindWarning,chipPayload,chipToken,COMPOSER_COMMANDS,EFFORT_LABELS,findTokenRanges,formatBytes,insertToken,MAX_ATTACHMENT_BYTES,MAX_ATTACHMENTS,readFolderAccess,readMentionQuery,readSlashQuery,saveFolderAccess,scoreItem,setFullAccessSkip,skipsFullAccessConfirm,SKILL_RECORDER_PROMPT,type ComposerAccess,type ComposerChip,type ComposerCommandId} from './composerMenus';
+import {attachmentKey,attachmentName,imageBlindModel,imageBlindWarning,chipPayload,chipToken,skillToken,COMPOSER_COMMANDS,EFFORT_LABELS,findTokenRanges,formatBytes,insertToken,MAX_ATTACHMENT_BYTES,MAX_ATTACHMENTS,readFolderAccess,readMentionQuery,readSlashQuery,saveFolderAccess,scoreItem,setFullAccessSkip,skipsFullAccessConfirm,SKILL_RECORDER_PROMPT,type ComposerAccess,type ComposerChip,type ComposerCommandId} from './composerMenus';
 import {ModelPicker} from './ModelPicker';
+import {ProviderUsageWarning} from './ProviderUsage';
 import {ProjectPicker} from './ProjectPicker';
 import {openImportConversations} from './ImportConversations';
 import {SKETCH_FILE_NAME,SketchPad,type SketchStroke} from './SketchPad';
@@ -141,16 +143,27 @@ export function NewChatScreen():React.ReactElement {
 
   const skills=state.skills.value??[];
   const plugins=state.plugins.value??[];
+  const [mcpServers,setMcpServers]=useState<McpServer[]>([]);
   const folderId=current.target.folderId;
   const folderPath=state.snapshot?.folders.find(folder=>folder.id===folderId)?.path;
   const text=draft.text;
-  const vocabulary={commands:[],skills:skills.filter(skillUsable).map(skill=>({name:skill.name,id:skill.id,label:skill.displayName??skill.name})),plugins:plugins.map(plugin=>({name:plugin.name,id:plugin.id,label:pluginLabel(plugin)}))};
+  const vocabulary={commands:[],skills:skills.filter(skillUsable).map(skill=>({name:skill.name,id:skill.id,label:skillLabel(skill),...(skill.claude==='command'?{command:true}:skill.claude==='skill'?{claudeSkill:true}:{})})),plugins:plugins.map(plugin=>({name:plugin.name,id:plugin.id,label:pluginLabel(plugin)}))};
   const tokenRanges=findTokenRanges(text,chips,vocabulary);
   const slash=popoverBlockedFor(dismissed,text)?null:readSlashQuery(text,caret);
   const mention=slash||popoverBlockedFor(dismissed,text)?null:readMentionQuery(text,caret);
   const mentionEntries=useMentionEntries(folderId,mention?.query??'',Boolean(mention));
 
   useEffect(()=>{if(state.providers.phase==='idle')void loadProviders();},[state.providers.phase]);
+  // The pickers list the target folder's own .claude and .agents entries, read again when the folder changes.
+  const skillPickerOpen=Boolean(slash)||toolMenu==='plus';
+  useEffect(()=>{if(skillPickerOpen)void loadSkills(false,folderPath?[folderPath]:[]);},[skillPickerOpen,folderPath]);
+  // #729: the + menu's Connectors & MCP rows, as in a chat's composer; read again each time the menu opens.
+  useEffect(()=>{
+    if(toolMenu!=='plus')return;
+    let live=true;
+    void invoke('mcp.servers.list',undefined).then(value=>{if(live)setMcpServers(Array.isArray(value)?value:[]);}).catch(()=>{if(live)setMcpServers([]);});
+    return()=>{live=false;};
+  },[toolMenu]);
   const projectId=current.target.projectId;
   // F9: chat.defaults is exactly what chat.create resolves (Project → user default → built-in); re-asked when the
   // target or the user's default-model setting changes, or once providers load (a gone provider is skipped).
@@ -253,7 +266,7 @@ export function NewChatScreen():React.ReactElement {
     setChips(current=>[...current.filter(entry=>entry.token!==chip.token),chip]);
     replaceRange(next.start,next.end,next.insert,next.caret);
   };
-  const skillChip=(skill:SkillEntry):ComposerChip=>({token:chipToken('skill',skill.name),kind:'skill',id:skill.id,label:skill.displayName??skill.name});
+  const skillChip=(skill:SkillEntry):ComposerChip=>({token:skillToken(skill),kind:'skill',id:skill.id,label:skillLabel(skill)});
   const pluginChip=(plugin:PluginEntry):ComposerChip=>({token:chipToken('plugin',plugin.name),kind:'plugin',id:plugin.id,label:pluginLabel(plugin)});
 
   /* / and @ and + rows all come from ComposerMenu.tsx's shared builders — the exact same ones an
@@ -344,6 +357,7 @@ export function NewChatScreen():React.ReactElement {
     onMention:()=>{setToolMenu(null);const at=input.current?.selectionStart??text.length;const lead=at>0&&!/\s/.test(text[at-1])?' ':'';replaceRange(at,at,`${lead}@`);},
     plugins,onPlugin:plugin=>insertChip(pluginChip(plugin),{start:text.length,end:text.length}),onBrowsePlugins:()=>{setToolMenu(null);openPluginsScreen('plugins');},
     skills,onSkill:skill=>insertChip(skillChip(skill),{start:text.length,end:text.length}),
+    connectors:connectorEntries(mcpServers,plugins),onConnector:connector=>insertChip({token:chipToken(connector.kind,connector.label),kind:connector.kind,id:connector.key,label:connector.label},{start:text.length,end:text.length}),
   });
   const plusIndex=plusRows[popoverActive]?.disabled?firstRow(plusRows):Math.min(popoverActive,plusRows.length-1);
   const onPlusKeyDown=(event:React.KeyboardEvent<HTMLDivElement>)=>{
@@ -459,6 +473,7 @@ export function NewChatScreen():React.ReactElement {
     <div ref={composerRoot} className="composer new-chat-composer" aria-busy={busy}>
       {attachments.length>0&&<div className="composer-attachments"><AttachmentStrip chatId={undefined} items={attachments} onRemove={removeAttachment} onRetry={()=>{}}
         onOpen={item=>{if(!sketches.current.has(item.localId))return false;openSketch(item.localId);return true;}}/></div>}
+      <ProviderUsageWarning providerId={createdModel.providerId || undefined}/>
       {attachments.some(item=>item.kind==='image')&&imageBlindModel(providers,createdModel.providerId,createdModel.id)&&<p className="composer-image-warning" role="status" data-testid="image-blind-warning">{imageBlindWarning(imageBlindModel(providers,createdModel.providerId,createdModel.id)!)}</p>}
       <div className={`composer-field${tokenRanges.length?' has-chips':''}`}>
         {tokenRanges.length>0&&<ChipMirror text={text} ranges={tokenRanges} selected={selection} plugins={plugins} mirror={mirror}/>}
@@ -498,7 +513,7 @@ export function NewChatScreen():React.ReactElement {
       <div className="composer-options" role="toolbar" aria-label="Message options">
         <div className="composer-toolbar-left">
           <Tip label="Add files and more"><button type="button" className="composer-plus" aria-label="Add files and more" aria-haspopup="menu" aria-expanded={toolMenu==='plus'} disabled={busy}
-            onClick={()=>{setToolMenu(current=>current==='plus'?null:'plus');setPopoverActive(0);setPlusQuery('');void loadSkills();void loadPlugins();}}><Plus size={16}/></button></Tip>
+            onClick={()=>{setToolMenu(current=>current==='plus'?null:'plus');setPopoverActive(0);setPlusQuery('');void loadSkills(true,folderPath?[folderPath]:[]);void loadPlugins();}}><Plus size={16}/></button></Tip>
           <Menu.Root open={toolMenu==='access'} onOpenChange={open=>setToolMenu(current=>open?'access':current==='access'?null:current)}>
             <Menu.Trigger className={`composer-access is-${access}`} aria-label={`Access: ${accessOption.label}`} title="Change permissions" disabled={busy}><accessOption.Icon size={14} aria-hidden="true"/><span className="composer-access-label">{accessOption.label}</span></Menu.Trigger>
             <MenuPopup side="top" align="start" sideOffset={6} className="composer-access-menu" aria-label="Permissions">
