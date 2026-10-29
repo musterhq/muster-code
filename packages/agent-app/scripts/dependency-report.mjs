@@ -59,6 +59,8 @@ function licenseOf(dir){
   const found={version:pkg.version??'unknown',license,text:file?readFileSync(path.join(abs,file),'utf8').trim():'',file:file??null};
   const override=LICENSE_OVERRIDES[`${pkg.name}@${found.version}`];
   if(override&&license==='UNKNOWN'&&!file)return {...found,license:override.license,text:`${override.copyright}\n\n${MIT_TERMS}\n\nThe published package declares no license. Confirmed upstream: ${override.source}`};
+  // A manifest without a license field whose shipped license file is the MIT text (khroma, used by mermaid) is MIT.
+  if(license==='UNKNOWN'&&/^The MIT License/i.test(found.text)&&found.text.includes('Permission is hereby granted, free of charge'))return {...found,license:'MIT'};
   return found;
 }
 
