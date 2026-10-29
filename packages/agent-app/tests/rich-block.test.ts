@@ -183,3 +183,10 @@ test('charts: categories keep the data order unless the spec sorts them (months 
   assert.ok(short.ok);
   assert.equal((short.plan.spec.encoding as {x: {sort?: unknown}}).x.sort ?? null, null);
 });
+
+// Spec: MUS-SPEC-21-361D (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-361d)
+test('reports: a title decodes entities once and never keeps a tag', () => {
+  assert.equal(reportTitle('<title>A &amp;lt;b&amp;gt; C</title>'), 'A &lt;b&gt; C');
+  assert.equal(reportTitle('<title>Q&amp;A &lt;3</title>'), 'Q&A <3');
+  assert.ok(!/<[a-z]/i.test(reportTitle('<h1>a<<b>script>b</h1>')));
+});

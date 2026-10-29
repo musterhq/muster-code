@@ -84,11 +84,15 @@ export function mermaidMeta(source: string): MermaidMeta {
 
 // ---- Reports --------------------------------------------------------------------------------------------------------
 
-const decodeEntities = (text: string) => text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+const ENTITIES: Record<string, string> = {'&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'"};
+/** One pass, so `&amp;lt;` stays `&lt;` instead of decoding twice. */
+const decodeEntities = (text: string) => text.replace(/&(?:amp|lt|gt|quot|#39);/g, entity => ENTITIES[entity]!);
+/** Tags are removed until none are left, so a split tag (`<scr<b>ipt>`) can't reassemble; any stray `<` goes too. */
+const stripTags = (text: string) => { let out = text, before; do { before = out; out = out.replace(/<[^<>]*>/g, ''); } while (out !== before); return out.replace(/</g, ''); };
 /** A report's title: its <title>, else its first <h1>, else "Report". */
 export function reportTitle(html: string): string {
   const title = /<title[^>]*>([\s\S]{0,300}?)<\/title>/i.exec(html)?.[1] ?? /<h1[^>]*>([\s\S]{0,300}?)<\/h1>/i.exec(html)?.[1] ?? '';
-  const text = decodeEntities(title.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+  const text = decodeEntities(stripTags(title)).replace(/\s+/g, ' ').trim();
   return text ? text.slice(0, 120) : 'Report';
 }
 
