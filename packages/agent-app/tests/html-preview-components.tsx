@@ -4,6 +4,7 @@
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 const {window}=parseHTML('<html data-theme="dark"><body><div id="root"></div></body></html>');
 let observers:Array<{callback:(entries:Array<{isIntersecting:boolean}>)=>void;disconnected:boolean}>=[];
@@ -123,6 +124,8 @@ const {THEME_FRAGMENT_KEY}=await import('../src/shared/html-render');
 
 // ---- render_html card ------------------------------------------------------------------------------------------------------
 {
+  // Spec: MUS-SPEC-21-578A (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-578a)
+  await check('a render_html page draws inline in the chat: themed, scripts-only sandbox, mounted near the viewport, full screen with zoom', async()=>{
   await show(null,10);
   observers=[];
   await show(<HtmlRenderCard renderId={'b'.repeat(32)} title="Revenue dashboard" chatId="c1"/>,300);
@@ -150,6 +153,7 @@ const {THEME_FRAGMENT_KEY}=await import('../src/shared/html-render');
   await click($('.rich-full [aria-label="Zoom in"]'),60);
   assert.equal($('.rich-full .rich-zoom-level')!.textContent,'125%');
   await click($('[aria-label="Close full screen"]'),200);
+  });
 }
 
 // ---- unreachable page ------------------------------------------------------------------------------------------------------

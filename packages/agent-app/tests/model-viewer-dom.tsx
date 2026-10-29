@@ -2,6 +2,7 @@
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require = createRequire(import.meta.url);
 const {parseHTML} = require('linkedom');
 const {window} = parseHTML('<html><body><div id="root"></div></body></html>');
@@ -77,6 +78,8 @@ const file = (path: string, extra: Record<string, unknown> = {}) => ({source: {k
 // 2. Loading, ready, controls, info, wireframe, full screen, export affordance, teardown.
 files.set('models/cube.glb', model.cubeGlb());
 {
+  // Spec: MUS-SPEC-21-366A (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-366a)
+  await check('a GLB model opens as an interactive 3D preview: canvas, views, info, wireframe, full screen, released on close', async () => {
   const before = {...live};
   const r = mount(file('models/cube.glb', {variant: 'tab'}));
   await waitFor(() => state() === 'loading' || state() === 'ready', 'loading');
@@ -112,6 +115,7 @@ files.set('models/cube.glb', model.cubeGlb());
   await waitFor(() => live.disposed === before.disposed + 1, 'engine disposal on unmount');
   assert.equal(live.lost, before.lost + 1, 'the GL context is released');
   assert.equal(live.workers, before.workers + 1); assert.equal(live.terminated, before.terminated + 1, 'the parse worker is terminated');
+  });
 }
 
 // 3. A failed read shows the plain-English card; Try again recovers.

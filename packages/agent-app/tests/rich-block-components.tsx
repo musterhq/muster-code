@@ -3,6 +3,7 @@
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
 Object.assign(globalThis,{window,document:window.document,HTMLElement:window.HTMLElement,Element:window.Element,Node:window.Node,MutationObserver:window.MutationObserver,requestAnimationFrame:(fn:any)=>setTimeout(fn,0),cancelAnimationFrame:clearTimeout,
@@ -140,6 +141,8 @@ setRichRenderers({
   const reply=(fence:string)=>`Here is the picture.\n\n${fence}\n\nAfter the block.`;
   const closed='```mermaid\nflowchart LR\n  A-->B\n```';
   const open='```mermaid\nflowchart LR\n  A-->B';
+  // Spec: MUS-SPEC-21-361A (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-361a)
+  await check('a closed mermaid fence in a reply draws as a diagram; while streaming it stays code', async()=>{
   mermaidCalls=0;
   await show(<MessageBody text={reply(open)}/>);
   assert.ok(!$('.rich-block'),'a streaming fence stays an ordinary code block');
@@ -158,7 +161,10 @@ setRichRenderers({
   // Cached: the same source remounts without rendering again (a block scrolling back into a virtual list).
   await show(<div/>);await show(<MessageBody text={reply(closed)}/>,20);await until(()=>$('.rich-block[data-status=ready]'));
   assert.equal(mermaidCalls,1,'a block seen before is served from the cache');
+  });
 
+  // Spec: MUS-SPEC-21-361B (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-361b)
+  await check('an invalid mermaid fence shows the error card with the parse error and its source', async()=>{
   // Parse failure: error card with the source, never a blank block.
   mermaidFail='Parse error on line 2: expected node';
   await show(<MessageBody text={reply('```mermaid\nflowchart LR\n  A[\n```')}/>,20);await until(()=>$('.rich-block[data-status=error]'));
@@ -168,11 +174,14 @@ setRichRenderers({
   await click($$('.rich-body button').find(b=>/Show source/.test(b.textContent??''))!);
   assert.match($('.rich-source')!.textContent!,/A\[/);
   mermaidFail='';
+  });
 
   // Other languages are untouched; unknown fences stay code.
   await show(<MessageBody text={'```json\n{"a":1}\n```\n\n```html\n<p>x</p>\n```'}/>);
   assert.ok(!$('.rich-block'));assert.equal($$('.md-code').length,2);
 
+  // Spec: MUS-SPEC-21-361C (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-361c)
+  await check('a chart fence draws a Vega chart with its title, a table view and disposal on unmount', async()=>{
   // Charts: parse errors are caught before any library loads; good specs mount a view and dispose it on unmount.
   chartMounted=0;
   await show(<MessageBody text={reply('```chart\n{"type":"bar","title":"Users","data":[{"w":"W1","u":3},{"w":"W2","u":5}],"x":"w","y":"u"}\n```')}/>,20);
@@ -194,6 +203,7 @@ setRichRenderers({
   const disposedBefore=chartDisposed;
   await show(<div/>);
   assert.ok(chartDisposed>disposedBefore,'unmounting disposes the view');
+  });
 
   await show(<MessageBody text={reply('```chart\n{"type":"bar",}\n```')}/>,20);await until(()=>$('.rich-block[data-status=error]'));
   assert.equal($('.rich-block')!.getAttribute('data-status'),'error');assert.match($('.rich-body')!.textContent!,/not valid JSON/);
@@ -210,6 +220,8 @@ setRichRenderers({
 
 // ---- reports and the sandboxed frame ---------------------------------------------------------------------------------------
 {
+  // Spec: MUS-SPEC-21-361D (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-361d)
+  await check('a report frame is scripts-only: no same-origin, served from its own muster-report origin', async()=>{
   calls.length=0;
   await show(<SandboxedHtml html="<p>hi</p>" scripts title="Report" storeKey="k1"/>,420);
   const frame=$('iframe.sandboxed-html-frame')!;
@@ -222,6 +234,7 @@ setRichRenderers({
   await show(<SandboxedHtml html="<p>hi</p>" title="Report"/>,420);
   assert.equal($('iframe')!.getAttribute('sandbox'),'','a page that must not run gets an empty sandbox (every restriction)');
   assert.deepEqual(calls.at(-1)![1],{html:'<p>hi</p>',scripts:false});
+  });
 
   // Height messages are accepted only from this frame and only as a finite number.
   const heights:number[]=[];

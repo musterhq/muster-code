@@ -160,6 +160,7 @@ test('network for a page: asked on the card in Workspace mode, granted up front 
   assert.match(full.text(granted), /Network access \(https only\) is allowed/);
 });
 
+// Spec: MUS-SPEC-21-578B (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-578b)
 test('preview_open(url) opens the agent tab, shows the mini player (or the pane) and reports an unreachable server', async () => {
   const {bridge, emitted, opened, text} = fakeBridge();
   const ok = await bridge.call('c1', 'preview_open', {url: '0.0.0.0:5173'});

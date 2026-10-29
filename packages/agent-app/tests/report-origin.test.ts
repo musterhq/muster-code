@@ -27,6 +27,7 @@ test('a registered report is served from its own random origin with the strict C
   assert.notEqual(new ReportRegistry().register({html: 'x'}).token, token, 'tokens are random per document');
 });
 
+// Spec: MUS-SPEC-21-361E (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-361e)
 test('the CSP allows no network at all and no way out of the sandbox', () => {
   const csp = reportCsp(true);
   for (const directive of ["default-src 'none'", "connect-src 'none'", "frame-src 'none'", "child-src 'none'", "worker-src 'none'", "object-src 'none'", "form-action 'none'", "base-uri 'none'", "manifest-src 'none'", 'img-src data: blob:', 'font-src data:', "script-src 'unsafe-inline'"]) assert.ok(csp.includes(directive), directive);
