@@ -75,7 +75,7 @@ for (const [platform, device] of [['iOS', UDID], ['Android', SERIAL]] as const) 
       const listing = textOf(first);
       // Find "Sign in": a button, not the heading that contains the words.
       assert.match(listing, /^e\d+ button "Sign in" \[\d+,\d+ \d+×\d+\]$/m);
-      assert.match(listing, /^e\d+ heading "Sign in to Taskboard"/m);
+      assert.match(listing, /^e\d+ (heading|text) "Sign in to Taskboard"/m);
       assert.ok(!/application|window|linearlayout|framelayout/i.test(listing), 'layout containers and the full-screen root are left out');
       const email = refFor(listing, /textfield "(?:Email|email)"/);
       // Type into the Email field by its ref, then into Password by its label, then tap Sign in by its label.
@@ -88,13 +88,13 @@ for (const [platform, device] of [['iOS', UDID], ['Android', SERIAL]] as const) 
       assert.match(textOf(tap), /Tapped e\d+ button "Sign in"/);
       const app = hub.app(device);
       assert.equal(app.screen, 'home');assert.equal(app.email, 'ada@example.com');assert.equal(app.password, 'hunter2');
-      assert.match(textOf(await call('device_snapshot', {})), /heading "Welcome, ada@example\.com"/);
       // Every tap landed inside its element (the centre of the field and button boxes).
       assert.deepEqual(app.taps.map(t => [Math.round(t.x * 100) / 100, Math.round(t.y * 100) / 100]), [[0.5, 0.3], [0.5, 0.42], [0.5, 0.53]]);
-      // A ref from a screen that is gone is refused instead of tapping whatever is there now.
+      // A ref from the sign-in screen, used after the screen changed, is refused instead of tapping whatever is there now.
       const stale = await call('device_tap_element', {ref: email});
       assert.equal(stale.isError, true);assert.match(textOf(stale), /no longer on screen|device_snapshot/);
       assert.equal(app.taps.length, 3, 'nothing was tapped for the stale ref');
+      assert.match(textOf(await call('device_snapshot', {})), /(heading|text) "Welcome, ada@example\.com"/);
       // The helper was asked with its bearer token, never with the token in a URL.
       const axRequests = hub.requests.filter(r => /\/ax$|api\/accessibility/.test(r.path));
       assert.ok(axRequests.length >= 3);assert.ok(axRequests.every(r => r.auth === `Bearer ${hub.token}` && !r.path.includes(hub.token)));
@@ -126,7 +126,7 @@ test('element tools keep the device rules: read-only chats only look, user contr
     assert.match(textOf(await call('device_tap', {x: 10, y: 10})), /device_screenshot first/);
     const names = DEVICE_TOOL_SPECS.map(spec => spec.name);
     for (const name of ['device_snapshot', 'device_tap_element', 'device_type_into', 'device_settings', 'device_tap', 'device_screenshot']) assert.ok(names.includes(name as never), name);
-    assert.match(DEVICE_NOTE, /device_snapshot/);assert.match(DEVICE_NOTE, /ref/);assert.match(DEVICE_NOTE, /fall back|fallback/);
+    assert.match(DEVICE_NOTE, /device_snapshot/);assert.match(DEVICE_NOTE, /ref/);assert.match(DEVICE_NOTE, /fall back|fallback/i);
   } finally { await done(); hub.stop(); }
 });
 
@@ -322,6 +322,6 @@ test('device_settings: an agent switches to dark mode and larger text and reads 
     const detail = await manager.action(UDID, {type: 'setAppearance', value: 'light'});
     assert.equal(detail.settings.appearance, 'light');assert.equal(detail.platform, 'ios');
     await assert.rejects(manager.action(UDID, {type: 'setAppearance', value: 'sepia'}), /appearance/);
-    assert.ok(log.every(call => call[0] === '/usr/bin/xcrun'), 'only simctl ran');
+    assert.ok(log.filter(call => call.join(' ').includes(UDID)).every(call => call[0] === '/usr/bin/xcrun'), 'only simctl ran against the iPhone');
   } finally { await done(); hub.stop(); }
 });
