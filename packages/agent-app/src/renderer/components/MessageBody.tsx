@@ -268,15 +268,8 @@ function ServerImage({src, alt}: {src: string; alt?: string}): React.ReactElemen
   if (state && 'url' in state) return <img className="md-server-image" src={state.url} alt={alt ?? ''} loading="lazy"/>;
   return <span className="md-unavailable-link">{state ? `[Image: ${alt || 'image'} — could not be loaded from the server]` : `[Image: ${alt || 'image'} — loading]`}</span>;
 }
-/** The local file a markdown image points at: `/abs/path.png` or `file:///abs/path.png`; undefined for anything else. */
-export function localImagePath(src?: string): string | undefined {
-  if (!src) return undefined;
-  let path = src.trim();
-  if (/^file:\/\//i.test(path)) { try { path = decodeURIComponent(new URL(path).pathname); } catch { return undefined; } }
-  else if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(path) && !/^[A-Za-z]:[\\/]/.test(path)) return undefined;
-  else { try { path = decodeURIComponent(path); } catch { /* keep as written */ } }
-  return (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)) && /\.(?:png|jpe?g|gif|webp|bmp|avif|svg)$/i.test(path) ? path : undefined;
-}
+import { localImagePath } from '../local-image-path';
+export { localImagePath };
 
 function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false, asDocument = false, reports = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean; asDocument?: boolean; reports?: boolean }): React.ReactElement {
   // Replies link the files they mention (markdown-file-links.ts); documents and previews render as written.
