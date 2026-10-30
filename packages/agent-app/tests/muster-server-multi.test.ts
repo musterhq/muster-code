@@ -14,7 +14,7 @@ import type {DomainContext} from '../src/runtime/domains/types.ts';
 import type {MusterServerEntryView,MusterServerProject} from '../src/shared/domains/muster-server-protocol.ts';
 
 const json=(status:number,value:unknown)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json'}});
-interface FakeServer {origin:string;user:{username:string;displayName:string;role:string};password:string;token:string;projects:Array<{id:string;name:string}>}
+interface FakeServer {origin:string;user:{username:string;displayName:string;role:string};password:string;token:string;projects:Array<{id:string;name:string}>;org?:string}
 /** Many fake Muster Servers behind one fetch: each issues its own token and answers only to it. `down` makes one unreachable. */
 function fakeServers(list:FakeServer[]){
   const byOrigin=new Map(list.map(s=>[s.origin,s]));
@@ -32,7 +32,7 @@ function fakeServers(list:FakeServer[]){
     if(url.pathname==='/api/auth/token')return body.password===server.password?json(200,{ok:true,token:server.token}):json(401,{ok:false,error:'Wrong username or password.'});
     if(url.pathname==='/rpc'){
       if(headers.authorization!==`Bearer ${server.token}`)return json(401,{ok:false,error:'Not signed in.'});
-      if(body.command==='server.me')return json(200,{ok:true,value:{user:server.user,server:{version:'0.3.0'}}});
+      if(body.command==='server.me')return json(200,{ok:true,value:{user:server.user,server:{version:'0.3.0',...(server.org?{name:server.org}:{})}}});
       if(body.command==='project.list')return json(200,{ok:true,value:server.projects.map(p=>({...p,goal:'',archived:false}))});
       if(body.command==='server.health')return json(200,{ok:true,value:{version:'0.3.0'}});
     }
@@ -68,7 +68,7 @@ test('three Muster Servers added one after another are all listed, each with its
   await r.call('musterServer.check',{});
   const list=await r.list();
   assert.deepEqual(list.map(s=>[s.name,s.url,s.account,s.state]),[
-    ['alpha.example.com','https://alpha.example.com','Olivia Owner (@olivia)','online'],
+    ['alpha.example.com','https://alpha.example.com','Olivia Owner · API token','online'],
     ['beta.example.com','https://beta.example.com','Mel Member (@mel)','online'],
     ['gamma.example.com','https://gamma.example.com','Gus Guest (@gus)','online'],
   ],'adding a server never replaces the one before it');
@@ -108,7 +108,7 @@ test('rename, disconnect, re-authenticate and remove act on one server and leave
   await connectPassword(r,ALPHA,{serverId:a!.id});
   list=await r.list();
   assert.deepEqual(list.map(s=>s.id),[a!.id,b!.id,g!.id]);
-  assert.equal(list[0]!.account,'Olivia Owner (@olivia)');
+  assert.equal(list[0]!.account,'Olivia Owner (@olivia)','a password sign-in shows the account and its username');
 
   const out=await r.call<{servers:MusterServerEntryView[]}>('musterServer.remove',{serverId:g!.id});
   assert.deepEqual(out.servers.map(s=>s.id),[a!.id,b!.id],'removed from the list');
@@ -198,4 +198,42 @@ test('an unreachable server shows its own error and a retry, and the others stay
   list=await r.list();
   assert.deepEqual(list.map(s=>[s.id,s.state,s.error]),[[a!.id,'online',null],[b!.id,'online',null]]);
   assert.deepEqual((await r.call<{projects:MusterServerProject[]}>('musterServer.projects')).projects.map(p=>p.name),['Support desk','Billing','Payroll']);
+});
+
+const QA1:FakeServer={origin:'http://127.0.0.1:7471',user:{username:'owner1',displayName:'QA Owner 1',role:'owner'},password:'qa1-password-1',token:'mst_qa1_issued_token_0123456789',projects:[{id:'q1',name:'QA project'}],org:'QA Org 1'};
+const QA2:FakeServer={origin:'http://127.0.0.1:7472',user:{username:'owner2',displayName:'QA Owner 2',role:'owner'},password:'qa2-password-1',token:'mst_qa2_issued_token_0123456789',projects:[]};
+/** The Settings add flow: probe the address, then save it with the pasted token, aimed at a new entry (what ConnectionPanel sends). */
+async function addWithToken(r:ReturnType<typeof runtime>,s:FakeServer){
+  const probe=await r.call<{ok:boolean;backend:string}>('paperclip.test',{mode:'custom',baseUrl:s.origin,token:s.token});
+  assert.equal(probe.ok,true,`${s.origin} answers the probe`);
+  return r.call<{serverName:string|null}>('paperclip.config.set',{mode:'custom',baseUrl:s.origin,token:s.token,backend:probe.backend,companyId:null,serverId:'new'});
+}
+
+// Spec: MUS-SPEC-13-803G (docs/spec/clauses/13-muster-server.md#mus-spec-13-803g)
+test('a server added with an API token shows the person the token belongs to',async t=>{
+  const dir=await home(t),servers=fakeServers([QA1,QA2,BETA]),r=runtime(t,dir,servers);
+  await addWithToken(r,QA1);await addWithToken(r,QA2);await connectPassword(r,BETA);
+  await r.call('musterServer.check',{});
+  const list=await r.list();
+  assert.deepEqual(list.map(s=>s.account),['QA Owner 1 · API token','QA Owner 2 · API token','Mel Member (@mel)'],'the token\'s person, and that it is a token; a password sign-in keeps its username');
+  // A restart reads the account back from the list file (no check needed to name the person).
+  const again=runtime(t,dir,servers,r.secrets);
+  assert.equal((await again.list())[0]!.account,'QA Owner 1 · API token');
+});
+
+// Spec: MUS-SPEC-13-803H (docs/spec/clauses/13-muster-server.md#mus-spec-13-803h)
+test('a new server is named after its one org, else its host, and Rename still wins',async t=>{
+  const dir=await home(t),servers=fakeServers([QA1,QA2]),r=runtime(t,dir,servers);
+  const added=await addWithToken(r,QA1);await addWithToken(r,QA2);
+  await r.call('musterServer.check',{});
+  let list=await r.list();
+  assert.deepEqual(list.map(s=>s.name),['QA Org 1','127.0.0.1:7472'],'the org name when the server has one org, else host:port');
+  assert.equal((await r.call<{projects:MusterServerProject[]}>('musterServer.projects')).projects[0]!.serverName,'QA Org 1','projects are labelled with that name too');
+  assert.ok(added,'the add flow answered');
+  await r.call('musterServer.rename',{serverId:list[0]!.id,name:'Staging'});
+  await r.call('musterServer.check',{});
+  list=await r.list();
+  assert.deepEqual(list.map(s=>s.name),['Staging','127.0.0.1:7472'],'a name the person gave is never replaced by the org name');
+  const again=runtime(t,dir,servers,r.secrets);
+  assert.deepEqual((await again.list()).map(s=>s.name),['Staging','127.0.0.1:7472'],'names survive a restart');
 });

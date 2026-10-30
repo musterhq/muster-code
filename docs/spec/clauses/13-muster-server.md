@@ -22,7 +22,10 @@ Boundaries:
 | [MUS-SPEC-13-803C](13-muster-server.md#mus-spec-13-803c) | Projects from every connected server are listed at once, each labelled with its server; Projects, Roster and Inbox say which server they sync from. | [`projects from every connected server are listed at once and labelled with their server`](../../../packages/agent-app/tests/muster-server-multi.test.ts) |
 | [MUS-SPEC-13-803D](13-muster-server.md#mus-spec-13-803d) | An existing single-server setup becomes the first entry of the list with the same token, origin, orgs and account, and keeps working without signing in again. | [`an existing single-server setup moves into the list on first launch with nothing lost`](../../../packages/agent-app/tests/muster-server-multi.test.ts) |
 | [MUS-SPEC-13-803E](13-muster-server.md#mus-spec-13-803e) | A server that cannot be reached shows its own error, the others stay online and keep listing projects, and Retry brings it back. | [`an unreachable server shows its own error and a retry, and the others stay usable`](../../../packages/agent-app/tests/muster-server-multi.test.ts) |
-| [MUS-SPEC-13-803F](13-muster-server.md#mus-spec-13-803f) | Settings › Integrations lists each server as a row with name, URL, account and status, the row actions, a Retry on an unreachable row, and Add server opening the add flow. | [`the Integrations list shows every server with its actions, and Add server opens the add flow`](../../../packages/agent-app/tests/muster-server-list-dom.tsx) |
+| [MUS-SPEC-13-803F](13-muster-server.md#mus-spec-13-803f) | Settings › Integrations lists each server as a one-line row with name, URL, account and status, its actions in a "…" menu, a Retry on an unreachable row, and Add server opening the add flow. | [`the Integrations list shows every server with its actions, and Add server opens the add flow`](../../../packages/agent-app/tests/muster-server-list-dom.tsx) |
+| [MUS-SPEC-13-803G](13-muster-server.md#mus-spec-13-803g) | A server added with an API token shows the person the token belongs to, marked as a token; a password sign-in keeps its username. | [`a server added with an API token shows the person the token belongs to`](../../../packages/agent-app/tests/muster-server-multi.test.ts) |
+| [MUS-SPEC-13-803H](13-muster-server.md#mus-spec-13-803h) | A new server is named after its one org, else its host; a name given with Rename is kept. | [`a new server is named after its one org, else its host, and Rename still wins`](../../../packages/agent-app/tests/muster-server-multi.test.ts) |
+| [MUS-SPEC-13-803I](13-muster-server.md#mus-spec-13-803i) | After a server is added, the status line names that server, and the Projects line names the server it is about. | [`after adding a server the status line names the server just added, and the Projects line names its own server`](../../../packages/agent-app/tests/muster-server-list-dom.tsx) |
 
 <a id="mus-spec-13-575a"></a>
 #### MUS-SPEC-13-575A: A server value named like an object key falls back to the default
@@ -40,7 +43,7 @@ Boundaries:
 
 - Precondition: A fresh data folder and three fake Muster Servers at different addresses.
 - Action: Connect the first with a token, the second and the third with a password, then list the servers and check them.
-- Expected result: All three are listed, in the order added, with name, URL, signed-in account and status "online". Each token sits under its own secret-store entry, no token is in a config file, and each server only ever receives its own token.
+- Expected result: All three are listed, in the order added, with name, URL, signed-in account ("Olivia Owner · API token" for the token, the display name and username for a password) and status "online". Each token sits under its own secret-store entry, no token is in a config file, and each server only ever receives its own token.
 - Test: `packages/agent-app/tests/muster-server-multi.test.ts::three Muster Servers added one after another are all listed, each with its own token`
 - Environment: Node test runner; fake servers through an injected fetch; no network.
 - Known gaps: The browser-approval sign-in for a second server uses the same storage path but is not driven here.
@@ -95,8 +98,41 @@ Boundaries:
 
 - Precondition: Settings › Integrations with three servers: one online, one unreachable, one disconnected.
 - Action: Render the list, rename one, retry the unreachable one and press Add server.
-- Expected result: Each server is a row with its name, URL, signed-in account and status. Every row has Rename, Re-authenticate, Disconnect (when connected) and Remove. The unreachable row shows its error and a Retry that checks only that server. Add server shows the existing address form.
+- Expected result: Each server is a row with its name, URL, signed-in account and status. A row shows at most one button, Use for Projects, and only on a connected server that does not feed Projects. Rename, Re-authenticate, Disconnect (when connected) and Remove are in the row's "…" menu. The unreachable row shows its error and a Retry that checks only that server. Add server shows the existing address form.
 - Test: `packages/agent-app/tests/muster-server-list-dom.tsx::the Integrations list shows every server with its actions, and Add server opens the add flow`
 - Environment: linkedom DOM through scripts/test-renderer.mjs; stubbed bridge; no network.
 - Known gaps: Uses a stubbed bridge, not the real runtime. Layout and styling are not checked.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-13-803g"></a>
+#### MUS-SPEC-13-803G: A token sign-in shows whose token it is
+
+- Precondition: Two fake Muster Servers added through the Settings add flow with API tokens (probe, then save with the token), and one added with a password.
+- Action: Check the servers and list them, then read the list again after a restart.
+- Expected result: The token servers show "QA Owner 1 · API token" and "QA Owner 2 · API token", the person each server says the token belongs to. The password server shows "Mel Member (@mel)". The account is still there after a restart, before any check.
+- Test: `packages/agent-app/tests/muster-server-multi.test.ts::a server added with an API token shows the person the token belongs to`
+- Environment: Node test runner; fake servers through an injected fetch; no network.
+- Known gaps: Muster Servers only; a Paperclip-compatible token shows the person when its server answers who-am-I.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-13-803h"></a>
+#### MUS-SPEC-13-803H: A new server is named after its org
+
+- Precondition: Two fake Muster Servers added with tokens: one reports the org name "QA Org 1", the other reports none.
+- Action: Check them, list them and their projects, rename the first, check again, then restart.
+- Expected result: The first is named "QA Org 1" and its projects are labelled with it. The second is named by host and port. After Rename the first keeps "Staging" through later checks and a restart.
+- Test: `packages/agent-app/tests/muster-server-multi.test.ts::a new server is named after its one org, else its host, and Rename still wins`
+- Environment: Node test runner; fake servers through an injected fetch; no network.
+- Known gaps: A server with several orgs is named by host. Which org name a server reports is up to the server.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-13-803i"></a>
+#### MUS-SPEC-13-803I: The status line names the server just added
+
+- Precondition: Settings › Integrations with servers listed and the one feeding Projects connected.
+- Action: Open Add server, enter a second server's address and connect.
+- Expected result: The add flow closes and the new server has its row. A status line says "Connected to" and the new server's name. No line still says the first server is the one connected, and the Projects line says "Projects, Roster and Inbox sync from" and the name of its own server.
+- Test: `packages/agent-app/tests/muster-server-list-dom.tsx::after adding a server the status line names the server just added, and the Projects line names its own server`
+- Environment: linkedom DOM through scripts/test-renderer.mjs; stubbed bridge; no network.
+- Known gaps: Uses a stubbed bridge, not the real runtime.
 - Evidence: UNVERIFIED
