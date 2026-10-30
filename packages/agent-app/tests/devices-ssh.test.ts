@@ -216,10 +216,10 @@ test('host checks: iOS needs a Mac (a Linux host shows Android only); remote err
 
 function fakeHost(id: string, label: string, overrides: Partial<DeviceHost> = {}): DeviceHost & {runs: string[][]; stopped: number} {
   const runs: string[][] = [];
-  const host = {
+  const host: DeviceHost & {runs: string[][]; stopped: number} = {
     id, kind: 'ssh' as const, label, ready: true, runs, stopped: 0,
     summary: (): DeviceHostSummary => ({id, kind: 'ssh', label, state: 'ready', ios: {available: true}, android: {available: true}}),
-    connect: async () => host.summary(),
+    connect: async (): Promise<DeviceHostSummary> => host.summary(),
     probe: () => ({
       env: {ANDROID_HOME: '/remote/sdk'}, home: '/Users/remote', platform: 'darwin' as NodeJS.Platform, exists: () => true,
       run: async (file: string, args: string[]) => {

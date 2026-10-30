@@ -19,6 +19,7 @@ import {AppleModels} from './models.ts';
 import {androidSkinChrome, dataUrl, parseHubChrome, skinDir} from './chrome.ts';
 import {readAvdConfig} from './discovery.ts';
 import type {DeviceChrome} from '../../shared/device-protocol.ts';
+import {joinDeviceId, splitDeviceId, type DeviceHost, type DeviceHosts} from './hosts.ts';
 
 export const HUB_IDLE_MS = 45_000;
 /** System packages worth offering an agent on Android (settings, browser, the usual Google apps). */
@@ -39,6 +40,8 @@ export interface DeviceManagerDeps extends ProbeDeps {
   agentAccessChanged?(enabled: boolean): void;
   setTimeout?: typeof setTimeout;
   clearTimeout?: typeof clearTimeout;
+  /** Remote device hosts (#812): SSH hosts the user chose; their devices are listed and driven beside local ones. */
+  hosts?: DeviceHosts;
 }
 interface Settings {enabled: boolean; agentControl: boolean; appleModels: boolean}
 interface Live {session: DeviceSession; link: DeviceLink; viewers: Set<string>}
@@ -93,7 +96,28 @@ export class DeviceManager {
     const {ios, android, node} = this.setupCache;
     return {enabled: this.settings.enabled, agentControl: this.settings.agentControl, appleModels: this.settings.appleModels, models: this.appleModels.status(), ios, android, node,
       host: this.deps.platform === 'darwin' || this.deps.platform === 'win32' ? this.deps.platform : 'linux',
-      helper: {state: this.helperState, version: HELPER_VERSION, downloadMB: HELPER_DOWNLOAD_MB, running: !!this.hub, ...(this.helperProgress ? {progress: this.helperProgress} : {}), ...(this.helperError ? {error: this.helperError} : {})}};
+      helper: {state: this.helperState, version: HELPER_VERSION, downloadMB: HELPER_DOWNLOAD_MB, running: !!this.hub, ...(this.helperProgress ? {progress: this.helperProgress} : {}), ...(this.helperError ? {error: this.helperError} : {})},
+      ...(this.deps.hosts ? {hosts: await this.deps.hosts.summaries()} : {})};
+  }
+  /** A remote host changed state (#812): republish, drop a gone host's devices, and wake its sessions after a reconnect. */
+  hostChanged(host: DeviceHost): void {
+    if (this.disposed) return;
+    if (host.ready) for (const live of this.live.values()) if (live.session.hostId === host.id) live.link.reconnect();
+    if (!host.ready && host.summary().state === 'off') {
+      for (const [id, live] of this.live) if (live.session.hostId === host.id) { this.live.delete(id); live.link.close(); }
+      this.list = {...this.list, devices: this.list.devices.filter(device => device.hostId !== host.id)};
+      this.publishSessions(); this.deps.emit({type: 'deviceList', list: this.list});
+    }
+    void this.publishSetup();
+  }
+  /** Where a device lives: this computer, or a connected remote host and the id that host uses. */
+  private where(id: string): {host?: DeviceHost; raw: string; probe: ProbeDeps; adb: string; hub: () => Promise<HubEndpoint>} {
+    const {hostId, raw} = splitDeviceId(id);
+    if (!hostId) return {raw: id, probe: this.deps, adb: androidTools(this.deps).adb, hub: () => this.hubEndpoint()};
+    const host = this.deps.hosts?.get(hostId);
+    if (!host) throw new Error('That device\'s host is not connected. Connect it in Settings › Integrations › Devices.');
+    const probe = host.probe();
+    return {host, raw: validId(raw), probe, adb: androidTools(probe).adb.split(path.sep).join('/'), hub: () => host.hub()};
   }
   private async publishSetup(): Promise<DeviceSetup> { const setup = await this.setup(); this.deps.emit({type: 'deviceSetup', setup}); return setup; }
 
@@ -110,7 +134,7 @@ export class DeviceManager {
     if (this.settings.appleModels && !next.appleModels) this.appleModels.clear();
     this.settings = next;
     writeSettings(this.settingsFile, next);
-    if (!next.enabled) await this.stopAll();
+    if (!next.enabled) await Promise.all([this.stopAll(), this.deps.hosts?.stopAll()]);
     if (before !== this.agentAccess) this.deps.agentAccessChanged?.(this.agentAccess);
     return this.publishSetup();
   }
@@ -188,8 +212,8 @@ export class DeviceManager {
     }
     if (!this.disposed) void this.publishSetup();
   }
-  private async hubJson(pathname: string, body: unknown, timeoutMs = 180_000): Promise<{ok?: boolean; error?: string; id?: string; serial?: string}> {
-    const hub = await this.hubEndpoint();
+  private async hubJson(pathname: string, body: unknown, timeoutMs = 180_000, endpoint: () => Promise<HubEndpoint> = () => this.hubEndpoint()): Promise<{ok?: boolean; error?: string; id?: string; serial?: string}> {
+    const hub = await endpoint();
     const response = await this.deps.fetch(`${hub.origin}${pathname}`, {method: 'POST', headers: {authorization: `Bearer ${hub.token}`, 'content-type': 'application/json'}, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs)});
     const result = await response.json().catch(() => ({})) as {ok?: boolean; error?: string; id?: string; serial?: string};
     if (!response.ok && result.ok === undefined) return {ok: false, error: `The device helper answered ${response.status}.`};
@@ -205,8 +229,18 @@ export class DeviceManager {
       setup.ios.available ? listIos(this.deps).catch(error => { errors.push(`iOS: ${errorLine(error)}`); return [] as DeviceInfo[]; }) : Promise.resolve([] as DeviceInfo[]),
       setup.android.available ? listAndroid(this.deps).catch(error => { errors.push(`Android: ${errorLine(error)}`); return [] as DeviceInfo[]; }) : Promise.resolve([] as DeviceInfo[]),
     ]);
+    const remote: DeviceInfo[] = [];
+    for (const host of this.deps.hosts ? await this.deps.hosts.active() : []) {
+      if (!host.ready) continue;
+      const summary = host.summary(), probe = host.probe(), tag = (device: DeviceInfo): DeviceInfo => ({...device, id: joinDeviceId(host.id, device.id), hostId: host.id, hostLabel: host.label});
+      const [hostIos, hostAndroid] = await Promise.all([
+        summary.ios?.available ? listIos(probe).catch(error => { errors.push(`${host.label}: iOS: ${errorLine(error)}`); return [] as DeviceInfo[]; }) : Promise.resolve([] as DeviceInfo[]),
+        summary.android?.available ? listAndroid(probe).catch(error => { errors.push(`${host.label}: Android: ${errorLine(error)}`); return [] as DeviceInfo[]; }) : Promise.resolve([] as DeviceInfo[]),
+      ]);
+      remote.push(...hostIos.map(tag), ...hostAndroid.map(tag));
+    }
     // Booted first, then by name, so the running ones lead the picker.
-    const devices = [...ios, ...android].sort((a, b) => Number(b.state === 'booted') - Number(a.state === 'booted') || a.name.localeCompare(b.name));
+    const devices = [...ios, ...android, ...remote].sort((a, b) => Number(b.state === 'booted') - Number(a.state === 'booted') || a.name.localeCompare(b.name));
     this.list = {devices, errors, checkedAt: Date.now()};
     this.deps.emit({type: 'deviceList', list: this.list});
     return this.list;
@@ -225,19 +259,21 @@ export class DeviceManager {
     this.ready();
     const device = await this.find(validId(rawId));
     if (device.state === 'booted') return device;
+    const at = this.where(device.id);
     this.patchDevice(device.id, {state: 'booting'});
     try {
       if (device.platform === 'ios') {
         // simctl boots headless (no Simulator window); bootstatus waits until SpringBoard is up.
-        await this.deps.run('/usr/bin/xcrun', ['simctl', 'boot', device.id], {timeoutMs: 120_000}).catch(error => { if (!/current state: Booted/i.test(String(error))) throw error; });
-        await this.deps.run('/usr/bin/xcrun', ['simctl', 'bootstatus', device.id, '-b'], {timeoutMs: 240_000});
+        await at.probe.run('/usr/bin/xcrun', ['simctl', 'boot', at.raw], {timeoutMs: 120_000}).catch(error => { if (!/current state: Booted/i.test(String(error))) throw error; });
+        await at.probe.run('/usr/bin/xcrun', ['simctl', 'bootstatus', at.raw, '-b'], {timeoutMs: 240_000});
         this.patchDevice(device.id, {state: 'booted'});
         return {...device, state: 'booted'};
       }
-      const result = await this.hubJson('/api/devices/boot', {platform: 'android', id: device.name, name: device.name}, 300_000);
+      const result = await this.hubJson('/api/devices/boot', {platform: 'android', id: device.name, name: device.name}, 300_000, at.hub);
       if (result.ok === false) throw new Error(result.error || 'The emulator did not start.');
       const list = await this.devices(true);
-      const booted = list.devices.find(item => item.id === result.serial || item.id === result.id) ?? list.devices.find(item => item.platform === 'android' && item.name === device.name && item.state !== 'shutdown');
+      const mine = (id: string | undefined) => id && (at.host ? joinDeviceId(at.host.id, id) : id);
+      const booted = list.devices.find(item => item.id === mine(result.serial) || item.id === mine(result.id)) ?? list.devices.find(item => item.platform === 'android' && item.name === device.name && item.state !== 'shutdown' && item.hostId === device.hostId);
       if (!booted) throw new Error('The emulator started but did not appear in adb. Try again.');
       return booted;
     } catch (error) {
@@ -249,13 +285,14 @@ export class DeviceManager {
     this.ready();
     const id = validId(rawId), device = await this.find(id);
     await this.close(id);
+    const at = this.where(id);
     this.patchDevice(id, {state: 'shutting-down'});
     try {
       if (device.platform === 'ios') {
         // serve-sim's own shutdown also closes its capture session, so the next boot streams fresh.
-        const viaHub = this.hub ? await this.hubJson('/vendor/serve-sim/grid/api/shutdown', {udid: id}, 60_000).catch(() => ({ok: false})) : {ok: false};
-        if (viaHub.ok !== true) await this.deps.run('/usr/bin/xcrun', ['simctl', 'shutdown', id], {timeoutMs: 60_000}).catch(error => { if (!/current state: Shutdown/i.test(String(error))) throw error; });
-      } else await this.deps.run(androidTools(this.deps).adb, ['-s', id, 'emu', 'kill'], {timeoutMs: 30_000});
+        const viaHub = (at.host ? at.host.ready : this.hub) ? await this.hubJson('/vendor/serve-sim/grid/api/shutdown', {udid: at.raw}, 60_000, at.hub).catch(() => ({ok: false})) : {ok: false};
+        if (viaHub.ok !== true) await at.probe.run('/usr/bin/xcrun', ['simctl', 'shutdown', at.raw], {timeoutMs: 60_000}).catch(error => { if (!/current state: Shutdown/i.test(String(error))) throw error; });
+      } else await at.probe.run(at.adb, ['-s', at.raw, 'emu', 'kill'], {timeoutMs: 30_000});
     } finally { await this.devices(true).catch(() => undefined); }
   }
 
@@ -280,10 +317,11 @@ export class DeviceManager {
       return existing.session;
     }
     if (device.state !== 'booted') device = await this.boot(device.id);
-    const session: DeviceSession = {deviceId: device.id, name: deviceTitle(device), platform: device.platform, formFactor: device.formFactor, ...(device.frame ? {frame: device.frame} : {}), ...(by.chatId ? {chatId: by.chatId} : {}),
+    const at = this.where(device.id);
+    const session: DeviceSession = {deviceId: device.id, name: deviceTitle(device), platform: device.platform, formFactor: device.formFactor, ...(device.frame ? {frame: device.frame} : {}), ...(device.hostId ? {hostId: device.hostId, hostLabel: device.hostLabel} : {}), ...(by.chatId ? {chatId: by.chatId} : {}),
       openedBy: by.chatId ? 'agent' : 'user', control: 'agent', state: 'starting', inputReady: false, openedAt: Date.now()};
     const live: Live = {session, viewers: new Set(), link: undefined as unknown as DeviceLink};
-    live.link = new DeviceLink(device.platform, device.id, {hub: () => this.hubEndpoint(), fetch: this.deps.fetch, socket: this.deps.socket, setTimeout: this.timers.set, clearTimeout: this.timers.clear}, {
+    live.link = new DeviceLink(device.platform, at.raw, {hub: at.hub, fetch: this.deps.fetch, socket: this.deps.socket, setTimeout: this.timers.set, clearTimeout: this.timers.clear}, {
       frame: frame => { if (this.live.get(device.id) !== live) return; live.session.lastFrameAt = Date.now(); this.deps.frame(device.id, frame); },
       state: (state, detail) => { if (this.live.get(device.id) === live) this.updateSession(live, {state, ...(detail ? {error: detail} : {})}); },
       screen: screen => { if (this.live.get(device.id) === live) this.updateSession(live, {screen}); },
@@ -346,19 +384,22 @@ export class DeviceManager {
   }
   private async readChrome(id: string): Promise<DeviceChrome | null> {
     const device = await this.find(id);
+    const at = this.where(id);
+    // A remote emulator's SDK skin is on the host, not here: Muster's own frame (iOS frames come through the helper).
+    if (at.host && device.platform === 'android') return null;
     if (device.platform === 'android') {
       const dir = skinDir(readAvdConfig(this.deps, device.name), androidTools(this.deps).sdk);
       return dir ? androidSkinChrome(dir, {text: file => this.deps.readText?.(file), bytes: file => this.deps.readBytes?.(file)}) : null;
     }
-    if (this.deps.platform !== 'darwin') return null;
+    if (!at.host && this.deps.platform !== 'darwin') return null;
     // Read-only routes of the loopback helper: the parsed DeviceKit descriptor, then its rasterised images.
-    const hub = await this.hubEndpoint();
+    const hub = await at.hub();
     const get = async (pathname: string) => {
       const response = await this.deps.fetch(`${hub.origin}${pathname}`, {headers: {authorization: `Bearer ${hub.token}`}, signal: AbortSignal.timeout(20_000)});
       if (!response.ok) throw new Error(`the helper answered ${response.status}`);
       return response;
     };
-    const described = parseHubChrome(await (await get('/vendor/serve-sim/grid/api')).json(), id);
+    const described = parseHubChrome(await (await get('/vendor/serve-sim/grid/api')).json(), at.raw);
     if (!described) return null;
     const image = async (name: string) => {
       const bytes = new Uint8Array(await (await get(`/vendor/serve-sim/grid/api/devicekit-chrome?chrome=${encodeURIComponent(described.identifier)}&image=${encodeURIComponent(name)}`)).arrayBuffer());
@@ -379,7 +420,8 @@ export class DeviceManager {
     if (from === 'agent' && live.session.control === 'user') throw new Error('The user has taken control of this device.');
     if (live.session.platform === 'android' && (button === 'volumeUp' || button === 'volumeDown' || button === 'power')) {
       // Fixed keyevents through adb; no text reaches a shell.
-      await this.deps.run(androidTools(this.deps).adb, ['-s', id, 'shell', 'input', 'keyevent', button === 'power' ? '26' : button === 'volumeUp' ? '24' : '25'], {timeoutMs: 10_000});
+      const at = this.where(id);
+      await at.probe.run(at.adb, ['-s', at.raw, 'shell', 'input', 'keyevent', button === 'power' ? '26' : button === 'volumeUp' ? '24' : '25'], {timeoutMs: 10_000});
       return;
     }
     if (button === 'volumeUp' || button === 'volumeDown' || (button === 'back' && live.session.platform === 'ios')) throw new Error('This device has no such button.');
@@ -388,7 +430,7 @@ export class DeviceManager {
   async rotate(rawId: unknown): Promise<void> {
     const id = validId(rawId), live = this.live.get(id);
     if (!live) throw new Error('Open the device first.');
-    if (live.session.platform === 'android') { await this.deps.run(androidTools(this.deps).adb, ['-s', id, 'emu', 'rotate'], {timeoutMs: 10_000}); return; }
+    if (live.session.platform === 'android') { const at = this.where(id); await at.probe.run(at.adb, ['-s', at.raw, 'emu', 'rotate'], {timeoutMs: 10_000}); return; }
     if (!live.link.rotate()) throw new Error('The simulator is not accepting input yet. Try again in a moment.');
   }
   control(rawId: unknown, owner: unknown): DeviceSession {
@@ -400,8 +442,8 @@ export class DeviceManager {
   }
   /** simctl right after a cold boot can stall on CoreSimulator for well over 20 s (CI saw listapps and launch time out):
    *  60 s, and one more try when the first attempt was killed by the time limit. */
-  private simctlPatient(args: string[]): Promise<string> {
-    const once = () => this.deps.run('/usr/bin/xcrun', ['simctl', ...args], {timeoutMs: 60_000});
+  private simctlPatient(args: string[], run: ProbeDeps['run'] = this.deps.run): Promise<string> {
+    const once = () => run('/usr/bin/xcrun', ['simctl', ...args], {timeoutMs: 60_000});
     const timedOut = (error: unknown) => { const text = String(error instanceof Error ? error.message : error).trim(); return /timed? ?out|ETIMEDOUT|SIGTERM/i.test(text) || /^Command failed: \S+ simctl [^\n]*$/.test(text); };
     return once().catch(error => timedOut(error) ? once() : Promise.reject(error));
   }
@@ -410,11 +452,12 @@ export class DeviceManager {
     this.ready();
     const device = await this.find(validId(rawId));
     if (device.state !== 'booted') throw new Error(`${deviceTitle(device)} is not running.`);
-    if (device.platform === 'ios') return parseSimctlApps(await this.simctlPatient(['listapps', device.id]));
-    const adb = androidTools(this.deps).adb;
+    const at = this.where(device.id);
+    if (device.platform === 'ios') return parseSimctlApps(await this.simctlPatient(['listapps', at.raw], at.probe.run));
+    const adb = at.adb;
     const [user, system] = await Promise.all([
-      this.deps.run(adb, ['-s', device.id, 'shell', 'pm', 'list', 'packages', '-3'], {timeoutMs: 15_000}),
-      this.deps.run(adb, ['-s', device.id, 'shell', 'pm', 'list', 'packages', '-s'], {timeoutMs: 15_000}).catch(() => ''),
+      at.probe.run(adb, ['-s', at.raw, 'shell', 'pm', 'list', 'packages', '-3'], {timeoutMs: 15_000}),
+      at.probe.run(adb, ['-s', at.raw, 'shell', 'pm', 'list', 'packages', '-s'], {timeoutMs: 15_000}).catch(() => ''),
     ]);
     return sortApps([...parseAdbPackages(user, true), ...parseAdbPackages(system, false).filter(app => ANDROID_SYSTEM_APPS.test(app.id))]);
   }
@@ -425,14 +468,15 @@ export class DeviceManager {
     if (typeof app !== 'string' || !APP_ID.test(app)) throw new Error('Pass the app\'s bundle id (iOS) or package name (Android).');
     if (!live) throw new Error('Open the device first.');
     if (from === 'agent' && live.session.control === 'user') throw new Error('The user has taken control of this device.');
+    const at = this.where(id);
     if (live.session.platform === 'ios') {
-      await this.simctlPatient(['launch', id, app]).catch(error => {
+      await this.simctlPatient(['launch', at.raw, app], at.probe.run).catch(error => {
         throw new Error(/not installed|FBSOpenApplicationServiceErrorDomain|found nothing|No such|code=4\b/i.test(errorLine(error)) ? `${app} is not installed on ${live.session.name}. Use device_apps to see what is.` : `Could not launch ${app}: ${errorLine(error)}`);
       });
       return;
     }
     // monkey starts the package's launcher activity; it needs no activity name and runs nothing else.
-    const out = await this.deps.run(androidTools(this.deps).adb, ['-s', id, 'shell', 'monkey', '-p', app, '-c', 'android.intent.category.LAUNCHER', '1'], {timeoutMs: 30_000})
+    const out = await at.probe.run(at.adb, ['-s', at.raw, 'shell', 'monkey', '-p', app, '-c', 'android.intent.category.LAUNCHER', '1'], {timeoutMs: 30_000})
       .catch(error => { throw new Error(`Could not launch ${app}: ${errorLine(error)}`); });
     if (/No activities found|monkey aborted|Error:/i.test(out)) throw new Error(`${app} is not installed on ${live.session.name}, or has no launcher screen. Use device_apps to see what is.`);
   }
@@ -442,7 +486,9 @@ export class DeviceManager {
     const device = await this.find(validId(rawId));
     if (device.state !== 'booted') throw new Error(`${deviceTitle(device)} is not running.`);
     let png: Buffer;
-    if (device.platform === 'ios') {
+    const at = this.where(device.id);
+    if (at.host) png = await at.host.screenshot(device.platform, at.raw);
+    else if (device.platform === 'ios') {
       fs.mkdirSync(this.paths.stateDir, {recursive: true, mode: 0o700});
       const dir = fs.mkdtempSync(path.join(this.paths.stateDir, 'shot-'));
       try {
@@ -459,7 +505,7 @@ export class DeviceManager {
     for (const id of [...this.live.keys()]) await this.close(id);
     await this.stopHub();
   }
-  async dispose(): Promise<void> { this.disposed = true; await this.stopAll(); }
+  async dispose(): Promise<void> { this.disposed = true; await Promise.all([this.stopAll(), this.deps.hosts?.stopAll()]); }
 }
 
 function bootFailure(device: DeviceInfo, error: unknown): string {

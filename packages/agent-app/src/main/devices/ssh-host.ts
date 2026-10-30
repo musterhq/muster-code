@@ -215,7 +215,7 @@ export class SshDeviceHost implements DeviceHost {
         let newline: number;
         while ((newline = out.indexOf('\n')) >= 0) {
           const line = out.slice(0, newline); out = out.slice(newline + 1);
-          let message: {protocol?: number; type?: string} & Partial<Ready> & {code?: number | null; tail?: string};
+          let message: {protocol?: number; type?: string; port?: number; token?: string; version?: string; hubPid?: number; code?: number | null; tail?: string};
           try { message = JSON.parse(line); } catch { continue; }
           if (message.type === 'ready' && typeof message.port === 'number' && typeof message.token === 'string') {
             if (message.version !== HELPER_VERSION) { done(new DeviceHostError('VERSION_MISMATCH', `The device helper on ${this.label} is ${message.version}, and Muster needs ${HELPER_VERSION}. Disconnect and connect again to reinstall it.`)); continue; }
