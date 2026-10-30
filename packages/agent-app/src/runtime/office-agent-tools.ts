@@ -94,7 +94,7 @@ export async function runOfficeTool(deps: OfficeToolDeps, chatId: string, tool: 
         return text([
           `Office libraries ready (${describeVersions(ready.versions)}).`,
           `Run scripts with: ${JSON.stringify(ready.node)} <script.mjs|script.cjs> [args]`,
-          'import { Document, Packer } from "docx" and require("docx") both work from any folder with that command. Keep scripts and outputs in the working folder.',
+          'Both ES module imports and CommonJS requires of the docx package work from any folder with that command. Keep scripts and outputs in the working folder.',
           `Modules folder: ${ready.modules}`,
         ].join('\n'));
       }
