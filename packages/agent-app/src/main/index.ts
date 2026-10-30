@@ -550,7 +550,9 @@ async function main(): Promise<void> {
   const devices = wireDevices({ipcMain, window:()=>window, trusted:event=>isTrustedSender(event.senderFrame,event.sender.id),
     userData:app.getPath('userData'), manifestDir:unpackedPath(path.join(__dirname,'device-helper')), toolsDir:path.join(dataDir,'agent-tools','devices'), execPath:process.execPath,
     emit:onEvent,
-    chat:async chatId=>{const chat=(await loaded.service.invoke('app.snapshot',undefined)).chats.find(item=>item.id===chatId);return chat?{mode:chat.mode,...(chat.permissionMode?{permissionMode:chat.permissionMode}:{})}:undefined;}});
+    chat:async chatId=>{const chat=(await loaded.service.invoke('app.snapshot',undefined)).chats.find(item=>item.id===chatId);return chat?{mode:chat.mode,...(chat.permissionMode?{permissionMode:chat.permissionMode}:{})}:undefined;},
+    // #812: remote device hosts reuse Settings › Environments' SSH hosts and their trusted keys.
+    dataDir, sshHosts:async()=>(await loaded.service.invoke('ssh.hosts.list',{})).hosts});
 
   ipcMain.handle('muster:invoke', async (event, command: unknown, input: unknown) => {
     if (!isTrustedSender(event.senderFrame, event.sender.id)) {

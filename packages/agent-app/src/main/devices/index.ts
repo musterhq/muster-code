@@ -11,6 +11,9 @@ import {locateCli} from '../../runtime/adapters/shared.ts';
 import {DeviceManager} from './manager.ts';
 import {DeviceToolHost} from './agent-tools.ts';
 import type {Run} from './discovery.ts';
+import {DeviceHosts} from './hosts.ts';
+import {SshDeviceHost} from './ssh-host.ts';
+import type {SshHost} from '../../shared/domains/envs-protocol.ts';
 
 const run: Run = (file, args, options = {}) => new Promise((resolve, reject) => {
   execFile(file, args, {timeout: options.timeoutMs ?? 30_000, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8', windowsHide: true, env: options.env ?? process.env}, (error, stdout, stderr) => error ? reject(new Error(String(stderr || error.message).trim() || error.message)) : resolve(stdout));
@@ -29,8 +32,15 @@ export function wireDevices(input: {
   userData: string; manifestDir: string; toolsDir: string; execPath: string;
   emit(event: DeviceEvent): void;
   chat(chatId: string): Promise<{mode: string; permissionMode?: string} | undefined>;
+  /** Remote device hosts (#812): the SSH hosts from Settings › Environments, and the data folder holding their trusted keys. */
+  sshHosts?(): Promise<SshHost[]>;
+  dataDir?: string;
 }): DevicesWiring {
   const home = homedir();
+  const sshHosts = input.sshHosts, dataDir = input.dataDir;
+  const hosts = sshHosts && dataDir ? new DeviceHosts({userData: input.userData, sshHosts,
+    create: record => new SshDeviceHost(record, {dataDir, userData: input.userData, manifestDir: input.manifestDir, fetch: (...args) => fetch(...args), changed: host => manager.hostChanged(host)}),
+    changed: () => undefined}) : undefined;
   let toolHost: DeviceToolHost | undefined;
   const setAgentAccess = (enabled: boolean) => {
     if (!enabled) { delete process.env[DEVICE_MCP_LAUNCHER_ENV]; return; }
@@ -54,6 +64,7 @@ export function wireDevices(input: {
       window.webContents.send(DEVICE_FRAME_CHANNEL, {deviceId, codec: frame.codec, key: frame.key, data: frame.data, ...(frame.pts !== undefined ? {pts: frame.pts} : {}), ...(frame.reset ? {reset: true} : {}), ...(frame.format ? {format: frame.format} : {}), ...(frame.config ? {config: true} : {})});
     },
     agentAccessChanged: setAgentAccess,
+    ...(hosts ? {hosts} : {}),
   });
   async function startTools(): Promise<void> {
     toolHost ??= new DeviceToolHost({dir: input.toolsDir, execPath: input.execPath, target: {
@@ -112,6 +123,13 @@ export function wireDevices(input: {
       case 'devices.chrome': return manager.chrome(request.id);
       case 'devices.model': return manager.model(request.id);
       case 'devices.modelStore': return manager.storeModel(request.id, request.glb);
+      case 'devices.hosts': return hosts ? hosts.summaries() : [];
+      case 'devices.connectHost': {
+        if (!hosts) throw new Error('Remote device hosts are not available here.');
+        if (!(await manager.setup()).enabled) throw new Error('Turn devices on first.');
+        return hosts.connect(request.sshHostId);
+      }
+      case 'devices.disconnectHost': if (!hosts) throw new Error('Remote device hosts are not available here.'); return hosts.disconnect(request.sshHostId);
     }
   };
   return {

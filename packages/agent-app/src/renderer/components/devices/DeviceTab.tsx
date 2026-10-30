@@ -72,8 +72,13 @@ function DevicePicker(): React.ReactElement {
   const open = (device: DeviceInfo) => act(device, device.state === 'booted' ? 'Opening…' : 'Starting…', async () => { const session = await invoke('devices.open', {id: device.id}); openDeviceTab({id: session.deviceId, name: session.name}); });
   const devices = ui.list?.devices ?? [];
   const groups: {label: string; check: PlatformCheck; items: DeviceInfo[]; hidden?: string}[] = [
-    {label: 'iOS Simulators', check: setup.ios, items: devices.filter(item => item.platform === 'ios'), ...(setup.host !== 'darwin' ? {hidden: `iOS Simulators need a Mac with Xcode, so they are not available on ${hostDevice().lower}.`} : {})},
-    {label: 'Android Emulators', check: setup.android, items: devices.filter(item => item.platform === 'android')},
+    {label: 'iOS Simulators', check: setup.ios, items: devices.filter(item => item.platform === 'ios' && !item.hostId), ...(setup.host !== 'darwin' ? {hidden: `iOS Simulators need a Mac with Xcode, so they are not available on ${hostDevice().lower}.`} : {})},
+    {label: 'Android Emulators', check: setup.android, items: devices.filter(item => item.platform === 'android' && !item.hostId)},
+    // #812: each connected remote host gets its own groups, labelled with its name.
+    ...(setup.hosts ?? []).filter(host => host.state !== 'off').flatMap(host => host.state !== 'ready'
+      ? [{label: `On ${host.label}`, check: {available: false, reason: host.detail ?? (host.state === 'failed' ? 'The host could not be used.' : 'Connecting…')}, items: []}]
+      : [{label: `iOS Simulators on ${host.label}`, check: host.ios ?? {available: false}, items: devices.filter(item => item.platform === 'ios' && item.hostId === host.id)},
+        {label: `Android Emulators on ${host.label}`, check: host.android ?? {available: false}, items: devices.filter(item => item.platform === 'android' && item.hostId === host.id)}]),
   ];
   return <div className="device-picker">
     <header className="device-picker-head">
@@ -86,7 +91,7 @@ function DevicePicker(): React.ReactElement {
       <h4>{group.label}</h4>
       {group.hidden ? <p className="device-group-note">{group.hidden}</p>
         : !group.check.available ? <div className="device-group-note is-missing"><FixSteps check={group.check}/></div>
-        : !group.items.length ? <p className="device-group-note">{group.label.startsWith('iOS') ? 'No simulators yet. Add one in Xcode › Window › Devices and Simulators.' : 'No virtual devices yet. Create one in Android Studio › Device Manager.'}</p>
+        : !group.items.length ? <p className="device-group-note">{group.label.includes(' on ') ? 'None on this host yet.' : group.label.startsWith('iOS') ? 'No simulators yet. Add one in Xcode › Window › Devices and Simulators.' : 'No virtual devices yet. Create one in Android Studio › Device Manager.'}</p>
         : <ul className="device-list">{group.items.map(device => {
           const live = ui.sessions.some(session => session.deviceId === device.id), working = busy[device.id];
           const Icon = device.formFactor === 'tablet' ? Tablet : Smartphone;

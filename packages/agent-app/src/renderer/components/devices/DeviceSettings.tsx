@@ -4,10 +4,10 @@
  */
 import React, {useEffect, useId, useState} from 'react';
 import {CircleCheck, CircleAlert} from 'lucide-react';
-import type {DeviceSetup, PlatformCheck} from '../../../shared/device-protocol';
+import type {DeviceHostSummary, DeviceSetup, PlatformCheck} from '../../../shared/device-protocol';
 import {device as hostDevice} from '../../../shared/device-noun';
 import {invoke} from '../../bridge';
-import {closeSettings, notifyError, openTab} from '../../store';
+import {closeSettings, notifyError, openAppSettings, openTab} from '../../store';
 import {DEVICES_TAB_ID, devicesAvailable, setDeviceSetup, useDeviceUi, wireDeviceEvents} from '../../deviceSessions';
 import './devices.css';
 
@@ -25,6 +25,33 @@ function Check({label, check}: {label: string; check: PlatformCheck}) {
       {!check.available && check.fix?.length ? <ol className="device-fix">{check.fix.map(step => <li key={step}>{step}</li>)}</ol> : null}
       {!check.available && check.detail ? <span className="device-check-detail">{check.detail}</span> : null}</span>
   </li>;
+}
+
+const HOST_STATE: Record<DeviceHostSummary['state'], string> = {off: 'Not used', connecting: 'Connecting…', installing: 'Installing the helper…', starting: 'Starting…', ready: 'Connected', reconnecting: 'Reconnecting…', failed: 'Failed'};
+/** Remote device hosts (#812): an SSH host from Settings › Environments, used for its simulators and emulators. */
+function RemoteHosts({setup}: {setup: DeviceSetup}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const hosts = setup.hosts ?? [];
+  const act = async (host: DeviceHostSummary, on: boolean) => {
+    setBusy(host.sshHostId ?? host.id);
+    try { await invoke(on ? 'devices.connectHost' : 'devices.disconnectHost', {sshHostId: host.sshHostId!}); } catch (cause) { notifyError(cause); }
+    finally { setBusy(null); try { setDeviceSetup(await invoke('devices.setup', undefined)); } catch { /* the next event updates it */ } }
+  };
+  return <div className="preference-group" aria-label="Remote device hosts">
+    <Row title="Devices on other machines" description={<>Use the simulators and emulators of an SSH host (Settings › Environments). Muster installs the same helper {setup.helper.version} there, in ~/.muster/device-host and without sudo (it needs Node.js 20 or later on the host), forwards it over SSH and stops it when you disconnect or quit. iOS needs a Mac host.</>}/>
+    {!hosts.length ? <p className="project-edit-hint">No SSH hosts yet. <button type="button" className="pip-action" onClick={() => openAppSettings('environments')}>Add one in Environments</button></p>
+      : <ul className="device-checks">{hosts.map(host => {
+        const used = host.state !== 'off', working = busy === host.sshHostId || ['connecting', 'installing', 'starting'].includes(host.state);
+        return <li key={host.id} className={`device-check${host.state === 'ready' ? ' is-ok' : ''}`} data-host-state={host.state}>
+          {host.state === 'ready' ? <CircleCheck size={14} aria-hidden="true"/> : <CircleAlert size={14} aria-hidden="true"/>}
+          <span><strong>{host.label}</strong> {host.address} · {HOST_STATE[host.state]}
+            {host.detail ? <span className="device-check-detail" role={host.state === 'failed' ? 'alert' : undefined}>{host.detail}</span> : null}
+            {host.state === 'ready' && host.ios && !host.ios.available ? <span className="device-check-detail">{host.ios.reason}</span> : null}</span>
+          <button type="button" className={`pip-action${used ? '' : ' is-primary'}`} disabled={!setup.enabled || (working && !used)} onClick={() => void act(host, !used || host.state === 'failed')}>{host.state === 'failed' ? 'Try again' : used ? 'Disconnect' : 'Connect'}</button>
+          {host.state === 'failed' && <button type="button" className="pip-action" onClick={() => void act(host, false)}>Stop using</button>}
+        </li>;
+      })}</ul>}
+  </div>;
 }
 
 export function DeviceSettings(): React.ReactElement {
@@ -65,6 +92,7 @@ export function DeviceSettings(): React.ReactElement {
       <div className="preference-group"><Row title="Realistic device models in 3D" description={<>Downloads device models from apple.com the first time a 3D view needs one, checks each file and converts it on {noun.lower}; Muster never ships them. Off, or offline: Muster's own device shapes.{setup.appleModels && setup.models.some(model => model.state === 'failed') ? <span className="device-check-detail">{setup.models.find(model => model.state === 'failed')?.error}</span> : null}</>}>
         <Toggle label="Realistic device models in 3D" checked={setup.appleModels} disabled={busy || !setup.enabled} onChange={on => void run(() => invoke('devices.configure', {appleModels: on}))}/>
       </Row></div>
+      {setup.enabled && helper?.state === 'installed' && setup.hosts && <RemoteHosts setup={setup}/>}
       {setup.enabled && helper?.state === 'installed' && <p className="project-edit-hint"><button type="button" className="pip-action" onClick={() => { closeSettings(); openTab({id: DEVICES_TAB_ID, kind: 'device', title: 'Devices'}); }}>Open Devices</button></p>}
     </>}
   </>;
