@@ -78,3 +78,28 @@
 /* Android navigation glyphs on the rail (Back ◁, Home ○, Recents □). */
 .device-rail-button svg.device-nav-glyph { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linejoin:round; }
 .device-native-part { position:absolute; display:block; pointer-events:none; user-select:none; }
+
+/* Device settings (#809): a narrow column beside the rail, in the pane's own surface and type. */
+.device-tools { width:236px; flex:none; display:flex; flex-direction:column; min-height:0; border-left:1px solid var(--hairline); background:var(--bg); font-size:var(--fs-12); color:var(--text); }
+.device-tools-head { display:flex; align-items:center; justify-content:space-between; padding:8px 8px 8px 12px; border-bottom:1px solid var(--hairline); }
+.device-tools-head strong { font-size:var(--fs-12); font-weight:500; }
+.device-tools-body { overflow:auto; padding:4px 12px 12px; display:flex; flex-direction:column; gap:10px; }
+.device-tools-body section { display:flex; flex-direction:column; gap:6px; }
+.device-tools-body h5 { margin:6px 0 0; font-size:var(--fs-11); font-weight:500; color:var(--text-faint); }
+.device-tools-segment { display:flex; gap:2px; padding:2px; border-radius:var(--radius-6); background:var(--bg-sunken); }
+.device-tools-segment button { flex:1; height:24px; border:0; border-radius:var(--radius-4, 4px); background:transparent; color:var(--text-dim); cursor:pointer; font:inherit; }
+.device-tools-segment button[aria-pressed='true'] { background:var(--bg); color:var(--text); }
+.device-tools-row { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--text-dim); }
+.device-tools-row select { max-width:120px; }
+.device-tools-switch { position:relative; width:28px; height:16px; padding:0 !important; border-radius:8px !important; background:var(--bg-sunken) !important; }
+.device-tools-switch span { position:absolute; top:2px; left:2px; width:10px; height:10px; border-radius:50%; background:var(--text-dim); transition:transform .12s; }
+.device-tools-switch[aria-checked='true'] { background:var(--accent) !important; border-color:var(--accent) !important; }
+.device-tools-switch[aria-checked='true'] span { transform:translateX(12px); background:var(--bg); }
+.device-tools-inline { display:flex; gap:4px; align-items:center; }
+.device-tools-inline input { flex:1; min-width:0; }
+.device-tools-body input:not([type=checkbox]), .device-tools-body select { height:24px; padding:0 6px; border:1px solid var(--hairline); border-radius:var(--radius-6); background:var(--bg-sunken); color:var(--text); font:inherit; }
+.device-tools-body button:not(.icon-button):not(.device-tools-segment button) { height:24px; padding:0 8px; border:1px solid var(--hairline); border-radius:var(--radius-6); background:var(--bg); color:var(--text); cursor:pointer; font:inherit; }
+.device-tools-body button:disabled { opacity:.5; cursor:default; }
+.device-tools-wide { width:100%; box-sizing:border-box; }
+.device-tools-faint { margin:0; color:var(--text-faint); }
+.device-tools-error { margin:4px 0 0; color:var(--danger, #d14343); }

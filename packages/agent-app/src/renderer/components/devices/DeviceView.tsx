@@ -5,7 +5,7 @@
  * out: starting, reconnecting (the last picture stays), error with Reconnect, and an agent's session with Take control.
  */
 import React, {Suspense, lazy, useCallback, useEffect, useRef, useState} from 'react';
-import {Box, Camera, Hand, House, LayoutGrid, Lock, Play, Power, PowerOff, RefreshCw, RotateCw, X} from 'lucide-react';
+import {Box, Camera, Hand, House, LayoutGrid, Lock, Play, Power, PowerOff, RefreshCw, RotateCw, SlidersHorizontal, X} from 'lucide-react';
 import type {DeviceButton, DeviceSession} from '../../../shared/device-protocol';
 import {invoke} from '../../bridge';
 import {closeTab, getState, notifyError, notifySuccess} from '../../store';
@@ -16,6 +16,7 @@ import {clampedPointOnScreen, containRect, pointOnScreen} from '../../devices/ge
 import {Tip} from '../Tooltip';
 import {threeAvailable} from '../../devices/webgl';
 import {DeviceFrameFlat, frameOf, useDeviceChrome} from './DeviceFrameFlat';
+import {DeviceToolsPanel} from './DeviceToolsPanel';
 // three.js and the device bodies load only when someone turns on the 3D view.
 const DeviceFrame3D = lazy(() => import('./DeviceFrame3D'));
 
@@ -95,6 +96,7 @@ export function DeviceView({session, visible}: {session: DeviceSession; visible:
   const canvas = useRef<HTMLCanvasElement>(null);
   const [mode, setMode] = useState<'flat' | '3d'>(() => { try { return localStorage.getItem('muster.deviceView') === '3d' && threeAvailable() ? '3d' : 'flat'; } catch { return 'flat'; } });
   const input = useDeviceInput(session, feed);
+  const [tools, setTools] = useState(false);
   const ready = !!feed?.width;
   // Each frame is copied straight into the canvas; React re-renders only when the picture's size changes.
   useFeedPaint(feed, current => { if (mode === 'flat') paintInto(canvas.current, current); }, [mode, ready]);
@@ -131,6 +133,7 @@ export function DeviceView({session, visible}: {session: DeviceSession; visible:
           </DeviceFrameFlat>}
         {status !== 'live' && <DeviceOverlay session={session} status={status} hasPicture={ready} error={feed?.error}/>}
       </div>
+      {tools && <DeviceToolsPanel session={session} onClose={() => setTools(false)}/>}
       <nav className="device-rail" aria-label={`${session.name} controls`} data-os={session.platform}>
         {ios ? <>
           <RailButton label="Home" icon={<House size={15}/>} onClick={() => press('home')} disabled={!session.inputReady}/>
@@ -148,6 +151,7 @@ export function DeviceView({session, visible}: {session: DeviceSession; visible:
         <span className="device-rail-gap"/>
         <RailButton label={ios ? (toChat ? 'Screenshot to Chat' : 'Save Screenshot') : (toChat ? 'Take screenshot to chat' : 'Take screenshot')} icon={<Camera size={15}/>} onClick={() => void captureScreenshot(session, toChat ? 'attach' : 'save')}/>
         {threeAvailable() && <RailButton label={mode === '3d' ? 'Flat view' : '3D view'} icon={<Box size={15}/>} pressed={mode === '3d'} onClick={() => setView(mode === '3d' ? 'flat' : '3d')}/>}
+        <RailButton label="Device settings" icon={<SlidersHorizontal size={15}/>} pressed={tools} onClick={() => setTools(open => !open)}/>
         <span className="device-rail-gap"/>
         <RailButton label={ios ? 'Shut Down Simulator' : 'Stop emulator'} icon={ios ? <Power size={15}/> : <PowerOff size={15}/>} onClick={() => void deviceAction(async () => { await invoke('devices.shutdown', {id: session.deviceId}); closeTab(deviceTabId(session.deviceId)); })}/>
       </nav>
