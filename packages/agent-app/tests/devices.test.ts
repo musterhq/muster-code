@@ -371,7 +371,8 @@ function toolTarget(overrides: Partial<DeviceToolTarget> = {}): DeviceToolTarget
     open: async () => ({deviceId: 'emulator-5554', name: 'Pixel 9', platform: 'android', formFactor: 'phone', chatId: 'c1', openedBy: 'agent', control: 'agent', state: 'live', inputReady: true, openedAt: 0}),
     close: async () => {}, waitForInput: async () => true,
     screenshot: async () => { const png = Buffer.alloc(24); png.writeUInt32BE(0x89504e47, 0); png.writeUInt32BE(1080, 16); png.writeUInt32BE(2400, 20); return {png, width: 1080, height: 2400}; },
-    tap: async (_id, x, y) => { taps.push([x, y]); return true; }, type: () => true, ...overrides};
+    tap: async (_id, x, y) => { taps.push([x, y]); return true; }, type: () => true, key: () => true,
+    snapshot: async () => { throw new Error('no tree'); }, detail: async () => { throw new Error('no settings'); }, action: async () => { throw new Error('no settings'); }, ...overrides};
 }
 const textOf = (result: {content: {type: string; text?: string}[]}) => result.content.filter(part => part.type === 'text').map(part => part.text).join(' ');
 

@@ -6,10 +6,10 @@ import {execFile, spawn} from 'node:child_process';
 import {existsSync, readFileSync, statSync} from 'node:fs';
 import {homedir} from 'node:os';
 import type {BrowserWindow, IpcMain, IpcMainEvent} from 'electron';
-import {DEVICE_ACK_CHANNEL, DEVICE_FRAME_CHANNEL, DEVICE_INPUT_CHANNEL, DEVICE_MCP_LAUNCHER_ENV, deviceButton, parseDeviceInput, type DeviceCommands, type DeviceEvent} from '../../shared/device-protocol.ts';
+import {DEVICE_ACK_CHANNEL, DEVICE_FRAME_CHANNEL, DEVICE_INPUT_CHANNEL, DEVICE_MCP_LAUNCHER_ENV, deviceButton, parseDeviceInput, type DeviceCommands, type DeviceEvent, type DeviceInput} from '../../shared/device-protocol.ts';
 import {locateCli} from '../../runtime/adapters/shared.ts';
 import {DeviceManager} from './manager.ts';
-import {DeviceToolHost} from './agent-tools.ts';
+import {DeviceToolHost, type DeviceToolTarget} from './agent-tools.ts';
 import type {Run} from './discovery.ts';
 
 const run: Run = (file, args, options = {}) => new Promise((resolve, reject) => {
@@ -56,25 +56,7 @@ export function wireDevices(input: {
     agentAccessChanged: setAgentAccess,
   });
   async function startTools(): Promise<void> {
-    toolHost ??= new DeviceToolHost({dir: input.toolsDir, execPath: input.execPath, target: {
-      agentAccess: () => manager.agentAccess,
-      chat: input.chat,
-      list: async () => (await manager.devices(true)).devices,
-      session: id => manager.liveSession(id),
-      open: (id, chatId) => manager.open(id, {chatId}),
-      close: id => manager.close(id),
-      screenshot: id => manager.screenshot(id),
-      waitForInput: id => manager.waitForInput(id),
-      tap: async (id, x, y) => {
-        if (!manager.input(id, {kind: 'touch', phase: 'begin', x, y}, 'agent')) return false;
-        await new Promise(r => setTimeout(r, 60));
-        return manager.input(id, {kind: 'touch', phase: 'end', x, y}, 'agent');
-      },
-      type: (id, text) => manager.input(id, {kind: 'text', text}, 'agent'),
-      apps: id => manager.apps(id),
-      launchApp: (id, app) => manager.launchApp(id, app, 'agent'),
-      button: (id, button) => manager.button(id, button, 'agent'),
-    }});
+    toolHost ??= new DeviceToolHost({dir: input.toolsDir, execPath: input.execPath, target: managerToolTarget(manager, input.chat)});
     try { const launcher = await toolHost.start(); if (manager.agentAccess) process.env[DEVICE_MCP_LAUNCHER_ENV] = launcher; }
     catch (error) { console.warn(`Agent device tools unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   }
@@ -112,12 +94,41 @@ export function wireDevices(input: {
       case 'devices.chrome': return manager.chrome(request.id);
       case 'devices.model': return manager.model(request.id);
       case 'devices.modelStore': return manager.storeModel(request.id, request.glb);
+      case 'devices.detail': return manager.detail(request.id);
+      case 'devices.action': return manager.action(request.id, request.action);
     }
   };
   return {
     manager,
     invoke: invoke as DevicesWiring['invoke'],
     async dispose() { toolHost?.dispose(); delete process.env[DEVICE_MCP_LAUNCHER_ENV]; await manager.dispose(); },
+  };
+}
+/** What the agent tools call on the manager: every input is marked as the agent's, so taking control stops it. */
+export function managerToolTarget(manager: DeviceManager, chat: DeviceToolTarget['chat']): DeviceToolTarget {
+  const press = (id: string, input: DeviceInput) => manager.input(id, input, 'agent');
+  return {
+    agentAccess: () => manager.agentAccess,
+    chat,
+    list: async () => (await manager.devices(true)).devices,
+    session: id => manager.liveSession(id),
+    open: (id, chatId) => manager.open(id, {chatId}),
+    close: id => manager.close(id),
+    screenshot: id => manager.screenshot(id),
+    waitForInput: id => manager.waitForInput(id),
+    tap: async (id, x, y) => {
+      if (!press(id, {kind: 'touch', phase: 'begin', x, y})) return false;
+      await new Promise(r => setTimeout(r, 60));
+      return press(id, {kind: 'touch', phase: 'end', x, y});
+    },
+    type: (id, text) => press(id, {kind: 'text', text}),
+    key: (id, code) => press(id, {kind: 'key', phase: 'down', code, key: code}) && press(id, {kind: 'key', phase: 'up', code, key: code}),
+    apps: id => manager.apps(id),
+    launchApp: (id, app) => manager.launchApp(id, app, 'agent'),
+    button: (id, button) => manager.button(id, button, 'agent'),
+    snapshot: id => manager.snapshot(id),
+    detail: id => manager.detail(id),
+    action: (id, action) => manager.action(id, action, 'agent'),
   };
 }
 export const isDeviceCommand = (command: string): command is keyof DeviceCommands => command.startsWith('devices.');

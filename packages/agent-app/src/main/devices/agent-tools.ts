@@ -15,7 +15,8 @@ import {randomBytes, timingSafeEqual} from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import {DEVICE_MCP, deviceTitle, type DeviceSession} from '../../shared/device-protocol.ts';
+import {DEVICE_ACTION_SUPPORT, DEVICE_MCP, deviceTitle, parseDeviceAction, type DeviceDetail, type DeviceSession} from '../../shared/device-protocol.ts';
+import {byRef, centreOf, describeElement, findByLabel, formatAx, sameElementIn, type AxElement, type AxSnapshot} from './ax.ts';
 export {DEVICE_NOTE} from '../../shared/device-protocol.ts';
 import {launcherFile, nodeLauncherScript} from '../../runtime/launcher-script.ts';
 
@@ -26,16 +27,20 @@ const DEVICE_ARG = {type: 'string', description: 'Device id from device_list.'} 
 export const DEVICE_TOOL_SPECS = [
   {name: 'device_list', description: 'List the iOS Simulators and Android Emulators on this computer: id, name, OS, whether it is running, and whether a live session is open.', inputSchema: {type: 'object', properties: {}}},
   {name: 'device_open', description: 'Open a live session on a device (boots it first if it is off). The user watches it live in Muster. Call this before tapping or typing.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG}, required: ['device']}},
-  {name: 'device_screenshot', description: 'Capture the device screen as a PNG. Coordinates for device_tap are pixels in this image.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG}, required: ['device']}},
+  {name: 'device_screenshot', description: 'Capture the device screen as a PNG, to see what it looks like or to find content without labels. Coordinates for device_tap are pixels in this image. To find and press buttons and fields, device_snapshot is smaller and exact.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG}, required: ['device']}},
   {name: 'device_tap', description: 'Tap the screen at a point given in pixels of the most recent device_screenshot of this device. Needs an open session (device_open).', inputSchema: {type: 'object', properties: {device: DEVICE_ARG, x: {type: 'number', minimum: 0}, y: {type: 'number', minimum: 0}}, required: ['device', 'x', 'y']}},
   {name: 'device_type', description: 'Type text into the focused field on the device (tap the field first). iOS accepts US-keyboard ASCII. Needs an open session.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG, text: {type: 'string', maxLength: 2000}}, required: ['device', 'text']}},
   {name: 'device_apps', description: 'List the apps installed on a running device: bundle id (iOS) or package name (Android) and display name, the user\'s own apps first. Use an id with device_launch_app.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG}, required: ['device']}},
   {name: 'device_launch_app', description: 'Launch an installed app by its bundle id (iOS, e.g. com.apple.Preferences) or package name (Android, e.g. com.android.settings). Needs an open session (device_open). Take a device_screenshot afterwards.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG, app: {type: 'string', description: 'Bundle id or package name from device_apps.', maxLength: 255}}, required: ['device', 'app']}},
   {name: 'device_button', description: 'Press a hardware button: home, back (Android only) or app_switcher. Needs an open session.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG, button: {type: 'string', enum: ['home', 'back', 'app_switcher']}}, required: ['device', 'button']}},
   {name: 'device_close', description: 'Close the live session you opened. The device keeps running.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG}, required: ['device']}},
+  {name: 'device_snapshot', description: 'List the elements on the device screen from its accessibility tree, one per line: ref, role, label, value and frame (e.g. `e5 button "Sign in" [32,437 338×57]`). Act on them with device_tap_element and device_type_into. Smaller and more exact than a screenshot; take one again after the screen changes.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG}, required: ['device']}},
+  {name: 'device_tap_element', description: 'Tap an element at its centre, by its ref from the latest device_snapshot or by its label (exact label first, then a label that contains it; buttons and fields win over plain text). A ref from a screen that has changed is checked again and refused if the element is gone. Needs an open session.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG, ref: {type: 'string', description: 'Element ref from device_snapshot, such as e5.', maxLength: 12}, label: {type: 'string', description: 'The element\'s label, such as "Sign in".', maxLength: 200}}, required: ['device']}},
+  {name: 'device_type_into', description: 'Tap a text field (by ref or by label; a caption\'s label finds the field next to it), then type into it. Set submit to press Return afterwards. iOS accepts US-keyboard ASCII. Needs an open session.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG, ref: {type: 'string', maxLength: 12}, label: {type: 'string', maxLength: 200}, text: {type: 'string', maxLength: 2000}, submit: {type: 'boolean'}}, required: ['device', 'text']}},
+  {name: 'device_settings', description: 'Read the device settings (appearance, text size, accessibility toggles, network, foreground app), or change one with action and get them back. Actions: setAppearance {value: light|dark}; setTextSize {value: small|default|large|extra-large}; setToggle {setting: reduceMotion|increaseContrast|reduceTransparency|showBorders|voiceOver|networkEnabled, value: true|false}; setLiquidGlass {value: clear|tinted} (iOS); setColorFilter {value: none|grayscale|red-green|green-red|blue-yellow} (iOS); setOrientation {value: portrait|landscape_left|portrait_upside_down|landscape_right} (Android); rotate; setLocation {latitude, longitude}; clearLocation (iOS); setPermission {appId, permission: camera|microphone|photos|contacts|calendar|reminders|location|notifications|motion|media-library|faceid, decision: grant|revoke|reset}; openUrl {url} (web or deep link); launchApp {appId}; terminateApp {appId}; sendPush {appId, payload: message or APNs JSON} (iOS); shake (not supported on either platform: says so). Changing needs an open session.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG, action: {type: 'object', description: 'One action: {"type": "setAppearance", "value": "dark"}. Leave out to read the settings.', properties: {type: {type: 'string'}}, required: ['type']}}, required: ['device']}},
 ] as const;
 export const DEVICE_TOOL_NAMES = new Set<string>(DEVICE_TOOL_SPECS.map(spec => spec.name));
-const MUTATING = new Set(['device_open', 'device_tap', 'device_type', 'device_launch_app', 'device_button', 'device_close']);
+const MUTATING = new Set(['device_open', 'device_tap', 'device_type', 'device_launch_app', 'device_button', 'device_close', 'device_tap_element', 'device_type_into']);
 const AGENT_BUTTONS: Record<string, 'home' | 'back' | 'appSwitcher'> = {home: 'home', back: 'back', app_switcher: 'appSwitcher'};
 
 /** What the tools need from main: the device manager's methods plus the chat's mode. */
@@ -53,8 +58,27 @@ export interface DeviceToolTarget {
   apps(id: string): Promise<{id: string; name: string; user: boolean}[]>;
   launchApp(id: string, app: string): Promise<void>;
   button(id: string, button: 'home' | 'back' | 'appSwitcher'): Promise<void>;
+  /** The screen as elements (#809). */
+  snapshot(id: string): Promise<AxSnapshot>;
+  /** Presses a key on the device (Return after typing). */
+  key(id: string, code: 'Enter'): boolean;
+  detail(id: string): Promise<DeviceDetail>;
+  action(id: string, action: unknown): Promise<DeviceDetail>;
 }
 const shotSizes = new Map<string, {width: number; height: number}>();
+/** The latest snapshot per device, and whether something was done to the screen since (its refs then get re-checked). */
+const snapshots = new Map<string, {snapshot: AxSnapshot; stale: boolean}>();
+const remember = (device: string, snapshot: AxSnapshot) => { snapshots.delete(device); snapshots.set(device, {snapshot, stale: false}); if (snapshots.size > 64) snapshots.delete(snapshots.keys().next().value!); };
+const touched = (device: string) => { const entry = snapshots.get(device); if (entry) entry.stale = true; };
+/** Time for a tapped field to take focus (and its keyboard to come up) before typing. */
+export const FOCUS_SETTLE_MS = 350;
+const SETTING_NAMES: Record<string, string> = {appearance: 'appearance', textSize: 'text size', reduceMotion: 'reduce motion', increaseContrast: 'increase contrast', reduceTransparency: 'reduce transparency', showBorders: 'button shapes', voiceOver: 'VoiceOver', networkEnabled: 'network', liquidGlass: 'Liquid Glass', colorFilter: 'colour filter'};
+export function formatDetail(detail: DeviceDetail, name: string): string {
+  const entries = Object.entries(detail.settings).map(([key, value]) => `${SETTING_NAMES[key] ?? key}: ${value === true ? 'on' : value === false ? 'off' : value}`);
+  const support = DEVICE_ACTION_SUPPORT[detail.platform];
+  return [`Settings on ${name}${entries.length ? '' : ': none could be read'}`, ...entries, ...(detail.foregroundApp ? [`foreground app: ${detail.foregroundApp}`] : []),
+    `Actions here: ${support.actions.join(', ')} (toggles: ${support.toggles.join(', ')}).`].join('\n');
+}
 const id = (value: unknown): string | null => typeof value === 'string' && /^[A-Za-z0-9._:-]{1,140}$/.test(value) && !value.startsWith('-') ? value : null;
 
 /** Runs one device tool call for a chat. Exported for tests. */
@@ -99,6 +123,7 @@ export async function runDeviceTool(target: DeviceToolTarget, chatId: string, to
         if (session.control === 'user') return text('The user has taken control of this device. Stop and wait until they hand it back.', true);
         if (tool === 'device_launch_app') {
           if (typeof args.app !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/.test(args.app)) return text('Pass the app\'s bundle id (iOS) or package name (Android); device_apps lists them.', true);
+          touched(device);
           await target.launchApp(device, args.app);
           return text(`Launched ${args.app}. Take a device_screenshot to see it.`);
         }
@@ -106,6 +131,7 @@ export async function runDeviceTool(target: DeviceToolTarget, chatId: string, to
         if (!button) return text('Pass button: home, back or app_switcher.', true);
         if (button === 'back' && session.platform === 'ios') return text('iOS has no Back button; use the app\'s own back control or home.', true);
         if (!(await target.waitForInput(device))) return text('The device is not accepting input yet. Try again in a few seconds.', true);
+        touched(device);
         await target.button(device, button);
         return text(`Pressed ${args.button}.`);
       }
@@ -114,6 +140,7 @@ export async function runDeviceTool(target: DeviceToolTarget, chatId: string, to
         if (foreign) return text('Another chat\'s agent is using this device.', true);
         if (session.control === 'user') return text('The user has taken control of this device. Stop and wait until they hand it back.', true);
         if (!(await target.waitForInput(device))) return text('The device is not accepting input yet. Try again in a few seconds.', true);
+        touched(device);
         if (tool === 'device_type') {
           if (typeof args.text !== 'string' || !args.text || args.text.length > 2000) return text('Pass the text to type (up to 2000 characters).', true);
           return target.type(device, args.text) ? text(`Typed ${args.text.length} characters.`) : text(session.platform === 'ios' ? 'Only US-keyboard ASCII characters can be typed into an iOS Simulator.' : 'The text could not be sent.', true);
@@ -124,6 +151,42 @@ export async function runDeviceTool(target: DeviceToolTarget, chatId: string, to
         if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > size.width || y > size.height) return text(`The point must be inside the ${size.width}×${size.height} screenshot.`, true);
         return await target.tap(device, x / size.width, y / size.height) ? text(`Tapped at ${Math.round(x)}, ${Math.round(y)}.`) : text('The tap could not be sent.', true);
       }
+      case 'device_snapshot': {
+        const snapshot = await target.snapshot(device);
+        remember(device, snapshot);
+        return text(formatAx(snapshot, session?.name ?? device));
+      }
+      case 'device_settings': {
+        if (args.action === undefined) return text(formatDetail(await target.detail(device), session?.name ?? device));
+        if ((chat.permissionMode ?? 'workspace') === 'read-only') return text('This chat is read-only: you may read device settings, but not change them.', true);
+        if (!session) return text('Open the device first with device_open.', true);
+        if (foreign) return text('Another chat\'s agent is using this device.', true);
+        if (session.control === 'user') return text('The user has taken control of this device. Stop and wait until they hand it back.', true);
+        const action = parseDeviceAction(args.action);
+        const detail = await target.action(device, action);
+        touched(device);
+        return text(`Done: ${action.type}.\n${formatDetail(detail, session.name)}`);
+      }
+      case 'device_tap_element': case 'device_type_into': {
+        if (!session) return text('Open the device first with device_open.', true);
+        if (foreign) return text('Another chat\'s agent is using this device.', true);
+        if (session.control === 'user') return text('The user has taken control of this device. Stop and wait until they hand it back.', true);
+        const typing = tool === 'device_type_into';
+        if (typing && (typeof args.text !== 'string' || args.text.length > 2000)) return text('Pass the text to type (up to 2000 characters).', true);
+        const found = await resolveElement(target, device, args, typing ? 'type' : 'tap');
+        if ('error' in found) return text(found.error, true);
+        if (!(await target.waitForInput(device))) return text('The device is not accepting input yet. Try again in a few seconds.', true);
+        const {element, snapshot} = found, point = centreOf(snapshot, element);
+        touched(device);
+        if (!(await target.tap(device, point.x, point.y))) return text('The tap could not be sent.', true);
+        const where = `${Math.round(element.frame.x + element.frame.w / 2)}, ${Math.round(element.frame.y + element.frame.h / 2)} ${snapshot.unit}`;
+        if (!typing) return text(`Tapped ${describeElement(element)} at ${where}.${element.enabled ? '' : ' It is marked disabled, so the tap may do nothing.'} Call device_snapshot to see the result.`);
+        await new Promise(resolve => setTimeout(resolve, FOCUS_SETTLE_MS));
+        const value = args.text as string;
+        if (value && !target.type(device, value)) return text(session.platform === 'ios' ? 'Only US-keyboard ASCII characters can be typed into an iOS Simulator.' : 'The text could not be sent.', true);
+        if (args.submit === true) target.key(device, 'Enter');
+        return text(`Typed ${value.length} characters into ${describeElement(element)}${args.submit === true ? ' and pressed Return' : ''}. Call device_snapshot to check.`);
+      }
       case 'device_close': {
         if (!session) return text('No session is open on that device.');
         if (session.chatId !== chatId) return text('This session was opened by the user or another chat; leave it open.', true);
@@ -133,6 +196,31 @@ export async function runDeviceTool(target: DeviceToolTarget, chatId: string, to
       default: return text(`Unknown device tool ${tool}.`, true);
     }
   } catch (error) { return text(error instanceof Error ? error.message : String(error), true); }
+}
+
+/** The element a tool call names: by ref (re-checked against a fresh snapshot when the screen may have changed), or by label on a fresh snapshot. */
+async function resolveElement(target: DeviceToolTarget, device: string, args: Record<string, unknown>, want: 'tap' | 'type'): Promise<{element: AxElement; snapshot: AxSnapshot} | {error: string}> {
+  const ref = typeof args.ref === 'string' && /^e\d{1,4}$/.test(args.ref.trim()) ? args.ref.trim() : undefined;
+  const label = typeof args.label === 'string' ? args.label.trim() : '';
+  if (!ref && !label) return {error: 'Pass the element\'s ref from device_snapshot (such as e5) or its label.'};
+  if (!ref) {
+    const snapshot = await target.snapshot(device);
+    remember(device, snapshot);
+    const match = findByLabel(snapshot, label, want);
+    return 'error' in match ? match : {element: match.element, snapshot};
+  }
+  const entry = snapshots.get(device);
+  if (!entry) return {error: 'Call device_snapshot first; refs come from it.'};
+  const element = byRef(entry.snapshot, ref);
+  if (!element) return {error: `There is no ${ref} in the latest snapshot. Call device_snapshot again.`};
+  if (!entry.stale) return want === 'type' && !element.editable ? {error: `${describeElement(element)} is not a text field.`} : {element, snapshot: entry.snapshot};
+  // Something was done since that snapshot: act only if the same element is still on screen.
+  const fresh = await target.snapshot(device);
+  remember(device, fresh);
+  const now = sameElementIn(fresh, element);
+  if (!now) return {error: `${describeElement(element)} is no longer on screen. Call device_snapshot to see what is there now.`};
+  if (want === 'type' && !now.editable) return {error: `${describeElement(now)} is not a text field.`};
+  return {element: now, snapshot: fresh};
 }
 
 /** The stdio MCP server, written as plain CommonJS at start so no build entry is needed. */

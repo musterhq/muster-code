@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type {ChildProcess} from 'node:child_process';
-import {deviceId as validId, deviceTitle, type DeviceButton, type DeviceEvent, type DeviceInfo, type DeviceInput, type DeviceList, type DeviceSession, type DeviceSetup} from '../../shared/device-protocol.ts';
+import {deviceId as validId, deviceTitle, parseDeviceAction, type DeviceDetail, type DeviceButton, type DeviceEvent, type DeviceInfo, type DeviceInput, type DeviceList, type DeviceSession, type DeviceSetup} from '../../shared/device-protocol.ts';
 import {androidTools, APP_ID, checkAndroid, checkIos, checkNode, errorLine, listAndroid, listIos, parseAdbPackages, parseSimctlApps, sortApps, type DeviceApp, type ProbeDeps} from './discovery.ts';
 import {HELPER_DOWNLOAD_MB, HELPER_VERSION, helperInstalled, helperPaths, hubEnv, installHelper, killServeSimHelpers, startHub, type HelperPaths, type HubEndpoint, type Spawn} from './helper.ts';
 import {DeviceLink, type LinkDeps, type LinkFrame} from './link.ts';
@@ -19,6 +19,8 @@ import {AppleModels} from './models.ts';
 import {androidSkinChrome, dataUrl, parseHubChrome, skinDir} from './chrome.ts';
 import {readAvdConfig} from './discovery.ts';
 import type {DeviceChrome} from '../../shared/device-protocol.ts';
+import {parseAndroidAx, parseIosAx, type AxSnapshot} from './ax.ts';
+import {readDeviceSettings, runDeviceAction, type ActionHost} from './actions.ts';
 
 export const HUB_IDLE_MS = 45_000;
 /** System packages worth offering an agent on Android (settings, browser, the usual Google apps). */
@@ -453,6 +455,53 @@ export class DeviceManager {
     } else png = await this.deps.runBuffer(androidTools(this.deps).adb, ['-s', device.id, 'exec-out', 'screencap', '-p'], {timeoutMs: 20_000});
     if (png.length < 24 || png.readUInt32BE(0) !== 0x89504e47) throw new Error('The device returned no picture.');
     return {png, width: png.readUInt32BE(16), height: png.readUInt32BE(20)};
+  }
+
+  // --- Accessibility tree and settings (#809) ----------------------------------------------------------------------
+  /** The screen as elements, from the helper's accessibility routes (main's bearer token; nothing reaches the renderer). */
+  async snapshot(rawId: unknown): Promise<AxSnapshot> {
+    this.ready();
+    const device = await this.find(validId(rawId));
+    if (device.state !== 'booted') throw new Error(`${deviceTitle(device)} is not running.`);
+    const hub = await this.hubEndpoint();
+    const pathname = device.platform === 'ios' ? `/vendor/serve-sim/helper/${encodeURIComponent(device.id)}/ax` : `/vendor/serve-emu/api/accessibility?device=${encodeURIComponent(device.id)}`;
+    let response: Response;
+    try { response = await this.deps.fetch(`${hub.origin}${pathname}`, {headers: {authorization: `Bearer ${hub.token}`}, signal: AbortSignal.timeout(20_000)}); }
+    catch (error) { throw new Error(`The device helper did not answer for the accessibility tree: ${errorLine(error)}`); }
+    const body = await response.json().catch(() => undefined) as unknown;
+    if (!response.ok) {
+      const detail = body && typeof body === 'object' ? (body as {message?: unknown; error?: unknown}) : {};
+      const why = typeof detail.message === 'string' ? detail.message : typeof detail.error === 'string' ? detail.error : `the helper answered ${response.status}`;
+      throw new Error(`${deviceTitle(device)} could not describe its screen (${why.slice(0, 160)}).${device.platform === 'ios' && !this.live.has(device.id) ? ' Open it with device_open first.' : ''}`);
+    }
+    return device.platform === 'ios' ? parseIosAx(body) : parseAndroidAx(body);
+  }
+  private actionHost(device: DeviceInfo): ActionHost {
+    const vendor = path.join(this.paths.installDir, 'node_modules', 'expo-device-hub', 'vendor', 'serve-sim', 'dist');
+    const axSettings = path.join(vendor, 'simax', 'serve-sim-ax-settings');
+    return {platform: device.platform, deviceId: device.id, run: this.deps.run, adb: androidTools(this.deps).adb, node: this.deps.locate('node'), tmpDir: path.join(this.paths.stateDir, 'actions'),
+      helpers: {...(this.deps.exists(axSettings) ? {axSettings} : {}), ...(this.deps.exists(this.paths.serveSim) ? {serveSim: this.paths.serveSim} : {})},
+      rotate: () => this.rotate(device.id)};
+  }
+  private async running(rawId: unknown): Promise<DeviceInfo> {
+    this.ready();
+    const device = await this.find(validId(rawId));
+    if (device.state !== 'booted') throw new Error(`${deviceTitle(device)} is not running.`);
+    return device;
+  }
+  /** The device's settings read back from simctl or adb. */
+  async detail(rawId: unknown): Promise<DeviceDetail> {
+    const device = await this.running(rawId);
+    const read = await readDeviceSettings(this.actionHost(device));
+    return {deviceId: device.id, platform: device.platform, ...read, readAt: Date.now()};
+  }
+  /** One typed setting change, then the settings as the device now reports them. */
+  async action(rawId: unknown, rawAction: unknown, from: 'user' | 'agent' = 'user'): Promise<DeviceDetail> {
+    const action = parseDeviceAction(rawAction);
+    const device = await this.running(rawId);
+    if (from === 'agent' && this.live.get(device.id)?.session.control === 'user') throw new Error('The user has taken control of this device.');
+    await runDeviceAction(this.actionHost(device), action);
+    return this.detail(device.id);
   }
 
   private async stopAll(): Promise<void> {
