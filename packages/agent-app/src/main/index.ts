@@ -238,6 +238,8 @@ async function main(): Promise<void> {
   };
   let userProcessGroups: () => ReturnType<ProcessSessions['userProcessGroups']> = () => [];
   let userProcessTargets: () => ReturnType<ProcessSessions['userProcessTargets']> = async () => userProcessGroups();
+  // The runtime names this version for Muster's own plugins (#776) and in backups.
+  process.env.MUSTER_APP_VERSION ??= app.getVersion();
   const loaded = loadAgentService({ dataDir, onEvent, userProcesses: () => userProcessGroups(), userProcessTargets: () => userProcessTargets(), downscaleIcon });
   service = loaded.service;
   void service.invoke('settings.get', {}).then(result => { notifyPrefs = notificationPrefs(result.values); applyBadge(pendingAttention); }, () => {});

@@ -5,6 +5,7 @@ import { BROWSER_MCP, BROWSER_NOTE, COMPUTER_MCP, COMPUTER_USE_NOTE, MUSTER_COMP
 import type { ComputerControlOwner } from '../../shared/domains/computer-protocol.ts';
 import { DEVICE_MCP, DEVICE_MCP_LAUNCHER_ENV, DEVICE_NOTE } from '../../shared/device-protocol.ts';
 import { setToolImageStore, TOOL_IMAGE_ID, TOOL_IMAGE_MIME, imageSize } from '../tool-event-details.ts';
+import { currentPluginPlan } from '../plugin-providers.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
 /** Main sets this to the stdio launcher of the in-app browser MCP bridge once its local endpoint is listening. */
@@ -59,7 +60,8 @@ export async function ensureBrowserLauncher(chat: { mode: string }, wait = 5000)
 export function createComputerDomain(context: DomainContext): DomainModule {
   const images = path.join(context.dataDir, 'tool-images');
   setToolImageStore(images);
-  const unsubscribe = context.hooks.addRunOptionsContributor(async chat => { await ensureBrowserLauncher(chat); return computerRunOptions(chat); });
+  // #776: Muster's computer use joins the turn only when it is the version chosen in Skills & plugins.
+  const unsubscribe = context.hooks.addRunOptionsContributor(async chat => { await ensureBrowserLauncher(chat); return computerRunOptions(chat, undefined, currentPluginPlan(context.dataDir).musterComputer ? undefined : ''); });
   return {
     handlers: {
       'computer.image': input => {

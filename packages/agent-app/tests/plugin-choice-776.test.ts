@@ -10,9 +10,9 @@ import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {createAgentService} from '../src/runtime/service.ts';
 import type {ProviderAdapter, ProviderInput} from '../src/runtime/provider.ts';
-import {extensionsOptions} from '../src/runtime/domains/extensions.ts';
+import {pluginSourceOptions} from '../src/runtime/plugin-providers.ts';
 import {COMPUTER_MCP_LAUNCHER_ENV} from '../src/runtime/domains/computer.ts';
-import {prepareChatCodexHome} from '../src/runtime/plugin-providers.ts';
+import {prepareChatCodexHome} from '../src/runtime/codex-home.ts';
 import {MUSTER_OFFICE_SKILLS} from '../src/runtime/office-skills.ts';
 import {COMPUTER_MCP} from '../src/shared/computer-use.ts';
 import type {PluginCapability} from '../src/shared/domains/extensions-protocol.ts';
@@ -57,12 +57,12 @@ async function setup(t: TestContext) {
   const launcher = join(root, 'computer-launcher'); await writeFile(launcher, '#!/bin/sh\n'); await chmod(launcher, 0o755);
   const saved = process.env[COMPUTER_MCP_LAUNCHER_ENV];
   process.env[COMPUTER_MCP_LAUNCHER_ENV] = launcher;
-  extensionsOptions.codexHome = source;
+  pluginSourceOptions.codexHome = source;
   const inputs: ProviderInput[] = [];
   const provider: ProviderAdapter = {info, run: async input => { inputs.push(input); return {status: 'completed', finalMessage: 'done'}; }, stop: async () => true, dispose() {}};
   const service = createAgentService({dataDir, provider, onEvent() {}});
   t.after(async () => {
-    await service.dispose(); extensionsOptions.codexHome = undefined;
+    await service.dispose(); pluginSourceOptions.codexHome = undefined;
     if (saved === undefined) delete process.env[COMPUTER_MCP_LAUNCHER_ENV]; else process.env[COMPUTER_MCP_LAUNCHER_ENV] = saved;
     await rm(root, {recursive: true, force: true});
   });
@@ -171,7 +171,7 @@ test("old whole-folder links get the defaults and a person's own unrelated skill
 
   for (const choice of ['off', 'installed', 'muster'] as const) {
     for (const capability of ['documents', 'spreadsheets', 'presentations', 'pdf', 'visualize', 'computer-use'] as const) {
-      if (choice === 'installed' && capability === 'spreadsheets') continue;
+      if (choice === 'installed' && (capability === 'spreadsheets' || capability === 'presentations')) continue;
       await service.invoke('extensions.providers.set', {capability, choice});
     }
     prepare();

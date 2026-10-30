@@ -10,8 +10,6 @@ import { unpackedPath } from './unpacked-path.ts';
 
 /** Muster's skills, by folder name (also their `name:`). */
 export const MUSTER_OFFICE_SKILLS = ['documents', 'spreadsheets', 'presentations', 'pdf'] as const;
-/** Skill folders of another source that cover the same file types: never linked into Muster's home. */
-export const OFFICE_SKILL_ALIASES: ReadonlySet<string> = new Set([...MUSTER_OFFICE_SKILLS, 'docx', 'doc', 'word', 'xlsx', 'excel', 'spreadsheet', 'pptx', 'powerpoint', 'slides', 'presentation']);
 const STAMP = '.muster-skill';
 
 /** The folder holding Muster's skills: dist/runtime/resources/skills in the app (the runtime runs from dist/main), resources/skills in a checkout. */
@@ -41,10 +39,10 @@ function digest(dir: string): string {
 }
 
 /** Copies each of Muster's skills into `skillsDir/<name>`, replacing a link or an older copy; an unchanged copy is left alone. */
-export function installMusterSkills(source: string, skillsDir: string): string[] {
+export function installMusterSkills(source: string, skillsDir: string, names: Iterable<string> = MUSTER_OFFICE_SKILLS): string[] {
   const installed: string[] = [];
   mkdirSync(skillsDir, { recursive: true });
-  for (const name of MUSTER_OFFICE_SKILLS) {
+  for (const name of names) {
     const from = join(source, name), to = join(skillsDir, name);
     if (!existsSync(join(from, 'SKILL.md'))) continue;
     const want = digest(from);

@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import {awaitProviderListing,configuredProviderInstances,providerListingsSettled,providerNode,type ProviderInstance,revalidateProviderInstances} from './provider-instances.ts';
+import {awaitProviderListing,configuredProviderInstances,providerDataDir,providerListingsSettled,providerNode,type ProviderInstance,revalidateProviderInstances} from './provider-instances.ts';
 import {createAdapterCatalog,type AdapterCatalog} from './adapters/index.ts';
 import {readOwnedCommandOutputs} from './command-output-recovery.ts';
 import {authFailureStatus, authRecovery, coreBudgetOptions, classifyProviderFailure, lifecycleDiagnostic, requestWhileOwned, providerAccessPolicy, type ProviderBudgets, type ProviderRecovery} from './provider-run-lifecycle.ts';
@@ -26,7 +26,7 @@ import {DEVICE_MCP, DEVICE_NOTE} from '../shared/device-protocol.ts';
 import type {McpServerSpec} from './adapters/types.ts';
 import type {RunnableAdapter} from './adapters/types.ts';
 import {CLAUDE_CODE_LANE_DRIVER, CLAUDE_LANE_DRIVER} from '../shared/provider-lanes.ts';
-import {adoptCodexThread, prepareMusterCodexHome} from './codex-home.ts';
+import {adoptCodexThread, prepareChatCodexHome} from './codex-home.ts';
 import {musterSkillsDir} from './office-skills.ts';
 import {claudeLaneAllowed, LANE_DROPPED_SERVERS, withoutUnavailableToolNotes} from './claude-lane.ts';
 import {SANDBOX_MCP_SERVER} from '../shared/sandbox-routes.ts';
@@ -415,7 +415,12 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         ...(sandboxedRun(input.configOverrides) ? CODEX_SANDBOX_FEATURES : [])];
       // #426: the model's own window and compaction point (catalog or router listing), unless the user set them in config.toml.
       const windowOverrides = codexWindowOverrides(route.info.models.find(entry => entry.id === model0), userCompactionKeys(route.sessionsRoot ? dirname(route.sessionsRoot) : undefined), input.engineWindow);
-      const signature = JSON.stringify([access, model0, input.reasoningEffort ?? 'medium', input.configOverrides ?? {}, featureOverrides, windowOverrides, input.cwd, route.command, route.info.id, route.env]);
+      // #720/#776: link the person's shared configuration into Muster's own home with only the chosen plugin versions; a
+      // changed choice changes the signature, so a warm session restarts on this turn.
+      const ownHome = route.env.MUSTER_CODEX_SOURCE_HOME && route.env.CODEX_HOME ? {source: route.env.MUSTER_CODEX_SOURCE_HOME, home: route.env.CODEX_HOME} : undefined;
+      let pluginKey: string | undefined, prepareError: unknown;
+      if (ownHome) try { pluginKey = prepareChatCodexHome(ownHome.source, ownHome.home, {dataDir: providerDataDir(), musterSkills: musterSkillsDir()}).key; } catch (error) { prepareError = error; }
+      const signature = JSON.stringify([access, model0, input.reasoningEffort ?? 'medium', input.configOverrides ?? {}, featureOverrides, windowOverrides, input.cwd, route.command, route.info.id, route.env, pluginKey ?? null]);
       if (previous && ((previous.signature !== undefined && previous.signature !== signature) || previous.stale) && !busyWithBackground(previous)) close(previous);
       if (!previous && sessions.size >= 64) {
         // Bound retained observers without evicting known background work.
@@ -456,7 +461,8 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         const split = splitSecretOverrides(input.configOverrides);
         const extraOverrides = Object.entries(split.args).filter(([name]) => /^[A-Za-z0-9_.-]{1,128}$/.test(name) && !/^(sandbox|approval_policy)/.test(name)).map(([name, value]) => `${name}=${JSON.stringify(value)}`);
         // #720: link the person's shared configuration into Muster's own home, and bring over a thread from before.
-        if (route.env.MUSTER_CODEX_SOURCE_HOME && route.env.CODEX_HOME) { prepareMusterCodexHome(route.env.MUSTER_CODEX_SOURCE_HOME, route.env.CODEX_HOME, {musterSkills: musterSkillsDir()}); adoptCodexThread(route.env.MUSTER_CODEX_SOURCE_HOME, route.env.CODEX_HOME, resumeThread); }
+        if (prepareError) throw prepareError;
+        if (ownHome) adoptCodexThread(ownHome.source, ownHome.home, resumeThread);
         const launch = {
           cwd: input.cwd, command: route.command, model, reasoning,
           env: { MUSTER_PROVIDER_NODE: node.node, ...node.env, ...route.env }, transportOwner: session.owner, cacheKey: session.key,

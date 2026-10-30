@@ -18,7 +18,7 @@
 .plugins-category { font-size: var(--fs-12); padding: 3px 9px; border-radius: var(--radius-10); color: var(--text-dim); background: none; border: 1px solid transparent; }
 .plugins-category:hover, .plugins-category.is-active { background: var(--bg-active); color: var(--text); border-color: var(--hairline); }
 .plugins-scope { display: flex; align-items: center; gap: 6px; color: var(--text-faint); font-size: var(--font-caption); }
-.plugins-scope select { height: 26px; max-width: 180px; padding: 0 6px; color: var(--text); background: var(--bg-raised); border: 1px solid var(--hairline); border-radius: var(--radius-6); font: inherit; font-size: var(--font-caption); }
+.plugins-scope select, .plugins-version { height: 26px; max-width: 180px; padding: 0 6px; color: var(--text); background: var(--bg-raised); border: 1px solid var(--hairline); border-radius: var(--radius-6); font: inherit; font-size: var(--font-caption); }
 
 .plugins-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 .plugins-main { flex: 1; min-width: 0; overflow-y: auto; padding: 16px 20px 28px; }

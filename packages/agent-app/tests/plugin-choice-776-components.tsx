@@ -45,7 +45,8 @@ Array.from(document.querySelectorAll<HTMLButtonElement>('.plugins-view-tabs [rol
 const group=()=>Array.from(document.querySelectorAll('.plugins-group')).find(node=>node.querySelector('h3')?.textContent==="Muster's plugins");
 const row=(name:string)=>Array.from(group()?.querySelectorAll('.plugins-row')??[]).find(node=>node.querySelector('.plugins-card-text strong')?.textContent===name) as HTMLElement|undefined;
 const picker=(name:string)=>row(name)?.querySelector('select') as HTMLSelectElement|null|undefined;
-const pick=async(name:string,value:string)=>{const select=picker(name)!;select.value=value;select.dispatchEvent(new window.Event('change',{bubbles:true}));await delay(40);};
+// linkedom's select.value has no setter: pick the option the way a click on it does.
+const pick=async(name:string,value:string)=>{const select=picker(name)!;for(const option of Array.from(select.querySelectorAll('option')))option.toggleAttribute('selected',option.getAttribute('value')===value);select.dispatchEvent(new window.Event('change',{bubbles:true}));await delay(40);};
 
 // Spec: MUS-SPEC-14-776F (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-776f)
 await check("#776 each plugin row picks Muster's version, an installed one or off",async()=>{
@@ -54,7 +55,7 @@ await check("#776 each plugin row picks Muster's version, an installed one or of
   assert.ok(row('Documents')!.querySelector('.plugins-tile'),'the usual row tile');
   assert.match(row('Documents')!.querySelector('.plugins-card-text em')!.textContent!,/Muster's · 0\.9\.0/);
   const options=Array.from(picker('Documents')!.querySelectorAll('option')).map(option=>option.textContent);
-  assert.deepEqual(options,["Muster's",'Documents 1.4.0 · Plugin cache · other','docx 3.1 · Skills folder · ~/.codex/skills','Off']);
+  assert.deepEqual(options,["Muster's",'Documents · 1.4.0 · Plugin cache · other','docx · 3.1 · Skills folder · ~/.codex/skills','Off']);
   assert.equal(picker('Documents')!.getAttribute('aria-label'),'Documents version');
   assert.equal(picker('Documents')!.value,'muster',"Muster's is selected by default");
 
