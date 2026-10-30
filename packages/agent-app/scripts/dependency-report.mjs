@@ -11,12 +11,13 @@ import * as esbuild from 'esbuild';
 import {existsSync,mkdirSync,readdirSync,readFileSync,writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {katexFontsWoff2Only} from './katex-fonts.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const src=(...p)=>path.join(root,'src',...p);
 const common={bundle:true,minify:true,write:false,metafile:true,logLevel:'silent',absWorkingDir:root,define:{'process.env.NODE_ENV':'"production"'}};
 const targets=[
-  {name:'renderer',entryPoints:{main:src('renderer','main.tsx'),'diff-worker':src('renderer','diff-worker.ts'),'syntax-highlight-worker':src('renderer','syntax-highlight-worker.ts'),'model-worker':src('renderer','three-engine','model','worker.ts')},outdir:path.join(root,'.dependency-report'),splitting:true,platform:'browser',format:'esm',target:'es2022',jsx:'automatic',loader:{'.ttf':'file','.woff2':'file','.wasm':'binary'},external:['fs','path']},
+  {name:'renderer',entryPoints:{main:src('renderer','main.tsx'),'diff-worker':src('renderer','diff-worker.ts'),'syntax-highlight-worker':src('renderer','syntax-highlight-worker.ts'),'model-worker':src('renderer','three-engine','model','worker.ts')},outdir:path.join(root,'.dependency-report'),splitting:true,platform:'browser',format:'esm',target:'es2022',jsx:'automatic',loader:{'.ttf':'file','.woff2':'file','.wasm':'binary'},plugins:[katexFontsWoff2Only],external:['fs','path']},
   {name:'main',entryPoints:[src('main','index.ts')],outfile:path.join(root,'.dependency-report/main.cjs'),platform:'node',format:'cjs',target:'node22',external:['electron','node-pty']},
   {name:'preload',entryPoints:[src('preload','index.ts')],outfile:path.join(root,'.dependency-report/preload.cjs'),platform:'node',format:'cjs',target:'node22',external:['electron']},
   {name:'runtime',entryPoints:[src('runtime','service.ts')],outfile:path.join(root,'.dependency-report/service.cjs'),platform:'node',format:'cjs',target:'node22',external:['electron']},
@@ -25,13 +26,16 @@ const targets=[
 /** node_modules/<pkg> or node_modules/@scope/<pkg> of an esbuild input path (the innermost one). */
 function packageOf(input){
   const parts=input.split('/');const at=parts.lastIndexOf('node_modules');
+  // A patched copy installed from patched-packages/ (see its README) resolves to its real path, outside node_modules.
+  if(at<0&&parts[0]==='patched-packages'&&parts[1]){const dir=parts.slice(0,2).join('/');return {name:JSON.parse(readFileSync(path.join(root,dir,'package.json'),'utf8')).name,dir};}
   if(at<0)return null;
   const name=parts[at+1]?.startsWith('@')?`${parts[at+1]}/${parts[at+2]}`:parts[at+1];
   return {name,dir:parts.slice(0,at+1+name.split('/').length).join('/')};
 }
-// Packages whose published manifest has no license field and ship no license file. The license is confirmed upstream
+// Packages that ship no license file (and, for some, no license field either). The license is confirmed upstream
 // and recorded here, keyed by name@version so a version bump is re-checked by a person.
 const LICENSE_OVERRIDES={
+  'remark-math@6.0.0':{license:'MIT',source:'package.json declares MIT; the license file of github.com/remarkjs/remark-math is not in the npm tarball.',copyright:'Copyright (c) 2017 Junyoung Choi <fluke8259@gmail.com>'},
   'buffers@0.1.1':{license:'MIT',source:'package.json of github.com/bitpay/node-buffers (a copy of substack/node-buffers, whose repository is gone) declares "MIT/X11"; the Debian node-buffers 0.1.1 package records MIT (debian/copyright, Source: github.com/substack/node-buffers). The npm tarball ships neither a license field nor a license file.',copyright:'Copyright (c) James Halliday <mail@substack.net>'},
 };
 const MIT_TERMS=`Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -58,7 +62,7 @@ function licenseOf(dir){
   const file=existsSync(abs)?readdirSync(abs).find(name=>/^(licen[cs]e|copying)(\.|-|$)/i.test(name)):undefined;
   const found={version:pkg.version??'unknown',license,text:file?readFileSync(path.join(abs,file),'utf8').trim():'',file:file??null};
   const override=LICENSE_OVERRIDES[`${pkg.name}@${found.version}`];
-  if(override&&license==='UNKNOWN'&&!file)return {...found,license:override.license,text:`${override.copyright}\n\n${MIT_TERMS}\n\nThe published package declares no license. Confirmed upstream: ${override.source}`};
+  if(override&&!file)return {...found,license:override.license,text:`${override.copyright}\n\n${MIT_TERMS}\n\n${license==='UNKNOWN'?'The published package declares no license. ':''}Confirmed upstream: ${override.source}`};
   // A manifest without a license field whose shipped license file is the MIT text (khroma, used by mermaid) is MIT.
   if(license==='UNKNOWN'&&/^The MIT License/i.test(found.text)&&found.text.includes('Permission is hereby granted, free of charge'))return {...found,license:'MIT'};
   return found;

@@ -28,6 +28,8 @@ export interface AppSettings {
   'appearance.reducedMotion': AccessibilityOverride;
   'appearance.reducedTransparency': AccessibilityOverride;
   'chat.inlineDiffs': boolean;
+  /** #785: `$…$`, `$$…$$`, `\\(…\\)` and `\\[…\\]` in replies are typeset as formulas. Off shows the TeX as written. */
+  'chat.mathRendering': boolean;
   /** How Codex-backed agents write: `personality` in Codex config. Automatic uses your Codex config's personality, else Friendly (as the desktop app does). */
   'chat.responseStyle': ResponseStyle;
   /** The model new chats start with, unless their Project sets one. Null follows the app's built-in default. */
@@ -78,6 +80,7 @@ export const SETTING_DEFAULTS: AppSettings = {
   'appearance.reducedMotion': 'system',
   'appearance.reducedTransparency': 'system',
   'chat.inlineDiffs': true,
+  'chat.mathRendering': true,
   'chat.responseStyle': 'auto',
   'general.defaultModel': null,
   'chats.autoArchiveDays': 0,
@@ -117,6 +120,7 @@ const CHECKS: { [K in SettingKey]: { valid(value: unknown): value is AppSettings
   'appearance.reducedMotion': { valid: oneOf<AccessibilityOverride>(['system', 'reduce']), expected: '"system" or "reduce"' },
   'appearance.reducedTransparency': { valid: oneOf<AccessibilityOverride>(['system', 'reduce']), expected: '"system" or "reduce"' },
   'chat.inlineDiffs': { valid: bool, expected: 'true or false' },
+  'chat.mathRendering': { valid: bool, expected: 'true or false' },
   'chat.responseStyle': { valid: oneOf<ResponseStyle>(RESPONSE_STYLES), expected: '"auto", "friendly" or "pragmatic"' },
   'general.defaultModel': { valid: modelPreference, expected: 'null or {providerId, model, effort?}' },
   'notifications.runs': { valid: oneOf<RunNotifications>(['all', 'failures', 'off']), expected: '"all", "failures" or "off"' },

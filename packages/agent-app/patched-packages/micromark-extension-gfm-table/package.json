@@ -1,0 +1,44 @@
+{
+  "author": "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)",
+  "bugs": "https://github.com/micromark/micromark-extension-gfm-table/issues",
+  "contributors": [
+    "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)"
+  ],
+  "dependencies": {
+    "devlop": "^1.0.0",
+    "micromark-factory-space": "^2.0.0",
+    "micromark-util-character": "^2.0.0",
+    "micromark-util-symbol": "^2.0.0",
+    "micromark-util-types": "^2.0.0"
+  },
+  "description": "micromark extension to support GFM tables",
+  "exports": {
+    "types": "./dev/index.d.ts",
+    "default": "./dev/index.js"
+  },
+  "files": [
+    "dev/"
+  ],
+  "funding": {
+    "type": "opencollective",
+    "url": "https://opencollective.com/unified"
+  },
+  "keywords": [
+    "cell",
+    "column",
+    "gfm",
+    "markdown",
+    "micromark-extension",
+    "micromark",
+    "row",
+    "table",
+    "tabular",
+    "unified"
+  ],
+  "license": "MIT",
+  "name": "micromark-extension-gfm-table",
+  "repository": "micromark/micromark-extension-gfm-table",
+  "sideEffects": false,
+  "type": "module",
+  "version": "2.1.1"
+}

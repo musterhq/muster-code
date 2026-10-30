@@ -69,6 +69,14 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-786K](21-visuals-and-artifacts.md#mus-spec-21-786k) | A Mermaid file that does not parse shows "Unable to render diagram: <message>" with its source and Retry; a file with a URL or a %%{ }%% block shows why it is not drawn, with its source, and never reaches Mermaid. | [`an invalid Mermaid file shows the error with its source; a file with a URL or configuration is never handed to Mermaid`](../../../packages/agent-app/tests/notebook-mermaid-786-dom.tsx) |
 | [MUS-SPEC-21-786L](21-visuals-and-artifacts.md#mus-spec-21-786l) | Switching the app between dark and light re-serves a notebook HTML output in the new colour scheme and redraws a Mermaid file in the new theme. | [`both previews follow the app theme: HTML outputs are framed in the active colours and diagrams redraw in light and dark`](../../../packages/agent-app/tests/notebook-mermaid-786-dom.tsx) |
 | [MUS-SPEC-21-366A](21-visuals-and-artifacts.md#mus-spec-21-366a) | A GLB file opens as an interactive 3D preview: canvas, camera views, model info, wireframe, full screen, and all graphics and worker resources released on close. | [`a GLB model opens as an interactive 3D preview: canvas, views, info, wireframe, full screen, released on close`](../../../packages/agent-app/tests/model-viewer-dom.tsx) |
+| [MUS-SPEC-21-785A](21-visuals-and-artifacts.md#mus-spec-21-785a) | Inline and display formulas typeset with their labels; display maths scrolls sideways; prices, shell variables, code and links stay as written. | [`a reply typesets inline and display maths, labelled, with display maths scrolling sideways`](../../../packages/agent-app/tests/markdown-math-dom.tsx) |
+| [MUS-SPEC-21-785B](21-visuals-and-artifacts.md#mus-spec-21-785b) | Prices and shell variables stay plain text; code spans, code blocks and links are untouched. | [`maths parsing: prices, shell variables, code, escapes and links stay text`](../../../packages/agent-app/tests/markdown-math.test.ts) |
+| [MUS-SPEC-21-785C](21-visuals-and-artifacts.md#mus-spec-21-785c) | The four delimiters typeset as inline or display formulas. | [`maths parsing: the four delimiters, display blocks and source offsets`](../../../packages/agent-app/tests/markdown-math.test.ts) |
+| [MUS-SPEC-21-785D](21-visuals-and-artifacts.md#mus-spec-21-785d) | While a reply streams, an unfinished formula shows as its source. | [`maths parsing: an unfinished formula stays text at every point of a streaming reply`](../../../packages/agent-app/tests/markdown-math.test.ts) |
+| [MUS-SPEC-21-785E](21-visuals-and-artifacts.md#mus-spec-21-785e) | TeX pipes inside a table cell do not break the table; a display equation's `=` line is not read as a heading. | [`maths parsing: TeX pipes stay in their table cell and a display = line is not a heading`](../../../packages/agent-app/tests/markdown-math.test.ts) |
+| [MUS-SPEC-21-785F](21-visuals-and-artifacts.md#mus-spec-21-785f) | While a reply streams an unfinished formula shows as its source; invalid TeX shows its source. | [`a streaming formula shows its source until it closes, and invalid TeX shows its source`](../../../packages/agent-app/tests/markdown-math-dom.tsx) |
+| [MUS-SPEC-21-785G](21-visuals-and-artifacts.md#mus-spec-21-785g) | Copying a selection that includes a formula copies the whole TeX source with its delimiters; the same for Mermaid diagrams. | [`copying a selection with maths or a diagram gives back the TeX and the fenced source`](../../../packages/agent-app/tests/markdown-math-dom.tsx) |
+| [MUS-SPEC-21-785H](21-visuals-and-artifacts.md#mus-spec-21-785h) | Replies render formulas, on by default. | [`maths is on by default and the Chat setting turns it off`](../../../packages/agent-app/tests/markdown-math-dom.tsx) |
 
 ### Side chats
 
@@ -644,3 +652,93 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Environment: DOM suite (linkedom) built by tests/run-model-viewer-dom.mjs, with a fake WebGL renderer and a stubbed `files.modelChunk` bridge.
 - Known gaps: No real GPU draws the model; pixels are not compared.
 - Evidence: UNVERIFIED
+
+### Maths in replies
+
+<a id="mus-spec-21-785a"></a>
+#### MUS-SPEC-21-785A: Inline and display maths typeset
+
+- Precondition: An assistant reply holds `$x^2$`, `\(y_1\)` and a `$$…$$` display block, plus prices, a shell variable, a code span and a link.
+- Action: Show the reply; then show one whose TeX uses `\href{javascript:…}` and `\htmlClass`.
+- Expected result: The three formulas are typeset by KaTeX: inline ones are groups labelled "Inline equation", the display one is labelled "Display equation", is display style, sits in a horizontal scroller that takes keyboard focus, and carries MathML with its TeX annotation. Prices, `$HOME`, the code span and the link stay as written. TeX makes no `javascript:` link and no injected class.
+- Test: `packages/agent-app/tests/markdown-math-dom.tsx::a reply typesets inline and display maths, labelled, with display maths scrolling sideways`
+- Environment: DOM suite (linkedom) with a stubbed bridge and the real KaTeX.
+- Known gaps: linkedom has no layout: that a long display formula actually scrolls, and the focus ring, are styling and are not measured.
+- Evidence: local; cd packages/agent-app && npm run test:renderer (suite markdown-math-dom); exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
+
+<a id="mus-spec-21-785b"></a>
+#### MUS-SPEC-21-785B: Prices, shell variables, code and links stay text
+
+- Precondition: Prose with prices (`$5 and $10`, `$5-$10`, `$1,000,$2,000`), shell variables (`$HOME`, `${PATH}`, `$(pwd)`), code spans, indented code, links, autolinks, escaped dollars and citations like `\[1\]`.
+- Action: Parse each with the parser replies use.
+- Expected result: None of them becomes a formula and each keeps its text as written; a real formula later on the same line as a price still is one; a link or autolink keeps a `$` in its destination.
+- Test: `packages/agent-app/tests/markdown-math.test.ts::maths parsing: prices, shell variables, code, escapes and links stay text`
+- Environment: Node test of the remark pipeline (remark-parse, remark-gfm, remark-math on the patched tokenizer); no DOM.
+- Known gaps: None known.
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/markdown-math.test.ts; exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
+
+<a id="mus-spec-21-785c"></a>
+#### MUS-SPEC-21-785C: The four delimiters and display blocks
+
+- Precondition: Text with `$…$`, `\(…\)`, `$$…$$` and `\[…\]`, display blocks on their own lines, formulas ending in a comma, TeX escapes and CRLF line ends.
+- Action: Parse each.
+- Expected result: Inline and display formulas come out in order with their TeX; Markdown block syntax inside a display block stays TeX; source offsets match the original text for every line ending.
+- Test: `packages/agent-app/tests/markdown-math.test.ts::maths parsing: the four delimiters, display blocks and source offsets`
+- Environment: Node test of the remark pipeline; no DOM.
+- Known gaps: None known.
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/markdown-math.test.ts; exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
+
+<a id="mus-spec-21-785d"></a>
+#### MUS-SPEC-21-785D: An unfinished formula stays text while streaming
+
+- Precondition: A reply with an inline and a display formula, cut at every character as a stream would deliver it.
+- Action: Parse every prefix.
+- Expected result: No prefix throws; an unclosed `\(`, `$$` or `\[` stays text; once closed the formulas are read; a ```math fence counts only once closed.
+- Test: `packages/agent-app/tests/markdown-math.test.ts::maths parsing: an unfinished formula stays text at every point of a streaming reply`
+- Environment: Node test of the remark pipeline; no DOM.
+- Known gaps: None known.
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/markdown-math.test.ts; exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
+
+<a id="mus-spec-21-785e"></a>
+#### MUS-SPEC-21-785E: TeX pipes in tables and a display = line
+
+- Precondition: Tables whose cells hold `$|x|$`, `\(\frac{1}{|x|}\)`, `\|x\|`, a formula opened in one row and closed in a later one, and literal dollars in links and code; a `\[ … \]` block whose middle line is a lone `=`.
+- Action: Parse each.
+- Expected result: Every row keeps its cell count; a pipe inside a formula stays in its cell; a formula split across rows is text; the display block is one formula, not a setext heading.
+- Test: `packages/agent-app/tests/markdown-math.test.ts::maths parsing: TeX pipes stay in their table cell and a display = line is not a heading`
+- Environment: Node test of the remark pipeline; no DOM.
+- Known gaps: None known.
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/markdown-math.test.ts; exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
+
+<a id="mus-spec-21-785f"></a>
+#### MUS-SPEC-21-785F: Streaming and invalid formulas show their source
+
+- Precondition: A reply streams `Energy \(E = mc`, then `… \(E = mc^2\) and $$\sum_i`, then the whole text; another reply holds invalid TeX (`$\frac{1}$`) beside a valid formula.
+- Action: Show each stage, then the reply with invalid TeX.
+- Expected result: An unfinished formula is never rendered: its source shows; the closed one typesets while the open display one stays as written; invalid TeX shows its source exactly as written, with no KaTeX error box.
+- Test: `packages/agent-app/tests/markdown-math-dom.tsx::a streaming formula shows its source until it closes, and invalid TeX shows its source`
+- Environment: DOM suite (linkedom) with a stubbed bridge and the real KaTeX.
+- Known gaps: None known.
+- Evidence: local; cd packages/agent-app && npm run test:renderer (suite markdown-math-dom); exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
+
+<a id="mus-spec-21-785g"></a>
+#### MUS-SPEC-21-785G: Copy keeps the TeX and the diagram source
+
+- Precondition: A reply with an inline formula, a display formula, a mermaid fence and prose, all rendered.
+- Action: Copy a selection across the whole reply, part of one formula, a part inside the diagram, and plain prose only.
+- Expected result: The whole-reply copy is the Markdown as written: TeX with its own delimiters and the diagram as its fenced source; the HTML flavour carries the TeX, not the glyphs or the SVG. Part of a formula copies the whole formula; a selection inside the diagram copies its fence; plain prose is left to the browser.
+- Test: `packages/agent-app/tests/markdown-math-dom.tsx::copying a selection with maths or a diagram gives back the TeX and the fenced source`
+- Environment: DOM suite (linkedom) with a stubbed bridge and a stub Mermaid renderer; the selection is a stand-in that clones the nodes a browser selection would.
+- Known gaps: linkedom has no selection: the stand-in clones whole nodes, so a selection that starts mid-word is not exercised. Pasting into another app is not tested. Formulas inside Mermaid labels are drawn by Mermaid's own KaTeX and are not asserted here.
+- Evidence: local; cd packages/agent-app && npm run test:renderer (suite markdown-math-dom); exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
+
+<a id="mus-spec-21-785h"></a>
+#### MUS-SPEC-21-785H: Maths is on by default and can be turned off
+
+- Precondition: Fresh settings.
+- Action: Read the default, turn off "Typeset maths in replies" (Settings › Chat), show a reply with maths, then turn it back on.
+- Expected result: The setting is on by default; with it off the reply shows its TeX as written and nothing is typeset; turning it back on typesets the formulas.
+- Test: `packages/agent-app/tests/markdown-math-dom.tsx::maths is on by default and the Chat setting turns it off`
+- Environment: DOM suite (linkedom) with a stubbed bridge.
+- Known gaps: The Settings row itself is not clicked in this suite.
+- Evidence: local; cd packages/agent-app && npm run test:renderer (suite markdown-math-dom); exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e

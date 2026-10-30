@@ -11,6 +11,7 @@ import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeF
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {katexFontsWoff2Only} from '../katex-fonts.mjs';
 const {SHOTS} = await import(process.env.SHOTS_FILE ? new URL('file://' + path.resolve(process.env.SHOTS_FILE)).href : './shots.mjs');
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -29,7 +30,7 @@ async function build() {
   await esbuild.build({
     entryPoints: [{in: path.join(here, 'main.tsx'), out: 'main'}, {in: path.join(app, 'src/renderer/diff-worker.ts'), out: 'diff-worker'}, {in: path.join(app, 'src/renderer/syntax-highlight-worker.ts'), out: 'syntax-highlight-worker'}],
     outdir: bundle, bundle: true, splitting: true, platform: 'browser', format: 'esm', target: 'es2022', jsx: 'automatic',
-    loader: {'.ttf': 'file', '.woff2': 'file'}, minify: true, logLevel: 'error', absWorkingDir: app,
+    loader: {'.ttf': 'file', '.woff2': 'file'}, plugins: [katexFontsWoff2Only], minify: true, logLevel: 'error', absWorkingDir: app,
     define: {'process.env.NODE_ENV': '"production"'},
   });
   cpSync(path.join(app, 'src/renderer/styles.css'), path.join(bundle, 'styles.css'));

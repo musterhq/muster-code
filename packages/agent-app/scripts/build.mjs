@@ -3,6 +3,7 @@ import {execFileSync} from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {katexFontsWoff2Only} from './katex-fonts.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = (...p) => path.join(root, 'src', ...p);
@@ -146,6 +147,7 @@ if (hasRenderer) {
     target: 'es2022',
     jsx: 'automatic',
     loader: { '.ttf': 'file', '.woff2': 'file', '.wasm': 'binary' },
+    plugins: [katexFontsWoff2Only],
     // The vendored Draco glue has a Node-only branch that require()s these; the browser/worker branch never runs it.
     external: ['fs', 'path'],
     metafile: true,

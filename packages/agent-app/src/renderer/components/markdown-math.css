@@ -1,0 +1,16 @@
+/* KaTeX's stylesheet; scripts/build.mjs bundles its woff2 fonts with the app (the renderer's CSP allows fonts from 'self' only). */
+@import 'katex/dist/katex.min.css';
+
+/* #785 maths in replies. Inline formulas sit on the text line; a display formula is its own block and scrolls sideways when
+   wider than the reply, with a focus ring when the keyboard is on it. */
+.md-math { max-width: 100%; }
+.md-math-inline { display: inline-block; vertical-align: middle; white-space: nowrap; }
+.md-math-inline .md-math-scroll { display: block; max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+.md-math-display { display: block; margin-block: var(--md-gap, 0.65rem); }
+.md-math-display .md-math-scroll { display: block; max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: 2px; border-radius: var(--radius-4); }
+.md-math-display .md-math-scroll:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.md-math-display .katex-display { margin: 0; }
+.md-math-display .md-math-typeset { display: inline-block; min-width: 100%; }
+.md-math-source { white-space: pre-wrap; font-family: var(--mono); font-size: 0.92em; }
+.md-math .katex { font-size: 1.1em; }
+.md-table .md-math-inline .md-math-scroll { max-width: none; overflow: visible; }
