@@ -10,6 +10,8 @@ import {WorkbookFile} from './WorkbookFile';
 import {HighlightedSourceTable} from './HighlightedCode';
 import {codeLanguageFromPath} from './codeLanguage';
 import {HtmlPreview} from './FilePreviews';
+import {NotebookPreview} from './NotebookPreview';
+import {MermaidFilePreview} from './MermaidFilePreview';
 import {AttachmentModelPane} from './LazyModel';
 import {ResourceState} from './ResourceState';
 import {FileTypeIcon} from './FileTypeIcon';
@@ -61,7 +63,7 @@ export function AttachmentTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
   const attachmentId = tab.attachmentId ?? '';
   const name = tab.path || tab.title;
   const presentation = filePresentation(name);
-  const richText = presentation === 'markdown' || presentation === 'json' || presentation === 'csv' || presentation === 'tsv' || presentation === 'html';
+  const richText = presentation === 'markdown' || presentation === 'notebook' || presentation === 'mermaid' || presentation === 'json' || presentation === 'csv' || presentation === 'tsv' || presentation === 'html';
   const [mode, setMode] = useState<'source' | 'preview'>(richText ? 'preview' : 'source');
   const [state, setState] = useState<LoadState>({phase: 'loading'});
   const [attempt, setAttempt] = useState(0);
@@ -118,6 +120,8 @@ export function AttachmentTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
       if (truncated) truncatedNotice = <div className="pane-truncated file-truncated-notice"><span>Showing a preview of this file. It is larger than the in-app preview limit.</span></div>;
       const preview = richText && mode === 'preview';
       if (preview && presentation === 'html') content = <HtmlPreview html={text} name={name}/>;
+      else if (preview && presentation === 'notebook') content = <NotebookPreview text={text} name={name}/>;
+      else if (preview && presentation === 'mermaid') content = <MermaidFilePreview text={text} name={name}/>;
       else if (preview && presentation === 'markdown') content = <div className="file-markdown" data-kind={presentation} role="region" aria-label={`Preview of ${name}`} tabIndex={0}>
         <MessageBody text={text} asDocument/>
         {!text && <p className="file-empty">This document is empty.</p>}
@@ -136,7 +140,7 @@ export function AttachmentTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
       {richText && <div className="file-view-switch" role="group" aria-label="Document view">
         {mode === 'preview'
           ? <button type="button" className="file-view-toggle" aria-label="View source" title="Show the raw file with syntax highlighting" onClick={() => setMode('source')}><span>Source</span></button>
-          : <button type="button" className="file-view-toggle" aria-label={presentation === 'html' ? 'View rendered' : 'View preview'} title={presentation === 'html' ? 'Render without scripts' : 'Show the formatted document'} onClick={() => setMode('preview')}><span>{presentation === 'html' ? 'Rendered' : 'Preview'}</span></button>}
+          : <button type="button" className="file-view-toggle" aria-label={presentation === 'html' ? 'View rendered' : presentation === 'notebook' ? 'View notebook' : presentation === 'mermaid' ? 'View diagram' : 'View preview'} title={presentation === 'html' ? 'Render without scripts' : presentation === 'notebook' ? 'Show the cells and their saved outputs (nothing is run)' : presentation === 'mermaid' ? 'Draw the diagram' : 'Show the formatted document'} onClick={() => setMode('preview')}><span>{presentation === 'html' ? 'Rendered' : presentation === 'notebook' ? 'Notebook' : presentation === 'mermaid' ? 'Diagram' : 'Preview'}</span></button>}
       </div>}
     </div>
     <div className="file-content-layout">

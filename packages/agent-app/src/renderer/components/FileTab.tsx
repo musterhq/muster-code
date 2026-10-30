@@ -30,12 +30,14 @@ import {virtualRowSelection} from './VirtualRowTable';
 import {friendlyFileError, parseDelimited, delimitedCellType} from './filePresentation';
 import {ResourceState} from './ResourceState';
 import {FileExitActions, FileFallback, HtmlPreview, MediaFile, QuickLookFile} from './FilePreviews';
+import {NotebookPreview} from './NotebookPreview';
+import {MermaidFilePreview} from './MermaidFilePreview';
 import {Tip} from './Tooltip';
 import {ModelFilePane} from './LazyModel';
 
 // Keep Markdown parsing bounded independently of the host's file-read limit.
 const MARKDOWN_LIMIT = 64 * 1024;
-const SCROLLERS = '.code-scroll, .file-markdown, .html-preview';
+const SCROLLERS = '.code-scroll, .file-markdown, .html-preview, .notebook-scroll';
 
 /** A short-lived confirmation for copy actions. */
 function useCopied(): [string, (text: string, label: string) => void] {
@@ -80,6 +82,15 @@ function FileCopyMenu({folderPath, path, contents}: {folderPath?: string; path: 
       </Menu.Popup></Menu.Positioner></Menu.Portal>
     </Menu.Root>
   </>;
+}
+
+/** The toggle that leaves the source view: its name and its tooltip. */
+function previewLabel(kind: string): [label: string, title: string] {
+  if (kind === 'html') return ['View rendered', 'Render without scripts'];
+  if (kind === 'json') return ['View tree', 'Browse the JSON as a collapsible tree'];
+  if (kind === 'notebook') return ['View notebook', 'Show the cells and their saved outputs (nothing is run)'];
+  if (kind === 'mermaid') return ['View diagram', 'Draw the diagram'];
+  return ['View preview', 'Show the formatted document'];
 }
 
 /** Codex's floating copy control on a rendered document: copies the Markdown source. */
@@ -317,9 +328,9 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
       }
     }
   },[timeline,tab.path,folder?.path]);
-  // Documents open rendered (Markdown, HTML, CSV/TSV); code and config (JSON included) open as highlighted source,
-  // as in Codex. JSON's tree is an opt-in second view, never the default.
-  const richText = ['markdown','json','csv','tsv','html'].includes(kind);
+  // Documents open rendered (Markdown, notebooks, Mermaid diagrams, HTML, CSV/TSV); code and config (JSON included) open as
+  // highlighted source. JSON's tree is an opt-in second view, never the default.
+  const richText = ['markdown','notebook','mermaid','json','csv','tsv','html'].includes(kind);
   const opensRendered = richText && kind !== 'json';
   const isDelimited = kind === 'csv' || kind === 'tsv';
   const [mode, setMode] = useState<'source' | 'preview'>(opensRendered && !tab.line ? 'preview' : 'source');
@@ -411,7 +422,8 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
   };
   const canEdit = Boolean(ready) && !bypassesBody && !ready?.native && !ready?.document && !ready?.workbook && !ready?.asset;
   const revision = ready ? ready.document?.revision ?? ready.workbook?.revision ?? (delimited.workbook && !truncated ? textRevision : '') : '';
-  const previewLimit = kind === 'html' ? Infinity : MARKDOWN_LIMIT;
+  // Notebooks and diagrams bound themselves (shared/notebook.ts, the diagram source limit).
+  const previewLimit = kind === 'html' || kind === 'notebook' || kind === 'mermaid' ? Infinity : MARKDOWN_LIMIT;
   const previewAllowed = Boolean(ready) && richText && (isDelimited || text.length <= previewLimit) && !truncated;
   const preview = previewAllowed && mode === 'preview';
   // The stale case is decided here so the notice can offer a refresh; the source view below hides its own copy.
@@ -431,7 +443,7 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
   } else {
     const {asset, document, workbook} = ready!;
     content = <>
-      {kind === 'model' ? <ModelFilePane key={tab.id} folderId={tab.folderId!} path={tab.path!} revision={ready}/> : ready!.native ? <NativeDocument key={tab.id} folderId={tab.folderId!} path={tab.path!} revision={ready!} onToggleResourceMaximize={onToggleResourceMaximize} resourceMaximized={resourceMaximized}/> : document ? <PdfFile document={document} onLocation={setLocation}/> : workbook || (delimited.workbook && preview) ? <WorkbookFile key={`workbook:${tab.id}`} delimited={isDelimited} workbook={workbook ?? delimited.workbook!} onLocation={locateCell} onToggleFullPage={onToggleResourceMaximize} fullPage={resourceMaximized}/> : asset ? <ImageFile asset={asset} name={tab.title}/> : preview && delimited.error ? <div className="pane-error" role="alert"><p>Cannot preview this table: {delimited.error}</p><button onClick={() => setMode('source')}>View source</button></div> : preview && kind === 'html' ? <HtmlPreview html={text} name={tab.title}/> : preview ? <div className="file-markdown" data-kind={kind} role="region" aria-label={`Preview of ${tab.path}`} tabIndex={0}>
+      {kind === 'model' ? <ModelFilePane key={tab.id} folderId={tab.folderId!} path={tab.path!} revision={ready}/> : ready!.native ? <NativeDocument key={tab.id} folderId={tab.folderId!} path={tab.path!} revision={ready!} onToggleResourceMaximize={onToggleResourceMaximize} resourceMaximized={resourceMaximized}/> : document ? <PdfFile document={document} onLocation={setLocation}/> : workbook || (delimited.workbook && preview) ? <WorkbookFile key={`workbook:${tab.id}`} delimited={isDelimited} workbook={workbook ?? delimited.workbook!} onLocation={locateCell} onToggleFullPage={onToggleResourceMaximize} fullPage={resourceMaximized}/> : asset ? <ImageFile asset={asset} name={tab.title}/> : preview && delimited.error ? <div className="pane-error" role="alert"><p>Cannot preview this table: {delimited.error}</p><button onClick={() => setMode('source')}>View source</button></div> : preview && kind === 'html' ? <HtmlPreview html={text} name={tab.title}/> : preview && kind === 'notebook' ? <NotebookPreview text={text} name={tab.title} resourceContext={{folderId: tab.folderId!, path: tab.path!}}/> : preview && kind === 'mermaid' ? <MermaidFilePreview text={text} name={tab.title}/> : preview ? <div className="file-markdown" data-kind={kind} role="region" aria-label={`Preview of ${tab.path}`} tabIndex={0}>
         {kind === 'markdown' && text && <DocumentCopyButton text={text}/>}
         {kind === 'markdown' ? <MessageBody text={text} resourceContext={{folderId: tab.folderId!, path: tab.path!}} asDocument/> : <StructuredFile text={text} kind={kind as 'json'|'csv'|'tsv'}/>}
         {!text && <p className="file-empty">This document is empty.</p>}
@@ -444,7 +456,7 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
         {blaming && tab.folderId && tab.path ? <BlameView folderId={tab.folderId} path={tab.path} source={text} targetLine={tab.line}/> : turnReview && turnReview.model.state !== 'clean' ? <InlineFileSource source={text} path={tab.path??''} review={turnReview} targetLine={tab.line}/> : latestEdit && !turnReview ? <InlineFileSource source={text} path={tab.path??''} patch={latestEdit.patch} status={latestEdit.status} unavailableReason={latestEdit.unavailableReason} targetLine={tab.line}/> : text.length >= LARGE_FILE_THRESHOLD ? <VirtualFileSource source={text} language={codeLanguageFromPath(tab.path ?? '')} targetLine={tab.line}/> : <HighlightedSourceTable source={text} language={codeLanguageFromPath(tab.path ?? '')} targetLine={tab.line}/>}
         {!text && <p className="file-empty">This file is empty.</p>}
       </div>}
-      {richText && kind !== 'html' && !previewAllowed && !truncated && <div className="pane-truncated">Showing source: Document preview is limited to 65,536 characters.</div>}
+      {richText && kind !== 'html' && kind !== 'notebook' && kind !== 'mermaid' && !previewAllowed && !truncated && <div className="pane-truncated">Showing source: Document preview is limited to 65,536 characters.</div>}
       {truncated && <div className="pane-truncated file-truncated-notice">
         <span>Showing first {shownKB.toLocaleString()} KB. The full file is larger than the in-app preview.</span>
         <button type="button" onClick={loadFullFile} disabled={loadingFull}>{loadingFull ? 'Loading…' : 'Load full file'}</button>
@@ -463,7 +475,7 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
       {richText && !bypassesBody && <div className="file-view-switch" role="group" aria-label="Document view">
         {preview
           ? <button type="button" className="file-view-toggle" aria-label="View source" title="Show the raw file with syntax highlighting" onClick={() => setMode('source')}>View source</button>
-          : <button type="button" className="file-view-toggle" aria-label={kind === 'html' ? 'View rendered' : kind === 'json' ? 'View tree' : 'View preview'} disabled={!previewAllowed} title={previewAllowed ? (kind === 'html' ? 'Render without scripts' : kind === 'json' ? 'Browse the JSON as a collapsible tree' : 'Show the formatted document') : 'Large or truncated documents open as source'} onClick={() => setMode('preview')}>{kind === 'html' ? 'View rendered' : kind === 'json' ? 'View tree' : 'View preview'}</button>}
+          : <button type="button" className="file-view-toggle" aria-label={previewLabel(kind)[0]} disabled={!previewAllowed} title={previewAllowed ? previewLabel(kind)[1] : 'Large or truncated documents open as source'} onClick={() => setMode('preview')}>{previewLabel(kind)[0]}</button>}
       </div>}
       {selectionStatus && <span className="file-copy-status" role="status">{selectionStatus}</span>}
       <FileCopyMenu folderPath={folder?.path} path={tab.path ?? ''} contents={ready && !truncated && !ready.document && !ready.workbook && !ready.asset && !ready.native ? text : undefined}/>

@@ -1,5 +1,5 @@
 import {cleanIpcError} from './resourceErrors.ts';
-export type FilePresentation = 'markdown' | 'json' | 'csv' | 'tsv' | 'image' | 'text' | 'document' | 'workbook' | 'html' | 'media' | 'model' | 'quicklook' | 'binary';
+export type FilePresentation = 'markdown' | 'notebook' | 'mermaid' | 'json' | 'csv' | 'tsv' | 'image' | 'text' | 'document' | 'workbook' | 'html' | 'media' | 'model' | 'quicklook' | 'binary';
 
 /** Turn host/bridge failures into actionable, non-leaky viewer copy. */
 export function friendlyFileError(error: unknown): string {
@@ -39,6 +39,8 @@ export function filePresentation(path: string): FilePresentation {
   if (DOCUMENT.has(extension)) return 'document';
   if (QUICK_LOOK.has(extension)) return 'quicklook';
   if (extension === 'md' || extension === 'markdown' || extension === 'mdx') return 'markdown';
+  if (extension === 'ipynb') return 'notebook';
+  if (extension === 'mmd' || extension === 'mermaid') return 'mermaid';
   if (extension === 'json' || extension === 'geojson') return 'json';
   if (extension === 'csv' || extension === 'tsv') return extension;
   if (extension === 'html' || extension === 'htm') return 'html';
