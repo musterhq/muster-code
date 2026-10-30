@@ -17,6 +17,8 @@ async function open(active: boolean): Promise<Seen> {
   const chrome = await launchChrome();
   try {
     await chrome.navigate('about:blank', 'document.readyState === "complete"');
+    // The spinner only turns with motion allowed; a CI runner set to reduce motion would never start it.
+    await chrome.send('Emulation.setEmulatedMedia', {features: [{name: 'prefers-reduced-motion', value: 'no-preference'}]});
     // The screen opens after the window went inactive, as when an agent opens a panel while the person works elsewhere.
     return await chrome.evaluate(`(async () => {
       document.documentElement.dataset.windowActive = ${JSON.stringify(String(active))};
