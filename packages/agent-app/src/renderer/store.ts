@@ -1,3 +1,4 @@
+import {endsWithTab} from './deviceSessions.ts';
 import type {
   ApprovalDecision,
   Chat,
@@ -48,11 +49,13 @@ export interface WorkspaceTab {
   id: string;
   /** 'git' is the one Git surface per folder (Changes · History · Pull request). The older 'changes', 'history' and
    *  'pullRequest' kinds are only read from saved workspaces and are mapped onto 'git' on restore. */
-  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView' | 'rich';
+  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView' | 'rich' | 'device';
   /** kind: 'git' only — which segment is showing. */
   gitView?: GitView;
   /** kind: 'diff' — comparison local to this tab, independent of the Changes picker. */
   reviewBaseline?: ReviewBaseline;
+  /** kind: 'device' only (#363): the simulator UDID or emulator serial; absent for the device picker tab. */
+  deviceId?: string;
   /** kind: 'canvas' only (WRK-12). */
   canvasId?: string;
   /** kind: 'rich' only (visuals): what the block shows and its source (Mermaid text, chart JSON, report HTML). */
@@ -1010,6 +1013,9 @@ export function closeTab(id: string): void {
   removeTab(id);
 }
 function removeTab(id: string): void {
+  // #363: the user's own device session ends with its tab; an agent's goes back to its picture-in-picture.
+  const closing = state.tabs.find(t=>t.id===id);
+  if (closing?.kind === 'device' && endsWithTab(closing.deviceId)) void invoke('devices.close', {id: closing.deviceId!}).catch(() => undefined);
   const index = state.tabs.findIndex(t=>t.id===id);
   const tabs = state.tabs.filter((t) => t.id !== id);
   const { [id]: _body, ...fileBodies } = state.fileBodies;

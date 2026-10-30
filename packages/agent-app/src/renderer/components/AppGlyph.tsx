@@ -1,6 +1,6 @@
 /** Codex-style app marks for computer-use rows and the PiP stack: a small tinted tile per app or page. */
 import React from 'react';
-import {Calendar,Code2,FileText,Folder,Globe,Hammer,Hash,Image as ImageIcon,Mail,MapPin,MessageCircle,Monitor,Music,PenTool,Settings,SquareTerminal,StickyNote} from 'lucide-react';
+import {Calendar,Code2,FileText,Folder,Globe,Hammer,Hash,Image as ImageIcon,Mail,MapPin,MessageCircle,Monitor,Music,PenTool,Settings,Smartphone,SquareTerminal,StickyNote} from 'lucide-react';
 import type {ComputerTarget} from '../../shared/computer-use';
 import {agentHue} from '../agentIdentity';
 import './app-glyph.css';
@@ -26,14 +26,15 @@ const KNOWN:[RegExp,Icon,number,number][]=[
   [/code|cursor|zed|sublime|intellij|webstorm|muster/i,Code2,206,64],
 ];
 /** The mark for one app or page: `app` is the app name (or page title/host), `target` whether it is the in-app browser. */
-export function appMark(app:string,target:ComputerTarget):{icon?:Icon;hue:number;sat:number;letter:string} {
+export function appMark(app:string,target:ComputerTarget|'device'):{icon?:Icon;hue:number;sat:number;letter:string} {
   const name=app.trim();
   if(target==='browser')return {icon:Globe,hue:212,sat:72,letter:''};
+  if(target==='device')return {icon:Smartphone,hue:220,sat:12,letter:''};
   for(const [pattern,icon,hue,sat] of KNOWN) if(pattern.test(name))return {icon,hue,sat,letter:''};
   if(!name)return {icon:Monitor,hue:220,sat:10,letter:''};
   return {hue:agentHue(name),sat:58,letter:(name.match(/[\p{L}\p{N}]/u)?.[0]??'?').toUpperCase()};
 }
-export function AppGlyph({app,target,size=16,running=false}:{app:string;target:ComputerTarget;size?:number;running?:boolean}) {
+export function AppGlyph({app,target,size=16,running=false}:{app:string;target:ComputerTarget|'device';size?:number;running?:boolean}) {
   const mark=appMark(app,target),Icon=mark.icon;
   return <span className={`app-glyph${running?' is-active':''}`} aria-hidden="true" data-app={app||undefined} style={{'--app-hue':mark.hue,'--app-sat':`${mark.sat}%`,'--app-size':`${size}px`} as React.CSSProperties}>
     {Icon?<Icon size={Math.round(size*0.66)} strokeWidth={2}/>:<span className="app-glyph-letter">{mark.letter}</span>}

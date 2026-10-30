@@ -22,6 +22,7 @@ import {codexWindowOverrides, userCompactionKeys} from './codex-window-overrides
 import {unpackedPath} from './unpacked-path.ts';
 import {BROWSER_MCP, BROWSER_NOTE, browserToolStyle, routeBrowserNote} from '../shared/computer-use.ts';
 import {ASK_USER_METHOD, ASK_USER_RULE} from './ask-user.ts';
+import {DEVICE_MCP, DEVICE_NOTE} from '../shared/device-protocol.ts';
 import type {McpServerSpec} from './adapters/types.ts';
 import type {RunnableAdapter} from './adapters/types.ts';
 import {CLAUDE_CODE_LANE_DRIVER, CLAUDE_LANE_DRIVER} from '../shared/provider-lanes.ts';
@@ -181,9 +182,14 @@ export const runInstructions = (mode: Chat['mode'], extra?: string, subagents = 
 export function adapterBrowser(driver: string | undefined, mode: Chat['mode'], developerInstructions: string | undefined, overrides: ProviderInput['configOverrides'], subagents = true, permissionMode?: ChatPermissionMode): {instructions?: string; mcpServers?: Record<string, McpServerSpec>; browserTools?: true} {
   const style = browserToolStyle(driver), offered = !!developerInstructions?.includes(BROWSER_NOTE);
   const servers = mcpServersFromOverrides(overrides);
-  if (style === 'native' || style === 'none') delete servers[BROWSER_MCP];
+  // Routes that load no MCP servers never hear about tools they cannot call: the browser (native routes get their own)
+  // and the device tools (#363).
+  const noMcp = style === 'native' || style === 'none';
+  if (noMcp) { delete servers[BROWSER_MCP]; delete servers[DEVICE_MCP]; }
   if (driver === CLAUDE_LANE_DRIVER) for (const name of LANE_DROPPED_SERVERS) delete servers[name];
-  const instructions = runInstructions(mode, routeSandboxNote(routeBrowserNote(driver === CLAUDE_LANE_DRIVER ? withoutUnavailableToolNotes(developerInstructions) : developerInstructions, style), driver), subagents, permissionMode);
+  const notes = driver === CLAUDE_LANE_DRIVER ? withoutUnavailableToolNotes(developerInstructions) : developerInstructions;
+  const withoutDevices = noMcp && notes?.includes(DEVICE_NOTE) ? notes.replace(DEVICE_NOTE, '').replace(/\n{3,}/g, '\n\n').trim() || undefined : notes;
+  const instructions = runInstructions(mode, routeSandboxNote(routeBrowserNote(withoutDevices, style), driver), subagents, permissionMode);
   return {...(instructions ? {instructions} : {}), ...(Object.keys(servers).length ? {mcpServers: servers} : {}), ...(offered && style === 'native' ? {browserTools: true as const} : {})};
 }
 /** #653: a run carries the muster_sandbox server only while its chat is sandboxed (domains/sandbox.ts adds it). */

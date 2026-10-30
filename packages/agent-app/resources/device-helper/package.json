@@ -1,0 +1,9 @@
+{
+  "name": "muster-device-helper",
+  "private": true,
+  "description": "Pinned Expo Device Hub install used by Muster's Devices integration (downloaded on first enable).",
+  "license": "MIT",
+  "dependencies": {
+    "expo-device-hub": "0.15.3"
+  }
+}

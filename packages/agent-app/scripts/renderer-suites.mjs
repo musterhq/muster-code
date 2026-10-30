@@ -49,6 +49,7 @@ export const split = new Set([
   'mermaid-787-dom',
   'html-preview-components',
   'notebook-mermaid-786-dom',
+  'devices-components',
 ]);
 
 /** tests/*.tsx files that are deliberately not suites, with the reason. */

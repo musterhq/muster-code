@@ -3,4 +3,5 @@
 import '../../src/renderer/main.tsx';
 import * as store from '../../src/renderer/store';
 import * as newChat from '../../src/renderer/newChatDraft';
-(window as unknown as {__shots: unknown}).__shots = {store, newChat};
+import * as deviceFrames from '../../src/shared/device-frames';
+(window as unknown as {__shots: unknown}).__shots = {store, newChat, deviceFrames};

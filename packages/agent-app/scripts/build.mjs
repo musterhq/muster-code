@@ -203,6 +203,9 @@ rmSync(dist('runtime', 'resources', 'skills'), {recursive: true, force: true});
 cpSync(path.join(root, 'resources', 'skills'), dist('runtime', 'resources', 'skills'), {recursive: true});
 // #789: the office libraries agent scripts import, pinned to the lockfile; the app downloads them on first use.
 writeFileSync(dist('runtime', 'resources', 'office-libs.json'), JSON.stringify(officeLibraryManifest(JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8')))));
+// #363: the device helper is not bundled; only its pinned manifest and lockfile ship (installed with npm ci on first enable).
+mkdirSync(dist('main', 'device-helper'), {recursive: true});
+for (const name of ['package.json', 'package-lock.json']) cpSync(path.join(root, 'resources', 'device-helper', name), dist('main', 'device-helper', name));
 
 if (watch) {
   const contexts = await Promise.all(builds.map((options) => esbuild.context(options)));

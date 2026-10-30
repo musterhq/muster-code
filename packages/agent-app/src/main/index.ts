@@ -50,6 +50,7 @@ import {shouldThrottleBackground} from './painting-policy.ts';
 import {electronSecretBox} from '../runtime/memory-context.ts';
 import {ServerSignInWindows} from './server-signin-window.ts';
 import { device } from '../shared/device-noun.ts';
+import {isDeviceCommand,wireDevices} from './devices/index.ts';
 
 
 app.setName('Muster Agent');
@@ -545,6 +546,12 @@ async function main(): Promise<void> {
     frame !== null && frame === window.webContents.mainFrame &&
     frame.url.split('#')[0] === rendererURL;
 
+  // #363 Devices: simulators and emulators, the loopback helper, and the agent's muster_device tools (main owns all of it).
+  const devices = wireDevices({ipcMain, window:()=>window, trusted:event=>isTrustedSender(event.senderFrame,event.sender.id),
+    userData:app.getPath('userData'), manifestDir:unpackedPath(path.join(__dirname,'device-helper')), toolsDir:path.join(dataDir,'agent-tools','devices'), execPath:process.execPath,
+    emit:onEvent,
+    chat:async chatId=>{const chat=(await loaded.service.invoke('app.snapshot',undefined)).chats.find(item=>item.id===chatId);return chat?{mode:chat.mode,...(chat.permissionMode?{permissionMode:chat.permissionMode}:{})}:undefined;}});
+
   ipcMain.handle('muster:invoke', async (event, command: unknown, input: unknown) => {
     if (!isTrustedSender(event.senderFrame, event.sender.id)) {
       throw new Error('Rejected IPC from untrusted sender.');
@@ -553,6 +560,7 @@ async function main(): Promise<void> {
     if (!isCommandName(command)) {
       throw new Error('Unknown command.');
     }
+    if (isDeviceCommand(command)) return devices.invoke(command, input as never);
     switch(command) {
       case 'updates.status': return updater.snapshot();
       case 'updates.check': return updater.check();
@@ -1011,6 +1019,7 @@ async function main(): Promise<void> {
         await withinDeadline(disposal, 5000);
         unregisterBrowserCaller();browserBridge.dispose();
         terminalTools.dispose(); backgroundTools.dispose();
+        await withinDeadline(devices.dispose(), 3000).catch(()=>undefined);
         browserWorkspace.dispose();
         nativePreview.hide();
       }
