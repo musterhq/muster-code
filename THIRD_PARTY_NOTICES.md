@@ -13,7 +13,7 @@ third-party work, each under its own license:
 | T3 Code (incremental Markdown parser, table interaction and styling, HTML render and preview, notebook and Mermaid file previews) | `packages/agent-app/src/renderer`, `packages/agent-app/src/shared` | MIT, Copyright (c) 2026 T3 Tools Inc. |
 | Mozilla PDF.js, SheetJS SSF | bundled in Muster Agent | Apache-2.0 |
 | three.js and its 3D model loaders and decoders (Draco, meshopt) | bundled in Muster Agent, loaded when a model opens | MIT (three.js), Apache-2.0 (Draco), MIT (meshoptimizer) |
-| T3 Code (device streaming and device-model conversion approach) | `packages/agent-app/src/main/devices`, `packages/agent-app/src/renderer/devices` | MIT, Copyright (c) 2026 T3 Tools Inc. |
+| T3 Code (device streaming, the H.264 stall fix `avcConfig.ts` and its tests from commit fa4e4677c0ecc437aece2dcea39f76ef31414152, and device-model conversion approach) | `packages/agent-app/src/main/devices`, `packages/agent-app/src/renderer/devices` | MIT, Copyright (c) 2026 T3 Tools Inc. |
 | Expo Device Hub (with serve-sim and serve-emu), scrcpy-server | installed on the user's computer at runtime by Devices, not bundled | MIT; Apache-2.0 |
 | Code-OSS (Visual Studio Code open source) | Muster Code builds assembled by `scripts/assemble.sh` | MIT, Copyright (c) Microsoft Corporation |
 | npm packages bundled into Muster Agent | `dist/renderer/THIRD-PARTY-LICENSES.txt` | per package (MIT, ISC, Apache-2.0, BSD, Zlib, Unlicense, EPL-2.0, MPL-2.0 OR Apache-2.0) |

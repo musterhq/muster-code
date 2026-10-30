@@ -7,12 +7,14 @@
  * after `isConfigSupported` (some decoders reject the simulators' High profile). If this window cannot decode it, the feed
  * asks main to switch that device to MJPEG, decoded with createImageBitmap. Android sends Annex-B H.264, configured from
  * the SPS of the first keyframe. Each finished frame is acknowledged so main keeps sending (flow control).
- * The AVCC handling and the MJPEG fallback follow T3 Code's device stream client (MIT; see THIRD_PARTY_NOTICES.md).
+ * The AVCC handling and the MJPEG fallback follow T3 Code's device stream client (MIT; see THIRD_PARTY_NOTICES.md); the
+ * description is repaired first (avcConfig.ts, the stall fix) so the decoder never holds frames back for reordering.
  */
 import {useEffect, useRef, useState} from 'react';
 import type {DeviceFrame} from '../../shared/device-protocol.ts';
 import {invoke} from '../bridge.ts';
 import {avcCodecFromAnnexB, avcCodecFromDescription} from './geometry.ts';
+import {simulatorAvcConfig} from './avcConfig.ts';
 
 type Listener = () => void;
 export class DeviceFeed {
@@ -65,8 +67,10 @@ export class DeviceFeed {
     this.decodeH264(frame);
   }
   /** iOS: a new description (a fresh subscription or an encoder change) configures a fresh decoder. */
-  private async configureAvcc(description: Uint8Array): Promise<void> {
+  private async configureAvcc(raw: Uint8Array): Promise<void> {
     this.closeDecoder();
+    // The stall fix (#811): the hub's fallback SPS gets "no reordering" VUI so each frame is output once decoded.
+    const description = simulatorAvcConfig(raw);
     this.format = 'avcc';
     const codec = avcCodecFromDescription(description);
     if (typeof VideoDecoder === 'undefined' || !codec) { this.fallBack(); return; }

@@ -190,6 +190,35 @@ await check('iOS H.264 decodes with WebCodecs and falls back to MJPEG when the p
   delete (globalThis as any).VideoDecoder;delete (globalThis as any).EncodedVideoChunk;
 });
 
+// 6c. The stall fix (#811): the hub's fallback avcC (an SPS with no VUI) reaches the decoder repaired, with zero
+//     reordering, so every frame is shown as soon as it is decoded; hardware decoding and low latency stay on.
+// Spec: MUS-SPEC-21-811B (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-811b)
+await check('the hub fallback description is repaired before the decoder sees it, without turning hardware decoding off', async () => {
+  const frameListeners=new Set<(frame:any)=>void>();
+  (window as any).musterDevices={onFrame(listener:any){frameListeners.add(listener);return()=>frameListeners.delete(listener);},ack(){},input(){}};
+  const probes:any[]=[],configs:any[]=[];
+  (globalThis as any).EncodedVideoChunk=class{type:string;constructor(init:any){this.type=init.type;}};
+  (globalThis as any).VideoDecoder=class{state='unconfigured';output:any;decodeQueueSize=0;constructor(init:any){this.output=init.output;}
+    static async isConfigSupported(config:any){probes.push(config);return {supported:true,config};}
+    configure(config:any){configs.push(config);this.state='configured';}
+    decode(){this.output({displayWidth:1179,displayHeight:2556,close(){}});}
+    close(){this.state='closed';}};
+  const {acquireFeed,releaseFeed}=await import('../src/renderer/devices/deviceFeed');
+  const deviceId='AVCC-REPAIR-3333';
+  const feed=acquireFeed(deviceId);
+  const fallback=[1,100,0,51,255,225,0,12,39,100,0,51,172,86,128,76,1,73,230,164,1,0,4,40,238,60,176];
+  const repaired=[1,100,0,51,255,225,0,17,39,100,0,51,172,86,128,76,1,73,230,168,6,208,68,35,80,1,0,4,40,238,60,176];
+  for(const listener of [...frameListeners])listener({deviceId,codec:'h264',format:'avcc',config:true,key:false,data:new Uint8Array(fallback)});
+  await until(()=>configs.length===1,'the decoder configured');
+  assert.equal(probes.length,1,'support is checked once');
+  assert.deepEqual([...probes[0].description],repaired,'with the repaired description');
+  assert.deepEqual([...configs[0].description],repaired);
+  assert.equal(configs[0].optimizeForLatency,true);
+  assert.equal(configs[0].hardwareAcceleration,undefined,'hardware decoding is not turned off');
+  releaseFeed(feed);
+  delete (globalThis as any).VideoDecoder;delete (globalThis as any).EncodedVideoChunk;
+});
+
 // 7. Each device wears its own frame, picked from what it reports (simctl device type, AVD config, the picture's shape
 //    for a foldable's posture); the rail uses the device's own OS terms.
 // Spec: MUS-SPEC-21-363G (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-363g)

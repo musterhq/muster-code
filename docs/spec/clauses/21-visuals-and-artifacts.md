@@ -81,6 +81,8 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-363J](21-visuals-and-artifacts.md#mus-spec-21-363j) | A checksum mismatch is refused. A match is cached with its source and licence noted, and offline keeps Muster's own body. | [`realistic models: SHA-256 mismatch refused, cache hit, offline fallback, metadata records source and no licence`](../../../packages/agent-app/tests/devices.test.ts) |
 | [MUS-SPEC-21-363K](21-visuals-and-artifacts.md#mus-spec-21-363k) | The DeviceKit descriptor is read and checked through the read-only route, and sliced chromes fall back to Muster's frame. | [`real frames, iOS: the helper's DeviceKit descriptor is read and validated; images come from its read-only route; sliced chromes fall back`](../../../packages/agent-app/tests/devices.test.ts) |
 | [MUS-SPEC-21-363L](21-visuals-and-artifacts.md#mus-spec-21-363l) | Discovery lists both platforms. A failed boot gives a plain-English reason and resets the state. | [`manager: discovery lists devices; a failed boot says why in plain English and resets the state`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-811A](21-visuals-and-artifacts.md#mus-spec-21-811a) | The hub's fallback avcC gains a VUI with zero reordering, exactly matching the captured repaired bytes; good, unknown, truncated and oversized records come back as the same object. | [`stall fix: the fallback SPS gains zero reordering byte for byte; good, unknown, truncated and oversized records pass through untouched`](../../../packages/agent-app/tests/device-avc-config.test.ts) |
+| [MUS-SPEC-21-811B](21-visuals-and-artifacts.md#mus-spec-21-811b) | The feed checks support once and configures WebCodecs with the repaired avcC, low latency on and hardware decoding not turned off. | [`the hub fallback description is repaired before the decoder sees it, without turning hardware decoding off`](../../../packages/agent-app/tests/devices-components.tsx) |
 | [MUS-SPEC-21-785A](21-visuals-and-artifacts.md#mus-spec-21-785a) | Inline and display formulas typeset with their labels; display maths scrolls sideways; prices, shell variables, code and links stay as written. | [`a reply typesets inline and display maths, labelled, with display maths scrolling sideways`](../../../packages/agent-app/tests/markdown-math-dom.tsx) |
 | [MUS-SPEC-21-785B](21-visuals-and-artifacts.md#mus-spec-21-785b) | Prices and shell variables stay plain text; code spans, code blocks and links are untouched. | [`maths parsing: prices, shell variables, code, escapes and links stay text`](../../../packages/agent-app/tests/markdown-math.test.ts) |
 | [MUS-SPEC-21-785C](21-visuals-and-artifacts.md#mus-spec-21-785c) | The four delimiters typeset as inline or display formulas. | [`maths parsing: the four delimiters, display blocks and source offsets`](../../../packages/agent-app/tests/markdown-math.test.ts) |
@@ -797,6 +799,30 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/devices.test.ts::manager: discovery lists devices; a failed boot says why in plain English and resets the state`
 - Environment: Node test with fakes for simctl, adb and the helper; no simulator, emulator or network.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### Device stream reliability (#811)
+
+<a id="mus-spec-21-811a"></a>
+#### MUS-SPEC-21-811A: The simulator's fallback SPS is repaired byte for byte so the decoder does not hold frames
+
+- Precondition: The avcC records captured from the hub before and after its encoder falls back from low-latency rate control.
+- Action: Repair the fallback record, the repaired one, the low-latency one, a record with two SPS and profile extensions, every truncated prefix, unsupported profiles, scaling lists, bad lengths, bad trailing bits, bad NAL headers, unterminated Exp-Golomb values and oversized records.
+- Expected result: The fallback record becomes the captured repaired bytes exactly (max_num_reorder_frames 0, max_dec_frame_buffering equal to the reference frames), and repairing it again changes nothing. Both SPS of a two-SPS record are handled and the PPS and extensions are kept. Every other input is returned as the same object, unchanged, and the input is never modified.
+- Test: `packages/agent-app/tests/device-avc-config.test.ts::stall fix: the fallback SPS gains zero reordering byte for byte; good, unknown, truncated and oversized records pass through untouched`
+- Environment: Node test; pure function over byte arrays.
+- Known gaps: The bytes are fixtures captured by the upstream project; a fresh capture from a Muster-run hub is not part of the test.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-811b"></a>
+#### MUS-SPEC-21-811B: The decoder is configured with the repaired description
+
+- Precondition: An iPhone feed with a fake VideoDecoder and the device bridge faked.
+- Action: Deliver the hub's fallback avcC description.
+- Expected result: isConfigSupported is called once, with the repaired description; configure gets the same repaired description, optimizeForLatency true and no hardwareAcceleration override.
+- Test: `packages/agent-app/tests/devices-components.tsx::the hub fallback description is repaired before the decoder sees it, without turning hardware decoding off`
+- Environment: DOM suite (linkedom) with a fake VideoDecoder and the device bridge faked.
+- Known gaps: A real decoder is not used, so the frame-latency gain itself is not measured here.
 - Evidence: UNVERIFIED
 
 ### Maths in replies
