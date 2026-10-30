@@ -1,21 +1,21 @@
 {
-  "generatedAt": "2026-10-29T18:35:42.733Z",
+  "generatedAt": "2026-10-30T04:41:55.790Z",
   "note": "Minified bytes each package contributes to the shipped bundles (renderer chunks are lazy where split). Regenerate with node scripts/dependency-report.mjs and commit with any dependency change.",
   "totals": {
-    "renderer": 16318590,
-    "main": 382990,
+    "renderer": 16324706,
+    "main": 387209,
     "preload": 1055,
-    "runtime": 2882131
+    "runtime": 2896346
   },
   "packages": [
     {
       "name": "(app source)",
-      "bytes": 5968676,
+      "bytes": 5992517,
       "targets": {
-        "renderer": 3725570,
-        "main": 382502,
+        "renderer": 3731011,
+        "main": 386721,
         "preload": 1041,
-        "runtime": 1859563
+        "runtime": 1873744
       },
       "version": "0.3.16",
       "license": "UNLICENSED",
@@ -35,9 +35,9 @@
     },
     {
       "name": "mermaid",
-      "bytes": 1669217,
+      "bytes": 1669229,
       "targets": {
-        "renderer": 1669217
+        "renderer": 1669229
       },
       "version": "12.1.0",
       "license": "MIT",
@@ -123,11 +123,11 @@
     },
     {
       "name": "katex",
-      "bytes": 267410,
+      "bytes": 267062,
       "targets": {
-        "renderer": 267410
+        "renderer": 267062
       },
-      "version": "0.16.47",
+      "version": "0.18.2",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": false
@@ -167,9 +167,9 @@
     },
     {
       "name": "@base-ui/react",
-      "bytes": 192179,
+      "bytes": 192181,
       "targets": {
-        "renderer": 192179
+        "renderer": 192181
       },
       "version": "1.9.0",
       "license": "MIT",
@@ -277,9 +277,9 @@
     },
     {
       "name": "jszip",
-      "bytes": 43728,
+      "bytes": 43762,
       "targets": {
-        "runtime": 43728
+        "runtime": 43762
       },
       "version": "3.10.2",
       "license": "(MIT OR GPL-3.0-or-later)",
@@ -388,11 +388,11 @@
     },
     {
       "name": "dompurify",
-      "bytes": 29836,
+      "bytes": 30843,
       "targets": {
-        "renderer": 29836
+        "renderer": 30843
       },
-      "version": "3.4.16",
+      "version": "3.4.17",
       "license": "(MPL-2.0 OR Apache-2.0)",
       "licenseFile": "LICENSE",
       "direct": true
@@ -2921,8 +2921,24 @@
   ],
   "unbundledDirectDependencies": [
     {
+      "name": "@napi-rs/canvas",
+      "reason": "not reached from any entry point (loaded at runtime or unused)"
+    },
+    {
+      "name": "docx",
+      "reason": "not reached from any entry point (loaded at runtime or unused)"
+    },
+    {
       "name": "node-pty",
       "reason": "native, shipped from node_modules by the packager"
+    },
+    {
+      "name": "pdf-lib",
+      "reason": "not reached from any entry point (loaded at runtime or unused)"
+    },
+    {
+      "name": "pptxgenjs",
+      "reason": "not reached from any entry point (loaded at runtime or unused)"
     }
   ]
 }

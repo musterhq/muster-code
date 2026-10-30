@@ -28,7 +28,7 @@ test('file kinds pick the right app families', () => {
   assert.equal(openWithKind('Makefile'), 'code');
   assert.equal(openWithKind('.env'), 'code');
   assert.equal(openWithKind('data.csv'), 'delimited');
-  assert.deepEqual(Object.keys(FILES_COMMANDS).sort(), ['files.external.inspect', 'files.external.openWith', 'files.external.reveal', 'files.openFolderWith', 'files.openFolderWith.apps', 'files.openWith', 'files.openWith.apps', 'files.quickOpen', 'files.readFull', 'files.runActions.list', 'files.runActions.set', 'files.searchContent', 'files.searchContent.cancel', 'files.write']);
+  assert.deepEqual(Object.keys(FILES_COMMANDS).sort(), ['files.external.inspect', 'files.external.openWith', 'files.external.reveal', 'files.image.locate', 'files.openFolderWith', 'files.openFolderWith.apps', 'files.openWith', 'files.openWith.apps', 'files.quickOpen', 'files.readFull', 'files.runActions.list', 'files.runActions.set', 'files.searchContent', 'files.searchContent.cancel', 'files.write']);
 });
 
 test('only installed allowlisted apps are offered, best first, Finder last', async () => {

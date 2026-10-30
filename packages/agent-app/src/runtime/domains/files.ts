@@ -102,6 +102,19 @@ export function createFilesDomain(context: DomainContext, openWith = createOpenW
       if (info.kind !== 'file' && app !== 'finder') throw new Error('Only files can be opened in another app. Reveal the folder instead.');
       await openWith.open(info.path, app);
     },
+    'files.image.locate': async input => {
+      const located = async (): Promise<string> => {
+        if (input.folderId !== undefined) {
+          try { return await resolveInside(context.folderFor(text(input.folderId, 'a folder', 128)).path, text(input.folderPath, 'an image')); }
+          catch (error) { if (input.chatId === undefined || input.path === undefined) throw error; }
+        }
+        const chatId = text(input.chatId, 'a chat', 128), path = text(input.path, 'an image');
+        if (!context.store.chatMentionsPath(chatId, path)) throw new Error('That image is not part of this chat.');
+        return externalPath(path);
+      };
+      const path = await located(), stat = await fs.stat(path).catch(() => undefined);
+      return {path, name: basename(path) || path, exists: !!stat?.isFile()};
+    },
     'files.runActions.list': async input => ({actions: await readRunActions(context.dataDir, text(input.folderId, 'a folder', 128))}),
     'files.runActions.set': async input => {
       const folderId = text(input.folderId, 'a folder', 128);

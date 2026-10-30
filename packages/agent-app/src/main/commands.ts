@@ -23,6 +23,8 @@ const COMMANDS = {
   'chat.contextMenu': true,
   'folder.contextMenu': true,
   'project.contextMenu': true,
+  'image.contextMenu': true,
+  'image.copy': true,
   'folder.remove': true,
   'folder.rename': true,
   'folder.relink': true,
