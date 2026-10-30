@@ -7,7 +7,7 @@ third-party work, each under its own license:
 |---|---|---|
 | Muster core (Codex app-server client, memory and Hindsight stores, local Docker sandbox) | `packages/agent-app/vendor/muster-core`, bundled runtime | MIT, Copyright (c) 2026 Muster contributors |
 | QM (scoped-computer contract, adapted) | `packages/agent-app` runtime | MIT, Copyright (c) 2026 QM contributors |
-| T3 Code (incremental Markdown parser, table interaction and styling, HTML render and preview) | `packages/agent-app/src/renderer` | MIT, Copyright (c) 2026 T3 Tools Inc. |
+| T3 Code (incremental Markdown parser, table interaction and styling, HTML render and preview, notebook and Mermaid file previews) | `packages/agent-app/src/renderer`, `packages/agent-app/src/shared` | MIT, Copyright (c) 2026 T3 Tools Inc. |
 | Mozilla PDF.js, SheetJS SSF | bundled in Muster Agent | Apache-2.0 |
 | three.js and its 3D model loaders and decoders (Draco, meshopt) | bundled in Muster Agent, loaded when a model opens | MIT (three.js), Apache-2.0 (Draco), MIT (meshoptimizer) |
 | Code-OSS (Visual Studio Code open source) | Muster Code builds assembled by `scripts/assemble.sh` | MIT, Copyright (c) Microsoft Corporation |

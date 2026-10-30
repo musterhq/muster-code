@@ -621,7 +621,7 @@ async function main(): Promise<void> {
       case 'reports.open': {
         const request = input as Commands['reports.open']['input'];
         if (!request || typeof request.html !== 'string' || (request.scripts !== undefined && typeof request.scripts !== 'boolean')) throw new Error('Nothing to show.');
-        const { url, token } = reports.register({ html: request.html, ...(request.scripts === false ? { scripts: false } : {}), ...(typeof request.key === 'string' ? { key: request.key } : {}), ...(request.themed === true ? { themed: true } : {}) });
+        const { url, token } = reports.register({ html: request.html, ...(request.scripts === false ? { scripts: false } : {}), ...(typeof request.key === 'string' ? { key: request.key } : {}), ...(request.themed === true ? { themed: true } : {}), ...(request.scripts === false && request.measure === true ? { measure: true } : {}) });
         return { url, token };
       }
       case 'htmlRenders.open': {

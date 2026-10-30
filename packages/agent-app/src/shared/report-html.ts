@@ -31,7 +31,13 @@ export const THEME_BOOTSTRAP_SCRIPT = `<script>(function(){var s=document.getEle
 export interface PrepareOptions {
   /** Inject Muster's theme variables, the base stylesheet and the theme/link bootstrap (needs scripts). */
   themed?: boolean;
+  /** A page that must not run but should fit its frame (a notebook's saved HTML output): only the height reporter is injected, and the
+   *  CSP allows that one script by its hash (reportCsp's `measure`), so none of the page's own scripts or handlers run. */
+  measure?: boolean;
 }
+
+/** The height reporter's script text, as hashed for a measure-only page's CSP. */
+export const REPORT_HEIGHT_SOURCE = REPORT_HEIGHT_SCRIPT.slice('<script>'.length, -'</script>'.length);
 
 /** A fragment becomes a standards-mode document; the height reporter (and the theme bootstrap) go first so they run before the report's own scripts. */
 export function prepareReportHtml(html: string, scripts: boolean, options: PrepareOptions = {}): string {
@@ -43,7 +49,7 @@ export function prepareReportHtml(html: string, scripts: boolean, options: Prepa
   const inject = (/<meta[^>]+charset/i.test(html) ? '' : '<meta charset="utf-8">')
     + (themed && !/<meta\s[^>]*name\s*=\s*["']?viewport/i.test(html) ? '<meta name="viewport" content="width=device-width, initial-scale=1">' : '')
     + (themed ? `<style id="muster-theme">${THEME_DEFAULT_CSS}</style>${THEME_BOOTSTRAP_SCRIPT}` : '')
-    + (scripts ? REPORT_HEIGHT_SCRIPT : '');
+    + (scripts || options.measure === true ? REPORT_HEIGHT_SCRIPT : '');
   if (head) return doctype + html.slice(0, head.index + head[0].length) + inject + html.slice(head.index + head[0].length);
   const root = /<html(?:\s[^>]*)?>/i.exec(html);
   if (root) return doctype + html.slice(0, root.index + root[0].length) + `<head>${inject}</head>` + html.slice(root.index + root[0].length);
