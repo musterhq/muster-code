@@ -158,6 +158,7 @@ export class OfficeLibraries {
   private pending: Promise<OfficeLibrariesReady> | null = null;
   private listeners = new Set<(progress: OfficeLibrariesProgress) => void>();
   private error: string | undefined;
+  private installing = false;
 
   constructor(options: OfficeLibrariesOptions) {
     this.root = options.root;
@@ -195,18 +196,16 @@ export class OfficeLibraries {
     const marker = await this.marker(), wanted = this.wanted();
     const ready = !!marker && !!wanted && marker.key === wanted.key;
     return { ready, source: ready ? marker!.source : 'none', bytes: ready && marker!.source === 'downloaded' ? marker!.bytes ?? null : null,
-      modules: this.modules, node: this.node, versions: ready ? marker!.versions : {}, busy: !!this.pending, ...(this.error ? { error: this.error } : {}) };
+      modules: this.modules, node: this.node, versions: ready ? marker!.versions : {}, busy: this.installing, ...(this.error ? { error: this.error } : {}) };
   }
 
   /** The libraries, installing them first when this build's set is not there yet. Concurrent calls share one install. */
   async ensure(onProgress?: (progress: OfficeLibrariesProgress) => void): Promise<OfficeLibrariesReady> {
     if (onProgress) this.listeners.add(onProgress);
     try {
+      // Set before the first await, so callers that arrive together share one check and one install.
       if (!this.pending) {
-        const wanted = this.wanted(), marker = await this.marker();
-        if (!wanted) throw new Error('This build of Muster has no office libraries to install.');
-        if (marker && marker.key === wanted.key && await fs.stat(this.node).then(() => true, () => false)) return this.ready(marker);
-        const job = this.install(wanted);
+        const job = this.prepare();
         this.pending = job;
         void job.then(() => { this.pending = null; }, () => { this.pending = null; });
       }
@@ -214,6 +213,12 @@ export class OfficeLibraries {
     } finally {
       if (onProgress) this.listeners.delete(onProgress);
     }
+  }
+  private async prepare(): Promise<OfficeLibrariesReady> {
+    const wanted = this.wanted(), marker = await this.marker();
+    if (!wanted) throw new Error('This build of Muster has no office libraries to install.');
+    if (marker && marker.key === wanted.key && await fs.stat(this.node).then(() => true, () => false)) return this.ready(marker);
+    return this.install(wanted);
   }
 
   private ready(marker: Marker): OfficeLibrariesReady {
@@ -226,6 +231,7 @@ export class OfficeLibraries {
 
   private async install(wanted: { source: 'local' | 'downloaded'; key: string }): Promise<OfficeLibrariesReady> {
     this.error = undefined;
+    this.installing = true;
     await fs.mkdir(this.root, { recursive: true });
     await this.clearStaging();
     const staging = await fs.mkdtemp(join(this.root, 'staging-'));
@@ -254,6 +260,7 @@ export class OfficeLibraries {
       throw error;
     } finally {
       await fs.rm(staging, { recursive: true, force: true });
+      this.installing = false;
       this.progress(null);
     }
   }

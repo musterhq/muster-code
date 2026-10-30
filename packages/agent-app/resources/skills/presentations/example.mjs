@@ -44,7 +44,7 @@ const head = { bold: true, color: 'FFFFFF', fill: { color: ACCENT } };
 table.addTable([
   [{ text: 'Region', options: head }, { text: 'Q2', options: head }, { text: 'Q3', options: head }],
   ['North', '$1,450', '$1,690'], ['South', '$1,105', '$1,240'],
-], { x: 0.8, y: 1.6, w: 8, colW: [3.2, 2.4, 2.4], fontFace: FONT, fontSize: 18, color: INK, border: { type: 'solid', color: 'D1D5DB', pt: 1 }, rowH: 0.6 });
+], { x: 0.8, y: 1.6, w: 8, colW: [3.2, 2.4, 2.4], fontFace: FONT, fontSize: 18, color: INK, border: { type: 'solid', color: 'D1D5DB', pt: 1 }, rowH: 0.6, valign: 'middle' });
 
 if (imagePath) {
   const picture = pptx.addSlide({ masterName: 'CONTENT' });

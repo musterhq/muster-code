@@ -25,9 +25,9 @@ months.forEach(([month, units, price], index) => {
 });
 const totalRow = months.length + 2;
 sales.addRow({ month: 'Total', units: { formula: `SUM(B2:B${totalRow - 1})` }, revenue: { formula: `SUM(D2:D${totalRow - 1})` } });
-sales.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+sales.getRow(1).font = { name: 'Calibri', bold: true, color: { argb: 'FFFFFFFF' } };
 sales.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F3864' } };
-sales.getRow(totalRow).font = { bold: true };
+sales.getRow(totalRow).font = { name: 'Calibri', bold: true };
 sales.getRow(totalRow).border = { top: { style: 'thin' } };
 
 const summary = workbook.addWorksheet('Summary');
@@ -35,7 +35,7 @@ summary.columns = [{ width: 22 }, { width: 16 }];
 summary.addRow(['Total revenue', { formula: `Sales!D${totalRow}` }]).getCell(2).numFmt = '"$"#,##0.00';
 summary.addRow(['Average units', { formula: `AVERAGE(Sales!B2:B${totalRow - 1})` }]).getCell(2).numFmt = '0.0';
 summary.addRow(['Best month', { formula: `INDEX(Sales!A2:A${totalRow - 1},MATCH(MAX(Sales!D2:D${totalRow - 1}),Sales!D2:D${totalRow - 1},0))` }]);
-summary.getColumn(1).font = { bold: true };
+summary.getColumn(1).font = { name: 'Calibri', bold: true }; // a font without a name falls back to a serif in some apps
 
 if (imagePath) {
   // exceljs cannot write native Excel charts: place a chart picture instead (or make the chart in a .pptx).
