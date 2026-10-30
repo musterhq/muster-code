@@ -213,7 +213,7 @@ async function realSoffice(): Promise<string | null> {
   for (const path of [process.env.MUSTER_SOFFICE_PATH, ...installedCandidates(process.platform, homedir(), process.env)]) if (path && existsSync(path)) return path;
   return null;
 }
-/** Pixels near `hex` on a page image. */
+/** Pixels near `hex` on a page image: the total, how many are in each pixel column (a bar's height), and all coloured (not grey) pixels. */
 async function colourPixels(path: string, hex: string) {
   const {loadImage, createCanvas} = await import('@napi-rs/canvas');
   const image = await loadImage(await readFile(path));
@@ -221,10 +221,14 @@ async function colourPixels(path: string, hex: string) {
   context.drawImage(image, 0, 0);
   const {data} = context.getImageData(0, 0, image.width, image.height);
   const [r, g, b] = [0, 2, 4].map(at => parseInt(hex.slice(at, at + 2), 16));
-  let count = 0;
-  for (let i = 0; i < data.length; i += 4) if (Math.abs(data[i]! - r!) < 40 && Math.abs(data[i + 1]! - g!) < 40 && Math.abs(data[i + 2]! - b!) < 40) count++;
-  return count;
+  const columns = new Array<number>(image.width).fill(0);
+  let count = 0, coloured = 0;
+  for (let i = 0; i < data.length; i += 4) if (Math.max(data[i]!, data[i + 1]!, data[i + 2]!) - Math.min(data[i]!, data[i + 1]!, data[i + 2]!) > 60) coloured++;
+  for (let i = 0; i < data.length; i += 4) if (Math.abs(data[i]! - r!) < 40 && Math.abs(data[i + 1]! - g!) < 40 && Math.abs(data[i + 2]! - b!) < 40) { count++; columns[(i / 4) % image.width]!++; }
+  return {count, columns, coloured};
 }
+/** Tallest bar over shortest bar, from the series colour's pixel columns (columns under 30 pixels are legend or edges). */
+const barRatio = (columns: number[]) => { const bars = columns.filter(n => n >= 30); return Math.max(...bars) / Math.min(...bars); };
 
 // Spec: MUS-SPEC-21-773D (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-773d)
 test('with LibreOffice present, a render draws every native chart kind, and an edited cell redraws the chart', async t => {
@@ -232,7 +236,7 @@ test('with LibreOffice present, a render draws every native chart kind, and an e
   if (!soffice) { t.skip('no LibreOffice on this machine (set MUSTER_SOFFICE_PATH or MUSTER_OFFICE_RUNTIME_DIR)'); return; }
   const root = await directory(t), work = join(root, 'work');
   await mkdir(work);
-  const kinds = ['column', 'column-stacked', 'bar', 'bar-stacked', 'line', 'pie', 'doughnut', 'scatter', 'area'];
+  const kinds = ['column', 'column-stacked', 'bar', 'bar-stacked', 'line', 'pie', 'doughnut', 'scatter', 'area', 'area-stacked'];
   // One chart per sheet, nothing else on it, and the data on the last sheet: page N is chart N.
   await writeFile(join(work, 'render.mjs'), String.raw`
 import ExcelJS from 'exceljs';
@@ -249,7 +253,8 @@ await workbook.xlsx.writeFile(out);
 const series = ['B', 'C'].map(col => ({ name: 'Data!$' + col + '$1', categories: 'Data!$A$2:$A$7', values: 'Data!$' + col + '$2:$' + col + '$7' }));
 const scatter = [{ name: 'North', x: 'Data!$C$2:$C$7', y: 'Data!$B$2:$B$7' }];
 const base = kind => kind.split('-')[0];
-await addCharts(out, kinds.map(kind => ({ sheet: kind, type: base(kind), stacked: kind.endsWith('-stacked'), title: kind, xAxisTitle: 'Month', yAxisTitle: 'Units',
+await addCharts(out, kinds.map(kind => ({ sheet: kind, type: base(kind), stacked: kind.endsWith('-stacked'), title: kind,
+  xAxisTitle: kind === 'scatter' ? 'South' : 'Month', yAxisTitle: kind === 'scatter' ? 'North' : 'Units',
   series: kind === 'scatter' ? scatter : /pie|doughnut/.test(kind) ? [series[0]] : series, position: { from: 'A1', width: 640, height: 400 } })));
 `);
   const node = await musterNode(t, root);
@@ -266,17 +271,21 @@ await addCharts(out, kinds.map(kind => ({ sheet: kind, type: base(kind), stacked
   const render = (name: string) => renderOfficeFile(join(work, name), {runtime, outDir: join(root, 'pages', name), maxPages: kinds.length + 1, timeoutMs: 180_000});
   const before = await render('charts.xlsx');
   assert.ok(before.pages.length >= kinds.length, `one page per chart sheet (${before.pageCount})`);
-  for (const [index, kind] of kinds.entries()) {
-    const blue = await colourPixels(before.pages[index]!, '2563EB');
-    assert.ok(blue > 2000, `${kind}: the chart is drawn from the native part (${blue} series-colour pixels)`);
-  }
   if (process.env.MUSTER_773_REVIEW_DIR) {
     await mkdir(process.env.MUSTER_773_REVIEW_DIR, {recursive: true});
     for (const [index, kind] of kinds.entries()) await writeFile(join(process.env.MUSTER_773_REVIEW_DIR, `${index + 1}-${kind}.png`), await readFile(before.pages[index]!));
   }
-  // May's North bar grows from 140 to 600: the column chart's page has more of the series colour.
+  for (const [index, kind] of kinds.entries()) {
+    // Text, axes and gridlines are grey: coloured pixels are the series. A scatter chart is six markers; every other kind
+    // fills bars, slices, a line or an area.
+    const {coloured} = await colourPixels(before.pages[index]!, '2563EB'), least = kind === 'scatter' ? 300 : 2000;
+    assert.ok(coloured > least, `${kind}: the chart is drawn from the native part (${coloured} coloured pixels)`);
+  }
+  // Data!B6 (May, North) goes from 140 to 600 in the cells only: LibreOffice redraws the column from the range, so May's
+  // bar towers over the others where before the tallest was 1.5 times the shortest.
   const after = await render('edited.xlsx');
-  if (process.env.MUSTER_773_REVIEW_DIR) await writeFile(join(process.env.MUSTER_773_REVIEW_DIR, '10-column-after-edit.png'), await readFile(after.pages[0]!));
-  const [was, now] = [await colourPixels(before.pages[0]!, '2563EB'), await colourPixels(after.pages[0]!, '2563EB')];
-  assert.ok(now > was * 1.15, `the edited cell redraws the chart (${was} -> ${now} series-colour pixels)`);
+  if (process.env.MUSTER_773_REVIEW_DIR) await writeFile(join(process.env.MUSTER_773_REVIEW_DIR, '11-column-after-edit.png'), await readFile(after.pages[0]!));
+  const [was, now] = [barRatio((await colourPixels(before.pages[0]!, '2563EB')).columns), barRatio((await colourPixels(after.pages[0]!, '2563EB')).columns)];
+  assert.ok(was < 2, `before the edit the bars run 100 to 150 (ratio ${was.toFixed(2)})`);
+  assert.ok(now > 4, `the edited cell redraws the chart from its range, not its saved values (ratio ${now.toFixed(2)})`);
 });

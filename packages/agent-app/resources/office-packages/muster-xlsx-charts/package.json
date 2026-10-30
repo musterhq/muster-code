@@ -1,0 +1,10 @@
+{
+  "name": "muster-xlsx-charts",
+  "version": "1.0.0",
+  "description": "Muster's chart writer: adds native, editable Excel charts (DrawingML chart parts) to an .xlsx written by exceljs.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./index.mjs",
+  "types": "./index.d.ts",
+  "exports": { ".": { "types": "./index.d.ts", "import": "./index.mjs", "default": "./index.mjs" } }
+}
