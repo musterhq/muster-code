@@ -1,21 +1,21 @@
 {
-  "generatedAt": "2026-10-30T04:56:21.352Z",
+  "generatedAt": "2026-10-30T05:19:29.616Z",
   "note": "Minified bytes each package contributes to the shipped bundles (renderer chunks are lazy where split). Regenerate with node scripts/dependency-report.mjs and commit with any dependency change.",
   "totals": {
-    "renderer": 16730106,
-    "main": 387192,
+    "renderer": 16747711,
+    "main": 387570,
     "preload": 1055,
-    "runtime": 2882710
+    "runtime": 2896427
   },
   "packages": [
     {
       "name": "(app source)",
-      "bytes": 5990630,
+      "bytes": 6021718,
       "targets": {
-        "renderer": 3742743,
-        "main": 386704,
+        "renderer": 3759770,
+        "main": 387082,
         "preload": 1041,
-        "runtime": 1860142
+        "runtime": 1873825
       },
       "version": "0.3.16",
       "license": "UNLICENSED",
@@ -167,9 +167,9 @@
     },
     {
       "name": "@base-ui/react",
-      "bytes": 192176,
+      "bytes": 192174,
       "targets": {
-        "renderer": 192176
+        "renderer": 192174
       },
       "version": "1.9.0",
       "license": "MIT",
@@ -277,9 +277,9 @@
     },
     {
       "name": "jszip",
-      "bytes": 43728,
+      "bytes": 43762,
       "targets": {
-        "runtime": 43728
+        "runtime": 43762
       },
       "version": "3.10.2",
       "license": "(MIT OR GPL-3.0-or-later)",
@@ -2965,12 +2965,28 @@
   ],
   "unbundledDirectDependencies": [
     {
+      "name": "@napi-rs/canvas",
+      "reason": "not reached from any entry point (loaded at runtime or unused)"
+    },
+    {
+      "name": "docx",
+      "reason": "not reached from any entry point (loaded at runtime or unused)"
+    },
+    {
       "name": "micromark-extension-math",
       "reason": "not reached from any entry point (loaded at runtime or unused)"
     },
     {
       "name": "node-pty",
       "reason": "native, shipped from node_modules by the packager"
+    },
+    {
+      "name": "pdf-lib",
+      "reason": "not reached from any entry point (loaded at runtime or unused)"
+    },
+    {
+      "name": "pptxgenjs",
+      "reason": "not reached from any entry point (loaded at runtime or unused)"
     }
   ]
 }

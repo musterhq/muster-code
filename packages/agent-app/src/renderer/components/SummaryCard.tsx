@@ -6,7 +6,7 @@ import {invoke, subscribe} from '../bridge';
 import {useNewChatDraft} from '../newChatDraft';
 import {branchPullRequest} from '../branchPullRequest';
 import {loadGitChanges, notifyError, openBrowserTab, openChangesTab, openCreatePullRequestTab, openFile, openPullRequestTab, openFilesTab, openProcessesTab, openSubagentsTab, setSummaryLayout} from '../store';
-import {useStoreSlice} from '../useStore';
+import {useStoreSelector, useStoreSlice} from '../useStore';
 import {EMPTY_ACTIVITY_ITEMS, getSubagentActivity, subagentState} from '../subagentActivity';
 import {portURL, useListeningPorts, useProcessSummary} from '../processSummary';
 import {isActiveProcess} from '../../shared/process-protocol';
@@ -24,6 +24,7 @@ import {SandboxApplySheet} from './SandboxApplySheet';
 import { isNotGitRepository } from './resourceErrors';
 import './summary-card.css';
 import {SummaryScheduled} from './SummaryScheduled';
+import {automationsForFolders} from '../scheduledAutomations';
 import {CheckLogDisclosure, CiRepairControls, useCiRepair} from './CiRepair';
 import {ciRepairActive} from '../../shared/domains/ci-protocol';
 import type {GitHubChecks} from '../../shared/domains/github-protocol';
@@ -371,10 +372,16 @@ export function SummaryCard() {
   // The draft (Codex-style "New chat") has no real chat behind it yet, and a chat with neither a
   // folder nor any activity has nothing to summarize: the card disappears rather than showing a note.
   const hasActivity = items.length > 0 || activeCommands > 0;
-  const present = !!chat && !draft.open && (folders.length > 0 || hasActivity);
+  const eligible = !!chat && !draft.open && (folders.length > 0 || hasActivity);
   // S3-E / DF-F38: servers this chat's shells, commands or agent left listening (agent first).
-  const {ports: listening} = useListeningPorts(present ? chat?.id : undefined);
+  const {ports: listening} = useListeningPorts(eligible ? chat?.id : undefined);
   const shownPorts = useMemo(() => [...listening].sort((a, b) => Number(b.owner === 'agent') - Number(a.owner === 'agent') || a.port - b.port).slice(0, 4), [listening]);
+  const folderIds = useMemo(() => folders.map(folder => folder.id), [folders]);
+  const scheduled = useStoreSelector(s => automationsForFolders(s.automations.value ?? [], folderIds, s.snapshot?.chats ?? [], project?.id).length > 0);
+  const running = chat?.status === 'running' || chat?.status === 'stopping';
+  // #792: a chat with activity but no section to show (a plain reply, no folder) gets no card and no
+  // reserved room, rather than an empty bar; the card appears as soon as one section has something.
+  const present = eligible && (running || folders.length > 0 || scheduled || activeCommands > 0 || shownPorts.length > 0 || agents.length > 0 || sources.length > 0);
   const emptyTimeline = items.length === 0;
 
   // Pick the layout from the conversation's real size with one ResizeObserver (no media queries, no
@@ -433,7 +440,6 @@ export function SummaryCard() {
   const folded = compact && collapsed;
   const shownSources = allSources ? sources.slice(0, 20) : sources.slice(0, 3);
   const openAgents = () => openSubagentsTab(chat.id, chat.folderId ?? folders[0]?.id, chat.title || 'Conversation');
-  const running = chat.status === 'running' || chat.status === 'stopping';
   const attention = chat.status === 'waiting' || chat.status === 'failed' || !!chat.recovery;
   const agentSummary = [counts.working && `${counts.working} working`, counts.waiting && `${counts.waiting} waiting`, counts.failed && `${counts.failed} failed`, counts.done && `${counts.done} done`].filter(Boolean).join(' · ');
   const stats = totals && (totals.adds > 0 || totals.dels > 0 || generatedNote(totals.generated))
@@ -444,7 +450,7 @@ export function SummaryCard() {
     {running && <div className="summary-now" role="status"><CircleDot size={13} className="summary-pulse" aria-hidden="true"/><span title={latestAction}>{latestAction || 'Working…'}</span></div>}
     {folders.map(folder => <FolderSection key={folder.id} folder={folder} chat={chat} project={project} activity={items.length}/>)}
     {/* IMG-2026-09-18T1224: automations that target this folder. */}
-    <SummaryScheduled folderIds={folders.map(folder => folder.id)} projectId={project?.id}/>
+    <SummaryScheduled folderIds={folderIds} projectId={project?.id}/>
     {(activeCommands > 0 || shownPorts.length > 0) && <section className="summary-section" aria-label="Terminal">
       <Row icon={<SquareTerminal size={15}/>} label="Terminal" detail={<span className="summary-muted">{activeCommands > 0 ? `${activeCommands} running` : plural(listening.length, 'port') + ' listening'}</span>} onClick={() => openProcessesTab(chat.id, 'Terminal')}/>
       {shownPorts.map(port => <Row key={port.id} icon={<Globe size={15}/>} title={`Open ${portURL(port)} in the browser`}

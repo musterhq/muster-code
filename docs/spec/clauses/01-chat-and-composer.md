@@ -35,6 +35,8 @@ Boundaries:
 | [MUS-SPEC-01-403B](01-chat-and-composer.md#mus-spec-01-403b) | New chat remembers the last selected project folder, avoids broad home folders and submits in the displayed folder. | [`New chat returns to the last project after a folderless or Documents chat`](../../../packages/agent-app/tests/sidebar-chrome-403-dom.tsx) |
 | [MUS-SPEC-01-403C](01-chat-and-composer.md#mus-spec-01-403c) | A single turn leaves no stray minimap dash; multi-turn ticks jump to their matching user row and disappear when the conversation shrinks. | [`a one-turn transcript has no lone minimap dash and later turns remain reachable`](../../../packages/agent-app/tests/sidebar-chrome-403-dom.tsx) |
 | [MUS-SPEC-01-403D](01-chat-and-composer.md#mus-spec-01-403d) | Duplicate chat names show distinct visible suffix hints, including same-folder chats; unique names stay plain. | [`duplicate sidebar chat names get distinct suffixes without renaming them`](../../../packages/agent-app/tests/sidebar-chrome-403-dom.tsx) |
+| [MUS-SPEC-01-792A](01-chat-and-composer.md#mus-spec-01-792a) | A chat with no folder and one plain reply renders no summary card, and `.center` has no `data-summary`, so the transcript and composer keep the full width. | [`a chat with nothing to summarise shows no summary card and reserves no room`](../../../packages/agent-app/tests/summary-card-empty-dom.tsx) |
+| [MUS-SPEC-01-792B](01-chat-and-composer.md#mus-spec-01-792b) | When the same chat edits a file, the summary card appears with a Sources section and `.center` gets its `data-summary` layout. | [`the summary card appears once the chat changes a file`](../../../packages/agent-app/tests/summary-card-empty-dom.tsx) |
 
 ### Imported chats keep their own model
 
@@ -271,3 +273,27 @@ Boundaries:
 - Environment: DOM suite rendering the real Sidebar; no provider or desktop.
 - Known gaps: No external provider or native desktop; browser screenshots cover both themes separately.
 - Evidence: local; node packages/agent-app/dist/tests/sidebar-chrome-403-dom/sidebar-chrome-403-dom.mjs; exit 0; 4 passed, 0 failed, 0 skipped; commit 3d6bdf75f2454256e508cbebff87d2d923443774
+
+### Summary card with nothing to summarise (#792)
+
+<a id="mus-spec-01-792a"></a>
+#### MUS-SPEC-01-792A: A chat with nothing to summarise shows no summary card
+
+- Precondition: A chat with no folder, no changed files, no processes, no subagents and no tasks has one user message and one reply that used no tools.
+- Action: Open the chat.
+- Expected result: No `.summary-card` is rendered, and `.center` has no `data-summary` attribute, so no room is reserved beside the transcript and the composer is not shifted. Before the change, an empty card (`<div class="summary-card-body"></div>`) rendered with `data-summary="reserve"`.
+- Test: `packages/agent-app/tests/summary-card-empty-dom.tsx::a chat with nothing to summarise shows no summary card and reserves no room`
+- Environment: Real SummaryCard inside a `.center` element in a DOM suite (linkedom); fake app bridge; no network.
+- Known gaps: Layout width is not measured in linkedom, so the check is on the `data-summary` attribute that drives the reserve CSS, not on pixel positions.
+- Evidence: local; node packages/agent-app/dist/tests/summary-card-empty-dom.mjs; exit 0; 2 passed, 0 failed, 0 skipped; commit 51d98019fafa5b2fe3842c1acb1a3e7c3cbe9d56
+
+<a id="mus-spec-01-792b"></a>
+#### MUS-SPEC-01-792B: The summary card appears as soon as there is a section
+
+- Precondition: The chat from MUS-SPEC-01-792A is open with no summary card.
+- Action: A completed tool row that edits `src/app.ts` arrives in the chat's timeline.
+- Expected result: The summary card renders with a Sources section listing `app.ts`, and `.center` has a `data-summary` layout value.
+- Test: `packages/agent-app/tests/summary-card-empty-dom.tsx::the summary card appears once the chat changes a file`
+- Environment: Real SummaryCard inside a `.center` element in a DOM suite (linkedom); fake app bridge; no network.
+- Known gaps: Covers the Sources section only; folders, processes, subagents and scheduled automations use the same visibility check but are not each tested here.
+- Evidence: local; node packages/agent-app/dist/tests/summary-card-empty-dom.mjs; exit 0; 2 passed, 0 failed, 0 skipped; commit 51d98019fafa5b2fe3842c1acb1a3e7c3cbe9d56

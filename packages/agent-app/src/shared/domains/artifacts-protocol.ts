@@ -63,7 +63,7 @@ export interface ArtifactsCommands {
   /** Registers the entry with the desktop shell's isolated `muster-plugin:` origin and returns the frame URL (main). */
   'plugins.ui.open': { input: { pluginId: string; app: string }; output: { url: string; title: string } };
   /** Visuals: registers untrusted HTML (a report, a Canvas page) with the desktop shell's isolated `muster-report:` origin and returns the frame URL (main). `key` re-uses one document across edits. */
-  'reports.open': { input: { html: string; scripts?: boolean; key?: string; /** Muster's live theme variables and link handling (agent pages). */ themed?: boolean }; output: { url: string; token: string } };
+  'reports.open': { input: { html: string; scripts?: boolean; key?: string; /** Muster's live theme variables and link handling (agent pages). */ themed?: boolean; /** With scripts off: only Muster's height reporter runs, so the frame fits the page (notebook outputs). */ measure?: boolean }; output: { url: string; token: string } };
   /** render_html (#html-preview): a stored agent page, served themed; with network only when the person allowed it for this page (main). */
   'htmlRenders.open': { input: { id: string }; output: { url: string; token: string; page: HtmlRenderView } };
   /** The person allows network (https only) for one stored page that asked for it (main). */

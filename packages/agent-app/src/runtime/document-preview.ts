@@ -22,6 +22,7 @@ import { createHash } from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import { spawn } from 'node:child_process';
 import { resolveInside } from './paths.ts';
+import { installedCandidates, type OfficeRuntime } from './office-runtime.ts';
 
 const MAX_BYTES = 32 * 1024 * 1024;
 const CONVERT_TIMEOUT_MS = 45_000;
@@ -36,7 +37,7 @@ export interface DocumentPreview {
 }
 
 const PDF_EXTS: Record<string, true> = { '.pdf': true };
-const OFFICE_EXTS: Record<string, true> = { '.doc': true, '.docx': true, '.ppt': true, '.pptx': true, '.xls': true, '.xlsx': true, '.odt': true, '.odp': true, '.ods': true };
+export const OFFICE_EXTS: Record<string, true> = { '.doc': true, '.docx': true, '.ppt': true, '.pptx': true, '.xls': true, '.xlsx': true, '.odt': true, '.odp': true, '.ods': true };
 
 // --- Revision cache (one slot) ---
 
@@ -65,23 +66,18 @@ const inFlight = new Map<string, Promise<DocumentPreview>>();
 
 // --- soffice discovery ---
 
-/** Standard installs first; the Codex-bundled headless build is only a last resort. */
-export const CANDIDATE_PATHS = [
-  '/Applications/LibreOffice.app/Contents/MacOS/soffice',
-  join(homedir(),'Applications/LibreOffice.app/Contents/MacOS/soffice'),
-  '/Applications/LibreOfficeDev.app/Contents/MacOS/soffice',
-  '/opt/homebrew/bin/soffice',
-  '/usr/local/bin/soffice',
-  '/usr/local/bin/libreoffice',
-  '/usr/bin/soffice',
-  '/usr/bin/libreoffice',
-  '/snap/bin/libreoffice',
-  join(homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/native/libreoffice-headless/libreoffice/LibreOfficeDev.app/Contents/MacOS/soffice'),
-];
+/** A user's own LibreOffice in its standard install locations. Never another app's home or cache (#789). */
+export const CANDIDATE_PATHS = installedCandidates(process.platform, homedir(), process.env);
 
 /** Renderers match this prefix to fall back to macOS Quick Look (filePresentation.LIBREOFFICE_MISSING). */
 export const LIBREOFFICE_MISSING = 'LibreOffice not installed';
 
+/** Muster's office runtime (#789): the user's own LibreOffice on PATH, or the copy Muster downloaded. Set by the office domain. */
+let officeRuntime: Pick<OfficeRuntime, 'soffice'> | null = null;
+export function setOfficeRuntime(runtime: Pick<OfficeRuntime, 'soffice'> | null): void { officeRuntime = runtime; }
+export function activeOfficeRuntime(): Pick<OfficeRuntime, 'soffice'> | null { return officeRuntime; }
+
+/** The preview never starts a download by itself: without a copy it reports LibreOffice missing and points at Settings. */
 export async function findSoffice(candidates: readonly string[] = CANDIDATE_PATHS): Promise<string> {
   const env = process.env['MUSTER_SOFFICE_PATH'];
   if (env) {
@@ -91,8 +87,10 @@ export async function findSoffice(candidates: readonly string[] = CANDIDATE_PATH
   for (const p of candidates) {
     try { await fs.access(p, constants.X_OK); return p; } catch { /* continue */ }
   }
+  const own = await officeRuntime?.soffice();
+  if (own) return own;
   throw new Error(
-    `${LIBREOFFICE_MISSING}: Word, PowerPoint and OpenDocument files need LibreOffice for the in-app reader. Install LibreOffice or set MUSTER_SOFFICE_PATH to the soffice executable.`
+    `${LIBREOFFICE_MISSING}: Word, PowerPoint and OpenDocument files need LibreOffice for the in-app reader. Download it in Settings › Storage, install LibreOffice yourself, or set MUSTER_SOFFICE_PATH to the soffice executable.`
   );
 }
 
@@ -110,7 +108,7 @@ const REGISTRY_XCU = `<?xml version="1.0" encoding="UTF-8"?>
 </oor:items>
 `;
 
-async function writeRegistryDisableMacros(profileDir: string): Promise<void> {
+export async function writeRegistryDisableMacros(profileDir: string): Promise<void> {
   const regDir = join(profileDir, 'user', 'registrymodifications.xcu');
   await fs.mkdir(join(profileDir,'user'),{recursive:true});
   await fs.writeFile(regDir, REGISTRY_XCU, 'utf8');
@@ -118,19 +116,26 @@ async function writeRegistryDisableMacros(profileDir: string): Promise<void> {
 
 // --- Child process with timeout + tree kill ---
 
-function runSoffice(soffice: string, args: string[]): Promise<void> {
+export const SOFFICE_SANDBOX = '(version 1)(allow default)(deny network-outbound (remote ip))(deny network-inbound (local ip))';
+
+/** Runs soffice with no shell; the whole process tree is killed on timeout or when `signal` aborts. */
+export function runSoffice(soffice: string, args: string[], timeoutMs = CONVERT_TIMEOUT_MS, signal?: AbortSignal): Promise<void> {
   const { promise, resolve, reject } = Promise.withResolvers<void>();
-  // Deny network to document parsers on the supported macOS host. This is not a full filesystem sandbox.
+  // Deny network to document parsers on the supported macOS host. This is not a full filesystem sandbox. Only IP traffic
+  // is denied: `network*` also blocks the local socket soffice talks to itself over, and it then exits 0 with no PDF (#789).
   const isolated=process.platform==='darwin';
-  const child = spawn(isolated?'/usr/bin/sandbox-exec':soffice, isolated?['-p','(version 1)(allow default)(deny network*)',soffice,...args]:args, { stdio: 'ignore', detached: process.platform !== 'win32' });
-  const timer = setTimeout(() => {
+  const child = spawn(isolated?'/usr/bin/sandbox-exec':soffice, isolated?['-p',SOFFICE_SANDBOX,soffice,...args]:args, { stdio: 'ignore', detached: process.platform !== 'win32' });
+  const kill = () => {
     try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* already dead */ }
     try { child.kill('SIGKILL'); } catch { /* already dead */ }
-    reject(new Error(`LibreOffice conversion timed out after ${CONVERT_TIMEOUT_MS / 1000}s.`));
-  }, CONVERT_TIMEOUT_MS);
-  child.on('error', (err) => { clearTimeout(timer); reject(err); });
+  };
+  const timer = setTimeout(() => { kill(); reject(new Error(`LibreOffice conversion timed out after ${Math.round(timeoutMs / 1000)}s.`)); }, timeoutMs);
+  const onAbort = () => { clearTimeout(timer); kill(); reject(new Error('LibreOffice conversion was stopped.')); };
+  if (signal?.aborted) onAbort(); else signal?.addEventListener('abort', onAbort, { once: true });
+  child.on('error', (err) => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); reject(err); });
   child.on('close', (code) => {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
     if (code === 0) resolve();
     else reject(new Error(`LibreOffice exited with code ${code}.`));
   });

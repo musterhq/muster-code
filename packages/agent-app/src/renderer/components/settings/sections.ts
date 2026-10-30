@@ -17,7 +17,7 @@ export const SETTINGS_SECTIONS: readonly SectionInfo[] = [
   {id:'integrations', label:'Integrations', description:'Connect to Muster Server: its projects, tasks and agents show up in the app.', keywords:'muster server remote connect self-hosted team sign in integrations connection server deployment url api token org projects agents roster this mac off test link import disconnect sign in password browser'},
   {id:'shortcuts', label:'Shortcuts', description:'Keyboard shortcuts from the app menus.', keywords:'keyboard shortcuts hotkeys accelerators keys bindings'},
   {id:'diagnostics', label:'Diagnostics', description:'Versions, processes and the runtime log.', keywords:'diagnostics version electron node core log memory cpu processes metrics debug support redacted'},
-  {id:'storage', label:'Storage', description:'Disk use by category, with safe cleanup.', keywords:'storage disk space size attachments scratch cleanup clean delete sqlite database worktrees'},
+  {id:'storage', label:'Storage', description:'Disk use by category, with safe cleanup.', keywords:'storage disk space size attachments scratch cleanup clean delete sqlite database worktrees libreoffice office word powerpoint document runtime'},
   // Muster Server's web UI only (#199): your account, and the admin console for owners and admins. Never in the desktop app.
   {id:'server', label:'Server', description:'Your account and, for admins, people, invites, usage and connectors.', keywords:'server account password sign out admin people users roles invites invite link access revoke sessions usage cost per person ledger connectors slack telegram mattermost audit'},
 ];

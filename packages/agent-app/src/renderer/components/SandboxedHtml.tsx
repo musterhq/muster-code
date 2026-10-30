@@ -8,6 +8,8 @@
  *   scripts: true   sandbox="allow-scripts"   inline scripts run, but cannot reach Muster, Node, IPC, storage, the network,
  *                                             other frames, popups, forms or the top window
  *   scripts: false  sandbox=""                the page is shown, never run
+ *   measure: true   sandbox="allow-scripts"   the page is shown, never run, and fits its height: the CSP allows only Muster's
+ *                                             height reporter, by hash, so none of the page's own scripts or handlers run
  *
  * Never `allow-same-origin`: the opaque origin keeps the page out of the app's DOM, storage and preload bridge.
  *
@@ -38,7 +40,7 @@ export interface SandboxedHtmlProps {
   /** Re-uses one served document across edits (a Canvas being typed into) instead of registering a new one per change. */
   storeKey?: string;
   className?: string;
-  /** Called with the page's own height (CSS px) whenever it changes; only meaningful with scripts. Batched to one call per frame. */
+  /** Called with the page's own height (CSS px) whenever it changes; only meaningful with scripts or `measure`. Batched to one call per frame. */
   onHeight?(height: number): void;
   /** Called with the served document's token (for PDF export). */
   onToken?(token: string): void;
@@ -54,6 +56,8 @@ export interface SandboxedHtmlProps {
   lazy?: boolean;
   /** Bumps to re-register (after the person allowed network). */
   revision?: number;
+  /** With scripts off: let Muster's own height reporter run (and nothing else), so `onHeight` fits the frame to the page. */
+  measure?: boolean;
 }
 
 const REGISTER_DEBOUNCE_MS = 250;
@@ -78,7 +82,7 @@ export function linkAllowed(frame: HTMLIFrameElement | null, source: MessageEven
   return !!frame && !!frame.contentWindow && source === frame.contentWindow && activeElement === frame && userActive !== false;
 }
 
-export function SandboxedHtml({html, scripts = false, title, storeKey, className, onHeight, onToken, debounceMs = REGISTER_DEBOUNCE_MS, themed = false, renderId, onPage, lazy = false, revision = 0}: SandboxedHtmlProps): React.ReactElement {
+export function SandboxedHtml({html, scripts = false, title, storeKey, className, onHeight, onToken, debounceMs = REGISTER_DEBOUNCE_MS, themed = false, renderId, onPage, lazy = false, revision = 0, measure = false}: SandboxedHtmlProps): React.ReactElement {
   const web = isWebHost();
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,6 +98,7 @@ export function SandboxedHtml({html, scripts = false, title, storeKey, className
   const themeRef = useRef(theme); themeRef.current = theme;
   const runScripts = scripts || !!renderId;
   const isThemed = themed || !!renderId;
+  const measured = measure && !runScripts;
 
   useEffect(() => {
     if (web || !near) return;
@@ -101,7 +106,7 @@ export function SandboxedHtml({html, scripts = false, title, storeKey, className
     const run = () => {
       const request = renderId
         ? invoke('htmlRenders.open', {id: renderId}).then(result => { if (live) pageCallback.current?.(result.page); return result; })
-        : invoke('reports.open', {html, scripts, ...(storeKey ? {key: storeKey} : {}), ...(themed ? {themed: true} : {})});
+        : invoke('reports.open', {html, scripts, ...(storeKey ? {key: storeKey} : {}), ...(themed ? {themed: true} : {}), ...(measured ? {measure: true} : {})});
       void request.then(result => {
         if (!live) return;
         // The first paint is already themed: the theme rides in the fragment, which the page reads and then drops.
@@ -111,7 +116,7 @@ export function SandboxedHtml({html, scripts = false, title, storeKey, className
     if (first.current) { first.current = false; run(); return () => { live = false; }; }
     const timer = setTimeout(run, debounceMs);
     return () => { live = false; clearTimeout(timer); };
-  }, [web, near, html, scripts, storeKey, attempt, debounceMs, themed, renderId, revision, isThemed]);
+  }, [web, near, html, scripts, storeKey, attempt, debounceMs, themed, renderId, revision, isThemed, measured]);
 
   // Theme changes reach a loaded page as one message; the frame is never reloaded for them.
   useEffect(() => {
@@ -145,7 +150,7 @@ export function SandboxedHtml({html, scripts = false, title, storeKey, className
   if (web) return <div className={`sandboxed-html${className ? ` ${className}` : ''}`}><iframe className="sandboxed-html-frame" title={title} srcDoc={html} sandbox={runScripts ? 'allow-scripts' : ''} referrerPolicy="no-referrer" allow=""/></div>;
   if (error) return <ResourceState kind="error" compact message="Couldn’t open this page" detail={error} onRetry={() => setAttempt(value => value + 1)}/>;
   return <div ref={box} className={`sandboxed-html${className ? ` ${className}` : ''}`} data-loading={!loaded || undefined} data-themed={isThemed || undefined}>
-    {url && <iframe ref={frame} className="sandboxed-html-frame" title={title} src={url} style={isThemed && loaded ? {colorScheme: theme.appearance} : undefined} sandbox={runScripts ? 'allow-scripts' : ''} referrerPolicy="no-referrer" allow="" loading="lazy" onLoad={() => {
+    {url && <iframe ref={frame} className="sandboxed-html-frame" title={title} src={url} style={isThemed && loaded ? {colorScheme: theme.appearance} : undefined} sandbox={runScripts || measured ? 'allow-scripts' : ''} referrerPolicy="no-referrer" allow="" loading="lazy" onLoad={() => {
       setLoaded(true);
       // Covers a theme change that landed while the page was loading.
       if (isThemed) frame.current?.contentWindow?.postMessage(htmlRenderThemeMessage(themeRef.current), '*');

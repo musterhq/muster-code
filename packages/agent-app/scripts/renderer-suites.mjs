@@ -47,6 +47,7 @@ export const split = new Set([
   'ui-sweep-dom',
   'rich-block-components',
   'html-preview-components',
+  'notebook-mermaid-786-dom',
 ]);
 
 /** tests/*.tsx files that are deliberately not suites, with the reason. */

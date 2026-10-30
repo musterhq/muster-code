@@ -10,6 +10,7 @@ third-party work, each under its own license:
 | T3 Code (incremental Markdown parser, table interaction and styling, HTML render and preview, maths in replies and copy-as-source) | `packages/agent-app/src/renderer`, `packages/agent-app/src/shared/markdown-math.ts` | MIT, Copyright (c) 2026 T3 Tools Inc. |
 | micromark-extension-llm-math, mdast-util-math, micromark-extension-gfm-table (patched maths tokenizer) | `packages/agent-app/patched-packages` | MIT, Copyright (c) Titus Wormer |
 | KaTeX and its fonts | bundled in Muster Agent | MIT, Copyright (c) Khan Academy and other contributors |
+| T3 Code (incremental Markdown parser, table interaction and styling, HTML render and preview, notebook and Mermaid file previews) | `packages/agent-app/src/renderer`, `packages/agent-app/src/shared` | MIT, Copyright (c) 2026 T3 Tools Inc. |
 | Mozilla PDF.js, SheetJS SSF | bundled in Muster Agent | Apache-2.0 |
 | three.js and its 3D model loaders and decoders (Draco, meshopt) | bundled in Muster Agent, loaded when a model opens | MIT (three.js), Apache-2.0 (Draco), MIT (meshoptimizer) |
 | Code-OSS (Visual Studio Code open source) | Muster Code builds assembled by `scripts/assemble.sh` | MIT, Copyright (c) Microsoft Corporation |
