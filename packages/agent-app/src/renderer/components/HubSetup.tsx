@@ -52,7 +52,7 @@ export function plainHttpWarning(url: string, hasToken: boolean): string | undef
  */
 /** `addOnly`: just the add flow, for Add server and Re-authenticate in the list of servers (#803). `serverId` is the server it signs in
  *  (`'new'`: a new one, or the one already at that address); `initialAddress` fills the address; `onCancel` adds a Cancel button. */
-export function ConnectionPanel({ onSaved, compact = false, signInAvailable = true, addOnly = false, serverId, initialAddress = '', onCancel }: { onSaved?: (view: PaperclipConfigView) => void; compact?: boolean; signInAvailable?: boolean; addOnly?: boolean; serverId?: string; initialAddress?: string; onCancel?: () => void }): React.ReactElement {
+export function ConnectionPanel({ onSaved, compact = false, signInAvailable = true, addOnly = false, serverId, initialAddress = '', onCancel, inList = false }: { onSaved?: (view: PaperclipConfigView) => void; compact?: boolean; signInAvailable?: boolean; addOnly?: boolean; serverId?: string; initialAddress?: string; onCancel?: () => void; /** Shown under the list of servers: the line says which server Projects syncs from. */ inList?: boolean }): React.ReactElement {
   const [config, setConfig] = useState<PaperclipConfigView | null>(null);
   const [address, setAddress] = useState(initialAddress);
   const [token, setToken] = useState('');
@@ -177,7 +177,8 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
   return <div className={`ws-connection${compact ? ' is-compact' : ''}`}>
     {connected && config && <>
       <p className="ws-connection-detect" data-ok="true" role="status"><Check size={13} aria-hidden="true"/>
-        {who ? `Connected to ${host} as ${who}.` : config.hasToken ? `Connected to ${host} with an API token.` : `Connected to ${host}.`}{' '}
+        {inList ? `Projects, Roster and Inbox sync from ${config.serverName ?? host}${who ? ` as ${who}` : config.hasToken ? ' with an API token' : ''}.`
+          : who ? `Connected to ${host} as ${who}.` : config.hasToken ? `Connected to ${host} with an API token.` : `Connected to ${host}.`}{' '}
         {config.live === 'socket' ? 'Live updates on.' : 'Updates every few seconds.'}{config.reconnect && <> <button type="button" className="ws-link" onClick={() => void invoke('musterServer.signInWindow', { baseUrl: config.baseUrl, url: config.baseUrl }).catch(() => undefined)}>Reconnect for live updates</button></>}</p>
       <OrgsCard/><LocalCheckoutsCard/>
       <details className="ws-connection-more"><summary>Details</summary>

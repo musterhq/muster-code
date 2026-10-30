@@ -33,6 +33,8 @@ export interface ServerConfig {
   signedIn: { name: string | null; email: string | null } | null; signInNotice: string | null;
   /** The origin the stored session cookie belongs to (the cookie is sent there and nowhere else). */
   sessionOrigin: string | null;
+  /** The stored key is an API token someone pasted (not one a password or browser sign-in obtained). */
+  apiToken: boolean;
   /** Which secret-store entry holds the session cookie. Each server in the list has its own (the first keeps `server-session`). */
   sessionSecret: string;
   migratedFrom?: string[];
@@ -41,7 +43,7 @@ export interface ServerConfig {
   /** Who this Mac is signed in as on the server (the server's own user id), resolved once and kept with the origin it was resolved for. "Assigned to me" compares ids, never labels. */
   me: { id: string; name: string | null; origin: string } | null;
 }
-export const DEFAULT_SERVER_CONFIG: ServerConfig = { version: 2, mode: 'off', baseUrl: PAPERCLIP_LOCAL_URL, companyId: null, backend: null, tokenOrigin: null, tokenSecret: SERVER_SECRET, user: null, serverVersion: null, connectedAt: null, signedIn: null, signInNotice: null, sessionOrigin: null, sessionSecret: SESSION_SECRET, orgs: {}, me: null };
+export const DEFAULT_SERVER_CONFIG: ServerConfig = { version: 2, mode: 'off', baseUrl: PAPERCLIP_LOCAL_URL, companyId: null, backend: null, tokenOrigin: null, tokenSecret: SERVER_SECRET, user: null, serverVersion: null, connectedAt: null, signedIn: null, signInNotice: null, sessionOrigin: null, sessionSecret: SESSION_SECRET, apiToken: false, orgs: {}, me: null };
 
 const who = (v: unknown): { name: string | null; email: string | null } | null => v && typeof v === 'object' ? { name: s((v as Record<string, unknown>).name), email: s((v as Record<string, unknown>).email) } : null;
 const read = (path: string): Record<string, unknown> | null => { try { const v = JSON.parse(readFileSync(path, 'utf8')) as unknown; return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null; } catch { return null; } };
@@ -60,7 +62,7 @@ export function parseServerConfig(own: Record<string, unknown>): ServerConfig {
   const mode = own.mode === 'local' || own.mode === 'custom' ? own.mode : 'off';
   const user = own.user && typeof own.user === 'object' ? own.user as ServerUser : null;
   return { ...DEFAULT_SERVER_CONFIG, mode, baseUrl: s(own.baseUrl) ?? PAPERCLIP_LOCAL_URL, companyId: s(own.companyId), backend: own.backend === 'paperclip' || own.backend === 'muster-server' ? own.backend : null,
-    tokenOrigin: s(own.tokenOrigin), tokenSecret: secretId(own.tokenSecret) ?? SERVER_SECRET, user, serverVersion: s(own.serverVersion), connectedAt: s(own.connectedAt), signedIn: who(own.signedIn), signInNotice: s(own.signInNotice), sessionOrigin: s(own.sessionOrigin), sessionSecret: secretId(own.sessionSecret) ?? SESSION_SECRET, orgs: orgsOf(own.orgs), me: meOf(own.me), ...(Array.isArray(own.migratedFrom) ? { migratedFrom: own.migratedFrom as string[] } : {}) };
+    tokenOrigin: s(own.tokenOrigin), tokenSecret: secretId(own.tokenSecret) ?? SERVER_SECRET, user, serverVersion: s(own.serverVersion), connectedAt: s(own.connectedAt), signedIn: who(own.signedIn), signInNotice: s(own.signInNotice), sessionOrigin: s(own.sessionOrigin), sessionSecret: secretId(own.sessionSecret) ?? SESSION_SECRET, apiToken: own.apiToken === true, orgs: orgsOf(own.orgs), me: meOf(own.me), ...(Array.isArray(own.migratedFrom) ? { migratedFrom: own.migratedFrom as string[] } : {}) };
 }
 
 /** Reads `server.json`, or builds it from the older files (writing it so that this happens once). */

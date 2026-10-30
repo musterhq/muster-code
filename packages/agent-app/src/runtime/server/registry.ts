@@ -34,8 +34,10 @@ import { MusterServerBackend } from './muster-server-backend.ts';
 
 export interface ServerEntry {
   id: string;
-  /** What the person called it; null shows the address's host (or "This Mac"). */
+  /** What the person called it; null shows the server's one org name, else the address's host (or "This Mac"). */
   name: string | null;
+  /** The server's org name from the last check, when it has exactly one org. */
+  orgName: string | null;
   addedAt: string;
   config: ServerConfig;
 }
@@ -57,7 +59,7 @@ function readFile(dataDir: string): ServersFile | null {
     const servers: ServerEntry[] = [];
     for (const item of raw.servers as Array<Record<string, unknown>>) {
       if (!item || typeof item.id !== 'string' || !ID.test(item.id) || servers.some(s => s.id === item.id) || !item.config || typeof item.config !== 'object') continue;
-      servers.push({ id: item.id, name: typeof item.name === 'string' && item.name.trim() ? item.name.trim().slice(0, 80) : null, addedAt: typeof item.addedAt === 'string' ? item.addedAt : new Date(0).toISOString(), config: parseServerConfig(item.config as Record<string, unknown>) });
+      servers.push({ id: item.id, name: typeof item.name === 'string' && item.name.trim() ? item.name.trim().slice(0, 80) : null, orgName: typeof item.orgName === 'string' && item.orgName.trim() ? item.orgName.trim().slice(0, 120) : null, addedAt: typeof item.addedAt === 'string' ? item.addedAt : new Date(0).toISOString(), config: parseServerConfig(item.config as Record<string, unknown>) });
     }
     const workspace = typeof raw.workspace === 'string' && servers.some(s => s.id === raw.workspace) ? raw.workspace : null;
     return { version: 1, workspace, servers, ...(Array.isArray(raw.migratedFrom) ? { migratedFrom: raw.migratedFrom as string[] } : {}) };
@@ -75,7 +77,7 @@ export function loadServers(dataDir: string): { file: ServersFile; migrated: boo
   if (own) return { file: own, migrated: false };
   const { config } = loadServerConfig(dataDir);
   if (config.mode === 'off') return { file: { version: 1, workspace: null, servers: [] }, migrated: false };
-  const entry: ServerEntry = { id: newId(), name: null, addedAt: config.connectedAt ?? new Date().toISOString(), config };
+  const entry: ServerEntry = { id: newId(), name: null, orgName: null, addedAt: config.connectedAt ?? new Date().toISOString(), config };
   const file: ServersFile = { version: 1, workspace: entry.id, servers: [entry], migratedFrom: ['server.json'] };
   try { writeFile(dataDir, file); } catch { /* read-only data dir: the in-memory list still works */ }
   return { file, migrated: true };
@@ -129,8 +131,8 @@ export class ServerRegistry {
     const chosen = this.file.workspace ? this.get(this.file.workspace) : undefined;
     return chosen && connected(chosen) ? chosen : this.file.servers.find(connected);
   }
-  /** The name shown for a server: what it was called, else the host of its address (or this computer's name for a local one). */
-  nameOf(entry: ServerEntry): string { return entry.name ?? (entry.config.mode === 'local' && !entry.config.tokenOrigin ? device().title : hostOf(entry.config.baseUrl)); }
+  /** The name shown for a server: what it was called, else its one org's name, else the host of its address (this computer's name for a local one). */
+  nameOf(entry: ServerEntry): string { return entry.name ?? entry.orgName ?? (entry.config.mode === 'local' && !entry.config.tokenOrigin ? device().title : hostOf(entry.config.baseUrl)); }
 
   /** One server's own connection (the same object on every call). */
   connection(id: string): ServerConnection {
@@ -177,7 +179,7 @@ export class ServerRegistry {
   private insert(id: string, config: ServerConfig, workspace: boolean): void {
     this.drafts.delete(id);
     // The first server added (or one added while nothing feeds Projects) becomes the one that feeds Projects; later ones join beside it.
-    this.file = { ...this.file, servers: [...this.file.servers, { id, name: null, addedAt: new Date().toISOString(), config }], workspace: workspace || !this.file.workspace ? id : this.file.workspace };
+    this.file = { ...this.file, servers: [...this.file.servers, { id, name: null, orgName: null, addedAt: new Date().toISOString(), config }], workspace: workspace || !this.file.workspace ? id : this.file.workspace };
     this.persist();
   }
   private update(id: string, config: ServerConfig, notify: boolean): void {
@@ -247,7 +249,8 @@ export class ServerRegistry {
     const endpoint = conn.endpoint();
     if (!endpoint) throw new Error(`${this.nameOf(entry)} is disconnected.`);
     if (kind === 'muster-server' && !endpoint.token) throw new PaperclipError('Not signed in.', 401, 'auth');
-    return { kind, endpoint, backend: conn.makeBackend(kind, endpoint, { cache: false, orgName: this.nameOf(entry) }) };
+    // No org-name fallback: a server that names its org says so, one that does not answers with its host (so it is not mistaken for an org name).
+    return { kind, endpoint, conn, backend: conn.makeBackend(kind, endpoint, { cache: false }) };
   }
   private timed<T>(work: Promise<T>, entry: ServerEntry): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -262,10 +265,22 @@ export class ServerRegistry {
       const prior = this.health.get(entry.id);
       this.setHealth(entry.id, { state: 'checking', error: null, checkedAt: prior?.checkedAt ?? null, orgs: prior?.orgs ?? [] });
       try {
-        const { backend } = await this.backendOf(entry);
-        await this.timed(backend.health(), entry);
+        const { kind, conn, backend } = await this.backendOf(entry);
+        if (kind === 'muster-server') {
+          // `server.me` says whom the key signs in as: a pasted token arrives without it, so the row can name the person.
+          const me = await this.timed((backend as MusterServerBackend).rpc<{ user?: { username?: unknown; displayName?: unknown; role?: unknown } }>('server.me'), entry);
+          const u = me?.user;
+          if (u && typeof u.username === 'string' && this.get(entry.id)) conn.rememberAccount({ username: u.username, displayName: typeof u.displayName === 'string' && u.displayName ? u.displayName : u.username, role: typeof u.role === 'string' ? u.role : 'member' });
+        } else {
+          await this.timed(backend.health(), entry);
+          const person = backend.whoami ? await this.timed(backend.whoami(), entry).catch(() => null) : null;
+          if (person && this.get(entry.id)) conn.setPerson({ id: person.id, name: person.name ?? person.email });
+        }
         const orgs = await this.timed(backend.companies(), entry);
-        if (this.get(entry.id)) this.setHealth(entry.id, { state: 'online', error: null, checkedAt: new Date().toISOString(), orgs: orgs.map(o => o.name) });
+        if (!this.get(entry.id)) return;
+        const one = orgs.length === 1 && orgs[0]!.name.trim() && orgs[0]!.name.trim() !== hostOf(entry.config.baseUrl) ? orgs[0]!.name.trim() : null;
+        if (one !== this.get(entry.id)!.orgName) { this.file = { ...this.file, servers: this.file.servers.map(s => s.id === entry.id ? { ...s, orgName: one } : s) }; this.persist(); }
+        this.setHealth(entry.id, { state: 'online', error: null, checkedAt: new Date().toISOString(), orgs: orgs.map(o => o.name) });
       } catch (cause) { if (this.get(entry.id)) this.setHealth(entry.id, this.failure(entry, cause)); }
     }));
   }
@@ -303,7 +318,13 @@ export class ServerRegistry {
   /** What Settings shows for one server. */
   view(entry: ServerEntry): MusterServerEntryView {
     const conn = this.bind(entry.id), v = conn.view(), c = entry.config, health = this.health.get(entry.id);
-    const account = !v.hasToken ? null : c.user ? `${c.user.displayName} (@${c.user.username})` : c.signedIn ? [c.signedIn.name, c.signedIn.email && (c.signedIn.name ? `(${c.signedIn.email})` : c.signedIn.email)].filter(Boolean).join(' ') || 'your account' : 'API token';
+    // A pasted token says whose it is ("QA Owner 1 · API token"); a password sign-in its account; a browser sign-in its person.
+    const person = c.user?.displayName ?? conn.person()?.name ?? null;
+    const account = !v.hasToken ? null
+      : c.apiToken ? (person ? `${person} · API token` : 'API token')
+      : c.user ? `${c.user.displayName} (@${c.user.username})`
+      : c.signedIn ? [c.signedIn.name, c.signedIn.email && (c.signedIn.name ? `(${c.signedIn.email})` : c.signedIn.email)].filter(Boolean).join(' ') || 'your account'
+      : person ? `${person} · API token` : 'API token';
     const needsSignIn = !v.hasToken && (c.signInNotice !== null || c.backend === 'muster-server');
     const state: MusterServerState = !connected(entry) ? 'disconnected' : needsSignIn ? 'signed-out' : health?.state ?? 'checking';
     const error = !connected(entry) ? null : needsSignIn ? c.signInNotice ?? `Sign in to ${hostOf(c.baseUrl)} again to connect.` : health?.error ?? null;

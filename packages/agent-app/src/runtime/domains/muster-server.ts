@@ -41,7 +41,7 @@ export function createMusterServerDomain(context: DomainContext, options: { fetc
         else if (input.method === 'token') {
           if (typeof input.token !== 'string' || !/^mst_[A-Za-z0-9_-]{20,200}$/.test(input.token.trim())) throw new Error('Paste a Muster Server API token (it starts with mst_).');
           if (!conn.secrets().status(conn.config.tokenSecret).secureStorage) throw new Error('This computer has no secure keychain available, so the server token cannot be stored. Muster will not keep it in plain text.');
-          await conn.adopt(origin, input.token.trim(), input.mode === 'local' ? 'local' : 'custom');
+          await conn.adopt(origin, input.token.trim(), input.mode === 'local' ? 'local' : 'custom', true);
         } else throw new Error('Choose password or token sign-in.');
         return view(conn, idOf(conn, origin));
       },
