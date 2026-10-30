@@ -41,7 +41,7 @@ export interface SshDeviceHostDeps {
   /** Called on every state change (the manager republishes setup and reconnects sessions). */
   changed?(host: SshDeviceHost, previous: DeviceHostState): void;
   /** Tests: a different root, PATH, node, npm or scrcpy pin on the host. */
-  script?: Partial<Pick<RemoteScriptConfig, 'root' | 'extraPath' | 'node' | 'npm' | 'scrcpy'>>;
+  script?: Partial<Pick<RemoteScriptConfig, 'root' | 'extraPath' | 'env' | 'node' | 'npm' | 'scrcpy'>>;
   timing?: Partial<typeof TIMING>;
 }
 export const TIMING = {healthMs: 10_000, healthTimeoutMs: 5000, readyMs: 15_000, backoffMs: 1000, backoffMaxMs: 30_000, hubWaitMs: 60_000, keeperStartMs: 120_000, installMs: 15 * 60_000, probeMs: 45_000};
@@ -376,6 +376,6 @@ export class SshDeviceHost implements DeviceHost {
 }
 function pick(script: SshDeviceHostDeps['script']): Partial<RemoteScriptConfig> {
   if (!script) return {};
-  const {root, extraPath, node, npm} = script;
-  return {...(root ? {root} : {}), ...(extraPath ? {extraPath} : {}), ...(node ? {node} : {}), ...(npm ? {npm} : {})};
+  const {root, extraPath, env, node, npm} = script;
+  return {...(root ? {root} : {}), ...(extraPath ? {extraPath} : {}), ...(env ? {env} : {}), ...(node ? {node} : {}), ...(npm ? {npm} : {})};
 }

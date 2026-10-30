@@ -24,9 +24,10 @@ export const KEEPER_MARKER = 'muster-device-keeper';
 export const quoteRemoteArg = shq;
 
 /** Non-interactive SSH sessions rarely have Homebrew, version managers or the Android SDK on PATH: add the usual places. */
-export function remoteEnvironment(extraPath: string[] = []): string {
+export function remoteEnvironment(extraPath: string[] = [], env: Record<string, string> = {}): string {
   const extra = extraPath.map(dir => `${shq(dir)}:`).join('');
-  return `export PATH=${extra}"$HOME/.local/bin:$HOME/.volta/bin:$HOME/.local/share/mise/shims:$HOME/.asdf/shims:/opt/homebrew/bin:/usr/local/bin:$PATH"
+  const exports = Object.entries(env).filter(([key]) => /^[A-Z_][A-Z0-9_]*$/.test(key)).map(([key, value]) => `export ${key}=${shq(value)}\n`).join('');
+  return `${exports}export PATH=${extra}"$HOME/.local/bin:$HOME/.volta/bin:$HOME/.local/share/mise/shims:$HOME/.asdf/shims:/opt/homebrew/bin:/usr/local/bin:$PATH"
 if [ -d "$HOME/.nvm/versions/node" ]; then device_nvm=$(ls -1d "$HOME"/.nvm/versions/node/v*/bin 2>/dev/null | sort -V 2>/dev/null | tail -n 1); if [ -n "$device_nvm" ]; then export PATH="$PATH:$device_nvm"; fi; fi
 if [ -z "$ANDROID_HOME" ]; then
   if [ -n "$ANDROID_SDK_ROOT" ]; then export ANDROID_HOME="$ANDROID_SDK_ROOT";
@@ -56,23 +57,24 @@ export interface RemoteScriptConfig {
   /** Tests only: where the folder lives, extra PATH entries, the node and npm commands. */
   root?: string;
   extraPath?: string[];
+  env?: Record<string, string>;
   node?: string;
   npm?: string[];
 }
 export type RemoteMode = 'probe' | 'install' | 'stop';
 
 /** The remote command for a script on stdin: the environment prelude, a clear error when Node is missing, then node. */
-export function nodeCommand(config: Pick<RemoteScriptConfig, 'extraPath' | 'node'>, args: string[] = []): string {
+export function nodeCommand(config: Pick<RemoteScriptConfig, 'extraPath' | 'env' | 'node'>, args: string[] = []): string {
   const node = config.node ?? 'node';
-  return `sh -c ${shq(`${remoteEnvironment(config.extraPath)}command -v ${shq(node)} >/dev/null 2>&1 || { echo "MUSTER_ERROR NO_NODE Node.js is missing from the non-interactive SSH PATH" >&2; exit 127; }; exec ${shq(node)}${args.map(arg => ` ${shq(arg)}`).join('')}`)}`;
+  return `sh -c ${shq(`${remoteEnvironment(config.extraPath, config.env)}command -v ${shq(node)} >/dev/null 2>&1 || { echo "MUSTER_ERROR NO_NODE Node.js is missing from the non-interactive SSH PATH" >&2; exit 127; }; exec ${shq(node)}${args.map(arg => ` ${shq(arg)}`).join('')}`)}`;
 }
 /** A program on the host, run with the same prelude (simctl, adb, emulator), argv quoted. */
-export function programCommand(config: Pick<RemoteScriptConfig, 'extraPath'>, file: string, args: string[]): string {
-  return `sh -c ${shq(`${remoteEnvironment(config.extraPath)}exec ${[file, ...args].map(shq).join(' ')}`)}`;
+export function programCommand(config: Pick<RemoteScriptConfig, 'extraPath' | 'env'>, file: string, args: string[]): string {
+  return `sh -c ${shq(`${remoteEnvironment(config.extraPath, config.env)}exec ${[file, ...args].map(shq).join(' ')}`)}`;
 }
 /** A fixed shell snippet with the prelude (only Muster's own text, with quoted values, ever goes here). */
-export function shellCommand(config: Pick<RemoteScriptConfig, 'extraPath'>, script: string): string {
-  return `sh -c ${shq(`${remoteEnvironment(config.extraPath)}${script}`)}`;
+export function shellCommand(config: Pick<RemoteScriptConfig, 'extraPath' | 'env'>, script: string): string {
+  return `sh -c ${shq(`${remoteEnvironment(config.extraPath, config.env)}${script}`)}`;
 }
 
 /** Shared by every script: paths, the lock, the keeper record and stopping an earlier keeper. */

@@ -80,6 +80,9 @@ async function fixture(t: import('node:test').TestContext, options: {version?: s
   t.after(() => fs.rmSync(work, {recursive: true, force: true}));
   const dataDir = path.join(work, 'data'), root = path.join(work, 'remote-root'), tools = path.join(work, 'fake-tools');
   fs.mkdirSync(dataDir); fs.mkdirSync(tools);
+  // A fake Android SDK on the "host": adb and emulator scripts that list nothing.
+  const sdk = path.join(work, 'sdk');
+  for (const [dir, name] of [['platform-tools', 'adb'], ['emulator', 'emulator']]) { fs.mkdirSync(path.join(sdk, dir!), {recursive: true}); fs.writeFileSync(path.join(sdk, dir!, name!), '#!/bin/sh\nexit 0\n', {mode: 0o755}); }
   fs.writeFileSync(path.join(tools, 'fake-hub.mjs'), FAKE_HUB.replace("process.env.FAKE_LOG || new URL('../../../../../../fake-hub-pids.txt', import.meta.url).pathname", JSON.stringify(path.join(tools, 'hub-pids.txt'))));
   fs.writeFileSync(path.join(tools, 'fake-npm.cjs'), FAKE_NPM);
   fs.writeFileSync(path.join(tools, 'version.txt'), options.version ?? '0.15.3');
@@ -95,7 +98,7 @@ async function fixture(t: import('node:test').TestContext, options: {version?: s
   }
   const states: string[] = [];
   const host = new SshDeviceHost(record, {dataDir, userData: work, manifestDir: MANIFEST, fetch,
-    script: {root, extraPath: [path.dirname(process.execPath)], npm: [process.execPath, path.join(tools, 'fake-npm.cjs')], ...(options.node ? {node: options.node} : {}),
+    script: {root, extraPath: [path.dirname(process.execPath)], env: {ANDROID_HOME: sdk}, npm: [process.execPath, path.join(tools, 'fake-npm.cjs')], ...(options.node ? {node: options.node} : {}),
       scrcpy: {url: `http://127.0.0.1:${(files.address() as net.AddressInfo).port}/scrcpy`, sha256: createHash('sha256').update(scrcpyBytes).digest('hex'), path: SCRCPY_SERVER.path}},
     timing: {healthMs: 200, healthTimeoutMs: 1000, backoffMs: 100, backoffMaxMs: 400, readyMs: 8000},
     changed: h => states.push(h.summary().state)});
@@ -205,7 +208,8 @@ test('host checks: iOS needs a Mac (a Linux host shows Android only); remote err
   // The prelude finds the SDK and version-managed Node; program argv is quoted for the remote shell.
   assert.match(remoteEnvironment(), /ANDROID_HOME="\$HOME\/Library\/Android\/sdk"/);
   assert.match(remoteEnvironment(), /\.nvm\/versions\/node/);
-  assert.match(programCommand({}, '/usr/bin/xcrun', ["it's", '; rm -rf /']), /exec '\\''\/usr\/bin\/xcrun'\\'' '\\''it'\\''"'\\''"'\\''s'\\''|exec/);
+  const quoted = programCommand({}, '/bin/echo', ["it's", '; rm -rf /', '$(x)']);
+  assert.equal(execFileSync('/bin/sh', ['-c', quoted], {encoding: 'utf8'}).trim(), "it's ; rm -rf / $(x)", 'argv survives both shells untouched');
 });
 
 // --- Manager: remote devices beside local ones, through the same paths ---------------------------------------------
