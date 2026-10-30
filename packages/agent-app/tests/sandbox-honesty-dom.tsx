@@ -55,6 +55,9 @@ const errors:unknown[]=[],root=createRoot(document.getElementById('root')!,{onUn
 function Harness(){const state=useStore();const current=state.snapshot?.chats[0];return current?<><Composer chat={current}/><EnvironmentFooter chat={current} folder={{id:'folder',name:'Workspace',path:'/workspace'} as any}/></>:null;}
 await store.boot();await store.loadProviders(true);
 root.render(<Harness/>);await delay(150);
+// The footer shows "This Mac" until sandbox.chatEnvironment.get resolves; a loaded runner can take longer than any fixed
+// delay, so wait (up to 5 s) for the fetched environment itself before asserting on it (#802).
+for(let i=0;i<200&&!/Sandbox/.test(document.querySelector('.env-footer-trigger')?.textContent??'');i++)await delay(25);
 assert.deepEqual(errors,[]);
 const byTest=(id:string)=>document.querySelector(`[data-testid="${id}"]`) as HTMLElement|null;
 const chip=()=>document.querySelector('.env-footer-trigger')?.textContent??'';

@@ -406,7 +406,9 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     }).catch(() => { /* Runtimes without attachment staging have nothing to restore. */ });
     return () => { live = false; };
   }, [chat.id]);
-  useEffect(() => {
+  // A layout effect, so the reset lands in the same commit as the new chat: as a passive effect it could still be
+  // pending when the first click arrives, and React would flush it after that click and close the menu it opened (#802).
+  useLayoutEffect(() => {
     setMenu(null); setFullConfirm(false); setSettingsError(''); setDismissed(null); setCaret(text.length); recall.current = null; setLargePaste(null);
     settingsRequest.current++; modelRequest.current++; settingsPending.current = false; modelPending.current = false; setSettingsChanging(false); setModelChanging(false);
   }, [chat.id]);
