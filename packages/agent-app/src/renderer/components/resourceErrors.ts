@@ -9,7 +9,7 @@
 export const COMMAND_NAMESPACES: ReadonlySet<string> = new Set([
   'app', 'approval', 'artifacts', 'attachments', 'attention', 'automations', 'browser', 'chat', 'ci', 'clipboard', 'computer', 'extensions', 'files', 'folder',
   'git', 'github', 'goals', 'hindsight', 'image', 'import', 'link', 'mailbox', 'mcp', 'memory', 'models', 'musterServer', 'paperclip', 'plugins', 'processes', 'project', 'providers', 'question', 'reports', 'htmlRenders', 'previews',
-  'backups', 'checkout', 'insight', 'org', 'orgs', 'review', 'sandbox', 'search', 'services', 'settings', 'setup', 'skills', 'ssh', 'stashes', 'studio', 'subagents', 'terminal', 'terminalAccess', 'updates', 'work', 'workspace',
+  'backups', 'checkout', 'insight', 'office', 'org', 'orgs', 'review', 'sandbox', 'search', 'services', 'settings', 'setup', 'skills', 'ssh', 'stashes', 'studio', 'subagents', 'terminal', 'terminalAccess', 'updates', 'work', 'workspace',
 ]);
 const COMMAND_PREFIX = /^([a-z][a-zA-Z]*)(?:\.[a-zA-Z][\w-]*)+:\s*/;
 

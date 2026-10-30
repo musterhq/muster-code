@@ -1,21 +1,21 @@
 {
-  "generatedAt": "2026-10-30T04:01:54.553Z",
+  "generatedAt": "2026-10-30T04:41:55.790Z",
   "note": "Minified bytes each package contributes to the shipped bundles (renderer chunks are lazy where split). Regenerate with node scripts/dependency-report.mjs and commit with any dependency change.",
   "totals": {
-    "renderer": 16319733,
-    "main": 383075,
+    "renderer": 16324706,
+    "main": 387209,
     "preload": 1055,
-    "runtime": 2882131
+    "runtime": 2896346
   },
   "packages": [
     {
       "name": "(app source)",
-      "bytes": 5969238,
+      "bytes": 5992517,
       "targets": {
-        "renderer": 3726047,
-        "main": 382587,
+        "renderer": 3731011,
+        "main": 386721,
         "preload": 1041,
-        "runtime": 1859563
+        "runtime": 1873744
       },
       "version": "0.3.16",
       "license": "UNLICENSED",
@@ -167,9 +167,9 @@
     },
     {
       "name": "@base-ui/react",
-      "bytes": 192179,
+      "bytes": 192181,
       "targets": {
-        "renderer": 192179
+        "renderer": 192181
       },
       "version": "1.9.0",
       "license": "MIT",
@@ -277,9 +277,9 @@
     },
     {
       "name": "jszip",
-      "bytes": 43728,
+      "bytes": 43762,
       "targets": {
-        "runtime": 43728
+        "runtime": 43762
       },
       "version": "3.10.2",
       "license": "(MIT OR GPL-3.0-or-later)",
@@ -2921,8 +2921,24 @@
   ],
   "unbundledDirectDependencies": [
     {
+      "name": "@napi-rs/canvas",
+      "reason": "not reached from any entry point (loaded at runtime or unused)"
+    },
+    {
+      "name": "docx",
+      "reason": "not reached from any entry point (loaded at runtime or unused)"
+    },
+    {
       "name": "node-pty",
       "reason": "native, shipped from node_modules by the packager"
+    },
+    {
+      "name": "pdf-lib",
+      "reason": "not reached from any entry point (loaded at runtime or unused)"
+    },
+    {
+      "name": "pptxgenjs",
+      "reason": "not reached from any entry point (loaded at runtime or unused)"
     }
   ]
 }

@@ -131,6 +131,14 @@ cpSync(path.join(pty, 'lib'), path.join(ptyOut, 'lib'), {recursive: true, filter
 for (const name of ['package.json', 'LICENSE']) cpSync(path.join(pty, name), path.join(ptyOut, name));
 for (const name of ['pty.node', 'spawn-helper']) cpSync(path.join(ptyNative, name), path.join(ptyOut, 'build/Release', name));
 chmodSync(path.join(ptyOut, 'build/Release/spawn-helper'), 0o755);
+// #789: pdf.js and its canvas package turn rendered office documents into page images in the main process (not bundled:
+// pdf.js loads its own worker, fonts and wasm from disk, and the canvas package is native). LibreOffice itself is never shipped.
+const pdfjs = path.join(root, 'node_modules/pdfjs-dist'), pdfjsOut = path.join(appDir, 'node_modules/pdfjs-dist');
+for (const part of ['package.json', 'LICENSE', 'legacy/build/pdf.mjs', 'legacy/build/pdf.worker.mjs', 'standard_fonts', 'cmaps', 'wasm', 'iccs']) if (existsSync(path.join(pdfjs, part))) cpSync(path.join(pdfjs, part), path.join(pdfjsOut, part), {recursive: true});
+const canvasNative = `canvas-darwin-${arch}`;
+if (existsSync(path.join(root, 'node_modules/@napi-rs', canvasNative))) {
+  for (const name of ['canvas', canvasNative]) cpSync(path.join(root, 'node_modules/@napi-rs', name), path.join(appDir, 'node_modules/@napi-rs', name), {recursive: true, filter: source => !/\.(map|md|d\.ts)$/.test(source)});
+} else log(`warning: @napi-rs/${canvasNative} is not installed; office page images will be unavailable in this build`);
 for (const name of ['THIRD-PARTY-NOTICES.md']) if (existsSync(path.join(root, name))) cpSync(path.join(root, name), path.join(appDir, name));
 writeFileSync(path.join(appDir, 'package.json'), JSON.stringify({name: 'muster-agent', productName: PRODUCT, version, main: 'dist/main/index.cjs'}));
 
