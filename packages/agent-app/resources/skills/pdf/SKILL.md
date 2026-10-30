@@ -55,7 +55,7 @@ form fields, page numbers). Copy it into the working folder and change it.
 ```js
 import { readFile } from 'node:fs/promises';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
-const doc = await getDocument({ data: new Uint8Array(await readFile('in.pdf')), useSystemFonts: false, isEvalSupported: false }).promise;
+const doc = await getDocument({ data: new Uint8Array(await readFile('in.pdf')), useSystemFonts: false }).promise;
 for (let number = 1; number <= doc.numPages; number++) {
   const page = await doc.getPage(number);
   const { items } = await page.getTextContent();

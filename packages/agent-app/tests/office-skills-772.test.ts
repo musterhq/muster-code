@@ -206,7 +206,7 @@ test('an agent makes a PDF with a form using Muster\'s pdf skill, reads its text
   assert.equal(filled.getForm().getTextField('approver.name').getText(), 'Ada Lovelace');
   // Text extraction the way the skill shows it.
   const {getDocument} = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const task = getDocument({data: new Uint8Array(await readFile(turn.output)), useSystemFonts: false, isEvalSupported: false}); const doc = await task.promise;
+  const task = getDocument({data: new Uint8Array(await readFile(turn.output)), useSystemFonts: false}); const doc = await task.promise;
   const words = (await (await doc.getPage(1)).getTextContent()).items.map(item => 'str' in item ? item.str : '').join(' ');
   assert.match(words, /Quarterly report/); assert.match(words, /North/);
   await task.destroy();
