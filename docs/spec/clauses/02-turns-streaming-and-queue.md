@@ -79,6 +79,7 @@ Boundaries:
 | [MUS-SPEC-02-608C](02-turns-streaming-and-queue.md#mus-spec-02-608c) | A failed web request to a model gives a plain cause for a proxy, DNS, certificate or refused connection, marks the turn as not sent, and never shows the user name or password in the address. | [`HTTP fetch failures explain nested proxy, DNS, TLS and refused causes without credentials`](../../../packages/agent-app/tests/network-reconnect.test.ts) |
 | [MUS-SPEC-02-608D](02-turns-streaming-and-queue.md#mus-spec-02-608d) | The failure banner for a network error shows Retry even with an empty draft, runs the turn retry once per click with a busy state, and never sends the text in the composer instead. | [`a failed network turn offers Retry, which re-runs the turn and never sends the draft in its place`](../../../packages/agent-app/tests/recovery-notice.tsx) |
 | [MUS-SPEC-02-579A](02-turns-streaming-and-queue.md#mus-spec-02-579a) | After a crash, Continue anyway and then Steer on a queued message send it once; the app-server's saved copy is deleted, so it does not send it again when the thread goes idle. | [`a message queued before a crash is sent once after Continue anyway and Steer`](../../../packages/agent-app/tests/queue-after-crash-579.test.ts) |
+| [MUS-SPEC-02-800A](02-turns-streaming-and-queue.md#mus-spec-02-800a) | With the window inactive, newly streamed words show at full opacity instead of being held at the start of their fade; a focused window still fades them in. | [`streamed words are fully visible while the window is inactive`](../../../packages/agent-app/tests/stream-fade-inactive-800.test.ts) |
 
 ### Tool rows when a turn ends
 
@@ -801,4 +802,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/stream-reconcile-762.test.ts::a piece with no item id does not stop later completed replies from being saved`
 - Environment: Node with the real agent service and a fake provider sending the coding client's message events. No desktop app or network.
 - Known gaps: None beyond 762A.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-800a"></a>
+#### MUS-SPEC-02-800A: Streamed words stay readable while the window is inactive
+
+- Precondition: The app's own stylesheets are loaded; the window is marked inactive (`data-window-active="false"` on the root), as when the person works in another app beside Muster.
+- Action: New words of a reply arrive as fading spans in a paragraph and a table header, then 400 ms pass.
+- Expected result: Every new word has opacity 1. With the window focused, the same words fade in and also end at opacity 1.
+- Test: `packages/agent-app/tests/stream-fade-inactive-800.test.ts::streamed words are fully visible while the window is inactive`
+- Environment: Headless Chrome over CDP with the real styles.css and message-body.css; skipped when Chrome is not installed.
+- Known gaps: The window-activity tracking that sets the attribute (windowActivity.ts) is not driven here; the test sets the attribute directly.
 - Evidence: UNVERIFIED
