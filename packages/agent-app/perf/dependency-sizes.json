@@ -1,21 +1,21 @@
 {
-  "generatedAt": "2026-10-30T05:19:29.616Z",
+  "generatedAt": "2026-10-30T06:57:37.849Z",
   "note": "Minified bytes each package contributes to the shipped bundles (renderer chunks are lazy where split). Regenerate with node scripts/dependency-report.mjs and commit with any dependency change.",
   "totals": {
-    "renderer": 16747711,
-    "main": 387570,
+    "renderer": 16808786,
+    "main": 389396,
     "preload": 1055,
-    "runtime": 2896427
+    "runtime": 2923667
   },
   "packages": [
     {
       "name": "(app source)",
-      "bytes": 6021718,
+      "bytes": 6056547,
       "targets": {
-        "renderer": 3759770,
-        "main": 387082,
+        "renderer": 3765662,
+        "main": 388908,
         "preload": 1041,
-        "runtime": 1873825
+        "runtime": 1900936
       },
       "version": "0.3.16",
       "license": "UNLICENSED",
@@ -24,9 +24,9 @@
     },
     {
       "name": "@shikijs/langs",
-      "bytes": 3221804,
+      "bytes": 3276594,
       "targets": {
-        "renderer": 3221804
+        "renderer": 3276594
       },
       "version": "4.5.0",
       "license": "MIT",
@@ -178,9 +178,9 @@
     },
     {
       "name": "readable-stream",
-      "bytes": 161338,
+      "bytes": 161404,
       "targets": {
-        "runtime": 161338
+        "runtime": 161404
       },
       "version": "2.3.8",
       "license": "MIT",
@@ -277,9 +277,9 @@
     },
     {
       "name": "jszip",
-      "bytes": 43762,
+      "bytes": 43790,
       "targets": {
-        "runtime": 43762
+        "runtime": 43790
       },
       "version": "3.10.2",
       "license": "(MIT OR GPL-3.0-or-later)",
@@ -498,9 +498,9 @@
     },
     {
       "name": "string_decoder",
-      "bytes": 22046,
+      "bytes": 22051,
       "targets": {
-        "runtime": 22046
+        "runtime": 22051
       },
       "version": "1.1.1",
       "license": "MIT",
@@ -1545,9 +1545,9 @@
     },
     {
       "name": "lie",
-      "bytes": 3451,
+      "bytes": 3470,
       "targets": {
-        "runtime": 3451
+        "runtime": 3470
       },
       "version": "3.3.0",
       "license": "MIT",
@@ -1831,9 +1831,9 @@
     },
     {
       "name": "setimmediate",
-      "bytes": 1744,
+      "bytes": 1746,
       "targets": {
-        "runtime": 1744
+        "runtime": 1746
       },
       "version": "1.0.5",
       "license": "MIT",
@@ -2073,9 +2073,9 @@
     },
     {
       "name": "immediate",
-      "bytes": 935,
+      "bytes": 944,
       "targets": {
-        "runtime": 935
+        "runtime": 944
       },
       "version": "3.0.6",
       "license": "MIT",

@@ -438,7 +438,7 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
   else if (!body || body.phase === 'loading' || body.phase === 'idle') content = <ResourceState kind="loading" label={`Loading ${tab.path}`} rows={6}/>;
   else if (body.phase === 'error') {
     content = isBinaryReadError(body.error) ? <FileFallback folderId={tab.folderId!} path={tab.path!} reason="This is a binary file, so Muster has no text preview for it."/>
-      : isLibreOfficeMissing(body.error) ? <FileFallback folderId={tab.folderId!} path={tab.path!} reason="The in-app reader needs LibreOffice for this format, and macOS preview is not available in this build. Install LibreOffice or open the file in its own app."/>
+      : isLibreOfficeMissing(body.error) ? <FileFallback folderId={tab.folderId!} path={tab.path!} reason="The in-app reader needs LibreOffice for this format, and macOS preview is not available in this build. Download Muster’s copy in Settings › Storage, install LibreOffice, or open the file in its own app."/>
       : <ResourceState kind="error" message={friendlyFileError(body.error)} detail="The saved tab is still open; retry after the workspace is available." onRetry={reload}><FileExitActions folderId={tab.folderId!} path={tab.path!}/></ResourceState>;
   } else {
     const {asset, document, workbook} = ready!;

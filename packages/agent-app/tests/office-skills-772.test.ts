@@ -431,3 +431,36 @@ test('the build pins every office library and its dependencies from the lockfile
   }
   assert.ok(statSync(join(appDir, 'scripts', 'office-libs-manifest.mjs')).isFile());
 });
+
+// Spec: MUS-SPEC-21-772Q (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-772q)
+test('each office type previews in Muster with no other app installed', async t => {
+  const root = await directory(t), project = join(root, 'project');
+  await mkdir(project);
+  const libraries = new OfficeLibraries({root: join(root, 'office-libs'), execPath: process.execPath, localModules: localOfficeModules(join(appDir, 'src', 'runtime'))});
+  const {node} = await libraries.ensure();
+  await png(join(project, 'picture.png'));
+  for (const kind of MUSTER_OFFICE_SKILLS) execFileSync(node, [join(skillsSource, kind, 'example.mjs'), OUTPUT[kind], 'picture.png'], {cwd: project, stdio: 'pipe'});
+  const {readDocument} = await import('../src/runtime/document-preview.ts');
+  const {readWorkbook} = await import('../src/runtime/workbook-preview.ts');
+  const previousSoffice = process.env.MUSTER_SOFFICE_PATH; delete process.env.MUSTER_SOFFICE_PATH;
+  t.after(() => { if (previousSoffice !== undefined) process.env.MUSTER_SOFFICE_PATH = previousSoffice; setOfficeRuntime(null); });
+
+  // PDF and Excel need nothing else: pdf.js reads the PDF, the workbook grid reads the .xlsx.
+  setOfficeRuntime(null);
+  const pdf = await readDocument(project, OUTPUT.pdf);
+  assert.equal(pdf.converted, false);
+  assert.equal(Buffer.from(pdf.base64, 'base64').subarray(0, 5).toString(), '%PDF-');
+  const workbook = await readWorkbook(project, OUTPUT.spreadsheets);
+  assert.deepEqual(workbook.sheets.map(sheet => sheet.name), ['Sales', 'Summary']);
+  assert.equal(workbook.sheets[0]!.rows[0]![0], 'Month');
+  assert.equal(workbook.sheets[0]!.formulas['D5'], 'SUM(D2:D4)', 'the grid shows the formula behind a total');
+
+  // Word and PowerPoint go through Muster's own office runtime (here a stand-in soffice), never another app's copy.
+  const soffice = await fakeSoffice(root);
+  setOfficeRuntime({soffice: async () => soffice.path});
+  for (const kind of ['documents', 'presentations'] as const) {
+    const preview = await readDocument(project, OUTPUT[kind]);
+    assert.equal(preview.converted, true, `${kind} is converted`);
+    assert.equal(Buffer.from(preview.base64, 'base64').subarray(0, 5).toString(), '%PDF-');
+  }
+});
