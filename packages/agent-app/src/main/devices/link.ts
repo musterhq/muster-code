@@ -11,6 +11,7 @@
  *   T3 Tools Inc.; see THIRD-PARTY-NOTICES.md).
  *   Android: an H.264 socket (forwarded in order; on backlog, dropped up to the next keyframe) + an input-only socket.
  * - Every failure reconnects with backoff; after the first frame never arrives, the state says so in plain English.
+ * - A stream that goes silent while its connection stays open is caught within STALL_TIMEOUT_MS and recovers (#811).
  */
 import type {DeviceInput, DeviceOrientation, DevicePlatform, DeviceScreen, DeviceSessionState} from '../../shared/device-protocol.ts';
 import {AvccDemuxer, FrameGate, IOS_TAG, iosPacket, MjpegParser, semuInfo} from './frames.ts';
@@ -18,6 +19,13 @@ import {androidKeycode, hidForChar, hidUsageForCode} from './keys.ts';
 import type {HubEndpoint} from './helper.ts';
 
 export const FIRST_FRAME_TIMEOUT_MS = 15_000, RETRY_MS = [1000, 2000, 4000, 8000];
+/**
+ * The watchdog (#811): a video body or socket can stay open after the helper stops producing frames. Silence this long
+ * (no bytes on an iOS body, no message on the Android socket) is a stall: iOS reopens the stream (a fresh subscription
+ * starts with a keyframe); Android first asks for a keyframe and reopens only if the next bound is silent too.
+ */
+export const STALL_TIMEOUT_MS = FIRST_FRAME_TIMEOUT_MS;
+const STALLED = Symbol('stalled');
 /** Unacknowledged H.264 units before the link drops to the next keyframe (about one second at 30 fps). */
 export const H264_BACKLOG = 30;
 export interface LinkFrame {codec: 'jpeg' | 'h264'; key: boolean; data: Buffer; pts?: number; reset?: boolean; format?: 'annexb' | 'avcc'; config?: boolean}
@@ -55,6 +63,7 @@ export class DeviceLink {
   private gate = new FrameGate(2);
   private h264Backlog = 0;
   private dropping = false;
+  private stallTimer?: ReturnType<typeof setTimeout>;
   /** iOS: H.264 (AVCC) unless this window cannot decode it or the helper does not offer it, then MJPEG. */
   private mjpegOnly = false;
   stats: LinkStats = {transport: 'none', frames: 0, keyframes: 0, bytes: 0, restarts: 0, since: Date.now()};
@@ -108,7 +117,8 @@ export class DeviceLink {
   private stopVideo(reopenInput = true): void {
     if (this.firstFrameTimer) this.deps.clearTimeout(this.firstFrameTimer);
     if (this.retryTimer) this.deps.clearTimeout(this.retryTimer);
-    this.firstFrameTimer = this.retryTimer = undefined;
+    if (this.stallTimer) this.deps.clearTimeout(this.stallTimer);
+    this.firstFrameTimer = this.retryTimer = this.stallTimer = undefined;
     this.video?.abort(); this.video = undefined;
     const socket = this.videoSocket; this.videoSocket = undefined;
     if (socket && this.inputSocket === socket) { this.inputSocket = undefined; this.admitted = false; this.events.input(false); }
@@ -157,11 +167,14 @@ export class DeviceLink {
       if (!response.ok || !response.body) throw new Error(response.status === 401 ? 'The device helper refused the connection.' : `The simulator stream answered ${response.status}.`);
       const reader = response.body.getReader();
       for (;;) {
-        const {done, value} = await reader.read();
+        const result = await this.boundedRead(reader, controller);
+        if (result === STALLED) { this.stalled(controller, 'The device stopped sending video.'); return; }
+        const {done, value} = result;
         if (done || controller.signal.aborted) break;
         for (const chunk of demuxer.push(value)) {
           if (controller.signal.aborted) break;
-          if (chunk.kind === 'seed') { this.frameArrived(); this.forward({codec: 'jpeg', key: true, data: chunk.payload}, 'avcc'); continue; }
+          // The seed picture is shown, but only an access unit proves the H.264 stream works (#811).
+          if (chunk.kind === 'seed') { this.forward({codec: 'jpeg', key: true, data: chunk.payload}, 'avcc'); continue; }
           if (chunk.kind === 'description') { this.forward({codec: 'h264', format: 'avcc', config: true, key: false, data: chunk.payload}, 'avcc'); continue; }
           if (this.h264Backlog >= H264_BACKLOG) {
             // Behind by about a second: start over from a fresh keyframe rather than queue more.
@@ -181,6 +194,18 @@ export class DeviceLink {
       if (!controller.signal.aborted) this.videoFailed(message(error));
     }
   }
+  /** One read of a video body, bounded: STALLED when nothing arrives within STALL_TIMEOUT_MS (the body is then closed). */
+  private boundedRead(reader: ReadableStreamDefaultReader<Uint8Array>, controller: AbortController): Promise<ReadableStreamReadResult<Uint8Array> | typeof STALLED> {
+    return new Promise((resolve, reject) => {
+      const timer = this.deps.setTimeout(() => { resolve(STALLED); controller.abort(); void reader.cancel().catch(() => {}); }, STALL_TIMEOUT_MS);
+      reader.read().then(result => { this.deps.clearTimeout(timer); resolve(result); }, error => { this.deps.clearTimeout(timer); reject(error); });
+    });
+  }
+  /** The current stream went silent: recover as from any failure (the stream had been working, so from the first step). */
+  private stalled(controller: AbortController, detail: string): void {
+    if (this.video !== controller || this.closed || !this.viewing) return;
+    this.videoFailed(detail);
+  }
   private forward(frame: LinkFrame, transport: LinkStats['transport']): void { this.count(frame, transport); this.events.frame(frame); }
   private async readMjpeg(hub: HubEndpoint): Promise<void> {
     const controller = new AbortController();
@@ -191,7 +216,9 @@ export class DeviceLink {
       if (!response.ok || !response.body) throw new Error(response.status === 401 ? 'The device helper refused the connection.' : `The simulator stream answered ${response.status}.`);
       const reader = response.body.getReader();
       for (;;) {
-        const {done, value} = await reader.read();
+        const result = await this.boundedRead(reader, controller);
+        if (result === STALLED) { this.stalled(controller, 'The device stopped sending video.'); return; }
+        const {done, value} = result;
         if (done || controller.signal.aborted) break;
         for (const jpeg of parser.push(value)) {
           this.frameArrived();
@@ -212,9 +239,22 @@ export class DeviceLink {
     const socket = this.deps.socket(`${wsOrigin}/vendor/serve-emu/ws?device=${encodeURIComponent(this.deviceId)}&frame-meta=1`, this.auth(hub));
     socket.binaryType = 'arraybuffer';
     this.videoSocket = socket; this.inputSocket = socket; this.admitted = true;
+    // Watchdog: silence asks for a keyframe once; a second silent bound replaces the socket.
+    let asked = false;
+    const watch = () => {
+      if (this.stallTimer) this.deps.clearTimeout(this.stallTimer);
+      this.stallTimer = this.deps.setTimeout(() => {
+        this.stallTimer = undefined;
+        if (this.videoSocket !== socket) return;
+        if (!asked) { asked = true; try { socket.send(JSON.stringify({type: 'reset-video', ack: false})); } catch {} watch(); return; }
+        this.videoFailed('The device stopped sending video.');
+      }, STALL_TIMEOUT_MS);
+    };
+    watch();
     socket.onopen = () => { if (this.inputSocket === socket) this.events.input(true); };
     socket.onmessage = event => {
       if (this.videoSocket !== socket) return;
+      asked = false; watch();
       if (typeof event.data === 'string') {
         // The encoder restarted (rotation, resize): the renderer rebuilds its decoder from the next keyframe.
         if (/"video-session"/.test(event.data)) { this.dropping = false; this.h264Backlog = 0; this.events.frame({codec: 'h264', key: false, data: Buffer.alloc(0), reset: true}); }

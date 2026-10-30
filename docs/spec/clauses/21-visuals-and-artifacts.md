@@ -83,6 +83,8 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-363L](21-visuals-and-artifacts.md#mus-spec-21-363l) | Discovery lists both platforms. A failed boot gives a plain-English reason and resets the state. | [`manager: discovery lists devices; a failed boot says why in plain English and resets the state`](../../../packages/agent-app/tests/devices.test.ts) |
 | [MUS-SPEC-21-811A](21-visuals-and-artifacts.md#mus-spec-21-811a) | The hub's fallback avcC gains a VUI with zero reordering, exactly matching the captured repaired bytes; good, unknown, truncated and oversized records come back as the same object. | [`stall fix: the fallback SPS gains zero reordering byte for byte; good, unknown, truncated and oversized records pass through untouched`](../../../packages/agent-app/tests/device-avc-config.test.ts) |
 | [MUS-SPEC-21-811B](21-visuals-and-artifacts.md#mus-spec-21-811b) | The feed checks support once and configures WebCodecs with the repaired avcC, low latency on and hardware decoding not turned off. | [`the hub fallback description is repaired before the decoder sees it, without turning hardware decoding off`](../../../packages/agent-app/tests/devices-components.tsx) |
+| [MUS-SPEC-21-811C](21-visuals-and-artifacts.md#mus-spec-21-811c) | An AVCC or MJPEG body that stays open but sends nothing for 15 s is closed and reopened; the seed JPEG alone does not count as H.264 working; the new subscription goes live with no user action. | [`watchdog, iOS: an AVCC or MJPEG body that goes silent mid-stream is reopened within the bound and goes live again`](../../../packages/agent-app/tests/device-stream-reliability.test.ts) |
+| [MUS-SPEC-21-811D](21-visuals-and-artifacts.md#mus-spec-21-811d) | An emulator socket silent for 15 s gets a keyframe request without dropping; if the next 15 s are silent too, the socket is replaced and the new one goes live. | [`watchdog, Android: a silent video socket first gets a keyframe request, then is reopened if it stays silent`](../../../packages/agent-app/tests/device-stream-reliability.test.ts) |
 | [MUS-SPEC-21-785A](21-visuals-and-artifacts.md#mus-spec-21-785a) | Inline and display formulas typeset with their labels; display maths scrolls sideways; prices, shell variables, code and links stay as written. | [`a reply typesets inline and display maths, labelled, with display maths scrolling sideways`](../../../packages/agent-app/tests/markdown-math-dom.tsx) |
 | [MUS-SPEC-21-785B](21-visuals-and-artifacts.md#mus-spec-21-785b) | Prices and shell variables stay plain text; code spans, code blocks and links are untouched. | [`maths parsing: prices, shell variables, code, escapes and links stay text`](../../../packages/agent-app/tests/markdown-math.test.ts) |
 | [MUS-SPEC-21-785C](21-visuals-and-artifacts.md#mus-spec-21-785c) | The four delimiters typeset as inline or display formulas. | [`maths parsing: the four delimiters, display blocks and source offsets`](../../../packages/agent-app/tests/markdown-math.test.ts) |
@@ -823,6 +825,28 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/devices-components.tsx::the hub fallback description is repaired before the decoder sees it, without turning hardware decoding off`
 - Environment: DOM suite (linkedom) with a fake VideoDecoder and the device bridge faked.
 - Known gaps: A real decoder is not used, so the frame-latency gain itself is not measured here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-811c"></a>
+#### MUS-SPEC-21-811C: A silent iOS stream is caught within the bound and reopened
+
+- Precondition: An open iPhone session being viewed, a fake helper whose stream bodies stay open and send only what the test pushes, and a manual clock.
+- Action: Send the seed, then a description and frames, then keep the body open and silent; repeat on the MJPEG stream.
+- Expected result: After the seed alone the state is still starting. Frames keep the stream live and each one restarts the 15 s bound. After 15 s of silence the state is reconnecting with "The device stopped sending video.", the silent body is closed and a new subscription opens after the first retry step; its keyframe makes the state live again. A silent MJPEG body is reopened the same way.
+- Test: `packages/agent-app/tests/device-stream-reliability.test.ts::watchdog, iOS: an AVCC or MJPEG body that goes silent mid-stream is reopened within the bound and goes live again`
+- Environment: Node test with a fake helper and a manual clock; no simulator or network.
+- Known gaps: Whether a real idle simulator keeps its AVCC body busy is not checked here; if it does not, an idle device reopens its stream every 15 s (cheap, but visible as a brief reconnecting state). The device smoke does not yet hold a still screen for 15 s.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-811d"></a>
+#### MUS-SPEC-21-811D: A silent Android stream asks for a keyframe, then is reopened
+
+- Precondition: An open emulator session being viewed, a fake video socket and a manual clock.
+- Action: Send a keyframe, keep sending within the bound, then go silent; answer one keyframe request, then go silent and ignore the next.
+- Expected result: A socket that keeps sending is left alone. Silence for 15 s sends {"type":"reset-video","ack":false} and keeps the socket. A keyframe resets the watch. A second silent bound after a request closes the socket with "The device stopped sending video.", and a new video socket opens after the first retry step and goes live on its first keyframe.
+- Test: `packages/agent-app/tests/device-stream-reliability.test.ts::watchdog, Android: a silent video socket first gets a keyframe request, then is reopened if it stays silent`
+- Environment: Node test with a fake socket and a manual clock; no emulator or network.
+- Known gaps: A real idle emulator is not exercised; an idle one that sends nothing gets one keyframe request per 15 s.
 - Evidence: UNVERIFIED
 
 ### Maths in replies
