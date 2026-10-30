@@ -299,7 +299,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/markdown-math-dom.tsx::a reply typesets inline and display maths, labelled, with display maths scrolling sideways`
 - Environment: DOM suite (linkedom) with a stubbed bridge and the real KaTeX.
 - Known gaps: linkedom has no layout: that a long display formula actually scrolls, and the focus ring, are styling and are not measured.
-- Evidence: UNVERIFIED
+- Evidence: local; cd packages/agent-app && npm run test:renderer (suite markdown-math-dom); exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
 
 <a id="mus-spec-21-785b"></a>
 #### MUS-SPEC-21-785B: Prices, shell variables, code and links stay text
@@ -310,7 +310,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/markdown-math.test.ts::maths parsing: prices, shell variables, code, escapes and links stay text`
 - Environment: Node test of the remark pipeline (remark-parse, remark-gfm, remark-math on the patched tokenizer); no DOM.
 - Known gaps: None known.
-- Evidence: UNVERIFIED
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/markdown-math.test.ts; exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
 
 <a id="mus-spec-21-785c"></a>
 #### MUS-SPEC-21-785C: The four delimiters and display blocks
@@ -321,7 +321,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/markdown-math.test.ts::maths parsing: the four delimiters, display blocks and source offsets`
 - Environment: Node test of the remark pipeline; no DOM.
 - Known gaps: None known.
-- Evidence: UNVERIFIED
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/markdown-math.test.ts; exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
 
 <a id="mus-spec-21-785d"></a>
 #### MUS-SPEC-21-785D: An unfinished formula stays text while streaming
@@ -332,7 +332,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/markdown-math.test.ts::maths parsing: an unfinished formula stays text at every point of a streaming reply`
 - Environment: Node test of the remark pipeline; no DOM.
 - Known gaps: None known.
-- Evidence: UNVERIFIED
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/markdown-math.test.ts; exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
 
 <a id="mus-spec-21-785e"></a>
 #### MUS-SPEC-21-785E: TeX pipes in tables and a display = line
@@ -343,7 +343,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/markdown-math.test.ts::maths parsing: TeX pipes stay in their table cell and a display = line is not a heading`
 - Environment: Node test of the remark pipeline; no DOM.
 - Known gaps: None known.
-- Evidence: UNVERIFIED
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/markdown-math.test.ts; exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
 
 <a id="mus-spec-21-785f"></a>
 #### MUS-SPEC-21-785F: Streaming and invalid formulas show their source
@@ -354,7 +354,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/markdown-math-dom.tsx::a streaming formula shows its source until it closes, and invalid TeX shows its source`
 - Environment: DOM suite (linkedom) with a stubbed bridge and the real KaTeX.
 - Known gaps: None known.
-- Evidence: UNVERIFIED
+- Evidence: local; cd packages/agent-app && npm run test:renderer (suite markdown-math-dom); exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
 
 <a id="mus-spec-21-785g"></a>
 #### MUS-SPEC-21-785G: Copy keeps the TeX and the diagram source
@@ -365,7 +365,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/markdown-math-dom.tsx::copying a selection with maths or a diagram gives back the TeX and the fenced source`
 - Environment: DOM suite (linkedom) with a stubbed bridge and a stub Mermaid renderer; the selection is a stand-in that clones the nodes a browser selection would.
 - Known gaps: linkedom has no selection: the stand-in clones whole nodes, so a selection that starts mid-word is not exercised. Pasting into another app is not tested. Formulas inside Mermaid labels are drawn by Mermaid's own KaTeX and are not asserted here.
-- Evidence: UNVERIFIED
+- Evidence: local; cd packages/agent-app && npm run test:renderer (suite markdown-math-dom); exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
 
 <a id="mus-spec-21-785h"></a>
 #### MUS-SPEC-21-785H: Maths is on by default and can be turned off
@@ -376,4 +376,4 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/markdown-math-dom.tsx::maths is on by default and the Chat setting turns it off`
 - Environment: DOM suite (linkedom) with a stubbed bridge.
 - Known gaps: The Settings row itself is not clicked in this suite.
-- Evidence: UNVERIFIED
+- Evidence: local; cd packages/agent-app && npm run test:renderer (suite markdown-math-dom); exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
