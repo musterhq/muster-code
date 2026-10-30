@@ -4,6 +4,7 @@ import {ChevronLeft, ChevronRight, Image as ImageIcon, X} from 'lucide-react';
 import {invoke} from '../bridge';
 import type {Commands} from '../../shared/protocol';
 import {ImageFile} from './ImageFile';
+import {copyImage, imageMenuProps, imageRef, isMenuKey, openImageMenu, sourceRef} from './imageMenu';
 import './chat-image.css';
 
 export type ImageAsset = Commands['files.asset']['output'];
@@ -71,7 +72,7 @@ export function loadImageThumb(source: ImageSource, side: number): Promise<Entry
 
 /** The full image in a zoomable dialog (Fit, actual size, zoom). With `gallery` the dialog steps through that set with the
  *  arrow keys (or the Previous / Next buttons) starting at `gallery.index`; `onStep` reports where it moved. */
-export function ImageLightbox({source, name, onClose, gallery, onStep}: {source: ImageSource; name: string; onClose: () => void; gallery?: {items: {source: ImageSource; name: string}[]; index: number}; onStep?: (index: number) => void}) {
+export function ImageLightbox({source, name, onClose, gallery, onStep, onCanvas}: {source: ImageSource; name: string; onClose: () => void; gallery?: {items: {source: ImageSource; name: string}[]; index: number}; onStep?: (index: number) => void; /** #788: Open in Canvas for the shown image, when it has one. */ onCanvas?: (index: number) => (() => void) | undefined}) {
   const [asset, setAsset] = useState<ImageAsset>();
   const [failed, setFailed] = useState(false);
   const [at, setAt] = useState(gallery?.index ?? 0);
@@ -81,12 +82,18 @@ export function ImageLightbox({source, name, onClose, gallery, onStep}: {source:
   const atRef = useRef(at);
   const step = (delta: number) => { const next = (atRef.current + delta + count) % count; atRef.current = next; setAt(next); onStep?.(next); };
   const stepRef = useRef(step); stepRef.current = step;
+  // #788: the shown image's menu (right-click, the menu keys) and Cmd+C.
+  const canvas = onCanvas?.(Math.min(at, count - 1));
+  const menu = {canvas: canvas ? () => { onClose(); canvas(); } : undefined, pixels: () => asset?.dataUrl};
+  const menuRef = useRef({image: sourceRef(current.source), menu}); menuRef.current = {image: sourceRef(current.source), menu};
   useEffect(() => { let live = true; setAsset(undefined); setFailed(false); loadImageAsset(current.source).then(value => { if (live) setAsset(value); }, () => { if (live) setFailed(true); }); return () => { live = false; }; }, [current.source.kind, current.source.path, current.source.kind === 'chat' ? current.source.chatId : current.source.folderId]);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     close.current?.focus();
     const key = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.stopPropagation(); onClose(); }
+      else if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'c' && !document.getSelection?.()?.toString()) { event.preventDefault(); event.stopPropagation(); void copyImage(menuRef.current.image, menuRef.current.menu.pixels); }
+      else if (isMenuKey(event)) { event.preventDefault(); event.stopPropagation(); const box = document.querySelector('.chat-image-lightbox-stage')?.getBoundingClientRect?.(); void openImageMenu(menuRef.current.image, box ? {x: box.left + box.width / 2, y: box.top + box.height / 2} : {x: 0, y: 0}, menuRef.current.menu); }
       else if (count > 1 && (event.key === 'ArrowRight' || event.key === 'ArrowLeft')) { event.preventDefault(); event.stopPropagation(); stepRef.current(event.key === 'ArrowRight' ? 1 : -1); }
     };
     document.addEventListener('keydown', key, true);
@@ -97,7 +104,7 @@ export function ImageLightbox({source, name, onClose, gallery, onStep}: {source:
       <div className="chat-image-lightbox-head"><span title={current.source.path}>{current.name}</span>
         {count > 1 && <span className="chat-image-lightbox-count" aria-live="polite">{Math.min(at, count - 1) + 1} / {count}</span>}
         <button ref={close} type="button" className="icon-button" aria-label="Close image" onClick={onClose}><X size={14}/></button></div>
-      <div className="chat-image-lightbox-stage">
+      <div className="chat-image-lightbox-stage" {...imageMenuProps(sourceRef(current.source), menu)}>
         {count > 1 && <button type="button" className="chat-image-lightbox-nav is-prev icon-button" aria-label="Previous image" onClick={() => step(-1)}><ChevronLeft size={18}/></button>}
         {asset ? <ImageFile key={current.source.path} asset={asset} name={current.name}/> : <div className="pane-error" role="status">{failed ? 'This image could not be opened.' : 'Loading image…'}</div>}
         {count > 1 && <button type="button" className="chat-image-lightbox-nav is-next icon-button" aria-label="Next image" onClick={() => step(1)}><ChevronRight size={18}/></button>}
@@ -129,8 +136,9 @@ export function ChatImage({chatId, path, inFolder, variant = 'thumb', onOpen}: {
   const name = baseName(path);
   if (!source) return <span className={`chat-image chat-image-${variant} is-missing`} title={`${path} — not available to preview`}><ImageIcon size={16} aria-hidden="true"/></span>;
   const open = () => onOpen ? onOpen() : setZoom(true);
+  const menu = imageMenuProps(imageRef(chatId, path, inFolder), {canvas: open, pixels: () => entry?.url});
   return <>
-    <button type="button" className={`chat-image chat-image-${variant}${entry ? '' : failed ? ' is-failed' : ' is-loading'}`} title={failed ? `${name} — could not be read` : `${name} — ${onOpen ? 'Open' : 'Click to zoom'}`} aria-label={`${onOpen ? 'Open' : 'Zoom'} ${name}`} onClick={open}
+    <button type="button" {...menu} className={`chat-image chat-image-${variant}${entry ? '' : failed ? ' is-failed' : ' is-loading'}`} title={failed ? `${name} — could not be read` : `${name} — ${onOpen ? 'Open' : 'Click to zoom'}`} aria-label={`${onOpen ? 'Open' : 'Zoom'} ${name}`} onClick={open}
       style={variant === 'inline' && entry?.width && entry.height ? {aspectRatio: `${entry.width} / ${entry.height}`} : undefined}>
       {entry ? <img src={entry.url} alt={variant === 'inline' ? name : ''} draggable={false} decoding="async" loading="lazy"/> : <ImageIcon size={16} aria-hidden="true"/>}
     </button>

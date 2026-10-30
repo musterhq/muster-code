@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, protocol, screen, session, shell, clipboard, systemPreferences } from 'electron';
+import { app, BrowserWindow, ClipboardItem, desktopCapturer, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, protocol, screen, session, shell, clipboard, systemPreferences } from 'electron';
 import {execFile} from 'node:child_process';
 import {downscaleIcon} from './icon-downscale.ts';
 import {BrowserSessionVault} from './browser-session-vault.ts';
@@ -19,6 +19,7 @@ import { ARCHIVE_RUNNING_WARNING, type AgentEvent, type Commands, type Snapshot 
 import {chatMenuTemplate,folderMenuTemplate,projectMenuTemplate,popupChoice,type ChatMenuCommand,type FolderMenuCommand,type ProjectMenuCommand} from './chat-menu.ts';
 import {attentionAllowed,createAttentionTracker,createSettleTracker,notificationPrefs,notificationsMuted,wantedNotices,type NotificationPrefs} from './chat-notifications.ts';
 import { isCommandName } from './commands.ts';
+import {createImageMenu} from './image-menu.ts';
 import { fileOperation, mutablePath } from '../runtime/file-operations.ts';
 import { accessSync, constants as fsConstants, existsSync, readFileSync, promises as fs } from 'node:fs';
 import { resolveInside } from '../runtime/paths.ts';
@@ -597,6 +598,23 @@ async function main(): Promise<void> {
         const scale=window.webContents.getZoomFactor()||1;
         return popupChoice<ProjectMenuCommand>((pick,closed)=>Menu.buildFromTemplate(projectMenuTemplate(project,pick))
           .popup({window:window!,x:Math.round(request.x/scale),y:Math.round(request.y/scale),callback:closed}));
+      }
+      case 'image.contextMenu':
+      case 'image.copy': {
+        if(!service||!window||window.isDestroyed())throw new Error('Agent service is unavailable.');
+        const owner=window,runtime=service,scale=owner.webContents.getZoomFactor()||1;
+        const images=createImageMenu({
+          locate:image=>runtime.invoke('files.image.locate',image),
+          apps:file=>runtime.invoke('files.openWith.apps',{path:file}).then(result=>result.apps),
+          openWith:(file,appId)=>runtime.invoke('files.external.openWith',{path:file,app:appId}),
+          popup:(build,x,y)=>popupChoice((pick,closed)=>Menu.buildFromTemplate(build(pick)).popup({window:owner,x:Math.round(x/scale),y:Math.round(y/scale),callback:closed})),
+          // The clipboard takes a PNG item; pasting into another app gives the picture itself.
+          clipboard:{writeImage:picture=>clipboard.write([new ClipboardItem({'image/png':new Blob([new Uint8Array((picture as Electron.NativeImage).toPNG())],{type:'image/png'})})]),writeText:text=>clipboard.writeText(text)},imageFromPath:file=>nativeImage.createFromPath(file),imageFromDataURL:url=>nativeImage.createFromDataURL(url),
+          reveal:file=>shell.showItemInFolder(file),
+          saveDialog:async defaultPath=>{const result=await dialog.showSaveDialog(owner,{title:'Save Image As',defaultPath});return result.canceled||!result.filePath?null:result.filePath;},
+          copyFile:(from,to)=>fs.copyFile(from,to),downloads:app.getPath('downloads'),fileManager:device().fileManager,
+        });
+        return command==='image.copy'?images.copy(input as Commands['image.copy']['input']):images.contextMenu(input as Commands['image.contextMenu']['input']);
       }
       case 'chat.update': {
         // Archiving never stops work; say so before it happens, for every entry point (menu, shortcut, hover button).
