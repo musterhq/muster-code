@@ -8,6 +8,7 @@
  */
 import {createHash, randomBytes} from 'node:crypto';
 import {prepareReportHtml, REPORT_HEIGHT_SOURCE} from '../shared/report-html.ts';
+import {htmlRenderThemeFragment, type HtmlRenderRecord, type HtmlRenderTheme} from '../shared/html-render.ts';
 
 export {prepareReportHtml, REPORT_HEIGHT_SCRIPT} from '../shared/report-html.ts';
 
@@ -118,6 +119,56 @@ export async function printReport(registry: ReportRegistry, token: string, deps:
     // Scripts that draw the page (a chart library, a table builder) get a moment to finish before the page is laid out for print.
     await Promise.race([wait(deps.settleMs ?? 600), timeout]);
     return await Promise.race([window.printToPDF({printBackground: true, preferCSSPageSize: true}), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    try { window.destroy(); } catch { /* already gone */ }
+  }
+}
+
+// ---- PNG of an agent page (#771; main process, never inside the sandbox) ------------------------------------------------
+
+/** The slice of Electron the capture needs (an offscreen BrowserWindow in main), so the logic is testable without a window. */
+export interface CaptureWindow {
+  loadURL(url: string): Promise<void>;
+  /** The page's laid-out height in CSS px (main reads it from the page; the page cannot answer for itself). */
+  contentHeight(): Promise<number>;
+  setSize(width: number, height: number): void;
+  capture(): Promise<Buffer>;
+  destroy(): void;
+}
+export interface CaptureDeps {
+  /** A hidden window on a throwaway session: with `network`, https requests may load (the page's grant); otherwise none. */
+  createWindow(options: {network: boolean}): CaptureWindow;
+  theme: HtmlRenderTheme;
+  width?: number;
+  maxHeight?: number;
+  settleMs?: number;
+  timeoutMs?: number;
+  wait?(ms: number): Promise<void>;
+}
+export const CAPTURE_WIDTH = 720, CAPTURE_MAX_HEIGHT = 4000;
+
+/**
+ * Draws a stored agent page to a PNG: served from its own sandboxed origin exactly as the inline card shows it (themed,
+ * scripts on, network only with the page's grant), laid out at the card's width, sized to its height (bounded) and captured.
+ * Always destroys the window.
+ */
+export async function capturePage(registry: ReportRegistry, page: HtmlRenderRecord, deps: CaptureDeps): Promise<Buffer> {
+  const {url} = registry.register({html: page.html, scripts: true, themed: true, network: page.networkAllowed});
+  const wait = deps.wait ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms)));
+  const width = deps.width ?? CAPTURE_WIDTH, maxHeight = deps.maxHeight ?? CAPTURE_MAX_HEIGHT;
+  const window = deps.createWindow({network: page.networkAllowed});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('the page took too long to draw')), deps.timeoutMs ?? 20_000); });
+    await Promise.race([window.loadURL(url + htmlRenderThemeFragment(deps.theme)), timeout]);
+    // Scripts that draw the page (a chart, a table builder) get a moment to finish before it is measured.
+    await Promise.race([wait(deps.settleMs ?? 600), timeout]);
+    const measured = await Promise.race([window.contentHeight(), timeout]);
+    const height = Math.max(1, Math.min(maxHeight, Math.ceil(Number.isFinite(measured) && measured > 0 ? measured : 480)));
+    window.setSize(width, height);
+    await Promise.race([wait(150), timeout]);
+    return await Promise.race([window.capture(), timeout]);
   } finally {
     if (timer) clearTimeout(timer);
     try { window.destroy(); } catch { /* already gone */ }

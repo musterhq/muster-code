@@ -14,8 +14,8 @@
 import {createHash} from 'node:crypto';
 import {copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, rmdirSync, rmSync, statSync, symlinkSync, unlinkSync, type Dirent} from 'node:fs';
 import {join, resolve, sep} from 'node:path';
-import {installMusterSkills, isMusterSkillCopy, MUSTER_OFFICE_SKILLS} from './office-skills.ts';
-import {musterComputerLauncher, planPluginProviders, readPluginChoices, type PluginPlan} from './plugin-providers.ts';
+import {installMusterSkills, isMusterSkillCopy} from './office-skills.ts';
+import {MUSTER_SKILL_NAMES, musterComputerLauncher, planPluginProviders, readPluginChoices, type PluginPlan} from './plugin-providers.ts';
 
 const SHARED = new Set(['auth.json', 'config.toml', 'models_cache.json', 'model-catalogs', 'skills', 'plugins', 'rules', 'prompts',
   'AGENTS.md', 'AGENTS.override.md', 'helpers', 'computer-use', 'node_repl', 'packages', 'vendor_imports']);
@@ -114,7 +114,7 @@ export function prepareMusterCodexHome(sourceHome: string, home: string, options
   const rules = mirroredRules(plan.blocked);
   mkdirSync(home, {recursive: true, mode: 0o700});
   // Muster's copy of a skill the person no longer loads goes first, so a chosen installed skill of the same name links.
-  for (const name of MUSTER_OFFICE_SKILLS) {
+  for (const name of MUSTER_SKILL_NAMES) {
     const path = join(home, 'skills', name);
     if (!plan.copy.has(name) && isMusterSkillCopy(path)) try { rmSync(path, {recursive: true, force: true}); } catch { /* stays */ }
   }

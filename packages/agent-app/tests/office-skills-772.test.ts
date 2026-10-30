@@ -21,6 +21,7 @@ import {OFFICE_MCP, OFFICE_NOTE_PATTERN} from '../src/runtime/office-agent-tools
 import {OFFICE_LIBRARY_NAMES, OfficeLibraries, localOfficeModules, type OfficeLibraryManifest} from '../src/runtime/office-libraries.ts';
 import {prepareMusterCodexHome} from '../src/runtime/codex-home.ts';
 import {MUSTER_OFFICE_SKILLS, musterSkillsDir} from '../src/runtime/office-skills.ts';
+import {MUSTER_SKILL_NAMES} from '../src/runtime/plugin-providers.ts';
 import {claudeLaneAllowed, LANE_DROPPED_SERVERS, withoutUnavailableToolNotes} from '../src/runtime/claude-lane.ts';
 import {setOfficeRuntime} from '../src/runtime/document-preview.ts';
 import {officeLibraryManifest} from '../scripts/office-libs-manifest.mjs';
@@ -307,7 +308,7 @@ test('Muster\'s home links the person\'s own skills and plugins but not another 
   const bare = join(root, 'bare-source'), bareHome = join(root, 'bare-home');
   await mkdir(bare);
   prepareMusterCodexHome(bare, bareHome, {musterSkills: skillsSource});
-  assert.deepEqual((await readdir(join(bareHome, 'skills'))).sort(), [...MUSTER_OFFICE_SKILLS].sort());
+  assert.deepEqual((await readdir(join(bareHome, 'skills'))).sort(), [...MUSTER_SKILL_NAMES].sort(), 'the office skills and visualize (#771)');
 });
 
 // Spec: MUS-SPEC-14-772C (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-772c)

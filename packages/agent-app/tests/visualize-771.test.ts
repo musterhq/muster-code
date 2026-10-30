@@ -3,7 +3,7 @@
 // coding-client home leaves another app's visualize plugin out and installs Muster's own visualize skill.
 import assert from 'node:assert/strict';
 import {test, type TestContext} from 'node:test';
-import {existsSync, lstatSync, readFileSync, readlinkSync} from 'node:fs';
+import {existsSync, lstatSync, readFileSync, readlinkSync, realpathSync} from 'node:fs';
 import {mkdir, mkdtemp, rm, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
@@ -12,9 +12,9 @@ import {BrowserBridge} from '../src/main/agent-tools/browser-bridge.ts';
 import {BROWSER_TOOL_SPECS} from '../src/main/agent-tools/browser-tools.ts';
 import {HtmlRenderStore} from '../src/main/agent-tools/html-render-store.ts';
 import {REPORT_SCHEME, ReportRegistry, capturePage, type CaptureWindow} from '../src/main/report-origin.ts';
-import {prepareMusterCodexHome} from '../src/runtime/codex-home.ts';
+import {prepareChatCodexHome, prepareMusterCodexHome} from '../src/runtime/codex-home.ts';
 import {computerRunOptions} from '../src/runtime/domains/computer.ts';
-import {MUSTER_SKILLS} from '../src/runtime/office-skills.ts';
+import {MUSTER_SKILL_NAMES, writePluginChoices} from '../src/runtime/plugin-providers.ts';
 import {readChatImage} from '../src/runtime/file-assets.ts';
 import {localImagePath} from '../src/renderer/local-image-path.ts';
 import {COMPUTER_USE_NOTE, MUSTER_COMPUTER_NOTE, BROWSER_NOTE} from '../src/shared/computer-use.ts';
@@ -135,6 +135,21 @@ test('Muster\'s home leaves out another app\'s visualize plugin and installs Mus
   assert.equal(readFileSync(join(home, 'skills/visualize/SKILL.md'), 'utf8'), readFileSync(join(skillsSource, 'visualize/SKILL.md'), 'utf8'), 'Muster\'s visualize skill is installed');
   assert.equal(readFileSync(join(source, 'skills/visualize/SKILL.md'), 'utf8'), '---\nname: visualize\n---\nAnother app.\n', 'the person\'s home is untouched');
   assert.ok(existsSync(join(source, 'plugins/cache/bundled-market/visualize/1.0.57')));
+
+  // #776's picker decides: an installed version leaves Muster's skill out and links only that one; Off loads neither.
+  const dataDir = join(root, 'data'), chosen = join(source, 'plugins/cache/bundled-market/visualize');
+  const choose = (choice: 'muster' | 'installed' | 'off', installedId?: string) => { writePluginChoices(dataDir, {choices: {visualize: {choice, ...(installedId ? {installedId} : {})}}, noticed: {}}); return prepareChatCodexHome(source, home, {dataDir, musterSkills: skillsSource, computerLauncher: undefined}); };
+  const installed = choose('installed', chosen);
+  assert.ok(!installed.copy.has('visualize'));
+  assert.ok(!existsSync(join(home, 'skills/visualize')), 'neither Muster\'s visualize skill nor the other installed version (a skill) is loaded');
+  assert.equal(realpathSync(join(home, 'plugins/cache/bundled-market/visualize')), realpathSync(chosen), 'the chosen installed plugin loads (its marketplace is linked whole)');
+  assert.ok(!existsSync(join(home, 'plugins/cache/other-market/visualize')), 'the other installed plugin stays out');
+  choose('off');
+  assert.ok(!existsSync(join(home, 'skills/visualize')) && !existsSync(join(home, 'plugins/cache/bundled-market/visualize')), 'off loads neither');
+  assert.equal(linkTo(join(home, 'skills/my-skill')), join(source, 'skills/my-skill'));
+  choose('muster');
+  assert.equal(readFileSync(join(home, 'skills/visualize/SKILL.md'), 'utf8'), readFileSync(join(skillsSource, 'visualize/SKILL.md'), 'utf8'), 'Muster\'s again');
+  assert.ok(!existsSync(join(home, 'plugins/cache/bundled-market/visualize')));
 });
 
 // Spec: MUS-SPEC-21-771H (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-771h)
@@ -142,7 +157,7 @@ test('with no other app\'s plugin cache, an agent chat is told to visualize with
   const root = await directory(t), source = join(root, 'empty-home'), home = join(root, 'muster-home');
   await mkdir(source);
   prepareMusterCodexHome(source, home, {musterSkills: skillsSource});
-  assert.ok(MUSTER_SKILLS.includes('visualize'));
+  assert.ok(MUSTER_SKILL_NAMES.includes('visualize'));
   const skill = readFileSync(join(home, 'skills/visualize/SKILL.md'), 'utf8');
   assert.match(skill, /^---\nname: visualize\ndescription: .{40,}/m);
   for (const word of [/render_html/, /image: true/, /```mermaid/, /```chart/]) assert.match(skill, word);
