@@ -2,6 +2,7 @@ import React, {createContext, memo, useCallback, useEffect, useMemo, useRef, use
 import {Download, Image as ImageIcon, LayoutPanelLeft} from 'lucide-react';
 import {invoke} from '../bridge';
 import {ImageLightbox, absolute, loadImageThumb, resolveImageSource, type ImageSource} from './ChatImage';
+import {imageMenuProps, imageRef} from './imageMenu';
 import './image-gallery.css';
 
 /** Images a turn's gallery already shows: the tool rows and the reply drop their own copies of these. */
@@ -34,7 +35,7 @@ function useNear(ref: React.RefObject<HTMLElement | null>) {
 
 interface Picture {path: string; name: string; target?: GalleryTarget}
 
-const StripThumb = memo(function StripThumb({chatId, picture, index, selected, count, focusable, onSelect, onFail}: {chatId?: string; picture: Picture; index: number; selected: boolean; count: number; focusable: boolean; onSelect: (index: number) => void; onFail: (path: string) => void}) {
+const StripThumb = memo(function StripThumb({chatId, picture, index, selected, count, focusable, onSelect, onFail, onCanvas}: {chatId?: string; picture: Picture; index: number; selected: boolean; count: number; focusable: boolean; onSelect: (index: number) => void; onFail: (path: string) => void; onCanvas: (index: number) => void}) {
   const ref = useRef<HTMLButtonElement>(null);
   const near = useNear(ref);
   const [url, setUrl] = useState<string>();
@@ -48,7 +49,8 @@ const StripThumb = memo(function StripThumb({chatId, picture, index, selected, c
   useEffect(() => { if (selected && typeof ref.current?.scrollIntoView === 'function') ref.current.scrollIntoView({block: 'nearest', inline: 'nearest'}); }, [selected]);
   if (failed) return null;
   return <button ref={ref} type="button" role="option" aria-selected={selected} aria-label={`Image ${index + 1} of ${count}: ${picture.name}`} tabIndex={focusable ? 0 : -1} data-index={index}
-    className={`image-gallery-thumb${selected ? ' is-selected' : ''}${url ? '' : failed ? ' is-failed' : ' is-loading'}`} title={picture.name} onClick={() => onSelect(index)}>
+    className={`image-gallery-thumb${selected ? ' is-selected' : ''}${url ? '' : failed ? ' is-failed' : ' is-loading'}`} title={picture.name} onClick={() => onSelect(index)}
+    {...imageMenuProps(imageRef(chatId, picture.path, picture.target), {canvas: () => onCanvas(index), pixels: () => url})}>
     {url ? <img src={url} alt="" draggable={false} decoding="async" loading="lazy"/> : <ImageIcon size={14} aria-hidden="true"/>}
   </button>;
 });
@@ -87,6 +89,10 @@ export const ImageGallery = memo(function ImageGallery({chatId, paths, resolve, 
 
   const select = useCallback((next: number) => setSelected(Math.max(0, Math.min(count - 1, next))), [count]);
   const openPicture = (at: number) => { const picture = pictures[at]; if (picture?.target && onOpenFile) onOpenFile(picture.target); else setZoom(at); };
+  const openPictureRef = useRef(openPicture); openPictureRef.current = openPicture;
+  const canvasAt = useCallback((at: number) => openPictureRef.current(at), []);
+  // #788: one image menu per picture; Open in Canvas runs the gallery's own Canvas action.
+  const menuFor = (at: number, pixels?: () => string | undefined) => { const picture = pictures[at]; return picture ? imageMenuProps(imageRef(chatId, picture.path, picture.target), {canvas: () => openPicture(at), pixels}) : {}; };
   const onKeyDown = (event: React.KeyboardEvent) => {
     const forward = event.key === 'ArrowDown' || event.key === 'ArrowRight', back = event.key === 'ArrowUp' || event.key === 'ArrowLeft';
     const to = forward ? index + 1 : back ? index - 1 : event.key === 'Home' ? 0 : event.key === 'End' ? count - 1 : undefined;
@@ -109,10 +115,11 @@ export const ImageGallery = memo(function ImageGallery({chatId, paths, resolve, 
   if (!current) return null;
   const allFailed = pictures.every(picture => unreadable.has(picture.path));
   const links = expanded ? pictures : pictures.slice(0, VISIBLE_LINKS);
-  const lightbox = zoom === undefined ? undefined : pictures.flatMap(picture => { const source = resolveImageSource(chatId, picture.path, picture.target); return source ? [{source, name: picture.name}] : []; });
+  const lightboxPictures = zoom === undefined ? undefined : pictures.filter(picture => resolveImageSource(chatId, picture.path, picture.target));
+  const lightbox = lightboxPictures?.map(picture => ({source: resolveImageSource(chatId, picture.path, picture.target)!, name: picture.name}));
   return <section className="image-gallery" aria-label={`${count} ${count === 1 ? 'image' : 'images'}`} onKeyDown={onKeyDown}>
     <ul className="image-gallery-links">
-      {links.map((picture, at) => <li key={picture.path}><button type="button" className="image-gallery-link" title={`${picture.path} — Open`} onClick={() => openPicture(at)}><ImageIcon size={13} aria-hidden="true"/><span>{picture.name}</span></button></li>)}
+      {links.map((picture, at) => <li key={picture.path}><button type="button" className="image-gallery-link" title={`${picture.path} — Open`} onClick={() => openPicture(at)} {...menuFor(at)}><ImageIcon size={13} aria-hidden="true"/><span>{picture.name}</span></button></li>)}
       {count > VISIBLE_LINKS && <li><button type="button" className="image-gallery-link is-quiet" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? 'Show fewer' : `Show all ${count}`}</button></li>}
       {count > 1 && <li><button type="button" className="image-gallery-link" disabled={busy} onClick={() => void download()}><Download size={13} aria-hidden="true"/><span>{busy ? 'Saving…' : `Download all ${count} images`}</span></button></li>}
     </ul>
@@ -121,15 +128,15 @@ export const ImageGallery = memo(function ImageGallery({chatId, paths, resolve, 
     <div className={`image-gallery-body${count > 1 ? ' has-strip' : ''}`}>
       {heroFailed === current.path ? <div className="image-gallery-failure" role="status"><ImageIcon size={13} aria-hidden="true"/><span className="image-gallery-error">{current.name} could not be read</span></div> :
       <div className={`image-gallery-hero${hero ? '' : ' is-loading'}`} style={{aspectRatio: String(ratio ?? DEFAULT_RATIO)}}>
-        <button type="button" className="image-gallery-hero-hit" aria-label={`Zoom ${current.name}`} title={`${current.name} — Click to zoom`} onClick={() => setZoom(index)}>
+        <button type="button" className="image-gallery-hero-hit" aria-label={`Zoom ${current.name}`} title={`${current.name} — Click to zoom`} onClick={() => setZoom(index)} {...menuFor(index, () => hero?.path === current.path ? hero.url : undefined)}>
           {hero ? <img src={hero.url} alt={current.name} draggable={false} decoding="async"/> : null}
         </button>
         <button type="button" className="image-gallery-canvas" aria-label={`Open ${current.name} in Canvas`} onClick={() => openPicture(index)}><LayoutPanelLeft size={13} aria-hidden="true"/>Canvas</button>
       </div>}
       {count > 1 && <div className="image-gallery-strip-wrap"><div ref={strip} className="image-gallery-strip" role="listbox" aria-label="Image thumbnails" aria-orientation="vertical">
-        {pictures.map((picture, at) => <StripThumb key={picture.path} chatId={chatId} picture={picture} index={at} selected={at === index} count={count} focusable={at === index} onSelect={select} onFail={markUnreadable}/>)}
+        {pictures.map((picture, at) => <StripThumb key={picture.path} chatId={chatId} picture={picture} index={at} selected={at === index} count={count} focusable={at === index} onSelect={select} onFail={markUnreadable} onCanvas={canvasAt}/>)}
       </div></div>}
     </div>}
-    {lightbox && lightbox.length > 0 && <ImageLightbox source={lightbox[Math.min(zoom!, lightbox.length - 1)].source} name={lightbox[Math.min(zoom!, lightbox.length - 1)].name} gallery={{items: lightbox, index: Math.min(zoom!, lightbox.length - 1)}} onStep={select} onClose={() => setZoom(undefined)}/>}
+    {lightbox && lightbox.length > 0 && <ImageLightbox source={lightbox[Math.min(zoom!, lightbox.length - 1)].source} name={lightbox[Math.min(zoom!, lightbox.length - 1)].name} gallery={{items: lightbox, index: Math.min(zoom!, lightbox.length - 1)}} onStep={select} onCanvas={at => { const target = lightboxPictures![at]?.target; return target && onOpenFile ? () => onOpenFile(target) : undefined; }} onClose={() => setZoom(undefined)}/>}
   </section>;
 });

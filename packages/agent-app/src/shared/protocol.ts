@@ -6,6 +6,7 @@ export const MAX_ATTACHED_SKILL_BYTES = 48 * 1024;
 import type {BrowserCommands, BrowserEvent} from './browser-protocol.ts';
 import type {DomainCommands, DomainEvent} from './domains/index.ts';
 import type {ChatGoal} from './domains/goals-protocol.ts';
+import type {ImageRef} from './domains/files-protocol.ts';
 import type {ExcludedModel, ModelPricing} from './model-catalog.ts';
 /** The only renderer capability surface. Main validates every command and sender. */
 /** One slice of a 3D model file (or companion texture); `size` is the whole file's length. */
@@ -159,6 +160,11 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'folder.contextMenu': {input:{id:string;x:number;y:number;run?:'relink'};output:'new-chat'|'rename'|'files'|'default-model'|null};
  /** UR-135: the native right-click menu for a sidebar Project row; every action runs in the renderer. */
  'project.contextMenu': {input:{id:string;x:number;y:number};output:'new-chat'|'open'|'rename'|'edit'|'export'|'archive'|'restore'|null};
+ /** #788: the native right-click menu on a chat image. Main runs the file and clipboard actions; it returns 'canvas' (the renderer opens it)
+  *  or 'copy-pixels' (the file is gone or unreadable: the renderer copies the picture it already loaded through image.copy). */
+ 'image.contextMenu': {input:{image:ImageRef;x:number;y:number;canvas?:boolean};output:'canvas'|'copy-pixels'|null};
+ /** #788: copies a chat image to the clipboard as a picture, from its file, or from `dataUrl` (pixels the chat already loaded). */
+ 'image.copy': {input:{image:ImageRef;dataUrl?:string};output:{copied:boolean}};
  'folder.remove': {input:{id:string;archiveChats?:boolean};output:{archived:number}};
  'folder.rename': {input:{id:string;name:string};output:Folder};
  'folder.relink': {input:{id:string;path:string};output:Folder};

@@ -39,11 +39,16 @@ export interface FilesCommands {
   'files.external.reveal': {input: {path: string}; output: void};
   /** Opens an outside file in one allowlisted app (same catalog as files.openWith); never executes it. */
   'files.external.openWith': {input: {path: string; app: string}; output: void};
+  /** #788: where a chat image lives on disk, checked by the same gates as its preview: a folder image stays inside its
+   *  folder (falling back to the chat when that read fails), any other path must be named by the chat's own rows. Never reads content. */
+  'files.image.locate': {input: ImageRef; output: {path: string; name: string; exists: boolean}};
 }
+/** A chat image as the renderer names it: the folder pair, the chat pair, or both (folder first). */
+export interface ImageRef {chatId?: string; path?: string; folderId?: string; folderPath?: string}
 /** `folderPath` is what "Add folder" would add: the directory itself, or the file's parent. */
 export interface ExternalFileInfo {path: string; name: string; exists: boolean; kind?: 'file' | 'directory'; folderPath: string}
 export type FilesEvent = never;
-export const FILES_COMMANDS = {'files.openWith.apps': true, 'files.openWith': true, 'files.openFolderWith.apps': true, 'files.openFolderWith': true, 'files.write': true, 'files.readFull': true, 'files.searchContent': true, 'files.searchContent.cancel': true, 'files.quickOpen': true, 'files.runActions.list': true, 'files.runActions.set': true, 'files.external.inspect': true, 'files.external.reveal': true, 'files.external.openWith': true} as const satisfies Record<keyof FilesCommands, true>;
+export const FILES_COMMANDS = {'files.openWith.apps': true, 'files.openWith': true, 'files.openFolderWith.apps': true, 'files.openFolderWith': true, 'files.write': true, 'files.readFull': true, 'files.searchContent': true, 'files.searchContent.cancel': true, 'files.quickOpen': true, 'files.runActions.list': true, 'files.runActions.set': true, 'files.external.inspect': true, 'files.external.reveal': true, 'files.external.openWith': true, 'files.image.locate': true} as const satisfies Record<keyof FilesCommands, true>;
 
 const group = (kind: OpenWithKind, list: string) => list.split(' ').map(extension => [extension, kind] as const);
 const KINDS = new Map<string, OpenWithKind>([
