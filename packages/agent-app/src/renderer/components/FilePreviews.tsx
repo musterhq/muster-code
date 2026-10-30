@@ -6,6 +6,7 @@ import {friendlyFileError} from './filePresentation';
 import {FileTypeIcon} from './FileTypeIcon';
 import {NativeSurface} from './NativeSurface';
 import {ResourceState} from './ResourceState';
+import {SandboxedHtml} from './SandboxedHtml';
 
 const revealLabel = () => typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform ?? '') ? 'Reveal in Finder' : 'Reveal in file manager';
 
@@ -78,9 +79,9 @@ function MediaPlayer({asset, folderId, path}: {asset: Commands['files.asset']['o
   </div>;
 }
 
-/** HTML renders in an opaque-origin, script-less frame; the parent CSP still blocks remote loads. */
+/** HTML renders in the shared untrusted-HTML frame: its own origin, no scripts, no network. */
 export function HtmlPreview({html, name}: {html: string; name: string}): React.ReactElement {
   return <div className="html-preview">
-    <iframe title={`Rendered preview of ${name}`} sandbox="" srcDoc={html} referrerPolicy="no-referrer"/>
+    <SandboxedHtml html={html} title={`Rendered preview of ${name}`} className="html-preview-frame"/>
   </div>;
 }

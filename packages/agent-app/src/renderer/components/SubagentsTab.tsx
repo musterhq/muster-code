@@ -167,7 +167,7 @@ function Transcript({items, running}: {items:readonly TimelineItem[]; running:bo
       index--;
       out.push(<ActivityGroup key={tools[0].id} items={tools} live={running && index === items.length - 1} />);
     } else if (item.kind === 'user') out.push(<div key={item.id} className="subagent-user"><div className="msg msg-user"><div className="msg-text">{item.text}</div></div></div>);
-    else if (item.kind === 'assistant') out.push(<div key={item.id} className="msg msg-assistant"><MessageBody text={item.text} /></div>);
+    else if (item.kind === 'assistant') out.push(<div key={item.id} className="msg msg-assistant"><MessageBody text={item.text} reports /></div>);
     else if (item.kind === 'reasoning') out.push(<ReasoningRow key={item.id} item={item} />);
     else if (item.text) out.push(<p key={item.id} className="subagents-status">{item.text}</p>);
   }

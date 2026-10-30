@@ -29,6 +29,8 @@ export interface BrowserState extends BrowserOwner {
   consoleCount:number;
   consoleErrors:number;
   error?:string;
+  /** The main frame failed to load (a dev server that is down, DNS, refused): the tab shows the unreachable page. */
+  loadError?:{url:string; code:number; description:string};
   /** Main-frame TLS failure; never bypassed in-app. */
   certificateError?:{url:string; code:string};
   notice?:string;

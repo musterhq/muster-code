@@ -9,6 +9,7 @@ import {stageAttachment} from '../composerBridge';
 import {rememberProfile} from './BrowserTab';
 import {ImageFile} from './ImageFile';
 import type {ComputerPermissions} from '../../shared/domains/computer-protocol';
+import {handlePreviewEvent} from '../previews';
 import {PIP_STACK_MAX,agentBrowserBinding,bindAgentBrowser,liveViewTabId,STACK_PEEK,STACK_WIDTH,dockedSessions,formatAge,frameFreshness,hostOf,mergeSources,orderPipSources,pipPhase,type PipPhase,raiseSession,recentComputerSources,screenshotName,sessionKey,sessionTabId,setMinimized,setSnapshot,sourceKey,stackAnchor,stackHeight,stackWidth,toolImageUrl,useComputerUi,wireComputerEvents,type Box,type Freshness,type PipSource} from '../computerUse';
 import {clampPipPosition,exceedsDragThreshold,loadPipCorner,pipCornerOrigin,savePipCorner,settlePipDrop,springSettled,springStep,type PipCorner,type PipPoint,type PipRect,type PipSize,type SpringState} from '../pipLayout';
 import {AppGlyph} from './AppGlyph';
@@ -291,7 +292,7 @@ export function ComputerPip({paneVisible=true}:{paneVisible?:boolean}={}) {
   // Only a session that is live now, or ended moments ago, gets a card; the rest of the transcript's history does not.
   const clock=useNow(recent.some(candidate=>pipPhase(candidate,running,Date.now(),runEndedAt)!=='gone'));
   const sources=useMemo(()=>recent.filter(candidate=>pipPhase(candidate,running,clock,runEndedAt)!=='gone'),[recent,running,clock,runEndedAt]);
-  useEffect(()=>wireComputerEvents(),[]);
+  useEffect(()=>wireComputerEvents(handlePreviewEvent),[]);
   const cards=useMemo(()=>orderPipSources(sources,ui.raised).slice(0,PIP_STACK_MAX),[sources,ui.raised]);
   const docked=useMemo(()=>dockedSessions(cards,paneVisible?visibleTabId:null),[cards,visibleTabId,paneVisible]);
   const open=cards.filter(card=>!docked.has(sessionKey(card)));
@@ -385,7 +386,7 @@ export function LiveViewTab({tab}:{tab:Pick<WorkspaceTab,'id'|'chatId'|'title'>}
   const {url,failed:imageFailed}=useShot(source);
   const runEndedAt=useRunEnd(shot?null:tab.chatId??null,running);
   const now=useNow(!shot&&!!source);
-  useEffect(()=>wireComputerEvents(),[]);
+  useEffect(()=>wireComputerEvents(handlePreviewEvent),[]);
   const perms=usePermissions(!!source&&source.target==='computer');
   const owner=source?ui.control[source.chatId]??'agent':'agent';
   // A session that is no longer live reads "Ended" (its tab keeps the last picture), not a red "Disconnected".

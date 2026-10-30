@@ -19,6 +19,9 @@ import {markdownHeadingId} from './markdownAnchors';
 import {HighlightedCode} from './HighlightedCode';
 import {inferMarkdownCodeLanguages} from './codeLanguage';
 import {remarkProseBreaks} from '../markdown-breaks';
+import {remarkRichFences} from '../markdown-rich-fences';
+import {richKindOfFence} from '../../shared/rich-fence';
+import {RichFence, RichPreload} from './RichFence';
 
 import './message-body.css';
 
@@ -103,15 +106,24 @@ export function languageLabel(lang?: string): string {
   return LANGUAGE_NAMES[key] ?? (lang.length <= 4 ? lang.toUpperCase() : lang[0]!.toUpperCase() + lang.slice(1));
 }
 
+/** Whether this body may run an agent's ```html-report fences (in a sandbox). Only the surfaces that show an agent's or the user's own text opt in: a README, a teammate's comment or an installed skill never do. A context, not a prop on `pre`, so the renderer map stays stable while a reply streams. */
+const ReportsContext = React.createContext(false);
+
 function Pre({ children }: { children?: React.ReactNode }): React.ReactElement {
   const child = Array.isArray(children) ? children[0] : children;
   const [wrap, setWrap] = useState(false);
+  const reports = React.useContext(ReportsContext);
   if (React.isValidElement<{ className?: string; children?: React.ReactNode }>(child)) {
     const lang = /language-([\w+-]+)/.exec(child.props.className ?? '')?.[1];
     // The fence's closing newline is not a code line (QA: a blank line trailed every block).
     const text = codeText(child.props.children).replace(/\r?\n$/, '');
+    // A closed ```mermaid / ```chart / ```html-report fence is drawn; one still streaming stays code until it closes.
+    const rich = richKindOfFence(lang);
+    const open = (child.props as Record<string, unknown>)['data-fence-open'] === 'true' || (child.props as Record<string, unknown>).dataFenceOpen === 'true';
+    if (rich && !open && (rich !== 'report' || reports)) return <RichFence kind={rich} source={text}/>;
     return (
       <div className="md-code">
+        {rich && open && (rich !== 'report' || reports) && <RichPreload kind={rich}/>}
         <div className="md-code-head">
           <span className="md-code-lang"><Code size={13} aria-hidden="true" />{languageLabel(lang)}</span>
           <span className="md-code-actions">
@@ -231,12 +243,12 @@ export function localImagePath(src?: string): string | undefined {
   return (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)) && /\.(?:png|jpe?g|gif|webp|bmp|avif|svg)$/i.test(path) ? path : undefined;
 }
 
-function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false, asDocument = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean; asDocument?: boolean }): React.ReactElement {
+function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false, asDocument = false, reports = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean; asDocument?: boolean; reports?: boolean }): React.ReactElement {
   // Replies link the files they mention (markdown-file-links.ts); documents and previews render as written.
   // Agent prose keeps its single line breaks (markdown-breaks.ts); a Markdown document keeps CommonMark soft
   // breaks, so a hard-wrapped README still reads as flowing paragraphs.
   const remarkPlugins = React.useMemo(() => {
-    const plugins: PluggableList = [remarkGfm, createIncrementalMarkdownPlugin()];
+    const plugins: PluggableList = [remarkGfm, createIncrementalMarkdownPlugin(), remarkRichFences];
     if (linkFiles) plugins.push(remarkLeadingLabels, remarkFileLinks);
     if (!asDocument) plugins.push(remarkProseBreaks);
     return plugins;
@@ -271,6 +283,7 @@ function MessageBodyContent({ text, resourceContext, animate = false, linkFiles 
   }, [text, resourceContext?.folderId, resourceContext?.path]);
   const body = useRef<HTMLDivElement>(null);
   return (
+    <ReportsContext.Provider value={reports}>
     <div className="md-body" ref={body}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
@@ -283,6 +296,7 @@ function MessageBodyContent({ text, resourceContext, animate = false, linkFiles 
       </ReactMarkdown>
       <SelectionQuote container={body} />
     </div>
+    </ReportsContext.Provider>
   );
 }
 
@@ -293,6 +307,7 @@ export const MessageBody = React.memo(MessageBodyContent, (previous, next) =>
   previous.animate === next.animate &&
   previous.linkFiles === next.linkFiles &&
   previous.asDocument === next.asDocument &&
+  previous.reports === next.reports &&
   previous.resourceContext?.folderId === next.resourceContext?.folderId &&
   previous.resourceContext?.path === next.resourceContext?.path,
 );

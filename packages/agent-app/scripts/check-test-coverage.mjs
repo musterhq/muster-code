@@ -35,6 +35,11 @@ const support = {
   'tests/fixtures/cli-agents/fake-gemini.cjs': 'subprocess fixture for CLI workflows',
   'tests/fixtures/mock-openai-router.ts': 'local HTTP fixture for router workflows',
   'tests/fixtures/paperclip-challenge-mock.ts': 'local HTTP fixture for sign-in workflows',
+  'tests/html-sandbox-security.suite.ts': 'driven by tests/run-html-sandbox-security.mjs',
+  'tests/three-model.suite.ts': 'driven by tests/run-three-model.mjs',
+  'tests/model-viewer-dom.tsx': 'driven by tests/run-model-viewer-dom.mjs',
+  'tests/fixtures/model-fixtures.ts': '3D model fixtures shared by the model and three-engine suites',
+  'tests/fixtures/compressed-models.ts': 'Draco and meshopt model fixtures shared by the 3D suites',
   'tests/large-logo-729.electron.ts': 'nativeImage check run by npm run test:electron',
 };
 const problems = [];

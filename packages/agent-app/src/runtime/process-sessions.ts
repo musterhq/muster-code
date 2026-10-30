@@ -9,7 +9,7 @@ import {appendCommandOutput,MAX_COMMAND_OUTPUT,safeTailStart,trimFinishedOutputs
 import {TerminalSessions,type TerminalLaunch,type TerminalOptions} from './terminal-sessions.ts';
 import {OutputLog} from './output-log.ts';
 import type {UserProcessTarget} from './user-process-guard.ts';
-import {attributeListeners,ListeningPorts,type OwnedGroup,type ProcessRow} from './listening-ports.ts';
+import {attributeListeners,ListeningPorts,WebProbe,type OwnedGroup,type ProcessRow} from './listening-ports.ts';
 import {sharedResourceScheduler,type ResourceLease,type ResourceScheduler} from './resource-scheduler.ts';
 import {isActiveProcess,type ProcessEvent,type ProcessOutputPage,type ProcessOutputPageInput,type ProcessLease,type ProcessListSnapshot,type ProcessMetadata,type ProcessRef,type ProcessSnapshot,type ProcessStart,type ProcessSummarySnapshot,type ProcessPortsSnapshot} from '../shared/process-protocol.ts';
 
@@ -70,12 +70,14 @@ export class ProcessSessions {
   private queuedRuns=new Set<Promise<void>>();
   /** S3-E: listening ports per shell / command / agent process (one cached lsof scan). */
   readonly listeningPorts:ListeningPorts;
+  /** #html-preview: which listeners are web servers. */
+  readonly webProbe:WebProbe;
   private portRoot:number;
   /** Called once when a process this owner spawned ends (exited, failed or stopped), with its final snapshot. */
   private onExit?:(session:ProcessSnapshot)=>void;
-  constructor(private filePath:string,private authorize:ProcessAuthorize,private emit:(event:ProcessEvent)=>void,terminalLaunch?:TerminalLaunch,options:{outputLog?:OutputLog;resources?:ResourceScheduler;ports?:ListeningPorts;portRoot?:number;terminal?:TerminalOptions;onExit?:(session:ProcessSnapshot)=>void}={}) {
+  constructor(private filePath:string,private authorize:ProcessAuthorize,private emit:(event:ProcessEvent)=>void,terminalLaunch?:TerminalLaunch,options:{outputLog?:OutputLog;resources?:ResourceScheduler;ports?:ListeningPorts;webProbe?:WebProbe;portRoot?:number;terminal?:TerminalOptions;onExit?:(session:ProcessSnapshot)=>void}={}) {
     this.onExit=options.onExit;
-    this.listeningPorts=options.ports??new ListeningPorts();this.portRoot=options.portRoot??process.pid;
+    this.listeningPorts=options.ports??new ListeningPorts();this.webProbe=options.webProbe??new WebProbe();this.portRoot=options.portRoot??process.pid;
     this.terminals=new TerminalSessions(join(dirname(filePath),'terminal-sessions.json'),authorize,emit,terminalLaunch,options.terminal);
     this.outputLog=options.outputLog??new OutputLog(join(dirname(filePath),'output-logs'));
     this.resources=options.resources??sharedResourceScheduler();
@@ -203,7 +205,10 @@ export class ProcessSessions {
   async ports(input:{chatId:string}):Promise<ProcessPortsSnapshot> {
     await this.allowed(input?.chatId,'read');
     const {scan,rows}=await this.attributed(input.chatId,false);
-    return {chatId:input.chatId,supported:scan.supported,scannedAt:new Date(scan.at).toISOString(),ports:rows.sort((a,b)=>a.port-b.port).slice(0,64).map(row=>this.listeningPorts.toPort(row))};
+    const listed=rows.sort((a,b)=>a.port-b.port).slice(0,64);
+    // #html-preview: which of them are web servers (cached per process and port; at most 16 probes, in parallel).
+    const web=await Promise.all(listed.map((row,index)=>index<16?this.webProbe.isWeb(row.pid,row.port).catch(()=>false):Promise.resolve(undefined)));
+    return {chatId:input.chatId,supported:scan.supported,scannedAt:new Date(scan.at).toISOString(),ports:listed.map((row,index)=>({...this.listeningPorts.toPort(row),...(web[index]===undefined?{}:{web:web[index]})}))};
   }
   /** Stops an agent-owned listener after the user confirmed it. It is re-verified from a fresh scan:
    * never a user-owned group, never a process outside this conversation, never Muster or its provider. */

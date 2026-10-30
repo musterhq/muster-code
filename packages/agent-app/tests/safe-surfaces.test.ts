@@ -58,7 +58,7 @@ test('EXT-10 plugin bridge: only allowlisted, bounded requests; rate-limited UI 
 
 test('EXT-10 renderer CSP admits only the plugin origin as a frame source',()=>{
   const html=fs.readFileSync(new URL('../src/renderer/index.html',import.meta.url),'utf8');
-  assert.match(html,/frame-src muster-plugin:"/);
+  assert.match(html,/frame-src muster-plugin: muster-report:"/);
 });
 
 // ---------------------------------------------------------------- BRW-06

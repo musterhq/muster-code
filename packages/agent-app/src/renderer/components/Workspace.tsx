@@ -61,6 +61,7 @@ import {MailboxInbox} from './MailboxInbox';
 import {CanvasTab} from './CanvasTab';
 import {SideChatTab} from './SideChatTab';
 import {PluginUiTab} from './PluginUiTab';
+import {RichTab} from './RichTab';
 import {ensureArtifactSync, openSideChat, selectedText, sideChatBindingForTab} from '../artifacts';
 import {QuickOpenHost} from './QuickOpen';
 import type {FileContentMatch} from '../../shared/domains/files-protocol';
@@ -223,6 +224,8 @@ function TabBody({ tab, visible, onToggleResourceMaximize, resourceMaximized }: 
       return <SideChatTab tab={tab} {...(onToggleResourceMaximize ? {onToggleResourceMaximize} : {})} resourceMaximized={resourceMaximized ?? false} />;
     case 'pluginUi':
       return <PluginUiTab tab={tab} />;
+    case 'rich':
+      return <RichTab tab={tab}/>;
     case 'liveView':
       return <LiveViewTab tab={tab}/>;
   }

@@ -67,7 +67,7 @@ export function SideChatTab({tab, onToggleResourceMaximize, resourceMaximized = 
     <div className="side-chat-list" ref={list} aria-live="polite">
       {timeline?.phase === 'error' && <p className="side-chat-note" role="alert">{timeline.error}</p>}
       {!rows.length && timeline?.phase !== 'error' && <p className="side-chat-note">Ask about {side?.label ?? 'this resource'}. {binding?.excerpt ? 'Your selection is included.' : ''} The main conversation is not interrupted.</p>}
-      {rows.map(item => <div key={item.id} className={`side-chat-row is-${item.kind}`}>{item.kind === 'assistant' ? <MessageBody text={item.text}/> : <p>{item.text}</p>}</div>)}
+      {rows.map(item => <div key={item.id} className={`side-chat-row is-${item.kind}`}>{item.kind === 'assistant' ? <MessageBody text={item.text} reports/> : <p>{item.text}</p>}</div>)}
       {running && <p className="side-chat-note" role="status">Working…</p>}
     </div>
     {sendError && <p className="side-chat-error" role="alert">{sendError}</p>}
