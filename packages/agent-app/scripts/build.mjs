@@ -201,6 +201,9 @@ for (const name of ['codex-launch.sh', 'codex-profile.cjs', 'responses-compat.cj
 // #772-#775: Muster's own skills for documents, spreadsheets, presentations and PDF, installed into Muster's coding-client home.
 rmSync(dist('runtime', 'resources', 'skills'), {recursive: true, force: true});
 cpSync(path.join(root, 'resources', 'skills'), dist('runtime', 'resources', 'skills'), {recursive: true});
+// #773: Muster's own packages agent scripts import beside the office libraries (muster-xlsx-charts writes native Excel charts).
+rmSync(dist('runtime', 'resources', 'office-packages'), {recursive: true, force: true});
+cpSync(path.join(root, 'resources', 'office-packages'), dist('runtime', 'resources', 'office-packages'), {recursive: true});
 // #789: the office libraries agent scripts import, pinned to the lockfile; the app downloads them on first use.
 writeFileSync(dist('runtime', 'resources', 'office-libs.json'), JSON.stringify(officeLibraryManifest(JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8')))));
 // #363: the device helper is not bundled; only its pinned manifest and lockfile ship (installed with npm ci on first enable).

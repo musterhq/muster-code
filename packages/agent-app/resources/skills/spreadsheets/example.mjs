@@ -1,7 +1,9 @@
 // Starting point for a new .xlsx: two sheets, live formulas (also across sheets), number formats, a frozen header,
-// column widths, a total row and an optional picture. Copy it into the working folder, change the content and run it
+// column widths, a total row, a native Excel chart and an optional picture. Copy it into the working folder, change the content and run it
 // with the command office_setup gave you:  <node> make-xlsx.mjs out.xlsx [chart.png]
 import ExcelJS from 'exceljs';
+// Muster's chart writer: adds native, editable Excel charts to a file exceljs saved (exceljs writes no charts).
+import { addCharts } from 'muster-xlsx-charts';
 
 const [out = 'workbook.xlsx', imagePath] = process.argv.slice(2);
 const workbook = new ExcelJS.Workbook();
@@ -38,13 +40,21 @@ summary.addRow(['Best month', { formula: `INDEX(Sales!A2:A${totalRow - 1},MATCH(
 summary.getColumn(1).font = { name: 'Calibri', bold: true }; // a font without a name falls back to a serif in some apps
 
 if (imagePath) {
-  // exceljs cannot write native Excel charts: place a chart picture instead (or make the chart in a .pptx).
+  // A picture (a logo, a photo). Charts are native charts, added below.
   const image = workbook.addImage({ filename: imagePath, extension: 'png' });
-  summary.addImage(image, { tl: { col: 0, row: 4 }, ext: { width: 360, height: 220 } });
+  summary.addImage(image, { tl: { col: 3, row: 0 }, ext: { width: 120, height: 80 } });
 }
 
 // Print setup, so a render (and a printout) fits the columns on one page width.
 for (const sheet of workbook.worksheets) sheet.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
 
 await workbook.xlsx.writeFile(out);
+
+// Charts go in after the last exceljs save: saving with exceljs again would drop them. Each series points at a sheet
+// range, so the chart follows the cells when someone edits them.
+await addCharts(out, [{
+  type: 'column', sheet: 'Summary', title: 'Revenue by month', position: { from: 'A5', width: 480, height: 280 },
+  series: [{ name: 'Sales!$D$1', categories: `Sales!$A$2:$A$${totalRow - 1}`, values: `Sales!$D$2:$D$${totalRow - 1}` }],
+  xAxisTitle: 'Month', yAxisTitle: 'Revenue', numberFormat: '"$"#,##0', legend: false,
+}]);
 console.log(`Wrote ${out}`);

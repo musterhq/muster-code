@@ -93,6 +93,7 @@ export async function runOfficeTool(deps: OfficeToolDeps, chatId: string, tool: 
         const ready = await deps.libraries.ensure(progress => deps.progress(chatId, librariesProgressText(progress)));
         return text([
           `Office libraries ready (${describeVersions(ready.versions)}).`,
+          'Muster\'s chart writer is importable too: `import { addCharts } from \'muster-xlsx-charts\'` adds native, editable Excel charts to an .xlsx exceljs saved (see the spreadsheets skill).',
           `Run scripts with: ${JSON.stringify(ready.node)} <script.mjs|script.cjs> [args]`,
           'Both ES module imports and CommonJS requires of the docx package work from any folder with that command. Keep scripts and outputs in the working folder.',
           `Modules folder: ${ready.modules}`,

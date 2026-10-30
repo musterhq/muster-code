@@ -19,9 +19,17 @@ import { existsSync, promises as fs, readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import type { OfficeFetch, OfficeFetchResponse } from './office-runtime.ts';
+import { unpackedPath } from './unpacked-path.ts';
 
 /** Packages an agent script may import by name (scripts/office-libs-manifest.mjs keeps the same list). */
 export const OFFICE_LIBRARY_NAMES = ['docx', 'exceljs', 'pptxgenjs', 'pdf-lib', 'jszip', 'pdfjs-dist'] as const;
+/**
+ * #773: Muster's own packages, importable by name beside the libraries. They ship with the app (resources/office-packages,
+ * copied to dist/runtime/resources/office-packages by the build) and are copied into node_modules, where their own
+ * imports (exceljs, jszip) resolve to the libraries next to them. muster-xlsx-charts writes native Excel charts.
+ */
+export const MUSTER_OFFICE_PACKAGES = ['muster-xlsx-charts'] as const;
+const PACKAGE_STAMP = '.muster-package';
 const MARKER = '.muster-office-libs.json';
 const CONCURRENCY = 6;
 const MAX_TARBALL_BYTES = 64 * 1024 * 1024;
@@ -51,6 +59,8 @@ export interface OfficeLibrariesOptions {
   manifest?: OfficeLibraryManifest | null;
   /** A node_modules folder that already holds the libraries (a source checkout); null in a packaged app. */
   localModules?: string | null;
+  /** The folder holding Muster's own packages (MUSTER_OFFICE_PACKAGES); defaults to musterOfficePackagesDir(). */
+  packages?: string | null;
   fetch?: OfficeFetch;
   unpack?: OfficeUnpack;
   onProgress?: (progress: OfficeLibrariesProgress | null) => void;
@@ -86,6 +96,31 @@ export function localOfficeModules(from: string): string | null {
     if (OFFICE_LIBRARY_NAMES.every(name => existsSync(join(modules, name, 'package.json')))) return modules;
     if (dirname(dir) === dir) return null;
   }
+}
+
+/** resources/office-packages: dist/runtime/resources in the app (the runtime runs from dist/main), resources in a checkout. */
+export function musterOfficePackagesDir(here: string = typeof __dirname === 'string' ? __dirname : join(process.cwd(), 'src', 'runtime')): string | null {
+  const candidates = [join(here, 'resources', 'office-packages'), join(here, '..', 'runtime', 'resources', 'office-packages'), join(here, '..', '..', 'resources', 'office-packages'), join(process.cwd(), 'resources', 'office-packages')];
+  for (const candidate of candidates) {
+    const path = unpackedPath(candidate);
+    if (MUSTER_OFFICE_PACKAGES.every(name => existsSync(join(path, name, 'package.json')))) return path;
+  }
+  return null;
+}
+
+/** Every file of a package folder, hashed: a copy whose stamp matches is current. */
+async function packageDigest(dir: string): Promise<string> {
+  const hash = createHash('sha256');
+  const walk = async (folder: string, prefix: string): Promise<void> => {
+    for (const entry of (await fs.readdir(folder, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.name === PACKAGE_STAMP) continue;
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) await walk(join(folder, entry.name), rel);
+      else if (entry.isFile()) hash.update(rel).update('\0').update(await fs.readFile(join(folder, entry.name))).update('\0');
+    }
+  };
+  await walk(dir, '');
+  return hash.digest('hex');
 }
 
 const posixQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
@@ -152,6 +187,7 @@ export class OfficeLibraries {
   private readonly platform: NodeJS.Platform;
   private readonly manifest: OfficeLibraryManifest | null;
   private readonly localModules: string | null;
+  private readonly packages: string | null;
   private readonly fetch: OfficeFetch;
   private readonly unpack: OfficeUnpack;
   private readonly onProgress?: OfficeLibrariesOptions['onProgress'];
@@ -166,6 +202,7 @@ export class OfficeLibraries {
     this.platform = options.platform ?? process.platform;
     this.manifest = options.manifest ?? null;
     this.localModules = options.localModules ?? null;
+    this.packages = options.packages === undefined ? musterOfficePackagesDir() : options.packages;
     this.fetch = options.fetch ?? defaultFetch;
     this.unpack = options.unpack ?? systemUnpack;
     this.onProgress = options.onProgress;
@@ -217,8 +254,27 @@ export class OfficeLibraries {
   private async prepare(): Promise<OfficeLibrariesReady> {
     const wanted = this.wanted(), marker = await this.marker();
     if (!wanted) throw new Error('This build of Muster has no office libraries to install.');
-    if (marker && marker.key === wanted.key && await fs.stat(this.node).then(() => true, () => false)) return this.ready(marker);
-    return this.install(wanted);
+    const ready = marker && marker.key === wanted.key && await fs.stat(this.node).then(() => true, () => false) ? this.ready(marker) : await this.install(wanted);
+    await this.syncPackages();
+    return ready;
+  }
+
+  /** Copies Muster's own packages into node_modules when missing or changed (an app update), so scripts import them by name. */
+  private async syncPackages(): Promise<void> {
+    if (!this.packages) return;
+    for (const name of MUSTER_OFFICE_PACKAGES) {
+      const from = join(this.packages, name), to = join(this.modules, name);
+      if (!existsSync(join(from, 'package.json'))) continue;
+      const want = await packageDigest(from);
+      const have = await fs.readFile(join(to, PACKAGE_STAMP), 'utf8').then(text => text.trim(), () => '');
+      if (have === want) continue;
+      const staging = join(this.modules, `.${name}-${process.pid}-${Date.now()}`);
+      await fs.rm(staging, { recursive: true, force: true });
+      await fs.cp(from, staging, { recursive: true, dereference: true });
+      await fs.writeFile(join(staging, PACKAGE_STAMP), want);
+      if (await fs.lstat(to).then(() => true, () => false)) await this.discard(to);
+      await fs.rename(staging, to);
+    }
   }
 
   private ready(marker: Marker): OfficeLibrariesReady {
@@ -259,7 +315,8 @@ export class OfficeLibraries {
       this.error = error instanceof Error ? error.message : String(error);
       throw error;
     } finally {
-      await fs.rm(staging, { recursive: true, force: true });
+      // A leftover staging folder is cleared before the next install (clearStaging); it must not hide the real error.
+      await fs.rm(staging, { recursive: true, force: true }).catch(() => undefined);
       this.installing = false;
       this.progress(null);
     }
@@ -268,10 +325,10 @@ export class OfficeLibraries {
   private async download(modules: string): Promise<void> {
     const entries = this.manifest!.packages, total = entries.length;
     const scratch = await fs.mkdtemp(join(dirname(modules), 'tarballs-'));
-    let done = 0, next = 0;
+    let done = 0, next = 0, failure: { error: unknown } | null = null;
     this.progress({ phase: 'downloading', done, total });
     const worker = async () => {
-      while (next < entries.length) {
+      while (!failure && next < entries.length) {
         const entry = entries[next++]!;
         if (!/^https:\/\/registry\.npmjs\.org\//.test(entry.resolved)) throw new Error(`${entry.name} is not an npm registry download.`);
         if (!/^(node_modules\/(@[a-z0-9._-]+\/)?[a-z0-9._-]+)(\/node_modules\/(@[a-z0-9._-]+\/)?[a-z0-9._-]+)*$/i.test(entry.path) || entry.path.split('/').includes('..')) throw new Error(`Bad library path ${entry.path}.`);
@@ -289,8 +346,12 @@ export class OfficeLibraries {
         this.progress({ phase: 'downloading', done, total });
       }
     };
-    try { await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, worker)); }
-    finally { await fs.rm(scratch, { recursive: true, force: true }); }
+    // One failure stops new downloads, but the ones already running finish (an unpack still writes into the staging
+    // folder) before anything is removed; the first error is the one reported, never a cleanup error.
+    const run = () => worker().catch(error => { failure ??= { error }; });
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, run));
+    await fs.rm(scratch, { recursive: true, force: true }).catch(() => undefined);
+    if (failure) throw (failure as { error: unknown }).error;
   }
 
   private async writeRunner(): Promise<void> {

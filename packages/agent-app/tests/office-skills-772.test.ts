@@ -173,6 +173,15 @@ test('an agent makes an .xlsx with live formulas using Muster\'s spreadsheets sk
   assert.equal(sales.getCell('E2').numFmt, '0.0%');
   const zip = await JSZip.loadAsync(await readFile(turn.output));
   assert.match(await zip.file('xl/workbook.xml')!.async('string'), /fullCalcOnLoad="1"/, 'formulas recalculate when the file opens');
+  // #773: the example adds a native, editable chart with Muster's chart writer: a chart part whose series reads the
+  // Revenue cells, anchored on the Summary sheet.
+  assert.match(readFileSync(turn.skill, 'utf8'), /muster-xlsx-charts/, 'the skill teaches the chart writer');
+  const chartParts = Object.keys(zip.files).filter(name => /^xl\/charts\/chart\d+\.xml$/.test(name));
+  assert.equal(chartParts.length, 1, 'the workbook has one native chart part');
+  const chartXml = await zip.file(chartParts[0]!)!.async('string');
+  assert.match(chartXml, /<c:barChart>/);
+  assert.match(chartXml, /<c:val><c:numRef><c:f>Sales!\$D\$2:\$D\$4<\/c:f>/, 'the series reads the Revenue cells');
+  assert.match(await zip.file('[Content_Types].xml')!.async('string'), /drawingml\.chart\+xml/);
   assertRendered(turn, 2);
   // Editing keeps formats and formulas.
   sales.getCell('B2').value = 999;
@@ -408,6 +417,42 @@ test('a packaged app downloads the pinned office libraries once, checks each aga
   const removed = await libraries.remove();
   assert.ok(removed.removed && removed.bytes > 0);
   assert.equal((await libraries.status()).ready, false);
+});
+
+// Spec: MUS-SPEC-21-789Q (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-789q)
+test('a tarball that fails its checksum while other downloads are still running reports the checksum and leaves nothing behind', async t => {
+  const root = await directory(t);
+  const packages: OfficeLibraryManifest['packages'] = [];
+  const served = new Map<string, Buffer>();
+  for (const name of OFFICE_LIBRARY_NAMES) {
+    const {data, integrity} = await tarball(join(root, 'registry'), name, '1.0.0', 'module.exports = {};');
+    const url = `https://registry.npmjs.org/${name}/-/${name}-1.0.0.tgz`;
+    served.set(url, data);
+    packages.push({path: `node_modules/${name}`, name, version: '1.0.0', resolved: url, integrity: name === 'docx' ? `sha512-${createHash('sha512').update('else').digest('base64')}` : integrity});
+  }
+  // The other packages are still unpacking (as tar does: it creates folders and files as it goes) when docx, the
+  // tampered one, fails its checksum.
+  const fetch = async (url: string) => {
+    if (url.includes('/docx/')) await new Promise(wait => setTimeout(wait, 50));
+    const data = served.get(url)!;
+    return {status: 200, headers: {get: () => null}, body: (async function* () { yield data; })()};
+  };
+  let unpacking = 0, allDone!: () => void;
+  const unpacked = new Promise<void>(done => { allDone = done; });
+  const unpack = async (_tarball: string, into: string) => {
+    unpacking++;
+    await new Promise(wait => setTimeout(wait, 200));
+    await mkdir(into, {recursive: true});
+    await writeFile(join(into, 'index.js'), 'module.exports = {};');
+    await writeFile(join(into, 'package.json'), '{"name":"x","version":"1.0.0"}');
+    if (--unpacking === 0) allDone();
+  };
+  const libraries = new OfficeLibraries({root: join(root, 'libs'), execPath: process.execPath, manifest: {packages}, localModules: null, fetch, unpack});
+  await assert.rejects(libraries.ensure(), /docx 1\.0\.0 did not match its checksum/);
+  assert.equal(unpacking, 0, 'the failed install waited for the downloads already running');
+  await unpacked;
+  assert.ok(!existsSync(join(root, 'libs', 'node_modules')), 'nothing was installed');
+  assert.deepEqual((await readdir(join(root, 'libs'))).filter(name => name.startsWith('staging-')), [], 'no staging folder is left or recreated');
 });
 
 // Spec: MUS-SPEC-21-789O (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-789o)

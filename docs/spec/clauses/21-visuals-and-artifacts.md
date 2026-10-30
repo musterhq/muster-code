@@ -33,12 +33,17 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-789K](21-visuals-and-artifacts.md#mus-spec-21-789k) | The Settings commands report source, version and size; download returns at once and sends progress events; remove returns to none. | [`Settings commands report the runtime and download it in the background`](../../../packages/agent-app/tests/office-runtime-789.test.ts) |
 | [MUS-SPEC-21-789L](21-visuals-and-artifacts.md#mus-spec-21-789l) | macOS, Linux and Windows on Intel and ARM each have a pinned official LibreOffice build with an https documentfoundation.org URL, a SHA-256 and a plausible size; other platforms have none. | [`every pinned LibreOffice build is an official https download with a SHA-256`](../../../packages/agent-app/tests/office-runtime-789.test.ts) |
 | [MUS-SPEC-21-772A](21-visuals-and-artifacts.md#mus-spec-21-772a) | With no other app installed, an agent turn follows the documents skill: the .docx has headings, lists, a table and an image, and office_render returns page PNGs and inline images. | [`an agent makes a .docx with Muster's documents skill and sees its pages, with no other app installed`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
-| [MUS-SPEC-21-773A](21-visuals-and-artifacts.md#mus-spec-21-773a) | The .xlsx keeps live formulas (also across sheets), number formats and recalculate-on-open, renders to page images, and an edit keeps them. | [`an agent makes an .xlsx with live formulas using Muster's spreadsheets skill and sees its pages`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-773A](21-visuals-and-artifacts.md#mus-spec-21-773a) | The .xlsx keeps live formulas (also across sheets), number formats and recalculate-on-open, has a native chart reading the Revenue cells, renders to page images, and an edit keeps them. | [`an agent makes an .xlsx with live formulas using Muster's spreadsheets skill and sees its pages`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-773B](21-visuals-and-artifacts.md#mus-spec-21-773b) | An agent script adds a native chart of each kind (column, bar, stacked, percent, line, pie, doughnut, scatter, area) with Muster's chart writer; the package stays well-formed, exceljs still opens it, and existing pictures are kept. | [`an agent script adds a native chart of each kind to an .xlsx with Muster's chart writer, and the package stays valid`](../../../packages/agent-app/tests/xlsx-charts-773.test.ts) |
+| [MUS-SPEC-21-773C](21-visuals-and-artifacts.md#mus-spec-21-773c) | Each series references its sheet range (name, categories, values) with saved values matching the cells, so an edited cell is what the chart reads. | [`a chart series points at its sheet range, so editing a cell changes the data the chart shows`](../../../packages/agent-app/tests/xlsx-charts-773.test.ts) |
+| [MUS-SPEC-21-773D](21-visuals-and-artifacts.md#mus-spec-21-773d) | With a real LibreOffice, every chart kind renders from its native part, and a cell edited only in the sheet redraws the column chart. | [`with LibreOffice present, a render draws every native chart kind, and an edited cell redraws the chart`](../../../packages/agent-app/tests/xlsx-charts-773.test.ts) |
+| [MUS-SPEC-21-773E](21-visuals-and-artifacts.md#mus-spec-21-773e) | office_setup copies Muster's chart writer into the libraries' node_modules, an app update replaces the copy, and scripts import it by name. | [`office setup copies Muster's chart writer beside the libraries, and an app update replaces the old copy`](../../../packages/agent-app/tests/xlsx-charts-773.test.ts) |
 | [MUS-SPEC-21-774A](21-visuals-and-artifacts.md#mus-spec-21-774a) | The deck has five slides (title, bullets, chart, table, picture) on slide layouts, the chart is a native chart part and the picture is embedded. | [`an agent makes a .pptx with Muster's presentations skill and sees each slide`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
 | [MUS-SPEC-21-775A](21-visuals-and-artifacts.md#mus-spec-21-775a) | The PDF has the approver.name and approver.approved fields; filling them reads back. | [`an agent makes a PDF with a form using Muster's pdf skill, reads its text, fills the form and sees its pages`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
 | [MUS-SPEC-21-772Q](21-visuals-and-artifacts.md#mus-spec-21-772q) | PDF and .xlsx preview with nothing else installed; .docx and .pptx convert through Muster's own office runtime. | [`each office type previews in Muster with no other app installed`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
 | [MUS-SPEC-21-789M](21-visuals-and-artifacts.md#mus-spec-21-789m) | The service sends officeToolProgress events for that chat with "Downloading LibreOffice…" while the tool waits, then one with no message. | [`the first render shows LibreOffice download progress on the chat's tool row`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
 | [MUS-SPEC-21-789N](21-visuals-and-artifacts.md#mus-spec-21-789n) | The pinned library tarballs download once with progress, keep the lockfile layout, are refused on a bad integrity or non-registry URL, and can be removed. | [`a packaged app downloads the pinned office libraries once, checks each against its integrity and installs them atomically`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-789Q](21-visuals-and-artifacts.md#mus-spec-21-789q) | A tarball that fails its checksum while others are still unpacking: the install waits for them, reports the checksum error (never a cleanup error) and leaves no staging folder. | [`a tarball that fails its checksum while other downloads are still running reports the checksum and leaves nothing behind`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
 | [MUS-SPEC-21-789O](21-visuals-and-artifacts.md#mus-spec-21-789o) | docx, exceljs, pptxgenjs, pdf-lib, jszip and pdfjs-dist are pinned to their lockfile versions, every entry is an npm registry tarball with a sha512 integrity, no @types package is included, and every runtime dependency of a pinned package is pinned too. | [`the build pins every office library and its dependencies from the lockfile`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
 | [MUS-SPEC-21-789P](21-visuals-and-artifacts.md#mus-spec-21-789p) | Only this chat's message shows, as a live status line, and it goes away when cleared. | [`A running office tool row shows the first download progress and clears it when done`](../../../packages/agent-app/tests/office-tool-progress-789-dom.tsx) |
 | [MUS-SPEC-21-788A](21-visuals-and-artifacts.md#mus-spec-21-788a) | Right-click on the gallery hero, a gallery thumbnail, a gallery file link, a tool-row thumbnail, an inline reply image and the open image viewer each asks for the image menu, with that image's chat and path. | [`Right-click on every chat image surface asks for the image menu with its path`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
@@ -916,10 +921,54 @@ A PR that changes this area adds its cases here first: one row in this table, th
 
 - Precondition: As 772A.
 - Action: The same agent turn with the spreadsheets skill and its example script, writing budget.xlsx.
-- Expected result: The workbook has Sales and Summary sheets. Revenue, totals and a cross-sheet reference are formulas (B2*C2, SUM(D2:D4), Sales!D5), money and percent cells keep their number formats, and the workbook is set to recalculate on open. Page images come back as in 772A. Changing an input and saving keeps the formulas and formats.
+- Expected result: The workbook has Sales and Summary sheets. Revenue, totals and a cross-sheet reference are formulas (B2*C2, SUM(D2:D4), Sales!D5), money and percent cells keep their number formats, and the workbook is set to recalculate on open. The skill names Muster's chart writer, and the workbook has one native column chart part whose series reads Sales!$D$2:$D$4. Page images come back as in 772A. Changing an input and saving keeps the formulas and formats.
 - Test: `packages/agent-app/tests/office-skills-772.test.ts::an agent makes an .xlsx with live formulas using Muster's spreadsheets skill and sees its pages`
 - Environment: As 772A.
-- Known gaps: exceljs writes no native Excel charts; the skill says so and places a chart picture (or points to a presentation). Recalculated values were checked by hand with a real LibreOffice render.
+- Known gaps: Saving again with exceljs drops charts; the skill adds charts after the last save. Recalculated values were checked by hand with a real LibreOffice render.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-773b"></a>
+#### MUS-SPEC-21-773B: An agent script adds a native chart of each kind with Muster's chart writer
+
+- Precondition: Muster's office libraries are set up as office_setup prepares them (with Muster's own packages). A project folder whose name has a space holds a PNG.
+- Action: An agent script writes a workbook with exceljs (a Sales sheet with a formula column and a picture, and a "Q1 Spend" sheet), then calls `addCharts` from `muster-xlsx-charts` for nine charts: column, stacked column, bar, percent bar, line, pie, doughnut, scatter (on Q1 Spend) and stacked area.
+- Expected result: Every XML part is well-formed. exceljs reopens the file with both sheets and the formula intact. There are nine xl/charts/chartN.xml parts, each with its content type. Sales has one drawing that keeps exceljs's picture and holds eight charts; Q1 Spend has a drawing of its own with the scatter chart. Drawing object ids are unique. Each chart has its kind, grouping, legend position, number format, title and axis titles as asked; `legend: false` leaves the legend out.
+- Test: `packages/agent-app/tests/xlsx-charts-773.test.ts::an agent script adds a native chart of each kind to an .xlsx with Muster's chart writer, and the package stays valid`
+- Environment: Node test runner; real exceljs and jszip through Muster's script runner; no network.
+- Known gaps: Opening in Excel itself is not automated.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-773c"></a>
+#### MUS-SPEC-21-773C: A chart series points at its sheet range
+
+- Precondition: The workbook from 773B.
+- Action: Read the clustered column chart, then change Sales!B6 in the sheet XML only and reopen the file.
+- Expected result: The first series takes its name from Sales!$B$1 (cached "North"), its categories from Sales!$A$2:$A$13 and its values from Sales!$B$2:$B$13; the saved values equal the cells. No chart references a column it was not asked for. After the edit the range the chart reads holds the new value.
+- Test: `packages/agent-app/tests/xlsx-charts-773.test.ts::a chart series points at its sheet range, so editing a cell changes the data the chart shows`
+- Environment: As 773B.
+- Known gaps: None.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-773d"></a>
+#### MUS-SPEC-21-773D: A real LibreOffice draws every native chart kind and redraws after a cell edit
+
+- Precondition: A real LibreOffice (MUSTER_SOFFICE_PATH, a standard install or Muster's office runtime download). One chart per sheet and the data on the last sheet.
+- Action: Render the workbook; change Data!B6 from 140 to 600 in the sheet XML only and render again.
+- Expected result: Each chart page has the series colours drawn (bars, slices, lines, areas, or scatter markers). Before the edit the tallest column is under twice the shortest; after it, over four times: LibreOffice drew the chart from the range, not the saved values.
+- Test: `packages/agent-app/tests/xlsx-charts-773.test.ts::with LibreOffice present, a render draws every native chart kind, and an edited cell redraws the chart`
+- Environment: Node test runner with a real LibreOffice; skips when none is found.
+- Known gaps: Skips on machines without LibreOffice (including CI unless one is provided).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-773e"></a>
+#### MUS-SPEC-21-773E: office_setup installs Muster's chart writer and refreshes it after an app update
+
+- Precondition: A folder of shipped packages holding a copy of muster-xlsx-charts.
+- Action: Set up the office libraries; change the shipped package (as an app update would) and set up again; run a script that imports it by name.
+- Expected result: node_modules holds the shipped package after the first setup and the changed one after the second, and the script imports the new export and `addCharts`.
+- Test: `packages/agent-app/tests/xlsx-charts-773.test.ts::office setup copies Muster's chart writer beside the libraries, and an app update replaces the old copy`
+- Environment: Node test runner; no network.
+- Known gaps: None.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-21-774a"></a>
@@ -975,6 +1024,17 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/office-skills-772.test.ts::a packaged app downloads the pinned office libraries once, checks each against its integrity and installs them atomically`
 - Environment: Node test runner; system tar; fake registry.
 - Known gaps: Interrupted downloads restart the package set rather than resume each tarball.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-789q"></a>
+#### MUS-SPEC-21-789Q: A failed library download waits for the others and reports its checksum
+
+- Precondition: A fake registry serving the office library tarballs; docx's integrity is wrong and answers last; the other packages unpack slowly, creating folders and files as tar does.
+- Action: Ensure the libraries.
+- Expected result: The ensure rejects with "docx 1.0.0 did not match its checksum", only after every running unpack has finished. No node_modules is installed and no staging folder is left or recreated.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::a tarball that fails its checksum while other downloads are still running reports the checksum and leaves nothing behind`
+- Environment: Node test runner; fake registry and unpack; no network.
+- Known gaps: None.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-21-789o"></a>
