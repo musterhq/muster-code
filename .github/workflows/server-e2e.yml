@@ -3,58 +3,12 @@ name: Muster Server e2e
 # The app's Muster Server client against real Muster Server processes built from packages/server (#804).
 # The tests start each server on a temp data dir, wait for /healthz, seed an org, two people and a project through the
 # server's own CLI and API, then drive the app's client: sign in, projects, tasks, live updates, a restart, two servers.
+# Runs on every pull request (no path filters) so it always reports and can be a required check: a path-filtered required
+# check never reports on unrelated PRs and blocks them, and a hand-kept path list misses new client files.
 on:
   push:
     branches: [main]
-    paths:
-      - "packages/server/**"
-      # The app's server client.
-      - "packages/agent-app/src/runtime/server/**"
-      - "packages/agent-app/src/runtime/domains/muster-server.ts"
-      - "packages/agent-app/src/runtime/domains/paperclip.ts"
-      - "packages/agent-app/src/runtime/muster-server-signin.ts"
-      - "packages/agent-app/src/runtime/paperclip-client.ts"
-      - "packages/agent-app/src/runtime/server-auth.ts"
-      - "packages/agent-app/src/runtime/secret-store.ts"
-      - "packages/agent-app/src/shared/domains/paperclip-protocol.ts"
-      - "packages/agent-app/src/shared/domains/muster-server-protocol.ts"
-      # Settings › Integrations.
-      - "packages/agent-app/src/renderer/components/settings/ServerSettings.tsx"
-      - "packages/agent-app/src/renderer/components/settings/ServerWork.tsx"
-      - "packages/agent-app/src/renderer/components/settings/serverAction.ts"
-      - "packages/agent-app/src/renderer/components/OrgsCard.tsx"
-      - "packages/agent-app/src/renderer/components/HubSetup.tsx"
-      # The tests, their runner and the dependencies they build with.
-      - "packages/agent-app/tests/server-e2e/**"
-      - "packages/agent-app/scripts/test-server-e2e.mjs"
-      - "packages/agent-app/package.json"
-      - "packages/agent-app/package-lock.json"
-      - ".github/workflows/server-e2e.yml"
   pull_request:
-    paths:
-      - "packages/server/**"
-      # The app's server client.
-      - "packages/agent-app/src/runtime/server/**"
-      - "packages/agent-app/src/runtime/domains/muster-server.ts"
-      - "packages/agent-app/src/runtime/domains/paperclip.ts"
-      - "packages/agent-app/src/runtime/muster-server-signin.ts"
-      - "packages/agent-app/src/runtime/paperclip-client.ts"
-      - "packages/agent-app/src/runtime/server-auth.ts"
-      - "packages/agent-app/src/runtime/secret-store.ts"
-      - "packages/agent-app/src/shared/domains/paperclip-protocol.ts"
-      - "packages/agent-app/src/shared/domains/muster-server-protocol.ts"
-      # Settings › Integrations.
-      - "packages/agent-app/src/renderer/components/settings/ServerSettings.tsx"
-      - "packages/agent-app/src/renderer/components/settings/ServerWork.tsx"
-      - "packages/agent-app/src/renderer/components/settings/serverAction.ts"
-      - "packages/agent-app/src/renderer/components/OrgsCard.tsx"
-      - "packages/agent-app/src/renderer/components/HubSetup.tsx"
-      # The tests, their runner and the dependencies they build with.
-      - "packages/agent-app/tests/server-e2e/**"
-      - "packages/agent-app/scripts/test-server-e2e.mjs"
-      - "packages/agent-app/package.json"
-      - "packages/agent-app/package-lock.json"
-      - ".github/workflows/server-e2e.yml"
   workflow_dispatch:
 
 concurrency:
