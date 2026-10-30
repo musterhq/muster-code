@@ -46,6 +46,7 @@ export const split = new Set([
   'sidebar-chrome-403-dom',
   'ui-sweep-dom',
   'rich-block-components',
+  'mermaid-787-dom',
   'html-preview-components',
 ]);
 
