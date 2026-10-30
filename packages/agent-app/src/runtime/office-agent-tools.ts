@@ -137,11 +137,21 @@ const fs=require('node:fs');
 const TOOLS=${JSON.stringify(OFFICE_TOOL_SPECS)};
 const endpointFile=process.argv[2],chatId=process.env.MUSTER_CHAT_ID||'';
 const text=(t,isError)=>({content:[{type:'text',text:t}],...(isError?{isError:true}:{})});
-async function call(tool,args){
+// node:http, not fetch: fetch gives up waiting for response headers after five minutes, and a first LibreOffice
+// download can take longer than that before the host answers.
+const http=require('node:http');
+function call(tool,args){
   const {url,token}=JSON.parse(fs.readFileSync(endpointFile,'utf8'));
-  const response=await fetch(url,{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+token},body:JSON.stringify({chatId,tool,arguments:args}),signal:AbortSignal.timeout(${OFFICE_TOOL_TIMEOUT_SEC * 1000})});
-  if(!response.ok)throw new Error('office host answered '+response.status);
-  return await response.json();
+  const body=JSON.stringify({chatId,tool,arguments:args});
+  return new Promise((resolve,reject)=>{
+    const request=http.request(url,{method:'POST',headers:{'content-type':'application/json','content-length':Buffer.byteLength(body),authorization:'Bearer '+token}},response=>{
+      const chunks=[];response.on('data',chunk=>chunks.push(chunk));
+      response.on('end',()=>{if(response.statusCode!==200)return reject(new Error('office host answered '+response.statusCode));try{resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));}catch(error){reject(error);}});
+      response.on('error',reject);
+    });
+    request.setTimeout(${OFFICE_TOOL_TIMEOUT_SEC * 1000},()=>request.destroy(new Error('timed out')));
+    request.on('error',reject);request.end(body);
+  });
 }
 const write=line=>{process.stdout.write(line+'\\n');};
 async function handle(message){
