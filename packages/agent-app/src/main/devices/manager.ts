@@ -18,7 +18,7 @@ import {DeviceLink, type LinkDeps, type LinkFrame} from './link.ts';
 import {AppleModels} from './models.ts';
 import {androidSkinChrome, dataUrl, parseHubChrome, skinDir} from './chrome.ts';
 import {readAvdConfig} from './discovery.ts';
-import type {DeviceChrome} from '../../shared/device-protocol.ts';
+import type {DeviceChrome, DeviceWebRtcEvent} from '../../shared/device-protocol.ts';
 
 export const HUB_IDLE_MS = 45_000;
 /** System packages worth offering an agent on Android (settings, browser, the usual Google apps). */
@@ -288,6 +288,7 @@ export class DeviceManager {
       state: (state, detail) => { if (this.live.get(device.id) === live) this.updateSession(live, {state, ...(detail ? {error: detail} : {})}); },
       screen: screen => { if (this.live.get(device.id) === live) this.updateSession(live, {screen}); },
       input: ready => { if (this.live.get(device.id) === live) this.updateSession(live, {inputReady: ready}); },
+      stream: stream => { if (this.live.get(device.id) === live) this.updateSession(live, {stream}); },
     });
     this.live.set(device.id, live);
     this.publishSessions();
@@ -372,6 +373,17 @@ export class DeviceManager {
   }
   /** The renderer cannot decode this simulator's H.264: switch it to MJPEG. */
   streamFallback(rawId: unknown): void { const live = this.live.get(validId(rawId)); live?.link.preferMjpeg(); }
+  /** The WebRTC backup (#811): the renderer's offer, answered through main. */
+  async webrtcOffer(rawId: unknown, attempt: unknown, sessionId: unknown, sdp: unknown): Promise<{sdp: string}> {
+    const live = this.live.get(validId(rawId));
+    if (!live || typeof attempt !== 'number' || typeof sessionId !== 'string' || typeof sdp !== 'string') throw new Error('The backup connection is not in use.');
+    return {sdp: await live.link.webrtcOffer(attempt, sessionId, sdp)};
+  }
+  webrtcReport(rawId: unknown, attempt: unknown, event: unknown): void {
+    const live = this.live.get(validId(rawId));
+    if (!live || typeof attempt !== 'number' || !(['frame', 'stalled', 'failed', 'unsupported'] as unknown[]).includes(event)) return;
+    live.link.webrtcReport(attempt, event as DeviceWebRtcEvent);
+  }
   async waitForInput(id: string, ms?: number): Promise<boolean> { return (await this.live.get(id)?.link.waitForInput(ms)) ?? false; }
   async button(rawId: unknown, button: DeviceButton, from: 'user' | 'agent' = 'user'): Promise<void> {
     const id = validId(rawId), live = this.live.get(id);

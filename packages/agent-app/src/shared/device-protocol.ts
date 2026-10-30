@@ -102,7 +102,11 @@ export interface DeviceSession {
   inputReady: boolean;
   openedAt: number;
   lastFrameAt?: number;
+  /** Which path carries the video (#811): the main stream, or the WebRTC backup the renderer opens while `active`. */
+  stream?: DeviceStreamPath;
 }
+export interface DeviceStreamPath {path: 'main' | 'webrtc'; attempt: number; active: boolean}
+export type DeviceWebRtcEvent = 'frame' | 'stalled' | 'failed' | 'unsupported';
 export type DeviceButton = 'home' | 'power' | 'appSwitcher' | 'back' | 'volumeUp' | 'volumeDown';
 export type DeviceInput =
   | { kind: 'touch'; phase: 'begin' | 'move' | 'end'; x: number; y: number }
@@ -137,6 +141,10 @@ export interface DeviceCommands {
   'devices.control': { input: { id: string; owner: 'agent' | 'user' }; output: DeviceSession };
   /** This window cannot decode the simulator's H.264 (no WebCodecs, or its profile is unsupported): stream MJPEG instead. */
   'devices.streamFallback': { input: { id: string }; output: void };
+  /** The WebRTC backup (#811): main sends the renderer's offer to the helper (the token stays in main) and returns the answer. */
+  'devices.webrtcOffer': { input: { id: string; attempt: number; sessionId: string; sdp: string }; output: { sdp: string } };
+  /** What the renderer saw on the backup: its first frame, a stall, a failure, or that this window cannot play WebRTC. */
+  'devices.webrtcReport': { input: { id: string; attempt: number; event: DeviceWebRtcEvent }; output: void };
   /** The device's real frame from the user's own Xcode or Android SDK, or null (the parametric frame is used). */
   'devices.chrome': { input: { id: string }; output: DeviceChrome | null };
   /** A realistic 3D model: the cached conversion, or the verified apple.com download for the renderer to convert. */
@@ -147,7 +155,7 @@ export type DeviceEvent =
   | { type: 'deviceSetup'; setup: DeviceSetup }
   | { type: 'deviceList'; list: DeviceList }
   | { type: 'deviceSessions'; sessions: DeviceSession[] };
-export const DEVICE_COMMANDS = {'devices.setup': true, 'devices.configure': true, 'devices.installHelper': true, 'devices.list': true, 'devices.boot': true, 'devices.shutdown': true, 'devices.open': true, 'devices.close': true, 'devices.sessions': true, 'devices.view': true, 'devices.button': true, 'devices.rotate': true, 'devices.screenshot': true, 'devices.control': true, 'devices.streamFallback': true, 'devices.chrome': true, 'devices.model': true, 'devices.modelStore': true} as const satisfies Record<keyof DeviceCommands, true>;
+export const DEVICE_COMMANDS = {'devices.setup': true, 'devices.configure': true, 'devices.installHelper': true, 'devices.list': true, 'devices.boot': true, 'devices.shutdown': true, 'devices.open': true, 'devices.close': true, 'devices.sessions': true, 'devices.view': true, 'devices.button': true, 'devices.rotate': true, 'devices.screenshot': true, 'devices.control': true, 'devices.streamFallback': true, 'devices.webrtcOffer': true, 'devices.webrtcReport': true, 'devices.chrome': true, 'devices.model': true, 'devices.modelStore': true} as const satisfies Record<keyof DeviceCommands, true>;
 
 /** IPC: main → renderer frames, renderer → main frame acknowledgements (flow control) and input. */
 export const DEVICE_FRAME_CHANNEL = 'muster:device-frame';

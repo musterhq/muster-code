@@ -140,3 +140,131 @@ test('watchdog, Android: a silent video socket first gets a keyframe request, th
   assert.equal(rec.last().state, 'live');
   link.close();
 });
+
+// --- The WebRTC backup ----------------------------------------------------------------------------------------------
+
+/** A helper for the backup tests: AVCC answers as `avcc()` says; WebRTC offers and closes are recorded. */
+function backupHelper(avcc: () => Response | 'stream') {
+  const base = fakeHelper();
+  const offers: {url: string; auth: string | null; type: string | null; body: any}[] = [], closes: {url: string; body: any}[] = [];
+  const fetchFn = (async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/webrtc/offer')) {
+      const body = JSON.parse(String(init.body));
+      offers.push({url, auth: new Headers(init.headers).get('authorization'), type: new Headers(init.headers).get('content-type'), body});
+      return new Response(JSON.stringify({type: 'answer', sdp: `v=0 answer-for-${body.sessionId}`}));
+    }
+    if (url.endsWith('/webrtc/close')) { closes.push({url, body: JSON.parse(String(init.body))}); return new Response(null, {status: 204}); }
+    if (url.endsWith('/stream.avcc')) { const answer = avcc(); if (answer !== 'stream') { base.requests.push(url); return answer; } }
+    return base.fetchFn(url, init);
+  }) as typeof fetch;
+  return {...base, fetchFn, offers, closes};
+}
+const SESSION = '0f8fad5b-d9cb-469f-a165-70867728950e', SESSION2 = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+
+// Spec: MUS-SPEC-21-811E (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-811e)
+test('backup, iOS: a main stream that keeps failing switches to WebRTC signalled through main, and switches back once H.264 is healthy', async () => {
+  let failing = true;
+  const time = clock(), helper = backupHelper(() => failing ? new Response('boom', {status: 500}) : 'stream'), rec = recorder();
+  const streams: {path: string; attempt: number; active: boolean}[] = [];
+  FakeSocket.all = [];
+  const deps: LinkDeps = {hub, fetch: helper.fetchFn, socket: (url, headers) => new FakeSocket(url, headers) as never, setTimeout: time.set, clearTimeout: time.clear, now: () => time.now};
+  const link = new DeviceLink('ios', 'BBBBBBBB-2222', deps, {...rec.events, stream: s => streams.push({...s})});
+  await link.start();
+  link.setViewing(true); await flush();
+  // Three failures inside the window (the first attempt, then the 1 s and 2 s retries): the backup takes over.
+  await time.advance(1000); await time.advance(2000);
+  assert.equal(helper.opened('stream.avcc'), 3);
+  assert.deepEqual(streams.at(-1), {path: 'webrtc', attempt: 1, active: true}, 'main tells the renderer to open the backup');
+  assert.match(rec.states.map(s => s.detail ?? '').join(' '), /backup connection/);
+  // The renderer's offer goes to the helper through main, with the token; only the answer comes back.
+  await assert.rejects(link.webrtcOffer(0, SESSION, 'v=0 offer'), /not in use/, 'an offer for an old attempt is refused');
+  await assert.rejects(link.webrtcOffer(1, 'not-a-uuid', 'v=0 offer'), /session/);
+  await assert.rejects(link.webrtcOffer(1, SESSION, 'x'.repeat(245_761)), /offer/);
+  assert.equal(await link.webrtcOffer(1, SESSION, 'v=0 offer'), `v=0 answer-for-${SESSION}`);
+  assert.equal(helper.offers.length, 1);
+  assert.equal(helper.offers[0]!.url, 'http://127.0.0.1:5555/vendor/serve-sim/helper/BBBBBBBB-2222/webrtc/offer');
+  assert.equal(helper.offers[0]!.auth, 'Bearer tok');assert.equal(helper.offers[0]!.type, 'application/json');
+  assert.deepEqual(helper.offers[0]!.body, {type: 'offer', sdp: 'v=0 offer', sessionId: SESSION, codec: 'h264'});
+  link.webrtcReport(1, 'frame');
+  assert.equal(rec.last().state, 'live');assert.equal(link.stats.transport, 'webrtc');
+  // A check of the main stream that still fails keeps the backup and waits longer before the next one.
+  await time.advance(30_000);
+  assert.equal(helper.opened('stream.avcc'), 4, 'main is checked again after 30 s');
+  assert.equal(streams.at(-1)!.path, 'webrtc');
+  // The main stream is healthy again: the next check switches back on its first keyframe.
+  failing = false;
+  await time.advance(60_000);
+  assert.equal(helper.opened('stream.avcc'), 5, 'the next check backs off to 60 s');
+  helper.streams.at(-1)!.push(Buffer.concat([SEED, DESCRIPTION])); await flush();
+  assert.equal(streams.at(-1)!.path, 'webrtc', 'a description alone does not switch back');
+  const before = rec.frames.length;
+  helper.streams.at(-1)!.push(KEY); await flush();
+  assert.deepEqual(streams.at(-1), {path: 'main', attempt: 1, active: false}, 'back on the main stream');
+  assert.deepEqual(helper.closes.map(c => c.body), [{sessionId: SESSION}], 'the helper WebRTC session is closed by main');
+  assert.equal(helper.closes[0]!.url, 'http://127.0.0.1:5555/vendor/serve-sim/helper/BBBBBBBB-2222/webrtc/close');
+  assert.deepEqual(rec.frames.slice(before).map(f => [f.codec, !!f.config, f.key]), [['h264', true, false], ['h264', false, true]], 'the description, then the keyframe');
+  assert.equal(rec.last().state, 'live');assert.equal(link.stats.transport, 'avcc');
+  await assert.rejects(link.webrtcOffer(1, SESSION2, 'v=0 offer'), /not in use/, 'no offers once the backup is not in use');
+  link.close();
+});
+
+// Spec: MUS-SPEC-21-811F (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-811f)
+test('backup, iOS: a helper locked to WebRTC switches at once; a stalled or failed backup is retried, and given up after three', async () => {
+  const time = clock(), rec = recorder();
+  const helper = backupHelper(() => new Response(JSON.stringify({error: 'stream_transport_locked', transport: 'webrtc'}), {status: 409}));
+  const streams: {path: string; attempt: number; active: boolean}[] = [];
+  FakeSocket.all = [];
+  const deps: LinkDeps = {hub, fetch: helper.fetchFn, socket: (url, headers) => new FakeSocket(url, headers) as never, setTimeout: time.set, clearTimeout: time.clear, now: () => time.now};
+  const link = new DeviceLink('ios', 'BBBBBBBB-2222', deps, {...rec.events, stream: s => streams.push({...s})});
+  await link.start();
+  link.setViewing(true); await flush();
+  assert.equal(helper.opened('stream.avcc'), 1);assert.equal(helper.opened('stream.mjpeg'), 0, 'a WebRTC lock does not fall to MJPEG (it is locked too)');
+  assert.deepEqual(streams.at(-1), {path: 'webrtc', attempt: 1, active: true});
+  await link.webrtcOffer(1, SESSION, 'v=0 offer');
+  link.webrtcReport(1, 'frame');assert.equal(rec.last().state, 'live');
+  // Not watched: the backup closes too (no video runs unwatched), and reopens with a new attempt.
+  link.setViewing(false); await flush();
+  assert.deepEqual(streams.at(-1), {path: 'webrtc', attempt: 1, active: false});
+  assert.deepEqual(helper.closes.map(c => c.body.sessionId), [SESSION]);
+  link.setViewing(true); await flush();
+  assert.deepEqual(streams.at(-1), {path: 'webrtc', attempt: 2, active: true});
+  // The renderer says the backup stalled: retried with a new attempt after a short wait.
+  link.webrtcReport(1, 'stalled');
+  assert.equal(streams.at(-1)!.attempt, 2, 'a report for an old attempt is ignored');
+  link.webrtcReport(2, 'stalled');
+  assert.equal(rec.last().state, 'reconnecting');assert.match(rec.last().detail ?? '', /backup connection stopped sending video/);
+  await time.advance(1000);
+  assert.deepEqual(streams.at(-1), {path: 'webrtc', attempt: 3, active: true});
+  // No frame within the first-frame bound counts as a failure too; after three in a row main takes over again.
+  link.webrtcReport(3, 'failed'); await time.advance(2000);
+  assert.equal(streams.at(-1)!.attempt, 4);
+  await time.advance(15_000);
+  await time.advance(4000); await flush();
+  assert.equal(streams.at(-1)!.path, 'main', 'the backup is given up after three failures in a row');
+  link.close();
+});
+
+// Spec: MUS-SPEC-21-811G (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-811g)
+test('backup: a window without WebRTC keeps the main stream; Android never switches (its local helper has no WebRTC)', async () => {
+  const time = clock(), rec = recorder();
+  const helper = backupHelper(() => new Response(JSON.stringify({error: 'stream_transport_locked', transport: 'webrtc'}), {status: 409}));
+  const streams: {path: string}[] = [];
+  const deps: LinkDeps = {hub, fetch: helper.fetchFn, socket: (url, headers) => new FakeSocket(url, headers) as never, setTimeout: time.set, clearTimeout: time.clear, now: () => time.now};
+  const link = new DeviceLink('ios', 'BBBBBBBB-2222', deps, {...rec.events, stream: s => streams.push({...s})});
+  await link.start();
+  link.setViewing(true); await flush();
+  assert.equal(streams.at(-1)!.path, 'webrtc');
+  link.webrtcReport(1, 'unsupported'); await flush();
+  assert.equal(streams.at(-1)!.path, 'main', 'this window cannot play WebRTC: back to the main stream');
+  link.close();
+
+  FakeSocket.all = [];
+  const android: {path: string}[] = [], arec = recorder();
+  const alink = new DeviceLink('android', 'emulator-5554', {...deps, fetch: (async () => new Response('{}')) as typeof fetch}, {...arec.events, stream: s => android.push({...s})});
+  await alink.start();
+  alink.setViewing(true); await flush();
+  for (let i = 0; i < 4; i++) { FakeSocket.all.filter(s => /frame-meta=1/.test(s.url)).at(-1)!.close(); await time.advance(8000); }
+  assert.deepEqual(android, [], 'Android stays on its socket');
+  await assert.rejects(alink.webrtcOffer(1, SESSION, 'v=0 offer'), /not in use/);
+  alink.close();
+});

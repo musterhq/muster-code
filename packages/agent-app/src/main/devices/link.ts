@@ -26,16 +26,33 @@ export const FIRST_FRAME_TIMEOUT_MS = 15_000, RETRY_MS = [1000, 2000, 4000, 8000
  */
 export const STALL_TIMEOUT_MS = FIRST_FRAME_TIMEOUT_MS;
 const STALLED = Symbol('stalled');
+/**
+ * The WebRTC backup (#811, iOS). When the main stream fails FAILOVER_FAILURES times within FAILOVER_WINDOW_MS (stalls
+ * included), or the helper says it is locked to WebRTC, the renderer is told to open a WebRTC connection instead. Main
+ * signals it (the renderer's offer reaches the helper only through webrtcOffer, with the token); the media goes
+ * straight to the renderer. Main checks the main stream again after MAIN_RECHECK_MS (backing off) and switches back on
+ * its first keyframe. Three backup failures in a row give the backup up until the user reconnects.
+ * Android does not switch: serve-emu's WebRTC needs a native module that Muster's script-free helper install omits.
+ */
+export const FAILOVER_FAILURES = 3, FAILOVER_WINDOW_MS = 120_000, MAIN_RECHECK_MS = [30_000, 60_000, 120_000, 300_000], WEBRTC_ATTEMPTS = 3;
+/** serve-sim's own limit on an offer's SDP. */
+export const MAX_SDP = 245_760;
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+/** Which path carries a session's video: the main stream (frames over IPC) or the WebRTC backup (media in the renderer). */
+export interface LinkStream {path: 'main' | 'webrtc'; attempt: number; active: boolean}
+export type WebRtcReport = 'frame' | 'stalled' | 'failed' | 'unsupported';
 /** Unacknowledged H.264 units before the link drops to the next keyframe (about one second at 30 fps). */
 export const H264_BACKLOG = 30;
 export interface LinkFrame {codec: 'jpeg' | 'h264'; key: boolean; data: Buffer; pts?: number; reset?: boolean; format?: 'annexb' | 'avcc'; config?: boolean}
 /** What a link is streaming and how much (diagnostics, the CI smoke's measurements). */
-export interface LinkStats {transport: 'avcc' | 'mjpeg' | 'semu' | 'none'; frames: number; keyframes: number; bytes: number; restarts: number; since: number}
+export interface LinkStats {transport: 'avcc' | 'mjpeg' | 'semu' | 'webrtc' | 'none'; frames: number; keyframes: number; bytes: number; restarts: number; since: number}
 export interface LinkEvents {
   frame(frame: LinkFrame): void;
   state(state: DeviceSessionState, detail?: string): void;
   screen(screen: DeviceScreen): void;
   input(ready: boolean): void;
+  /** The video path changed (#811); without this listener the link never switches to the backup. */
+  stream?(stream: LinkStream): void;
 }
 type Socket = Pick<WebSocket, 'send' | 'close' | 'readyState'> & {binaryType: string; onopen: ((e: unknown) => void) | null; onmessage: ((e: {data: unknown}) => void) | null; onclose: ((e: {code: number; reason: string}) => void) | null; onerror: ((e: unknown) => void) | null};
 export interface LinkDeps {
@@ -44,6 +61,7 @@ export interface LinkDeps {
   socket(url: string, headers: Record<string, string>): Socket;
   setTimeout: typeof setTimeout;
   clearTimeout: typeof clearTimeout;
+  now?: () => number;
 }
 const ORIENTATIONS: DeviceOrientation[] = ['portrait', 'landscape_left', 'portrait_upside_down', 'landscape_right'];
 const OPEN = 1;
@@ -64,6 +82,18 @@ export class DeviceLink {
   private h264Backlog = 0;
   private dropping = false;
   private stallTimer?: ReturnType<typeof setTimeout>;
+  // The WebRTC backup (#811).
+  private path: LinkStream['path'] = 'main';
+  private attempt = 0;
+  private webrtcActive = false;
+  private webrtcSession?: string;
+  /** This window cannot play WebRTC, or the backup failed WEBRTC_ATTEMPTS times: stay on the main stream until Reconnect. */
+  private webrtcOff = false;
+  private webrtcFailures = 0;
+  private failures: number[] = [];
+  private checkTimer?: ReturnType<typeof setTimeout>;
+  private checkStep = 0;
+  private check?: AbortController;
   /** iOS: H.264 (AVCC) unless this window cannot decode it or the helper does not offer it, then MJPEG. */
   private mjpegOnly = false;
   stats: LinkStats = {transport: 'none', frames: 0, keyframes: 0, bytes: 0, restarts: 0, since: Date.now()};
@@ -106,6 +136,7 @@ export class DeviceLink {
     this.gotFrame = false; this.gate.reset(); this.h264Backlog = 0; this.dropping = false;
     this.events.state(this.retries ? 'reconnecting' : 'starting');
     this.firstFrameTimer = this.deps.setTimeout(() => this.videoFailed('No video arrived from the device.'), FIRST_FRAME_TIMEOUT_MS);
+    if (this.path === 'webrtc') { this.attempt++; this.webrtcActive = true; this.emitStream(); if (!this.checkTimer && !this.check) this.scheduleCheck(); return; }
     let hub: HubEndpoint;
     try { hub = await this.deps.hub(); } catch (error) { this.videoFailed(message(error)); return; }
     if (this.closed || !this.viewing) return;
@@ -120,6 +151,8 @@ export class DeviceLink {
     if (this.stallTimer) this.deps.clearTimeout(this.stallTimer);
     this.firstFrameTimer = this.retryTimer = this.stallTimer = undefined;
     this.video?.abort(); this.video = undefined;
+    if (this.webrtcActive) { this.webrtcActive = false; void this.closeWebRtc(); this.emitStream(); }
+    if (!this.viewing || this.closed) this.stopCheck();
     const socket = this.videoSocket; this.videoSocket = undefined;
     if (socket && this.inputSocket === socket) { this.inputSocket = undefined; this.admitted = false; this.events.input(false); }
     try { socket?.close(); } catch {}
@@ -134,6 +167,12 @@ export class DeviceLink {
   }
   private videoFailed(detail: string): void {
     if (this.closed || !this.viewing) return;
+    if (this.path === 'webrtc') { this.webrtcFailed(detail); return; }
+    if (this.canFailover()) {
+      const now = this.now();
+      this.failures = [...this.failures.filter(at => now - at < FAILOVER_WINDOW_MS), now];
+      if (this.failures.length >= FAILOVER_FAILURES) { this.failover(); return; }
+    }
     this.stopVideo(this.retries >= RETRY_MS.length);
     if (this.retries >= RETRY_MS.length) { this.events.state('error', `${detail} Reconnect to try again.`); return; }
     const wait = RETRY_MS[this.retries++]!;
@@ -147,32 +186,52 @@ export class DeviceLink {
     if (frame.config) return;
     this.stats.frames++; this.stats.bytes += frame.data.length; if (frame.key) this.stats.keyframes++;
   }
-  /** Restarts video after an error (the Reconnect button). */
-  reconnect(): void { this.retries = 0; if (this.viewing) void this.startVideo(); if (!this.inputSocket) void this.deps.hub().then(hub => this.connectInput(hub), () => {}); }
+  /** Restarts video after an error (the Reconnect button); the backup may be tried again. */
+  reconnect(): void { this.retries = 0; this.webrtcOff = false; this.failures = []; if (this.viewing) void this.startVideo(); if (!this.inputSocket) void this.deps.hub().then(hub => this.connectInput(hub), () => {}); }
 
   /**
    * iOS H.264: serve-sim's AVCC body, demuxed here and forwarded in order (a seed JPEG first, then the decoder
    * description, then access units). If the renderer falls behind, the subscription is reopened: a fresh one starts
    * with a new description and keyframe, where waiting could take minutes on an idle simulator.
    */
-  private async readAvcc(hub: HubEndpoint): Promise<void> {
+  private async readAvcc(hub: HubEndpoint, checking = false): Promise<void> {
     const controller = new AbortController();
-    this.video = controller;
+    // A check of the main stream while the backup runs (#811): nothing is forwarded until its first keyframe.
+    let probing = checking;
+    let description: Buffer | undefined;
+    if (probing) this.check = controller; else { this.video = controller; this.h264Backlog = 0; }
     const demuxer = new AvccDemuxer();
-    this.h264Backlog = 0;
+    const failed = (detail: string) => { if (probing) this.checkFailed(controller); else if (this.video === controller && !controller.signal.aborted) this.videoFailed(detail); };
     try {
       const response = await this.deps.fetch(`${hub.origin}/vendor/serve-sim/helper/${encodeURIComponent(this.deviceId)}/stream.avcc`, {headers: this.auth(hub), signal: controller.signal});
+      if (probing && !response.ok) { await response.body?.cancel().catch(() => {}); failed(''); return; }
+      // Locked to WebRTC: MJPEG is locked too, so this is the backup's job.
+      if (response.status === 409 && this.canFailover()) {
+        const body = await response.json().catch(() => null) as {error?: string; transport?: string} | null;
+        if (controller.signal.aborted) return;
+        if (body?.error === 'stream_transport_locked' && body.transport === 'webrtc') { this.failover(); return; }
+        this.mjpegOnly = true; void this.startVideo();
+        return;
+      }
       // A helper without the H.264 route (or locked to another transport) still streams MJPEG.
       if (response.status === 404 || response.status === 405 || response.status === 409) { await response.body?.cancel().catch(() => {}); this.mjpegOnly = true; if (!controller.signal.aborted) void this.startVideo(); return; }
       if (!response.ok || !response.body) throw new Error(response.status === 401 ? 'The device helper refused the connection.' : `The simulator stream answered ${response.status}.`);
       const reader = response.body.getReader();
       for (;;) {
         const result = await this.boundedRead(reader, controller);
-        if (result === STALLED) { this.stalled(controller, 'The device stopped sending video.'); return; }
+        if (result === STALLED) { if (probing) failed(''); else this.stalled(controller, 'The device stopped sending video.'); return; }
         const {done, value} = result;
         if (done || controller.signal.aborted) break;
         for (const chunk of demuxer.push(value)) {
           if (controller.signal.aborted) break;
+          if (probing) {
+            if (chunk.kind === 'description') description = chunk.payload;
+            if (chunk.kind !== 'keyframe') continue;
+            // Healthy again: this subscription becomes the stream, starting from its description and this keyframe.
+            probing = false;
+            this.switchToMain(controller);
+            if (description) this.forward({codec: 'h264', format: 'avcc', config: true, key: false, data: description}, 'avcc');
+          }
           // The seed picture is shown, but only an access unit proves the H.264 stream works (#811).
           if (chunk.kind === 'seed') { this.forward({codec: 'jpeg', key: true, data: chunk.payload}, 'avcc'); continue; }
           if (chunk.kind === 'description') { this.forward({codec: 'h264', format: 'avcc', config: true, key: false, data: chunk.payload}, 'avcc'); continue; }
@@ -189,10 +248,108 @@ export class DeviceLink {
           this.forward({codec: 'h264', format: 'avcc', key: chunk.kind === 'keyframe', data: chunk.payload}, 'avcc');
         }
       }
-      if (!controller.signal.aborted) this.videoFailed('The simulator stream ended.');
+      if (!controller.signal.aborted) failed('The simulator stream ended.');
     } catch (error) {
-      if (!controller.signal.aborted) this.videoFailed(message(error));
+      if (!controller.signal.aborted || probing) failed(message(error));
     }
+  }
+
+  // --- The WebRTC backup (#811) ---------------------------------------------------------------------------------
+  private now(): number { return (this.deps.now ?? Date.now)(); }
+  private canFailover(): boolean { return this.platform === 'ios' && !this.webrtcOff && !!this.events.stream; }
+  private emitStream(): void { this.events.stream?.({path: this.path, attempt: this.attempt, active: this.path === 'webrtc' && this.webrtcActive}); }
+  /** The main stream keeps failing (or is locked to WebRTC): the renderer opens the backup. */
+  private failover(): void {
+    this.stopVideo(false);
+    this.path = 'webrtc'; this.failures = []; this.webrtcFailures = 0; this.retries = 0; this.checkStep = 0;
+    this.events.state('reconnecting', 'The video stream keeps failing. Switching to the backup connection.');
+    this.scheduleCheck();
+    void this.startVideo();
+  }
+  private webrtcFailed(detail: string): void {
+    this.stopVideo(false);
+    if (++this.webrtcFailures >= WEBRTC_ATTEMPTS) {
+      // The backup does not work here either: back to the main stream, whose own retries end in the error state.
+      this.webrtcOff = true; this.path = 'main'; this.emitStream(); this.stopCheck();
+      this.retries = 0; this.failures = [];
+      this.events.state('reconnecting', detail);
+      this.retryTimer = this.deps.setTimeout(() => void this.startVideo(), RETRY_MS[0]!);
+      return;
+    }
+    this.events.state('reconnecting', detail);
+    this.retryTimer = this.deps.setTimeout(() => void this.startVideo(), RETRY_MS[this.webrtcFailures - 1]!);
+  }
+  /** What the renderer saw on the backup, for the current attempt only. */
+  webrtcReport(attempt: number, event: WebRtcReport): void {
+    if (this.closed || this.path !== 'webrtc' || !this.webrtcActive || attempt !== this.attempt) return;
+    if (event === 'frame') {
+      if (this.stats.transport !== 'webrtc') this.stats = {transport: 'webrtc', frames: 0, keyframes: 0, bytes: 0, restarts: this.stats.restarts, since: this.now()};
+      this.stats.frames++; this.webrtcFailures = 0;
+      this.frameArrived();
+      return;
+    }
+    if (event === 'unsupported') {
+      this.stopVideo(false);
+      this.webrtcOff = true; this.path = 'main'; this.emitStream(); this.stopCheck(); this.retries = 0;
+      void this.startVideo();
+      return;
+    }
+    this.webrtcFailed(event === 'stalled' ? 'The backup connection stopped sending video.' : 'The backup connection failed.');
+  }
+  /** The renderer's WebRTC offer, sent to the helper with the token; only the answer's SDP goes back. */
+  async webrtcOffer(attempt: number, sessionId: string, sdp: string): Promise<string> {
+    if (this.closed || this.path !== 'webrtc' || !this.webrtcActive || attempt !== this.attempt) throw new Error('The backup connection is not in use.');
+    if (typeof sessionId !== 'string' || !UUID_V4.test(sessionId)) throw new Error('Invalid backup connection session.');
+    if (typeof sdp !== 'string' || !sdp || sdp.length > MAX_SDP) throw new Error('Invalid backup connection offer.');
+    if (this.webrtcSession && this.webrtcSession !== sessionId) await this.closeWebRtc();
+    this.webrtcSession = sessionId;
+    const hub = await this.deps.hub();
+    const response = await this.deps.fetch(this.webrtcUrl(hub, 'offer'), {method: 'POST', headers: {...this.auth(hub), 'content-type': 'application/json'}, body: JSON.stringify({type: 'offer', sdp, sessionId, codec: 'h264'}), signal: AbortSignal.timeout(15_000)});
+    if (!response.ok) throw new Error(response.status === 409 ? 'Another viewer is connecting to this device. Retrying.' : `The backup connection was refused (${response.status}).`);
+    const answer = await response.json().catch(() => null) as {type?: string; sdp?: unknown} | null;
+    if (answer?.type !== 'answer' || typeof answer.sdp !== 'string' || !answer.sdp || answer.sdp.length > MAX_SDP) throw new Error('The device answered the backup connection with something unreadable.');
+    if (this.path !== 'webrtc' || attempt !== this.attempt || !this.webrtcActive) { void this.closeWebRtc(); throw new Error('The backup connection is not in use.'); }
+    return answer.sdp;
+  }
+  private webrtcUrl(hub: HubEndpoint, action: 'offer' | 'close'): string { return `${hub.origin}/vendor/serve-sim/helper/${encodeURIComponent(this.deviceId)}/webrtc/${action}`; }
+  /** Releases the helper's WebRTC session (best effort). */
+  private async closeWebRtc(): Promise<void> {
+    const sessionId = this.webrtcSession; this.webrtcSession = undefined;
+    if (!sessionId) return;
+    try {
+      const hub = await this.deps.hub();
+      await this.deps.fetch(this.webrtcUrl(hub, 'close'), {method: 'POST', headers: {...this.auth(hub), 'content-type': 'application/json'}, body: JSON.stringify({sessionId}), signal: AbortSignal.timeout(5000)});
+    } catch {}
+  }
+  private scheduleCheck(): void {
+    if (this.checkTimer) this.deps.clearTimeout(this.checkTimer);
+    const wait = MAIN_RECHECK_MS[Math.min(this.checkStep, MAIN_RECHECK_MS.length - 1)]!;
+    this.checkTimer = this.deps.setTimeout(() => { this.checkTimer = undefined; void this.checkMain(); }, wait);
+  }
+  private stopCheck(): void {
+    if (this.checkTimer) this.deps.clearTimeout(this.checkTimer);
+    this.checkTimer = undefined;
+    const check = this.check; this.check = undefined; check?.abort();
+  }
+  private async checkMain(): Promise<void> {
+    if (this.closed || this.path !== 'webrtc' || this.check) return;
+    if (!this.viewing) { this.scheduleCheck(); return; }
+    try { await this.readAvcc(await this.deps.hub(), true); } catch { this.checkStep++; this.scheduleCheck(); }
+  }
+  private checkFailed(controller: AbortController): void {
+    if (this.check !== controller) return;
+    this.check = undefined; controller.abort();
+    this.checkStep++;
+    if (this.path === 'webrtc' && !this.closed) this.scheduleCheck();
+  }
+  private switchToMain(controller: AbortController): void {
+    this.check = undefined;
+    if (this.checkTimer) this.deps.clearTimeout(this.checkTimer);
+    this.checkTimer = undefined; this.checkStep = 0;
+    this.stopVideo(false);
+    this.path = 'main'; this.failures = []; this.retries = 0; this.webrtcFailures = 0;
+    this.emitStream();
+    this.video = controller; this.gotFrame = false; this.h264Backlog = 0;
   }
   /** One read of a video body, bounded: STALLED when nothing arrives within STALL_TIMEOUT_MS (the body is then closed). */
   private boundedRead(reader: ReadableStreamDefaultReader<Uint8Array>, controller: AbortController): Promise<ReadableStreamReadResult<Uint8Array> | typeof STALLED> {
