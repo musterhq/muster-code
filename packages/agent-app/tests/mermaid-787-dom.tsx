@@ -51,11 +51,12 @@ const svgFor=(text:string)=>`<svg width="200" height="100" viewBox="0 0 200 100"
 let mermaidCalls=0;const mermaidFailures:string[]=[];
 setRichRenderers({async mermaid(source){mermaidCalls++;const fail=mermaidFailures.shift();if(fail)throw new Error(fail);return {svg:svgFor(source.split('\n')[1]?.trim()??''),width:200,height:100};}});
 
-const failed:string[]=[];
-const run=async(name:string,body:()=>Promise<void>)=>{try{await check(name,body);}catch(error){failed.push(name);console.error(error);await show(<div/>);}};
+// Each check reports on its own (check prints ok / not ok); a failure is recorded so the rest still run.
+let failed=0;
+const recordFailure=async(error:unknown)=>{failed++;console.error(error);await show(<div/>);};
 
 // Spec: MUS-SPEC-21-787B (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-787b)
-await run('a diagram header switches between Show code and Show diagram; the source stays in the DOM for Find', async()=>{
+await check('a diagram header switches between Show code and Show diagram; the source stays in the DOM for Find', async()=>{
   await show(<MessageBody text={'Plan:\n\n```mermaid\nflowchart LR\n  Alpha-->Beta\n```'}/>,20);
   await until(()=>$('.rich-block[data-kind=diagram][data-status=ready] .rich-stage'));
   const block=$('.rich-block')!;
@@ -81,10 +82,10 @@ await run('a diagram header switches between Show code and Show diagram; the sou
   assert.ok($('.rich-stage',block),'Show diagram draws it again');
   assert.ok($('[aria-label="Show code"]',block));
   assert.ok($('[data-rich-source]',block)!.classList.contains('rich-sr'));
-});
+}).catch(recordFailure);
 
 // Spec: MUS-SPEC-21-787C (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-787c)
-await run('clicking a diagram opens it full size with Copy image and Save as PNG and SVG, the theme background baked in', async()=>{
+await check('clicking a diagram opens it full size with Copy image and Save as PNG and SVG, the theme background baked in', async()=>{
   calls.length=0;saved.length=0;
   await show(<RichFence kind="diagram" source={'flowchart LR\n  Gamma-->Delta'}/>,20);
   await until(()=>$('.rich-block[data-status=ready] .rich-stage'));
@@ -117,10 +118,10 @@ await run('clicking a diagram opens it full size with Copy image and Save as PNG
   await click($$('[role=menuitem]').find(item=>item.textContent==='Download PNG')!,120);
   await until(()=>saved.length===2);
   assert.equal(saved[1]!.name,'Flowchart.png');assert.equal(saved[1]!.blob.type,'image/png');
-});
+}).catch(recordFailure);
 
 // Spec: MUS-SPEC-21-787E (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-787e)
-await run('a renderer chunk that fails to load shows Retry, and Retry loads it again', async()=>{
+await check('a renderer chunk that fails to load shows Retry, and Retry loads it again', async()=>{
   assert.ok(setRichBodyLoaders,'RichFence lets a test swap how a block body chunk loads');
   let loads=0;
   setRichBodyLoaders!({diagram:()=>{loads++;return loads===1?Promise.reject(new Error('Failed to fetch dynamically imported module: file:///app/renderer/MermaidBlock-x1.js')):import('../src/renderer/components/rich/MermaidBlock');}});
@@ -141,10 +142,10 @@ await run('a renderer chunk that fails to load shows Retry, and Retry loads it a
   await click($$('.rich-body [role=alert] button').find(b=>/Retry/.test(b.textContent??''))!,60);
   await until(()=>$('.rich-block[data-status=ready] .rich-stage'));
   assert.equal(mermaidCalls,2);
-});
+}).catch(recordFailure);
 
 // Spec: MUS-SPEC-21-787F (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-787f)
-await run('a mermaid fence saved in an older chat draws with the switch, with no migration', async()=>{
+await check('a mermaid fence saved in an older chat draws with the switch, with no migration', async()=>{
   // Exactly what a reply stored before this change holds: plain Markdown, no flags or metadata.
   const stored='Here is the deploy path.\n\n```mermaid\nsequenceDiagram\n  Iota->>Kappa: ship\n```\n\nDone.';
   await show(<MessageBody text={stored}/>,20);
@@ -152,10 +153,10 @@ await run('a mermaid fence saved in an older chat draws with the switch, with no
   assert.ok($('[aria-label="Show code"]'),'the switch is there for an old reply too');
   assert.match($('[data-rich-source]')!.textContent!,/Iota->>Kappa: ship/);
   assert.match($('.md-body')!.textContent!,/Done\./,'prose after the block is kept');
-});
+}).catch(recordFailure);
 
 assert.deepEqual(errors,[],'no uncaught render errors');
 root.unmount();
-if(failed.length){console.error(`mermaid-787-dom: ${failed.length} failing: ${failed.join(' | ')}`);process.exit(1);}
+if(failed){console.error(`mermaid-787-dom: ${failed} failing`);process.exit(1);}
 console.log('mermaid-787-dom: ok');
 process.exit(0);

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, protocol, screen, session, shell, clipboard, systemPreferences } from 'electron';
+import { app, BrowserWindow, ClipboardItem, desktopCapturer, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, protocol, screen, session, shell, clipboard, systemPreferences } from 'electron';
 import {execFile} from 'node:child_process';
 import {downscaleIcon} from './icon-downscale.ts';
 import {BrowserSessionVault} from './browser-session-vault.ts';
@@ -766,6 +766,14 @@ async function main(): Promise<void> {
       const text=(input as {text?:unknown})?.text;
       if(typeof text!=='string'||text.length>2097152)throw new Error('Copy exceeds the 2 MB limit.');
       clipboard.writeText(text);return;
+    }
+    if(command === 'clipboard.writeImage'){
+      const dataUrl=(input as {dataUrl?:unknown})?.dataUrl;
+      const prefix='data:image/png;base64,';
+      if(typeof dataUrl!=='string'||!dataUrl.startsWith(prefix)||dataUrl.length>32*1024*1024)throw new Error('Invalid image copy request.');
+      const png=Buffer.from(dataUrl.slice(prefix.length),'base64');
+      if(png.length<8||png.readUInt32BE(0)!==0x89504e47)throw new Error('The image is not a PNG.');
+      await clipboard.write([new ClipboardItem({'image/png':new Blob([png],{type:'image/png'})})]);return;
     }
     if(command === 'musterServer.signInWindow'){
       const request=input as Commands['musterServer.signInWindow']['input'];

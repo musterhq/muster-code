@@ -9,6 +9,9 @@ interface Row { content: string; color?: string }
 const waiting = new Map<number, (reply: Record<string, unknown>) => void>();
 const scope = {postMessage(reply: Record<string, unknown>) { waiting.get(reply.id as number)?.(reply); }, onmessage: undefined as undefined | ((event: {data: unknown}) => void)};
 Object.assign(globalThis, {self: scope});
+// The worker keeps its grammars for a few idle minutes; that timer must not hold this test process open.
+const setTimer = globalThis.setTimeout;
+Object.assign(globalThis, {setTimeout: (...args: Parameters<typeof setTimeout>) => { const timer = setTimer(...args); timer.unref?.(); return timer; }});
 const bundled = fileURLToPath(new URL('../dist/tests/syntax-highlight-worker-787.mjs', import.meta.url));
 await build({entryPoints: [fileURLToPath(new URL('../src/renderer/syntax-highlight-worker.ts', import.meta.url))], outfile: bundled, bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'error'});
 await import(pathToFileURL(bundled).href);

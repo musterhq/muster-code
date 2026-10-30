@@ -123,6 +123,7 @@ const COMMANDS = {
   'git.compareUrl': true,
   'link.open': true,
   'clipboard.write': true,
+  'clipboard.writeImage': true,
   'git.diff': true,
   'providers.list': true,
   'providers.reveal': true,

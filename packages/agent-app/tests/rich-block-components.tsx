@@ -164,6 +164,7 @@ setRichRenderers({
   });
 
   // Spec: MUS-SPEC-21-361B (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-361b)
+  // Spec: MUS-SPEC-21-787D (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-787d)
   await check('an invalid mermaid fence shows the error card with the parse error and its source', async()=>{
   // Parse failure: error card with the source, never a blank block.
   mermaidFail='Parse error on line 2: expected node';
