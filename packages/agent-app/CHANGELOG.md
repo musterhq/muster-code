@@ -3,7 +3,20 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
-## Unreleased
+## 0.3.17
+
+Muster uses far less memory with long chats, agents can make Word, Excel, PowerPoint and PDF files and show finished pages, dashboards and previews in the chat, replies typeset maths and draw diagrams and charts, and iOS Simulators and Android Emulators run beside your chats.
+
+- **Much less memory with long chats.** Muster no longer reads a chat's whole history to find a few rows. Starting Muster, the end of every turn, the Changes panel, installing a plugin and the check on a quiet running chat each used to load whole chats into memory (close to 1 GB at a time with chats of 20,000 messages); now they read only what they need (#819).
+- Replies streaming into a window you are not using show every word, and panels that open while the window is inactive are visible instead of staying transparent (#801, #817).
+- **Maths in replies.** `$…$`, `$$…$$`, `\(…\)` and `\[…\]` are typeset with KaTeX in new and older chats; copying a reply keeps the TeX source. Prices and shell variables stay plain text. Settings › Chat has a switch to turn it off (#799).
+- Mermaid diagrams in chat get a Show code switch, full-size Copy image and Save, and a Retry that reloads a part that failed to load (#798).
+- `.ipynb` notebooks open as notebooks (Markdown, highlighted code and saved outputs) and `.mmd` files as diagrams, with a toggle back to the source (#797).
+- Right-click any image in a chat to Copy Image, Copy Path, Reveal in Finder, Open With, Save As or Open in Canvas; Cmd+C in the image viewer copies the image (#791).
+- The chat summary card stays hidden when there is nothing to summarise (#796).
+- Settings › Integrations lists several Muster Servers at once, each with its own account, status and actions; the server you already had moves into the list without signing in again (#808).
+- The composer's + menu no longer closes itself right after you switch chats (#816).
+- DOMPurify and KaTeX are updated to their latest releases (#795).
 
 - **Word, Excel, PowerPoint and PDF files from agents, with Muster alone.** Agent chats get Muster's own skills for documents, spreadsheets, presentations and PDF, and two tools: `office_setup` installs the office libraries (docx, exceljs, pptxgenjs, pdf-lib, jszip, pdfjs-dist) the first time and gives the command that runs a script with them importable from any folder; `office_render` turns a file into page images the agent looks at before it replies, so it can fix overflowing text, bad page breaks and broken formulas. The first render downloads LibreOffice if you don't have it, and the tool row shows the progress. The libraries are pinned to the versions Muster is tested with, downloaded from npm on first use and checked against their checksums; Settings › Storage shows them with Remove.
 - Muster's coding-client home no longer links in another app's document, spreadsheet, presentation or PDF skills and plugins; your other skills and plugins still load.
