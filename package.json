@@ -8,7 +8,8 @@
     "build": "pnpm --filter @muster-code/builtin build",
     "assemble": "zsh scripts/assemble.sh",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test:server-e2e": "npm --prefix packages/agent-app run test:server-e2e"
   },
   "engines": {
     "node": ">=22"

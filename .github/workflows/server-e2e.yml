@@ -1,0 +1,68 @@
+name: Muster Server e2e
+
+# The app's Muster Server client against real Muster Server processes built from packages/server (#804).
+# The tests start each server on a temp data dir, wait for /healthz, seed an org, two people and a project through the
+# server's own CLI and API, then drive the app's client: sign in, projects, tasks, live updates, a restart, two servers.
+# Runs on every pull request (no path filters) so it always reports and can be a required check: a path-filtered required
+# check never reports on unrelated PRs and blocks them, and a hand-kept path list misses new client files.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: server-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_OPTIONS: --max-old-space-size=4096
+  # The server bundles the app's runtime and renderer; neither Electron nor node-pty's Electron rebuild is needed for that.
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+  MUSTER_SKIP_NATIVE_REBUILD: "1"
+  MUSTER_SERVER_E2E_LOGS: ${{ github.workspace }}/server-e2e-logs
+
+jobs:
+  server-e2e:
+    name: App client against a real Muster Server
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: packages/agent-app/.nvmrc
+          cache: npm
+          cache-dependency-path: |
+            packages/agent-app/package-lock.json
+            packages/server/package-lock.json
+
+      - name: Install
+        run: |
+          (cd packages/agent-app && npm ci --no-audit --no-fund)
+          (cd packages/server && npm ci --no-audit --no-fund)
+
+      - name: Build the app runtime and Muster Server
+        run: |
+          (cd packages/agent-app && npm run build)
+          (cd packages/server && npm run build)
+          packages/server/bin/muster-server --version
+
+      - name: Workflow tests against real servers
+        working-directory: packages/agent-app
+        env:
+          MUSTER_SERVER_E2E_SKIP_BUILD: "1"
+        run: npm run test:server-e2e
+
+      - name: Upload server and client logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: server-e2e-logs
+          path: server-e2e-logs/
+          if-no-files-found: warn
+          retention-days: 14
