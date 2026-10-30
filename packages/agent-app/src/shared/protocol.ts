@@ -143,6 +143,8 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'hindsight.recall': {input: {folderId?: string; query: string; budget?: 'low' | 'mid' | 'high'; maxTokens?: number; types?: Array<'world' | 'experience' | 'observation'>; tags?: string[]}; output: {bankId: string; results: readonly {id?: string; text: string; type?: string; score?: number}[]}};
  'hindsight.reflect': {input: {folderId?: string; query: string; context?: string; budget?: 'low' | 'mid' | 'high'; maxTokens?: number}; output: {bankId: string; text: string}};
  'clipboard.write': {input:{text:string};output:void};
+ /** Puts a PNG (a `data:image/png;base64,` URL, up to 32 MB) on the system clipboard as an image: Copy image on a drawn diagram. */
+ 'clipboard.writeImage': {input:{dataUrl:string};output:void};
  'link.open': {input:{url:string};output:void};
  /** Opens the server's own sign-in page in an app window with a cookie jar of its own per server origin (desktop only), so a hosted server can give this Mac the session its live socket accepts. `close` closes it. */
  'musterServer.signInWindow': {input:{url?:string;baseUrl:string;close?:boolean};output:{opened:boolean}};

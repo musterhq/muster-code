@@ -113,3 +113,7 @@
 .rich-loading-detail { display: flex; justify-content: center; padding: 0 12px 10px; }
 .rich-block[data-fullscreen='true'] { position: fixed; inset: 0; z-index: var(--z-modal); margin: 0; border: 0; border-radius: 0; background: var(--bg); }
 .rich-block[data-fullscreen='true'] .rich-body { flex: 1; display: flex; flex-direction: column; }
+
+/* Mermaid "Show code": the source in place of the drawing, highlighted. Inline it is capped like the drawing; full size it fills. */
+.rich-source.rich-code { max-height: 420px; margin: 8px; color: var(--text); }
+.rich-source.rich-code:not([data-mode='inline']) { max-height: none; overflow: auto; }

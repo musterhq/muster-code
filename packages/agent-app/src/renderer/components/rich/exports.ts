@@ -1,7 +1,8 @@
 /**
  * Saving a visual: the browser's own download path, which the desktop shell turns into the native Save dialog (no file is
- * written until the person picks a place). Pure DOM helpers; nothing here reaches the network.
+ * written until the person picks a place). Copying an image goes through the desktop shell's clipboard. Nothing here reaches the network.
  */
+import {invoke} from '../../bridge';
 
 /** Saves `blob` as `fileName` through a transient link. */
 export function downloadBlob(blob: Blob, fileName: string): void {
@@ -16,10 +17,19 @@ export function downloadBlob(blob: Blob, fileName: string): void {
 }
 export const downloadText = (text: string, fileName: string, type: string): void => downloadBlob(new Blob([text], {type: `${type};charset=utf-8`}), fileName);
 
-/** A standalone SVG file: XML header, explicit namespace. */
-export function standaloneSvg(svg: string): string {
-  const withNamespace = /<svg\b[^>]*\sxmlns=/i.test(svg) ? svg : svg.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
-  return `<?xml version="1.0" encoding="UTF-8"?>\n${withNamespace}\n`;
+/**
+ * A standalone SVG file: XML header, explicit namespace. With `background` the root carries the theme's surface colour, so a
+ * drawing made for a dark theme (light text) still reads when it is opened outside the app.
+ */
+export function standaloneSvg(svg: string, background?: string): string {
+  let out = /<svg\b[^>]*\sxmlns=/i.test(svg) ? svg : svg.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+  if (background && /^[#\w(),.%\s-]+$/.test(background)) {
+    const root = /<svg\b[^>]*>/i.exec(out)![0];
+    const style = /\sstyle="([^"]*)"/i.exec(root);
+    const tag = style ? root.replace(style[0], ` style="${style[1]!.replace(/;?\s*$/, ';')} background-color: ${background}"`) : root.replace(/<svg\b/i, `<svg style="background-color: ${background}"`);
+    out = out.replace(root, () => tag);
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>\n${out}\n`;
 }
 
 /** Rasterizes an SVG string on a canvas filled with `background` (a transparent PNG would vanish on a dark page). */
@@ -42,4 +52,20 @@ export async function svgToPngBlob(svg: string, width: number, height: number, b
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
     return await new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('The image could not be saved.')), 'image/png'));
   }
+}
+
+/** A PNG as a `data:image/png;base64,…` URL. */
+export async function pngDataUrl(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  return `data:image/png;base64,${btoa(binary)}`;
+}
+
+/**
+ * Puts a PNG on the system clipboard as an image. Through the main process: the window's session refuses every permission
+ * request, so the page's own `navigator.clipboard.write` is denied.
+ */
+export async function copyPngImage(blob: Blob): Promise<void> {
+  await invoke('clipboard.writeImage', {dataUrl: await pngDataUrl(blob)});
 }

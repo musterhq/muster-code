@@ -78,6 +78,7 @@ const LANGUAGE_LOADERS: Record<string, () => Promise<{ default: unknown }>> = {
   lua: () => import('@shikijs/langs/lua'),
   makefile: () => import('@shikijs/langs/makefile'),
   markdown: () => import('@shikijs/langs/markdown'),
+  mermaid: () => import('@shikijs/langs/mermaid'),
   mdx: () => import('@shikijs/langs/mdx'),
   'objective-c': () => import('@shikijs/langs/objective-c'),
   php: () => import('@shikijs/langs/php'),
