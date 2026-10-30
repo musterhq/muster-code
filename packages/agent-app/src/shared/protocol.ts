@@ -176,6 +176,8 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  /** Share sheet: saves an export through a save dialog (main process). */
  'chat.export.file': {input:{id:string;format:'markdown'|'html'|'json';redact?:boolean};output:{saved:boolean;fileName?:string}};
  'chat.timeline': { input: {id: string; select?: boolean}; output: TimelineSnapshot };
+ /** The chat's timeline revision alone: a cheap "did anything change?" probe. */
+ 'chat.timelineRevision': { input: {id: string}; output: {revision: number} };
  /** NAV-11 global search over message content (runtime full-text index of every non-archived chat's user and
   *  assistant messages). Every whitespace-separated term must appear in one message; one hit per chat (its best
   *  message), phrase matches first, then recency. Paged by `offset`/`limit` (default 20, max 50): a full page means

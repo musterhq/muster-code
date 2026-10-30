@@ -232,7 +232,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       if (prior.kind === 'restart') { store.appendItem(chat.id, 'notice', 'Muster closed again before the automatic continuation finished, so it was not continued again. Send a message to continue.', 'completed', {kind:'auto-resume', reason:'restart-again'}); continue; }
     }
     if (chat.status !== 'running' || chat.archived) continue;
-    if (store.timeline(chat.id).some(item => (item.kind === 'approval' || item.kind === 'question') && item.status === 'pending')) continue;
+    if (store.hasPendingDecision(chat.id)) continue;
     restartCandidates.push(chat.id);
   }
   // Adapter routes and the Messages lane (#688) run inside Muster: their work died with the process.
@@ -240,15 +240,14 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   // #450: rows already sent are dropped and natively held rows come back; an orphaned chat's queue waits for it to continue.
   queue.recoverAtBoot();
   for (const chatId of orphaned) if (store.queue(chatId).length && !queue.paused(chatId)) queue.pause(chatId, 'interrupted');
-  for (const chat of store.snapshot().chats) {
-    for (const item of store.timeline(chat.id)) {
-      // The provider request ended with the previous process; the card stays readable but cannot be reopened.
-      // No handler survives a restart. The same read-time rule decides: past its stored deadline it expired, otherwise it was lost.
-      // An ask_user question never had a waiting handler: it stays answerable, and its answer becomes the next turn.
-      if ((item.kind === 'question' || item.kind === 'approval') && item.status === 'pending' && !isNonBlockingQuestion(item.data)) { const settled = pendingStatusAtRead(item, Date.now(), false); store.updateItem(item.id, item.text, settled.status, {...item.data, expiredReason:settled.reason}); }
-      // A manual compaction request in flight when the app closed: no new process will ever settle this row.
-      if (item.kind === 'notice' && item.data?.kind === 'compaction' && item.status === 'running') store.updateItem(item.id, 'Compaction status unknown: Muster restarted while it was in progress. History is unchanged. Retry, or continue in a fresh thread with a summary.', 'failed', {...item.data, status: 'failed', actions: ['retry', 'fresh']});
-    }
+  // #39: only the rows that can need settling are read, never every chat's whole history.
+  for (const item of store.unsettledItems()) {
+    // The provider request ended with the previous process; the card stays readable but cannot be reopened.
+    // No handler survives a restart. The same read-time rule decides: past its stored deadline it expired, otherwise it was lost.
+    // An ask_user question never had a waiting handler: it stays answerable, and its answer becomes the next turn.
+    if ((item.kind === 'question' || item.kind === 'approval') && item.status === 'pending' && !isNonBlockingQuestion(item.data)) { const settled = pendingStatusAtRead(item, Date.now(), false); store.updateItem(item.id, item.text, settled.status, {...item.data, expiredReason:settled.reason}); }
+    // A manual compaction request in flight when the app closed: no new process will ever settle this row.
+    if (item.kind === 'notice' && item.data?.kind === 'compaction' && item.status === 'running') store.updateItem(item.id, 'Compaction status unknown: Muster restarted while it was in progress. History is unchanged. Retry, or continue in a fresh thread with a summary.', 'failed', {...item.data, status: 'failed', actions: ['retry', 'fresh']});
   }
   // PRJ-07: every Project change carries a durable per-Project sequence so clients detect and replay missed events.
   const projectFeed = new ProjectEventLog(store.database());
@@ -325,7 +324,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const state = (): void => snapshots.request();
   const publishedTimelineRevisions = new Map<string, number>();
   /** The last assistant message of the latest turn (after the last user message), or '' when the turn said nothing. */
-  const finalAssistantText = (chatId: string): string => { const items = store.timeline(chatId); for (let i = items.length - 1; i >= 0; i--) { const it = items[i]!; if (it.kind === 'user') return ''; if (it.kind === 'assistant' && it.text.trim()) return it.text; } return ''; };
+  const finalAssistantText = (chatId: string): string => { const items = store.lastTurnItems(chatId); for (let i = items.length - 1; i >= 0; i--) { const it = items[i]!; if (it.kind === 'user') return ''; if (it.kind === 'assistant' && it.text.trim()) return it.text; } return ''; };
   /** The streaming reply of each running chat, written to the store at most once per timeline publish (not once per delta). */
   const segmentFlushes = new Map<string, () => void>();
   const timeline = (chatId: string) => {
@@ -585,7 +584,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       timeline(chatId);
     };
     try {
-      const history = store.timeline(chatId).some(item => item.kind === 'user');
+      const history = store.hasUserMessage(chatId);
       if (options.fresh || !provider.compact) {
         compactions.delete(chatId);
         if (!history) { fail('there is no conversation to compact yet'); throw new Error('There is no conversation to compact yet.'); }
@@ -616,7 +615,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (telemetry.compacted || telemetry.usedTokens === null || compactions.has(chat.id)) return false;
     const model = withUserWindow(route.models.find(entry => entry.id === chat.model), domainHooks.contextWindowOverride(route.id, chat.model));
     const {at, window} = musterCompactAt(effectiveDriver(route.driver, chat), model, reportedWindowFor(telemetry, modelKey(chat.providerId ?? '', chat.model)), telemetry.usedTokens);
-    if (telemetry.usedTokens < at || !store.timeline(chat.id).some(item => item.kind === 'user')) return false;
+    if (telemetry.usedTokens < at || !store.hasUserMessage(chat.id)) return false;
     const used = `${Math.round(telemetry.usedTokens / 1000)}K of ${Math.round(window.tokens / 1000)}K tokens`;
     const row = store.appendItem(chat.id, 'notice', `Compacting context before this message (${used} in use)…`, 'running', {kind:'compaction', status:'running', auto:true});
     timeline(chat.id);
@@ -701,11 +700,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const selectedProvider=validateRunnableModel(chat.model,chat.providerId);
     // #319: a chat-only model in an Agent chat answers as chat, and the chat says so. Moving it to another provider or account is the
     // user's choice (the composer's "Switch to…" button), never done here: that would send the conversation to a different vendor.
-    if (chat.mode === 'agent' && selectedProvider.models.find(entry => entry.id === chat.model)?.tools === false && !store.timeline(chatId).some(item => item.data?.kind === 'tools-unavailable' && item.data?.model === chat.model && item.data?.providerId === selectedProvider.id)) {
+    if (chat.mode === 'agent' && selectedProvider.models.find(entry => entry.id === chat.model)?.tools === false && !store.noticesOfKind(chatId, 'tools-unavailable').some(item => item.data?.model === chat.model && item.data?.providerId === selectedProvider.id)) {
       store.appendItem(chatId, 'notice', `${selectedProvider.models.find(entry => entry.id === chat.model)?.name ?? chat.model} can’t run commands or edit files through ${selectedProvider.name}, so this chat answers without tools. Use “Switch to…” in the composer to pick a model with tools.`, 'completed', {kind: 'tools-unavailable', model: chat.model, providerId: selectedProvider.id});
     }
     // #427: a route with no sub-agent tool says so once, in one plain line, when the request asks for sub-agents (every chat type).
-    if (subagentSupport(effectiveDriver(selectedProvider.driver, chat)) === 'none' && asksForSubagents(prompt) && !store.timeline(chatId).some(item => item.data?.kind === 'subagents-unavailable' && item.data?.providerId === selectedProvider.id)) {
+    if (subagentSupport(effectiveDriver(selectedProvider.driver, chat)) === 'none' && asksForSubagents(prompt) && !store.noticesOfKind(chatId, 'subagents-unavailable').some(item => item.data?.providerId === selectedProvider.id)) {
       store.appendItem(chatId, 'notice', subagentsUnavailableText(selectedProvider.name), 'completed', {kind: 'subagents-unavailable', providerId: selectedProvider.id});
     }
     if (await autoCompactBeforeTurn(chat, selectedProvider)) chat = chatFor(chatId);
@@ -1154,7 +1153,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           const current = store.chat(chatId);
           const background = provider.hasActiveWork?.(chatId) === true;
           const canContinue = !run.stopped && !closing && !disposed && !!current?.providerThreadId && !background
-            && !store.timeline(chatId).some(item => item.kind === 'approval' && item.status === 'pending');
+            && !store.hasPendingDecision(chatId, ['approval']);
           const code = result.failure?.statusCode;
           const transient = result.status === 'failed' && result.dispatchState !== 'not-dispatched' && result.dispatchState !== 'unknown' && result.recovery?.kind === 'failed'
             && !result.recovery.auth && attemptActivity && limitClass(`${result.errorMessage ?? ''} ${result.recovery.reason}`) !== 'quota' && (code !== undefined ? code === 429 || (code >= 500 && code <= 599) : /\b(?:429|5\d\d)\b/.test(`${result.errorMessage ?? ''} ${result.recovery.reason}`));
@@ -1553,7 +1552,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const roots = [...new Set([folder.path, real])];
     // A path another chat also changed since this message is shared work: it is left alone, never restored.
     const shared = new Set(store.snapshot().chats.filter(other => other.id !== chat.id && other.folderId === folder.id && other.updatedAt >= edited.createdAt)
-      .flatMap(other => ownedPaths(store.timeline(other.id).filter(item => item.createdAt >= edited.createdAt), roots)));
+      .flatMap(other => ownedPaths(store.editItems(other.id).filter(item => item.createdAt >= edited.createdAt), roots)));
     const owned = (await resolveOwnedPaths(later, roots)).filter(path => !shared.has(path));
     if (!owned.length) return blocked('Muster did not change any files after this message.');
     const plan = await planRestore(folder.path, baseline.treeSha, owned);
@@ -1616,7 +1615,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (runs.has(chat.id) || chat.status === 'running' || chat.status === 'stopping') throw new Error('Wait for this run before moving the chat.');
     const project = projectId ? store.project(projectId) : undefined;
     if (projectId && !project) throw new Error('Project not found.');
-    const history = store.timeline(chat.id).some(item => item.kind === 'user');
+    const history = store.hasUserMessage(chat.id);
     if (project && history && !chat.folderId && project.folderIds.length) throw new Error('This chat has messages but no folder. Start a new chat in the Project instead.');
     const folderId = !project ? chat.folderId ?? null : chat.folderId && (history || project.folderIds.includes(chat.folderId)) ? chat.folderId : project.folderIds[0] ?? null;
     if (project && folderId && !project.folderIds.includes(folderId)) store.database().prepare('UPDATE projects SET folder_ids = ? WHERE id = ?').run(JSON.stringify([...project.folderIds, folderId]), project.id);
@@ -1734,6 +1733,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         state(); return result;
       }
       case 'chat.select': { const chatId = id(p.id); chatFor(chatId); store.setActiveChat(chatId); if (store.setUnread(chatId, false)) state(); return store.timeline(chatId); }
+      // #39: a stream-health probe compares revisions before it ever asks for the history.
+      case 'chat.timelineRevision': return {revision: store.timelineRevision(chatFor(id(p.id)).id)};
       case 'chat.timeline': {
         const chatId = id(p.id); chatFor(chatId);
         if (p.select !== undefined && typeof p.select !== 'boolean') throw new Error('Invalid selection.');
@@ -1756,7 +1757,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const roots = [...new Set([folder.path, real])];
         const owners: Array<{path: string; chatId: string; title: string; status: Chat['status']}> = [];
         const chats = store.snapshot().chats.filter(chat => chat.folderId === folderId && !chat.archived).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-        for (const chat of chats) for (const path of await resolveOwnedPaths(store.timeline(chat.id), roots)) owners.push({path, chatId: chat.id, title: chat.title, status: chat.status});
+        for (const chat of chats) for (const path of await resolveOwnedPaths(store.editItems(chat.id), roots)) owners.push({path, chatId: chat.id, title: chat.title, status: chat.status});
         return owners;
       }
       case 'chat.update': {
@@ -1830,7 +1831,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           if (disposed || closing) throw new Error('Agent runtime is stopping. Provider selection was not changed.');
           const updated=store.updateChat(chatId,{providerId,providerBindingId:bindingId,model,...(changed?{providerThreadId:null,providerTurnId:null,providerThreadProviderId:null,providerThreadBindingId:null,providerThreadDriver:null,recovery:null,error:null}:{})});
           // #724: the other provider never saw this conversation; its first message carries a summary of it.
-          if(changed && store.timeline(chatId).some(item=>item.kind==='user'&&item.text.trim())) {store.requireDigest(chatId);contextLedger.forget(chatId);store.appendItem(chatId,'notice','Provider selection changed. The next message starts a fresh provider conversation with a summary of the earlier messages; the displayed history is retained.','completed');timeline(chatId);}
+          if(changed && store.hasUserMessage(chatId, true)) {store.requireDigest(chatId);contextLedger.forget(chatId);store.appendItem(chatId,'notice','Provider selection changed. The next message starts a fresh provider conversation with a summary of the earlier messages; the displayed history is retained.','completed');timeline(chatId);}
           state();return updated;
         } finally {providerSelections.delete(chatId);}
       }
@@ -2282,7 +2283,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         }
         // The row's own file, or the name later edit rows of this chat renamed it to (a rename chain a→b→c→d is followed to the end).
         const renames:[string,string][]=[];
-        for(const row of store.timeline(chat.id)){
+        for(const row of store.editItems(chat.id)){
           if(row.kind!=='tool'||row.data?.type!=='fileChange'||!['running','completed'].includes(row.status??'')||!Array.isArray(row.data.changes))continue;
           const rowCwd=typeof row.data.cwd==='string'?row.data.cwd:root;
           for(const change of row.data.changes){
@@ -2386,7 +2387,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       if (chat.archived || chat.recovery?.kind === 'recovery-needed' || compactions.has(chat.id)) continue;
       const run = runs.get(chat.id), running = !!run && !run.stopped;
       if (!running && (run || chat.status === 'running' || chat.status === 'stopping')) continue;
-      const turn = lastTurn(store.timeline(chat.id));
+      const turn = lastTurn(store.lastTurnItems(chat.id));
       if (!turn.prompt?.text.trim()) continue;
       // Only chats whose turn is about this plugin: other running work is never interrupted and re-sent.
       if (running ? !turnMentions(plugin, turn) : !turnAbout(plugin, turn, chat.updatedAt)) continue;

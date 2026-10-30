@@ -577,12 +577,12 @@ async function readTimeline(id: string, select = false): Promise<void> {
 export async function probeTimeline(id: string, timeoutMs = 4_000): Promise<'live' | 'resynced' | 'failed'> {
   const local = timelineReplicas.get(id)?.value?.revision;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Timeline probe timed out')), timeoutMs); });
   try {
-    const snapshot = await Promise.race([
-      invoke('chat.timeline', {id}),
-      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Timeline probe timed out')), timeoutMs); }),
-    ]);
-    if (local !== undefined && snapshot.revision <= local) return 'live';
+    // #39: a silent chat usually has not changed; the revision alone says so without copying its whole history.
+    const {revision} = await Promise.race([invoke('chat.timelineRevision', {id}), deadline]);
+    if (local !== undefined && revision <= local) return 'live';
+    const snapshot = await Promise.race([invoke('chat.timeline', {id}), deadline]);
     timelineReplica(id).snapshot(snapshot);
     publishTimeline(id);
     return 'resynced';

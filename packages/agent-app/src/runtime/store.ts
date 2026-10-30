@@ -638,6 +638,42 @@ export class AgentStore {
     return (this.db.prepare('SELECT * FROM timeline WHERE chat_id = ? ORDER BY seq').all(chatId) as unknown as TimelineRow[]).map(rowToItem);
   }
 
+  /** #39: one chat's rows matching a fixed condition, in order. Never the whole history to find a few rows: on a
+   *  20,000-row chat a whole read peaks the main process above 1 GB. `?1` in the condition is the chat id. */
+  private timelineWhere(chatId: string, condition: string): TimelineItem[] {
+    return (this.db.prepare(`SELECT * FROM timeline WHERE chat_id = ?1 AND (${condition}) ORDER BY seq`).all(chatId) as unknown as TimelineRow[]).map(rowToItem);
+  }
+
+  /** The latest turn: the last user message that was not a steer, and every row after it (all rows when there is none). */
+  lastTurnItems(chatId: string): TimelineItem[] {
+    return this.timelineWhere(chatId, "seq >= coalesce((SELECT MAX(seq) FROM timeline WHERE chat_id = ?1 AND kind = 'user' AND (data IS NULL OR json_extract(data, '$.steered') IS NOT 1)), 0)");
+  }
+
+  /** True when the chat has a user message (with visible text, when `withText`). */
+  hasUserMessage(chatId: string, withText = false): boolean {
+    return this.db.prepare(`SELECT 1 AS hit FROM timeline WHERE chat_id = ? AND kind = 'user'${withText ? " AND length(trim(text)) > 0" : ''} LIMIT 1`).get(chatId) !== undefined;
+  }
+
+  /** The chat's notices of one `data.kind`, in order. */
+  noticesOfKind(chatId: string, kind: string): TimelineItem[] {
+    return (this.db.prepare("SELECT * FROM timeline WHERE chat_id = ? AND kind = 'notice' AND json_extract(data, '$.kind') = ? ORDER BY seq").all(chatId, kind) as unknown as TimelineRow[]).map(rowToItem);
+  }
+
+  /** #39: rows a restart must settle (open approvals and questions, notices still running) across every chat, without reading whole histories. */
+  unsettledItems(): TimelineItem[] {
+    return (this.db.prepare("SELECT * FROM timeline WHERE (kind IN ('approval', 'question') AND status = 'pending') OR (kind = 'notice' AND status = 'running') ORDER BY chat_id, seq").all() as unknown as TimelineRow[]).map(rowToItem);
+  }
+
+  /** True while the chat waits on the user for an approval or an answer. */
+  hasPendingDecision(chatId: string, kinds: readonly ('approval' | 'question')[] = ['approval', 'question']): boolean {
+    return this.db.prepare(`SELECT 1 AS hit FROM timeline WHERE chat_id = ? AND kind IN (${kinds.map(() => '?').join(', ')}) AND status = 'pending' LIMIT 1`).get(chatId, ...kinds) !== undefined;
+  }
+
+  /** #39: the tool rows that can carry file edits, in order: change lists, and successful shell patches (rowToItem turns those into changes). */
+  editItems(chatId: string): TimelineItem[] {
+    return this.timelineWhere(chatId, "kind = 'tool' AND (instr(data, '\"changes\"') > 0 OR instr(data, 'Success. Updated the following files') > 0)");
+  }
+
   /** True when one of this chat's own rows (a tool row, a reply) names the path. The gate for reading an image outside every folder. */
   chatMentionsPath(chatId: string, path: string): boolean {
     if (!path || path.includes('\0')) return false;
@@ -706,7 +742,7 @@ export class AgentStore {
   /** #387: a settled run (or a restart) leaves no tool row running. Rows the provider never closed become interrupted
    *  (shown as Stopped), keeping their output; `startedAt` gives a duration when the caller knows when each started. */
   settleToolItems(chatId: string, startedAt?: (item: TimelineItem) => number | undefined): void {
-    for (const item of this.timeline(chatId)) {
+    for (const item of this.timelineWhere(chatId, "kind = 'tool' AND status = 'running'")) {
       if (item.kind !== 'tool' || item.status !== 'running') continue;
       const started = startedAt?.(item) ?? Date.parse(item.createdAt);
       this.updateItem(item.id, item.text, 'interrupted', {...item.data, awaitingApproval: undefined, ...(Number.isFinite(started) && item.data?.durationMs === undefined ? {durationMs: Math.max(0, Date.now() - started)} : {})});
@@ -716,7 +752,7 @@ export class AgentStore {
   /** A spawn report that still says a child is running, in a run that no longer exists, is settled as interrupted. */
   interruptRunningChildren(chatId: string): void {
     const endedAt = now();
-    for (const item of this.timeline(chatId)) {
+    for (const item of this.timelineWhere(chatId, "kind = 'tool' AND instr(data, 'collabAgentToolCall') > 0")) {
       const data = item.data;
       if (item.kind !== 'tool' || data?.type !== 'collabAgentToolCall' || data.agentsStates == null) continue;
       const wasText = typeof data.agentsStates === 'string';
