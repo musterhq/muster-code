@@ -32,6 +32,15 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-789J](21-visuals-and-artifacts.md#mus-spec-21-789j) | A render that runs past its timeout rejects, tells the conversion to stop, removes its temp folder and writes nothing to the output folder; a failed conversion cleans up the same way. | [`a render that runs past its timeout stops and leaves no temp files`](../../../packages/agent-app/tests/office-runtime-789.test.ts) |
 | [MUS-SPEC-21-789K](21-visuals-and-artifacts.md#mus-spec-21-789k) | The Settings commands report source, version and size; download returns at once and sends progress events; remove returns to none. | [`Settings commands report the runtime and download it in the background`](../../../packages/agent-app/tests/office-runtime-789.test.ts) |
 | [MUS-SPEC-21-789L](21-visuals-and-artifacts.md#mus-spec-21-789l) | macOS, Linux and Windows on Intel and ARM each have a pinned official LibreOffice build with an https documentfoundation.org URL, a SHA-256 and a plausible size; other platforms have none. | [`every pinned LibreOffice build is an official https download with a SHA-256`](../../../packages/agent-app/tests/office-runtime-789.test.ts) |
+| [MUS-SPEC-21-772A](21-visuals-and-artifacts.md#mus-spec-21-772a) | With no other app installed, an agent turn follows the documents skill: the .docx has headings, lists, a table and an image, and office_render returns page PNGs and inline images. | [`an agent makes a .docx with Muster's documents skill and sees its pages, with no other app installed`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-773A](21-visuals-and-artifacts.md#mus-spec-21-773a) | The .xlsx keeps live formulas (also across sheets), number formats and recalculate-on-open, renders to page images, and an edit keeps them. | [`an agent makes an .xlsx with live formulas using Muster's spreadsheets skill and sees its pages`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-774A](21-visuals-and-artifacts.md#mus-spec-21-774a) | The deck has five slides (title, bullets, chart, table, picture) on slide layouts, the chart is a native chart part and the picture is embedded. | [`an agent makes a .pptx with Muster's presentations skill and sees each slide`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-775A](21-visuals-and-artifacts.md#mus-spec-21-775a) | The PDF has the approver.name and approver.approved fields; filling them reads back. | [`an agent makes a PDF with a form using Muster's pdf skill, reads its text, fills the form and sees its pages`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-772Q](21-visuals-and-artifacts.md#mus-spec-21-772q) | PDF and .xlsx preview with nothing else installed; .docx and .pptx convert through Muster's own office runtime. | [`each office type previews in Muster with no other app installed`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-789M](21-visuals-and-artifacts.md#mus-spec-21-789m) | The service sends officeToolProgress events for that chat with "Downloading LibreOffice…" while the tool waits, then one with no message. | [`the first render shows LibreOffice download progress on the chat's tool row`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-789N](21-visuals-and-artifacts.md#mus-spec-21-789n) | The pinned library tarballs download once with progress, keep the lockfile layout, are refused on a bad integrity or non-registry URL, and can be removed. | [`a packaged app downloads the pinned office libraries once, checks each against its integrity and installs them atomically`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-789O](21-visuals-and-artifacts.md#mus-spec-21-789o) | docx, exceljs, pptxgenjs, pdf-lib, jszip and pdfjs-dist are pinned to their lockfile versions, every entry is an npm registry tarball with a sha512 integrity, no @types package is included, and every runtime dependency of a pinned package is pinned too. | [`the build pins every office library and its dependencies from the lockfile`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-789P](21-visuals-and-artifacts.md#mus-spec-21-789p) | Only this chat's message shows, as a live status line, and it goes away when cleared. | [`A running office tool row shows the first download progress and clears it when done`](../../../packages/agent-app/tests/office-tool-progress-789-dom.tsx) |
 | [MUS-SPEC-21-788A](21-visuals-and-artifacts.md#mus-spec-21-788a) | Right-click on the gallery hero, a gallery thumbnail, a gallery file link, a tool-row thumbnail, an inline reply image and the open image viewer each asks for the image menu, with that image's chat and path. | [`Right-click on every chat image surface asks for the image menu with its path`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
 | [MUS-SPEC-21-788B](21-visuals-and-artifacts.md#mus-spec-21-788b) | Cmd+C in the open image viewer asks the app to copy the shown image to the clipboard. | [`Cmd+C in the image viewer copies the image`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
 | [MUS-SPEC-21-788C](21-visuals-and-artifacts.md#mus-spec-21-788c) | The ContextMenu key and Shift+F10 on a focused image ask for the image menu, placed at the image. | [`ContextMenu key and Shift+F10 open the image menu on a focused image`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
@@ -742,3 +751,104 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Environment: DOM suite (linkedom) with a stubbed bridge.
 - Known gaps: The Settings row itself is not clicked in this suite.
 - Evidence: local; cd packages/agent-app && npm run test:renderer (suite markdown-math-dom); exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
+
+### Office files for agents (#772-#775, #789)
+
+<a id="mus-spec-21-772a"></a>
+#### MUS-SPEC-21-772A: An agent makes a .docx with Muster's documents skill and sees its pages
+
+- Precondition: Another app's home is absent (HOME is an empty folder). LibreOffice is a stand-in soffice that writes a two-page PDF. A project folder holds a picture.
+- Action: In an agent-mode chat, a fake coding client follows the note: it reads the documents skill the note names, calls office_setup, copies the skill's example script into the project, runs it with the command office_setup returned, then calls office_render on report.docx.
+- Expected result: The note names Muster's shipped documents skill. The server lists office_setup and office_render, and setup reports docx. report.docx has Heading 1 paragraphs, a table, a numbered list, the title text and the image in word/media. The render answer lists a PDF and two page PNGs and carries the first two pages as images. An edit with jszip (as the skill shows) keeps word/styles.xml byte for byte. Nothing is created in another app's home.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::an agent makes a .docx with Muster's documents skill and sees its pages, with no other app installed`
+- Environment: Node test runner; the real service and office domain, a fake provider and a stand-in soffice; real docx, pdf.js and canvas; no network.
+- Known gaps: A real LibreOffice conversion is not run in the test (checked by hand: the example renders to one clean page).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-773a"></a>
+#### MUS-SPEC-21-773A: An agent makes an .xlsx with live formulas and sees its pages
+
+- Precondition: As 772A.
+- Action: The same agent turn with the spreadsheets skill and its example script, writing budget.xlsx.
+- Expected result: The workbook has Sales and Summary sheets. Revenue, totals and a cross-sheet reference are formulas (B2*C2, SUM(D2:D4), Sales!D5), money and percent cells keep their number formats, and the workbook is set to recalculate on open. Page images come back as in 772A. Changing an input and saving keeps the formulas and formats.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::an agent makes an .xlsx with live formulas using Muster's spreadsheets skill and sees its pages`
+- Environment: As 772A.
+- Known gaps: exceljs writes no native Excel charts; the skill says so and places a chart picture (or points to a presentation). Recalculated values were checked by hand with a real LibreOffice render.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-774a"></a>
+#### MUS-SPEC-21-774A: An agent makes a .pptx and sees each slide
+
+- Precondition: As 772A.
+- Action: The same agent turn with the presentations skill and its example script, writing deck.pptx.
+- Expected result: The deck has five slides (title, bullets, chart, table, picture) on slide layouts, the chart is a native chart part and the picture is embedded. Page images come back as in 772A.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::an agent makes a .pptx with Muster's presentations skill and sees each slide`
+- Environment: As 772A.
+- Known gaps: Editing an existing deck is by XML with jszip as the skill describes; the test does not edit a deck.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-775a"></a>
+#### MUS-SPEC-21-775A: An agent makes a PDF with a form, reads it, fills it and sees its pages
+
+- Precondition: As 772A.
+- Action: The same agent turn with the pdf skill and its example script, writing report.pdf; then fill its form with pdf-lib and read its text with pdfjs-dist as the skill shows.
+- Expected result: The PDF has the approver.name and approver.approved fields; filling them reads back. The text of page one includes the title and a table cell. The render answer lists one page and names the source PDF itself: a PDF renders without LibreOffice.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::an agent makes a PDF with a form using Muster's pdf skill, reads its text, fills the form and sees its pages`
+- Environment: As 772A.
+- Known gaps: Scanned PDFs have no text; the skill tells the agent to read the page images instead.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-772q"></a>
+#### MUS-SPEC-21-772Q: Each office type previews with no other app installed
+
+- Precondition: A project folder with the four example outputs. No MUSTER_SOFFICE_PATH. First no office runtime, then Muster's office runtime with a stand-in soffice.
+- Action: Read the PDF and the Word and PowerPoint files through the document preview, and the workbook through the workbook preview.
+- Expected result: The PDF is read directly (not converted). The workbook shows its two sheets, its header and the formula behind a total. The .docx and .pptx are converted to a PDF by Muster's own runtime.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::each office type previews in Muster with no other app installed`
+- Environment: Node test runner; no network.
+- Known gaps: Without any LibreOffice the viewer falls back to macOS Quick Look, and elsewhere to a note that points to Settings › Storage.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-789m"></a>
+#### MUS-SPEC-21-789M: The first render downloads LibreOffice with progress on the chat's tool row
+
+- Precondition: No LibreOffice installed. The pinned build is served by a fake download server; the fake unpacker puts a stand-in soffice in place.
+- Action: An agent turn calls office_render on a .docx.
+- Expected result: The service sends officeToolProgress events for that chat with "Downloading LibreOffice…" while the tool waits, then one with no message. LibreOffice lands in Muster's data folder and the render succeeds through it.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::the first render shows LibreOffice download progress on the chat's tool row`
+- Environment: Node test runner; fake network and unpacker.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-789n"></a>
+#### MUS-SPEC-21-789N: A packaged app downloads the pinned office libraries once
+
+- Precondition: A manifest of npm-style tarballs (one nested under another, as in the lockfile) served by a fake registry.
+- Action: Ensure the libraries twice at once, run a script, ensure again; then try a tampered integrity and a non-registry URL; then remove.
+- Expected result: One download serves both callers with progress from 0 to all packages. The nested layout is kept, so a dependency resolves. A second ensure fetches nothing. A tarball that fails its sha512 integrity installs nothing and leaves no staging folder; a non-registry URL is refused before any fetch. Remove frees the bytes and the status is no longer ready.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::a packaged app downloads the pinned office libraries once, checks each against its integrity and installs them atomically`
+- Environment: Node test runner; system tar; fake registry.
+- Known gaps: Interrupted downloads restart the package set rather than resume each tarball.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-789o"></a>
+#### MUS-SPEC-21-789O: The office libraries are pinned from the lockfile
+
+- Precondition: The app's package-lock.json.
+- Action: Build the office library manifest the way the build does.
+- Expected result: docx, exceljs, pptxgenjs, pdf-lib, jszip and pdfjs-dist are pinned to their lockfile versions, every entry is an npm registry tarball with a sha512 integrity, no @types package is included, and every runtime dependency of a pinned package is pinned too.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::the build pins every office library and its dependencies from the lockfile`
+- Environment: Node test runner.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-789p"></a>
+#### MUS-SPEC-21-789P: A running office tool row shows the download progress
+
+- Precondition: A running muster_office tool row in a chat.
+- Action: Send progress for another chat, for this chat, then clear it; then show a finished row and a row of another server.
+- Expected result: Only this chat's message shows, as a live status line, and it goes away when cleared. A finished row and another server's row show nothing.
+- Test: `packages/agent-app/tests/office-tool-progress-789-dom.tsx::A running office tool row shows the first download progress and clears it when done`
+- Environment: DOM suite (linkedom) with a stubbed bridge.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
