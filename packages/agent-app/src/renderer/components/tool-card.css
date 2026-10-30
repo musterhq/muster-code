@@ -126,3 +126,7 @@
 .tool-plan-link span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-plan-link button { flex: none; }
 .tool-plan-full { margin: 0 0 6px; }
+
+/* #html-preview: a render_html page under its row, aligned with the row text (like screenshots). */
+.tool-html-render { margin: 2px 0 6px 28px; min-width: 0; }
+.tool-html-render > .rich-block { margin: 0; }

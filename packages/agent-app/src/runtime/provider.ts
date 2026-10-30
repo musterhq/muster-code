@@ -16,6 +16,7 @@ import {NativeUnavailableError} from './codex-native.ts';
 import {splitSecretOverrides} from './thread-config.ts';
 import {CODEX_LAUNCHER, envFromOverrides, mcpServersFromOverrides} from './adapters/shared.ts';
 import { device } from '../shared/device-noun.ts';
+import { RICH_CONTENT_GUIDANCE } from '../shared/rich-block.ts';
 import {codexSubagentOverrides,subagentSupport} from './subagent-routes.ts';
 import {codexWindowOverrides, userCompactionKeys} from './codex-window-overrides.ts';
 import {unpackedPath} from './unpacked-path.ts';
@@ -171,7 +172,8 @@ export const AGENT_AUTONOMY_RULE = 'Work autonomously until the task is done. Do
 export const FULL_ACCESS_NO_ASKING_RULE = 'Never ask the user for permission or confirmation to proceed (no "should I push?", "reply go", "want me to continue?", "shall I…"): Full access is already granted. Commit, push, install, restart and run commands yourself. Stop to ask only before irreversibly deleting user data, or when you are truly blocked on information only the user has.';
 /** Agent mode never ends a turn on a promise: nothing wakes the agent up to keep it. */
 export const NO_PROMISE_RULE = 'Never end a turn promising future work ("I\'ll report back when the build finishes", "I\'ll check once it is done"): nothing wakes you up to keep that promise. If you are waiting on a build, test run, server or other process, wait for it in this turn with a tool call (wait for the process, or sleep and then poll its output or status) and report the result before you end the turn.';
-export const runInstructions = (mode: Chat['mode'], extra?: string, subagents = true, permissionMode?: ChatPermissionMode) => [modeInstructions(mode, subagents), mode === 'agent' ? AGENT_AUTONOMY_RULE : undefined, mode === 'agent' ? ASK_USER_RULE : undefined, mode === 'agent' ? NO_PROMISE_RULE : undefined, mode === 'agent' && permissionMode === 'full' ? FULL_ACCESS_NO_ASKING_RULE : undefined, mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, extra].filter(Boolean).join('\n\n') || undefined;
+/** Every route, every mode: the app draws ```mermaid, ```chart and ```html-report fences (shared/rich-block.ts). */
+export const runInstructions = (mode: Chat['mode'], extra?: string, subagents = true, permissionMode?: ChatPermissionMode) => [modeInstructions(mode, subagents), mode === 'agent' ? AGENT_AUTONOMY_RULE : undefined, mode === 'agent' ? ASK_USER_RULE : undefined, mode === 'agent' ? NO_PROMISE_RULE : undefined, mode === 'agent' && permissionMode === 'full' ? FULL_ACCESS_NO_ASKING_RULE : undefined, mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, RICH_CONTENT_GUIDANCE, extra].filter(Boolean).join('\n\n') || undefined;
 /** #424: the instructions, Muster's MCP servers and the native browser flag for a non-Codex route. Each route names the
  *  browser tools exactly as its model sees them, or says plainly that it has none; the browser server goes only to routes
  *  that load it (Claude Code, OpenCode, Grok), and HTTP routes get native browser tools wired to the same bridge. */

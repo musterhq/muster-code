@@ -2,7 +2,7 @@ import {ToolOutput,ToolDetail} from './ToolOutput';
 import {useDisclosure} from './useDisclosure';
 import {copyText} from '../clipboard';
 import { Blocks, BookOpen, Bot, Check, ChevronRight, Circle, CircleCheck, CircleDot, Copy, Image as ImageIcon, ListChecks, MousePointerClick, PencilLine, Search, Sparkles, SquareSlash, SquareTerminal, Wrench } from 'lucide-react';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import type { TimelineItem } from '../../shared/protocol';
 import { toolState, awaitingApproval, executionDenied, basename, classifyTool, commandLabel, commandOutcome, planPreview, planSteps, resolveToolPath, uniqueFileLabels, type PlanStep, type ToolKind } from './toolPresentation';
 import {getState,loadPlugins,openFile} from '../store';
@@ -25,6 +25,9 @@ import {AppGlyph} from './AppGlyph';
 import {openScreenshotTab} from './ComputerPip';
 import {ChatImage} from './ChatImage';
 import {GalleryCoverage,ImageGallery,type GalleryTarget} from './ImageGallery';
+
+/** #html-preview: render_html pages load their chunk (and their frame) only when a row has one. */
+const HtmlRenderCard = React.lazy(() => import('./rich/HtmlRenderCard'));
 
 type Glyph = React.ComponentType<{size?: number; strokeWidth?: number; 'aria-hidden'?: boolean | 'true'}>;
 /** Codex transcript glyphs: thin, monochrome, one per verb. */
@@ -219,6 +222,7 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
     {steps.length>0&&!open&&<PlanChecklist steps={steps}/>}
     {images.length>0&&<ImageThumbs item={item} paths={images}/>}
     {!open&&<ToolShots item={item}/>}
+    {p.htmlRender?.id&&!failed&&<div className="tool-html-render"><Suspense fallback={null}><HtmlRenderCard renderId={p.htmlRender.id} title={p.htmlRender.title} chatId={item.chatId}/></Suspense></div>}
     <Collapsible.Panel className="activity-disclosure"><div className="tool-row-body" id={`tool-body-${item.id}`}>
       {edit&&<EditDiffs item={item}/>}
       {p.subject&&!p.plan&&!edit&&!images.length ? <div className="tool-row-source"><code>{p.kind==='command'?commandLabel(p.subject):p.subject}</code>

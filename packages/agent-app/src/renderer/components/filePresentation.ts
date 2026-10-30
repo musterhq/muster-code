@@ -1,5 +1,5 @@
 import {cleanIpcError} from './resourceErrors.ts';
-export type FilePresentation = 'markdown' | 'json' | 'csv' | 'tsv' | 'image' | 'text' | 'document' | 'workbook' | 'html' | 'media' | 'quicklook' | 'binary';
+export type FilePresentation = 'markdown' | 'json' | 'csv' | 'tsv' | 'image' | 'text' | 'document' | 'workbook' | 'html' | 'media' | 'model' | 'quicklook' | 'binary';
 
 /** Turn host/bridge failures into actionable, non-leaky viewer copy. */
 export function friendlyFileError(error: unknown): string {
@@ -27,6 +27,7 @@ const set = (value: string) => new Set(value.split(' '));
 const IMAGE = set('png jpg jpeg gif webp svg bmp avif');
 const QUICK_LOOK = set('xlsb numbers key pages heic heif tif tiff');
 const DOCUMENT = set('pdf doc docx ppt pptx xls odt odp ods');
+const MODEL = set('glb gltf obj stl ply fbx');
 const AUDIO = set('mp3 m4a aac wav ogg oga opus flac');
 const VIDEO = set('mp4 m4v mov webm ogv');
 const BINARY = set('zip gz tgz bz2 xz 7z rar tar dmg iso pkg exe dll so dylib bin o a class jar war wasm pyc woff woff2 ttf otf eot sqlite sqlite3 db psd sketch fig ai eps ico icns');
@@ -43,11 +44,12 @@ export function filePresentation(path: string): FilePresentation {
   if (extension === 'html' || extension === 'htm') return 'html';
   if (IMAGE.has(extension)) return 'image';
   if (AUDIO.has(extension) || VIDEO.has(extension)) return 'media';
+  if (MODEL.has(extension)) return 'model';
   if (BINARY.has(extension)) return 'binary';
   return 'text';
 }
 
-export type FileIconKind = 'folder' | 'markdown' | 'json' | 'typescript' | 'javascript' | 'css' | 'html' | 'image' | 'pdf' | 'sheet' | 'doc' | 'slides' | 'archive' | 'lock' | 'audio' | 'video' | 'code' | 'text' | 'file';
+export type FileIconKind = 'folder' | 'markdown' | 'json' | 'typescript' | 'javascript' | 'css' | 'html' | 'image' | 'pdf' | 'sheet' | 'doc' | 'slides' | 'archive' | 'lock' | 'audio' | 'video' | 'model' | 'code' | 'text' | 'file';
 /** Visual tone per icon; resolved to existing :root tokens in file-type-icon.css. */
 export type FileIconTone = 'accent' | 'ok' | 'warn' | 'danger' | 'violet' | 'orange' | 'dim';
 const ICONS: Array<[FileIconKind, FileIconTone, Set<string>]> = [
@@ -65,6 +67,7 @@ const ICONS: Array<[FileIconKind, FileIconTone, Set<string>]> = [
   ['archive', 'dim', set('zip gz tgz bz2 xz 7z rar tar dmg iso pkg jar war')],
   ['audio', 'violet', AUDIO],
   ['video', 'violet', VIDEO],
+  ['model', 'accent', MODEL],
   ['code', 'dim', set('py rb go rs java kt swift c h cc cpp hpp cs php scala sh bash zsh fish sql graphql yaml yml toml ini lua dart ex exs hs zig tf proto')],
   ['text', 'dim', set('txt rst log env')],
 ];

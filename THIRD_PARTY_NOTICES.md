@@ -7,10 +7,11 @@ third-party work, each under its own license:
 |---|---|---|
 | Muster core (Codex app-server client, memory and Hindsight stores, local Docker sandbox) | `packages/agent-app/vendor/muster-core`, bundled runtime | MIT, Copyright (c) 2026 Muster contributors |
 | QM (scoped-computer contract, adapted) | `packages/agent-app` runtime | MIT, Copyright (c) 2026 QM contributors |
-| T3 Code (incremental Markdown parser, table interaction and styling) | `packages/agent-app/src/renderer` | MIT, Copyright (c) 2026 T3 Tools Inc. |
+| T3 Code (incremental Markdown parser, table interaction and styling, HTML render and preview) | `packages/agent-app/src/renderer` | MIT, Copyright (c) 2026 T3 Tools Inc. |
 | Mozilla PDF.js, SheetJS SSF | bundled in Muster Agent | Apache-2.0 |
+| three.js and its 3D model loaders and decoders (Draco, meshopt) | bundled in Muster Agent, loaded when a model opens | MIT (three.js), Apache-2.0 (Draco), MIT (meshoptimizer) |
 | Code-OSS (Visual Studio Code open source) | Muster Code builds assembled by `scripts/assemble.sh` | MIT, Copyright (c) Microsoft Corporation |
-| npm packages bundled into Muster Agent | `dist/renderer/THIRD-PARTY-LICENSES.txt` | per package (MIT, ISC, Apache-2.0, BSD, Zlib, Unlicense) |
+| npm packages bundled into Muster Agent | `dist/renderer/THIRD-PARTY-LICENSES.txt` | per package (MIT, ISC, Apache-2.0, BSD, Zlib, Unlicense, EPL-2.0, MPL-2.0 OR Apache-2.0) |
 
 Details, attribution and full license texts:
 
@@ -21,4 +22,5 @@ Details, attribution and full license texts:
   Help > Third-Party Notices.
 
 Where a dependency offers a choice of licenses (for example jszip, "MIT OR GPL-3.0-or-later"), Muster
-uses it under the MIT license.
+uses it under the MIT license. DOMPurify ("MPL-2.0 OR Apache-2.0") is used under Apache-2.0. elkjs (EPL-2.0, the
+diagram layout engine Mermaid loads) is bundled unmodified; its source is the published npm package.

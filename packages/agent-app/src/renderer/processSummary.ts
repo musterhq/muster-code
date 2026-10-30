@@ -121,7 +121,7 @@ export function agentCommands(items:readonly TimelineItem[]|undefined):AgentComm
 export interface PortsState {ports:ListeningPort[];supported:boolean}
 const PORT_POLL_MS=4000,PORT_POLL_MAX_MS=30_000,EMPTY_PORTS:PortsState={ports:[],supported:true};
 const portStates=new Map<string,PortsState>(),portListeners=new Map<string,Set<()=>void>>(),portStops=new Map<string,()=>void>();
-const samePorts=(a:ListeningPort[],b:ListeningPort[])=>a.length===b.length&&a.every((port,index)=>port.id===b[index].id&&port.owner===b[index].owner&&JSON.stringify(port.source)===JSON.stringify(b[index].source));
+const samePorts=(a:ListeningPort[],b:ListeningPort[])=>a.length===b.length&&a.every((port,index)=>port.id===b[index].id&&port.owner===b[index].owner&&port.web===b[index].web&&JSON.stringify(port.source)===JSON.stringify(b[index].source));
 export const listeningPorts=(chatId:string):PortsState=>portStates.get(chatId)??EMPTY_PORTS;
 /** Resolves true when the ports (or support) changed, so the poller can back off while nothing moves. */
 export function refreshListeningPorts(chatId:string):Promise<boolean> {

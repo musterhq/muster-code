@@ -3,6 +3,9 @@ import {execFile} from 'node:child_process';
 import {downscaleIcon} from './icon-downscale.ts';
 import {BrowserSessionVault} from './browser-session-vault.ts';
 import {PLUGIN_SCHEME,PluginUiRegistry} from './plugin-ui.ts';
+import {REPORT_SCHEME,ReportRegistry,printReport} from './report-origin.ts';
+import {HtmlRenderStore} from './agent-tools/html-render-store.ts';
+import {exportFileName} from '../shared/rich-block.ts';
 import {applyThemeSource,themeFromSettingsResult,windowBackground} from './theme';
 import path from 'node:path';
 import { writeProjectExportFile, projectExportFilename } from './project-export-file.ts';
@@ -52,7 +55,9 @@ app.setName('Muster Agent');
 {const store=passwordStoreSwitch(process.env,process.argv);if(store)app.commandLine.appendSwitch('password-store',store);}
 app.setPath('userData', app.commandLine.getSwitchValue('user-data-dir') || path.join(app.getPath('appData'), 'Muster Agent'));
 // EXT-10: plugin UI gets its own standard origin (registered before ready), served only through PluginUiRegistry.
-protocol.registerSchemesAsPrivileged([{scheme: PLUGIN_SCHEME, privileges: {standard: true, secure: true, supportFetchAPI: false, corsEnabled: true}}]);
+protocol.registerSchemesAsPrivileged([{scheme: PLUGIN_SCHEME, privileges: {standard: true, secure: true, supportFetchAPI: false, corsEnabled: true}},
+  // Visuals: untrusted HTML reports (and Canvas pages) get their own origin too (report-origin.ts). No fetch, no CORS: the page is one inline document.
+  {scheme: REPORT_SCHEME, privileges: {standard: true, secure: true, supportFetchAPI: false}}]);
 
 /** electron-builder.yml appId: the AppUserModelID of the Windows shortcuts. */
 const WINDOWS_APP_ID = 'dev.themuster.agent';
@@ -360,8 +365,26 @@ async function main(): Promise<void> {
     const response = await pluginUi.respond(request.url);
     return new Response(typeof response.body === 'string' ? response.body : new Uint8Array(response.body), {status: response.status, headers: response.headers});
   });
+  // Visuals: HTML reports and Canvas pages, one inline document per random token, served with a no-network CSP (report-origin.ts).
+  const reports = new ReportRegistry();
+  const serveReport = (request: {url: string}): Response => { const response = reports.respond(request.url); return new Response(response.body, {status: response.status, headers: response.headers}); };
+  if (!protocol.isProtocolHandled(REPORT_SCHEME)) protocol.handle(REPORT_SCHEME, serveReport);
+  /** A throwaway session for printing a report to PDF: same origin handler, every other request cancelled, no permissions. */
+  const reportPrintSession = () => {
+    const printSession = session.fromPartition('muster-report-print');
+    if (!printSession.protocol.isProtocolHandled(REPORT_SCHEME)) {
+      printSession.protocol.handle(REPORT_SCHEME, serveReport);
+      printSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+      printSession.setPermissionCheckHandler(() => false);
+      printSession.webRequest.onBeforeRequest((details, callback) => callback({cancel: !/^(muster-report|data|blob):/.test(details.url)}));
+    }
+    return printSession;
+  };
   // RUN-X1: the agent drives this same browser through the muster_browser MCP bridge; each chat's tab shows in the right pane.
+  // #html-preview: pages agents show inline (render_html) and workspace .html files opened with preview_open.
+  const htmlRenders = new HtmlRenderStore(path.join(dataDir,'html-renders'));
   const browserBridge = new BrowserBridge({dir:path.join(dataDir,'agent-tools'),browser:browserWorkspace,execPath:process.execPath,script:unpackedPath(path.join(__dirname,'browser-mcp.cjs')),
+    renders:htmlRenders,realpath:file=>fs.realpath(file),readFile:async file=>{const stat=await fs.stat(file);if(!stat.isFile())throw new Error('Not a file.');if(stat.size>4_000_000)throw new Error(`This file is ${(stat.size/1_000_000).toFixed(1)} MB; previews take at most 4 MB. Serve it with a dev server and preview its URL instead.`);return fs.readFile(file,'utf8');},
     snapshot:()=>loaded.service.invoke('app.snapshot',undefined),lease:async chatId=>(await loaded.service.invoke('computer.lease',{chatId})).owner,emit:onEvent});
   // #387/#424: started now (retried once), and again on first use if that failed; HTTP routes call it in-process.
   const startBrowserBridge=()=>browserBridge.ensureStarted().then(launcher=>{process.env.MUSTER_BROWSER_MCP_LAUNCHER=launcher;return launcher;});
@@ -483,7 +506,7 @@ async function main(): Promise<void> {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   // Subframes may only load a registered plugin UI origin (EXT-10); everything else, and every main-frame navigation, is refused.
-  window.webContents.on('will-frame-navigate', (event) => { if (!event.isMainFrame && (pluginUi.allows(event.url) || event.url === 'about:srcdoc')) return; event.preventDefault(); });
+  window.webContents.on('will-frame-navigate', (event) => { if (!event.isMainFrame && (pluginUi.allows(event.url) || reports.allows(event.url) || event.url === 'about:srcdoc')) return; event.preventDefault(); });
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
 
@@ -594,6 +617,38 @@ async function main(): Promise<void> {
         if(!service)throw new Error('Agent service is unavailable.');
         const request=input as Commands['plugins.ui.open']['input'];
         return pluginUi.register(await service.invoke('plugins.ui.entry',{pluginId:request?.pluginId,app:request?.app}));
+      }
+      case 'reports.open': {
+        const request = input as Commands['reports.open']['input'];
+        if (!request || typeof request.html !== 'string' || (request.scripts !== undefined && typeof request.scripts !== 'boolean')) throw new Error('Nothing to show.');
+        const { url, token } = reports.register({ html: request.html, ...(request.scripts === false ? { scripts: false } : {}), ...(typeof request.key === 'string' ? { key: request.key } : {}), ...(request.themed === true ? { themed: true } : {}) });
+        return { url, token };
+      }
+      case 'htmlRenders.open': {
+        // The page comes from main's own store, and so does its network grant: the renderer only names the page.
+        const page = htmlRenders.view((input as Commands['htmlRenders.open']['input'])?.id);
+        if (!page) throw new Error('This page is no longer available.');
+        const { url, token } = reports.register({ html: page.html, scripts: true, themed: true, key: `render:${page.id}:${page.networkAllowed ? 'net' : 'local'}`, network: page.networkAllowed });
+        return { url, token, page };
+      }
+      case 'htmlRenders.allowNetwork': return htmlRenders.allowNetwork((input as Commands['htmlRenders.allowNetwork']['input'])?.id);
+      case 'previews.open': { const request = input as Commands['previews.open']['input']; return browserBridge.openPreview(request?.chatId, request?.url, request?.panel === true); }
+      case 'reports.pdf': {
+        if (!window || window.isDestroyed()) throw new Error('The window is unavailable.');
+        const request = input as Commands['reports.pdf']['input'];
+        if (!request || typeof request.token !== 'string' || !/^[a-f0-9]{32}$/.test(request.token) || (request.title !== undefined && (typeof request.title !== 'string' || request.title.length > 400))) throw new Error('Invalid PDF export request.');
+        const token = request.token;
+        if (!reports.html(token)) throw new Error('This report has expired. Reopen it from the conversation and try again.');
+        const target = await dialog.showSaveDialog(window, { title: 'Export report as PDF', defaultPath: path.join(app.getPath('documents'), exportFileName(request.title ?? 'Report', 'pdf')), filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+        if (target.canceled || !target.filePath) return { saved: false };
+        const pdf = await printReport(reports, token, { createWindow: () => {
+          const printer = new BrowserWindow({ show: false, webPreferences: { session: reportPrintSession(), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, spellcheck: false } });
+          printer.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+          printer.webContents.on('will-navigate', event => event.preventDefault());
+          return { loadURL: url => printer.loadURL(url), printToPDF: options => printer.webContents.printToPDF(options), destroy: () => { if (!printer.isDestroyed()) printer.destroy(); } };
+        } });
+        await fs.writeFile(target.filePath, pdf);
+        return { saved: true, fileName: path.basename(target.filePath) };
       }
       case 'browser.open': return browserWorkspace.open(input as Commands['browser.open']['input']);
       case 'browser.navigate': return browserWorkspace.navigate(input as Commands['browser.navigate']['input']);

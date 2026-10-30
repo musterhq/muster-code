@@ -44,7 +44,12 @@ export function browserNote(style: BrowserToolStyle): string {
   const how = style === 'codex' ? `For web pages prefer the ${BROWSER_MCP} MCP tools (${tools}).`
     : style === 'native' ? `For web pages use the browser tools of this chat: ${tools}.`
     : `For web pages use the ${BROWSER_MCP} MCP server's tools, named exactly: ${tools}.`;
-  return `Muster has an in-app browser shown to the user in the right pane. ${how} ${BROWSER_WHEN} Flow: ${name('browser_navigate')}, ${name('browser_snapshot')}, act on [ref=eN], re-snapshot. ${BROWSER_LIVE} ${BROWSER_SESSION}`;
+  return `Muster has an in-app browser shown to the user in the right pane. ${how} ${BROWSER_WHEN} Flow: ${name('browser_navigate')}, ${name('browser_snapshot')}, act on [ref=eN], re-snapshot. ${BROWSER_LIVE} ${BROWSER_SESSION} ${previewNote(name)}`;
+}
+export const PREVIEW_TOOLS = ['render_html', 'preview_open', 'preview_close'] as const;
+/** #html-preview: how the agent shows its work. Same server, so the same naming as the browser tools. */
+function previewNote(name: (tool: string) => string): string {
+  return `To show a dashboard, chart, table or report you made, call ${name('render_html')} (one self-contained HTML page; it appears inline in the chat, themed and sandboxed) instead of describing it. After starting a dev server (in the background), call ${name('preview_open')} with its URL so the user sees the app live; it also opens a workspace .html file. ${name('preview_close')} closes it.`;
 }
 /** Said plainly on a route that has no browser tool, so the model neither claims one nor hunts for another. */
 export const NO_BROWSER_NOTE = "This chat's route has no in-app browser tool, so you cannot open or drive pages in Muster's browser here. Do not claim to have used it. To check a page, ask the user to open it in Muster's browser, or read it with a command-line HTTP request if you can run commands.";
@@ -139,6 +144,8 @@ export function computerAction(data: Record<string, unknown> | undefined): Compu
   const typed = TEXT_KEYS.map(key => str(args[key])).find(Boolean) ?? '';
   const sensitive = isSensitiveTyping(args);
   const t = tool.toLowerCase().replace(/[-\s]/g, '_');
+  // render_html is a page in the transcript, not a browser step: the tool row shows it (ToolCard).
+  if (t === 'render_html') return undefined;
   const make = (verb: string, runningVerb: string, object: string): ComputerAction => ({target, verb, runningVerb, object, app, url, label: `${verb}${object ? ' ' + object : ''}${where}`.trim()});
   if (/^(click|left_click|tap)$/.test(t)) return make('Clicked', 'Clicking', quote(element));
   if (/^(double_click|doubleclick)$/.test(t)) return make('Double-clicked', 'Double-clicking', quote(element));
@@ -149,6 +156,8 @@ export function computerAction(data: Record<string, unknown> | undefined): Compu
   if (/^(drag|drag_and_drop)$/.test(t)) return make('Dragged', 'Dragging', quote(element));
   if (/^(hover|move|mouse_move)$/.test(t)) return make('Hovered', 'Hovering over', quote(element));
   if (/^(select_option|select)$/.test(t)) return make('Selected', 'Selecting', quote(Array.isArray(args.values) ? args.values.map(String).join(', ') : str(args.value) || element));
+  if (t === 'preview_open') { const file = str(args.file); return make('Opened preview of', 'Opening preview of', hostOf(url) || file.split(/[\\/]/).pop() || 'a page'); }
+  if (t === 'preview_close') return make('Closed', 'Closing', 'the preview');
   if (/^(navigate|open_url|goto)$/.test(t)) return make('Opened', 'Opening', hostOf(url) || 'a page');
   if (/^(go_back|back)$/.test(t)) return make('Went back', 'Going back', '');
   if (/^(reload|refresh)$/.test(t)) return make('Reloaded', 'Reloading', 'the page');

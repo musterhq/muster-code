@@ -8,6 +8,7 @@ import {stageAttachment,runtimeMessage} from '../composerBridge';
 import {BROWSER_VIEWPORTS,browserAddress,browserScopeProfile,type BrowserConsoleEntry,type BrowserProfile,type BrowserState,type BrowserViewport} from '../../shared/browser-protocol';
 import './browser-tab.css';
 import {Tip} from './Tooltip';
+import {PreviewUnreachable} from './PreviewUnreachable';
 import {Menu,MenuPopup} from './AppMenu';
 import { device } from '../../shared/device-noun.ts';
 import {OVERLAY_SELECTOR,observeOverlayChanges,sameBounds,type Bounds} from '../overlayObserver';
@@ -238,7 +239,9 @@ function DesktopBrowserTab({owner,profileId:requestedProfile,initialUrl='about:b
   const cancelPick=()=>{void invoke('browser.cancelPick',{owner}).catch(()=>{});};
   const openExternal=()=>void guarded(()=>invoke('browser.openExternal',{owner}));
 
-  const reportedError=error || browser?.error;
+  // #html-preview: a page that could not be reached gets its own page, not the generic error bar.
+  const unreachable=!error && browser?.loadError && !browser.certificateError?browser.loadError:undefined;
+  const reportedError=error || (unreachable?undefined:browser?.error);
   const page=!!browser && browser.url!=='about:blank';
   const tools=ready && page && !picking && !browser?.certificateError;
   const viewport=browser?.viewport ?? 'fill';
@@ -305,6 +308,7 @@ function DesktopBrowserTab({owner,profileId:requestedProfile,initialUrl='about:b
     <div ref={host} className="browser-surface" role="region" aria-label="Website content" aria-busy={browser?.loading??false}>
       {!ready && !reportedError && <div className="browser-empty" role="status"><Globe size={26} aria-hidden="true"/><p>Opening browser…</p></div>}
       {ready && browser?.url==='about:blank' && !reportedError && <div className="browser-empty"><Globe size={26} aria-hidden="true"/><p>Browse a website</p><span>Enter an HTTP or HTTPS address above.</span></div>}
+      {unreachable && <PreviewUnreachable url={unreachable.url} code={unreachable.code} description={unreachable.description} onReload={()=>void action('browser.reload')} onOpenExternal={openExternal}/>}
       {browser?.certificateError && <div className="browser-interstitial" role="alert">
         <ShieldAlert size={28} aria-hidden="true"/>
         <p>This connection isn't private</p>
