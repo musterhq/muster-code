@@ -173,6 +173,15 @@ test('an agent makes an .xlsx with live formulas using Muster\'s spreadsheets sk
   assert.equal(sales.getCell('E2').numFmt, '0.0%');
   const zip = await JSZip.loadAsync(await readFile(turn.output));
   assert.match(await zip.file('xl/workbook.xml')!.async('string'), /fullCalcOnLoad="1"/, 'formulas recalculate when the file opens');
+  // #773: the example adds a native, editable chart with Muster's chart writer: a chart part whose series reads the
+  // Revenue cells, anchored on the Summary sheet.
+  assert.match(readFileSync(turn.skill, 'utf8'), /muster-xlsx-charts/, 'the skill teaches the chart writer');
+  const chartParts = Object.keys(zip.files).filter(name => /^xl\/charts\/chart\d+\.xml$/.test(name));
+  assert.equal(chartParts.length, 1, 'the workbook has one native chart part');
+  const chartXml = await zip.file(chartParts[0]!)!.async('string');
+  assert.match(chartXml, /<c:barChart>/);
+  assert.match(chartXml, /<c:val><c:numRef><c:f>Sales!\$D\$2:\$D\$4<\/c:f>/, 'the series reads the Revenue cells');
+  assert.match(await zip.file('[Content_Types].xml')!.async('string'), /drawingml\.chart\+xml/);
   assertRendered(turn, 2);
   // Editing keeps formats and formulas.
   sales.getCell('B2').value = 999;

@@ -289,3 +289,24 @@ await addCharts(out, kinds.map(kind => ({ sheet: kind, type: base(kind), stacked
   assert.ok(was < 2, `before the edit the bars run 100 to 150 (ratio ${was.toFixed(2)})`);
   assert.ok(now > 4, `the edited cell redraws the chart from its range, not its saved values (ratio ${now.toFixed(2)})`);
 });
+
+// Spec: MUS-SPEC-21-773E (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-773e)
+test('office setup copies Muster\'s chart writer beside the libraries, and an app update replaces the old copy', async t => {
+  const root = await directory(t), shipped = join(root, 'shipped');
+  const source = join(appDir, 'resources', 'office-packages', 'muster-xlsx-charts');
+  await mkdir(join(shipped, 'muster-xlsx-charts'), {recursive: true});
+  for (const name of ['package.json', 'index.mjs', 'index.d.ts']) await writeFile(join(shipped, 'muster-xlsx-charts', name), await readFile(join(source, name)));
+  const open = () => new OfficeLibraries({root: join(root, 'office-libs'), execPath: process.execPath, localModules: localOfficeModules(join(appDir, 'src', 'runtime')), packages: shipped});
+  const first = open();
+  t.after(() => first.remove());
+  const ready = await first.ensure();
+  const installed = join(ready.modules, 'muster-xlsx-charts', 'index.mjs');
+  assert.equal(await readFile(installed, 'utf8'), await readFile(join(source, 'index.mjs'), 'utf8'), 'the shipped package is in node_modules');
+  // An app update ships a changed package: the next setup replaces the copy.
+  await writeFile(join(shipped, 'muster-xlsx-charts', 'index.mjs'), (await readFile(join(source, 'index.mjs'), 'utf8')) + '\nexport const UPDATED = true;\n');
+  const ready2 = await open().ensure();
+  assert.match(await readFile(join(ready2.modules, 'muster-xlsx-charts', 'index.mjs'), 'utf8'), /export const UPDATED = true;/);
+  const probe = join(root, 'probe.mjs');
+  await writeFile(probe, `import { UPDATED, addCharts } from 'muster-xlsx-charts'; console.log(UPDATED && typeof addCharts);`);
+  assert.equal(execFileSync(ready2.node, [probe], {cwd: root, env: {...process.env, NODE_PATH: ''}, encoding: 'utf8'}).trim(), 'function');
+});
