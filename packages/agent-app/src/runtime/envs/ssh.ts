@@ -36,9 +36,10 @@ export function checkKeyFile(path: string): string | null {
   if (process.platform !== 'win32' && (statSync(path).mode & 0o077)) return `${path} can be read by other users. Run chmod 600 on it: ssh refuses such a key.`;
   return null;
 }
-export function sshArgs(dataDir: string, h: Pick<SshHost, 'host' | 'port' | 'user' | 'keyPath'>): string[] {
+/** `extra` goes before the destination (ssh reads anything after it as the remote command): forwards, -T, -N (#812). */
+export function sshArgs(dataDir: string, h: Pick<SshHost, 'host' | 'port' | 'user' | 'keyPath'>, extra: string[] = []): string[] {
   return ['-F', process.platform === 'win32' ? 'NUL' : '/dev/null', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=yes', '-o', `UserKnownHostsFile=${knownHostsFile(dataDir)}`, '-o', 'GlobalKnownHostsFile=/dev/null',
-    '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-o', 'ForwardAgent=no', '-o', 'ForwardX11=no', '-o', 'LogLevel=ERROR', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', '-i', h.keyPath, '-p', String(h.port), `${h.user}@${h.host}`];
+    '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-o', 'ForwardAgent=no', '-o', 'ForwardX11=no', '-o', 'LogLevel=ERROR', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', '-i', h.keyPath, '-p', String(h.port), ...extra, `${h.user}@${h.host}`];
 }
 const run = (bin: string, args: string[], input?: string, ms = 15_000) => new Promise<{ code: number | null; out: string; err: string }>(resolve => {
   const c = execFile(bin, args, { timeout: ms, maxBuffer: 1_000_000, windowsHide: true }, (e, stdout, stderr) => resolve({ code: e ? (typeof (e as { code?: unknown }).code === 'number' ? (e as { code: number }).code : 1) : 0, out: String(stdout), err: String(stderr) }));

@@ -22,6 +22,38 @@ export interface DeviceInfo {
   formFactor: DeviceFormFactor;
   /** How the device looks (flat and 3D), from its simctl device type or AVD profile (shared/device-frames.ts). */
   frame?: FrameSpec;
+  /** The machine it runs on (#812): absent for this computer; a remote host's id (`ssh-…`), whose devices' ids start with `<hostId>:`. */
+  hostId?: string;
+  /** That host's name as the user gave it, shown beside the device ("on build-mac"). */
+  hostLabel?: string;
+}
+/**
+ * Where devices run (#812). `local` is this computer. `ssh` is a host from Settings › Environments › SSH hosts: Muster
+ * installs the same pinned helper there (no sudo, in ~/.muster/device-host), starts it and forwards it to a loopback port
+ * here. `cloud` is reserved for hosted devices (not built yet).
+ */
+export type DeviceHostKind = 'local' | 'ssh' | 'cloud';
+export type DeviceHostState = 'off' | 'connecting' | 'installing' | 'starting' | 'ready' | 'reconnecting' | 'failed';
+export interface DeviceHostSummary {
+  /** `ssh-<12 hex>` for an SSH host. */
+  id: string;
+  kind: DeviceHostKind;
+  label: string;
+  /** user@host:port, for the settings row. */
+  address?: string;
+  /** The SSH host record this host uses (Settings › Environments). */
+  sshHostId?: string;
+  state: DeviceHostState;
+  /** Plain-English status or the reason it failed. */
+  detail?: string;
+  /** What the host has, once probed: iOS needs a Mac with Xcode. */
+  ios?: PlatformCheck;
+  android?: PlatformCheck;
+  /** The remote OS and Node.js, once probed ("darwin", "v22.11.0"). */
+  os?: string;
+  node?: string;
+  /** The helper version running there (always the pinned one; anything else is refused). */
+  helperVersion?: string;
 }
 export interface PlatformCheck {
   available: boolean;
@@ -58,6 +90,8 @@ export interface DeviceSetup {
   models: {id: 'iphone' | 'ipad'; label: string; state: 'absent' | 'downloading' | 'ready' | 'converted' | 'failed'; error?: string}[];
   /** The desktop platform: iOS is hidden (with a note) anywhere but macOS. */
   host: 'darwin' | 'win32' | 'linux';
+  /** Remote device hosts (#812): every SSH host you have, with whether Muster uses it for devices. */
+  hosts?: DeviceHostSummary[];
 }
 export interface DeviceList { devices: DeviceInfo[]; errors: string[]; checkedAt: number }
 export type DeviceSessionState = 'starting' | 'live' | 'reconnecting' | 'error';
@@ -90,6 +124,9 @@ export interface DeviceSession {
   platform: DevicePlatform;
   formFactor: DeviceFormFactor;
   frame?: FrameSpec;
+  /** The remote host it runs on (#812); absent for this computer. */
+  hostId?: string;
+  hostLabel?: string;
   /** The chat whose agent opened it; absent for a session the user opened. */
   chatId?: string;
   openedBy: 'user' | 'agent';
@@ -142,12 +179,18 @@ export interface DeviceCommands {
   /** A realistic 3D model: the cached conversion, or the verified apple.com download for the renderer to convert. */
   'devices.model': { input: { id: 'iphone' | 'ipad' }; output: { id: string; bodyNode: string; screenNode: string; glb?: Uint8Array; usdz?: Uint8Array } };
   'devices.modelStore': { input: { id: 'iphone' | 'ipad'; glb: Uint8Array }; output: void };
+  /** Remote device hosts (#812): every SSH host with its device state. */
+  'devices.hosts': { input: undefined; output: DeviceHostSummary[] };
+  /** Use an SSH host for devices: install the pinned helper there if needed, start it, forward it and list its devices. */
+  'devices.connectHost': { input: { sshHostId: string }; output: DeviceHostSummary };
+  /** Stop using it: close its sessions, stop its helper and tunnel. Nothing of Muster's keeps running on the host. */
+  'devices.disconnectHost': { input: { sshHostId: string }; output: DeviceHostSummary };
 }
 export type DeviceEvent =
   | { type: 'deviceSetup'; setup: DeviceSetup }
   | { type: 'deviceList'; list: DeviceList }
   | { type: 'deviceSessions'; sessions: DeviceSession[] };
-export const DEVICE_COMMANDS = {'devices.setup': true, 'devices.configure': true, 'devices.installHelper': true, 'devices.list': true, 'devices.boot': true, 'devices.shutdown': true, 'devices.open': true, 'devices.close': true, 'devices.sessions': true, 'devices.view': true, 'devices.button': true, 'devices.rotate': true, 'devices.screenshot': true, 'devices.control': true, 'devices.streamFallback': true, 'devices.chrome': true, 'devices.model': true, 'devices.modelStore': true} as const satisfies Record<keyof DeviceCommands, true>;
+export const DEVICE_COMMANDS = {'devices.setup': true, 'devices.configure': true, 'devices.installHelper': true, 'devices.list': true, 'devices.boot': true, 'devices.shutdown': true, 'devices.open': true, 'devices.close': true, 'devices.sessions': true, 'devices.view': true, 'devices.button': true, 'devices.rotate': true, 'devices.screenshot': true, 'devices.control': true, 'devices.streamFallback': true, 'devices.chrome': true, 'devices.model': true, 'devices.modelStore': true, 'devices.hosts': true, 'devices.connectHost': true, 'devices.disconnectHost': true} as const satisfies Record<keyof DeviceCommands, true>;
 
 /** IPC: main → renderer frames, renderer → main frame acknowledgements (flow control) and input. */
 export const DEVICE_FRAME_CHANNEL = 'muster:device-frame';
