@@ -6,6 +6,7 @@ import type {ComputerControlOwner, ComputerFrame} from '../shared/domains/comput
 import {computerAction, computerUseTarget, type ComputerTarget} from '../shared/computer-use.ts';
 import {agentBrowserOwner, browserScopeProfile} from '../shared/browser-protocol.ts';
 import {subscribe} from './bridge.ts';
+import type {DeviceSession} from '../shared/device-protocol.ts';
 import {orderByRaise, raiseKey} from './pipLayout.ts';
 
 export type Corner = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
@@ -22,7 +23,8 @@ export const ENDED_LINGER_MS = 6000;
 export interface ToolShot {id?: string; dataUrl?: string; mime?: string; width?: number; height?: number; bytes?: number}
 /** What the PiP shows: a pushed browser frame or the newest computer-use screenshot in the transcript. */
 export interface PipSource {
-  chatId: string; target: ComputerTarget; app: string; label: string; at: number;
+  /** 'device' (#363): a live simulator or emulator session; `deviceId` names it and the card shows its live feed. */
+  chatId: string; target: ComputerTarget | 'device'; deviceId?: string; deviceState?: 'starting' | 'live' | 'reconnecting' | 'error'; app: string; label: string; at: number;
   image?: ToolShot; url?: string; owner?: string; profileId?: string; itemId?: string; running?: boolean; failed?: string;
 }
 export interface PipPlacement {corner: Corner; width: number}
@@ -99,7 +101,8 @@ export function pickSource(frame: PipSource | undefined, shot: PipSource | undef
   return shot.at > frame.at ? {...shot, image: shot.image ?? frame.image, owner: frame.owner, profileId: frame.profileId, url: shot.url ?? frame.url} : frame;
 }
 /** Which card a source belongs to: a browser page by host, a desktop app by name. */
-export function sourceKey(source: Pick<PipSource, 'target' | 'app' | 'url'>): string {
+export function sourceKey(source: Pick<PipSource, 'target' | 'app' | 'url'> & {deviceId?: string}): string {
+  if (source.target === 'device') return `device:${source.deviceId ?? source.app}`;
   if (source.target === 'browser') return `browser:${source.url ? hostOf(source.url) : (source.app || 'browser').toLowerCase()}`;
   return `app:${(source.app || 'screen').toLowerCase()}`;
 }
@@ -131,9 +134,10 @@ export function mergeSources(frames: readonly PipSource[], steps: readonly PipSo
   return [...byKey.values()].sort((a, b) => b.at - a.at).slice(0, max);
 }
 /** One PiP card per session: the chat plus the app or page. The key the z-order is kept under. */
-export const sessionKey = (source: Pick<PipSource, 'chatId' | 'target' | 'app' | 'url'>): string => `${source.chatId}|${sourceKey(source)}`;
+export const sessionKey = (source: Pick<PipSource, 'chatId' | 'target' | 'app' | 'url'> & {deviceId?: string}): string => `${source.chatId}|${sourceKey(source)}`;
 /** The right-sidebar tab a session opens as: the agent's real browser tab when it has one, else a live-view tab. */
-export function sessionTabId(source: Pick<PipSource, 'chatId' | 'target' | 'app' | 'url' | 'owner' | 'profileId'>): string {
+export function sessionTabId(source: Pick<PipSource, 'chatId' | 'target' | 'app' | 'url' | 'owner' | 'profileId'> & {deviceId?: string}): string {
+  if (source.target === 'device') return `device:${source.deviceId ?? ''}`;
   if (source.target === 'browser' && source.owner && source.profileId) return source.owner;
   return liveViewTabId(source);
 }
@@ -172,6 +176,12 @@ export function pipPhase(source: PipSource | undefined, running: boolean, now: n
   return now - endedAt < ENDED_LINGER_MS ? 'ended' : 'gone';
 }
 export const pipShouldShow = (source: PipSource | undefined, running: boolean, now: number, runEndedAt = 0): boolean => pipPhase(source, running, now, runEndedAt) !== 'gone';
+/** A device session as a PiP source (#363): shown in the chat that opened it, or in any chat when the user opened it. */
+export function deviceSources(sessions: readonly DeviceSession[], chatId: string | null): PipSource[] {
+  if (!chatId) return [];
+  return sessions.filter(session => !session.chatId || session.chatId === chatId).map(session => ({chatId, target: 'device' as const, deviceId: session.deviceId, deviceState: session.state, app: session.name,
+    label: session.chatId ? (session.control === 'user' ? 'You have control' : 'Agent is using this device') : 'Live device', at: session.openedAt, running: true}));
+}
 export function frameSource(frame: ComputerFrame): PipSource {
   return {chatId: frame.chatId, target: 'browser', app: frame.title || hostOf(frame.url), label: frame.action ?? (frame.title || hostOf(frame.url)), at: frame.at, image: {dataUrl: frame.dataUrl, width: frame.width, height: frame.height, mime: 'image/jpeg'}, url: frame.url, owner: frame.owner, profileId: frame.profileId};
 }

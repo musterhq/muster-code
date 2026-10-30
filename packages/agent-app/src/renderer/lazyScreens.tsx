@@ -17,6 +17,7 @@ export const screenLoaders = {
   pullRequest: () => import('./components/PullRequestTab'),
   history: () => import('./components/GitHistoryTab'),
   computer: () => import('./components/ScopedComputerTab'),
+  device: () => import('./components/devices/DeviceTab'),
 } as const;
 
 /** React.lazy over a named export. */
@@ -32,6 +33,7 @@ export const LazyPreferencesScreen = lazyNamed(screenLoaders.settings, 'Preferen
 export const LazyPullRequestTab = lazyNamed(screenLoaders.pullRequest, 'PullRequestTab');
 export const LazyGitHistoryTab = lazyNamed(screenLoaders.history, 'GitHistoryTab');
 export const LazyScopedComputerTab = lazyNamed(screenLoaders.computer, 'ScopedComputerTab');
+export const LazyDeviceTab = lazyNamed(screenLoaders.device, 'DeviceTab');
 
 /** Quiet placeholder while a chunk loads: no spinner flash, just the surface's own background. */
 export function ScreenFallback({label}: {label: string}): React.ReactElement {
