@@ -87,3 +87,58 @@ test('an agent page in Muster\'s sandbox cannot reach the app, IPC, storage, fil
     server.close();
   }
 });
+
+// #786: a notebook's saved HTML output, served in the measure-only mode the notebook preview uses (scripts off, measure on) and
+// framed as SandboxedHtml frames it. The probes take no space, so the content is the table and the tall block. Real layout: the reported height is the content's, and follows it when the content changes.
+const OUTPUT = (height: number) => `<table><tr><td>42</td></tr></table><div style="height:${height}px">tall</div>`
+  + `<script>parent.postMessage({muster:'probe-ran',via:'inline script'},'*')</script>`
+  + `<img style="position:absolute;width:0;height:0" src="data:image/png;base64,AAAA" onerror="parent.postMessage({muster:'probe-ran',via:'onerror'},'*')">`
+  + `<svg style="position:absolute" width="0" height="0" onload="parent.postMessage({muster:'probe-ran',via:'svg onload'},'*')"></svg>`
+  + `<script src="data:text/javascript,parent.postMessage({muster:'probe-ran',via:'data script'},'*')"></script>`
+  + `<iframe style="position:absolute;width:0;height:0;border:0" srcdoc="<script>parent.parent.postMessage({muster:'probe-ran',via:'nested frame'},'*')</script>"></iframe>`;
+
+// Spec: MUS-SPEC-21-786G (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-786g)
+test('a notebook HTML output fits its frame to its content while none of its own scripts run', {skip: !chromePath() && 'no Chrome installed'}, async () => {
+  const {notebookOutputDocument} = await import('../src/shared/notebook.ts');
+  const registry = new ReportRegistry();
+  const theme = {appearance: 'dark' as const, variables: {'--background': '#1b1c1f', '--foreground': '#e6e7ea'}};
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? '/', 'http://x');
+    if (url.pathname === '/') {
+      response.writeHead(200, {'content-type': 'text/html'});
+      // The frame as SandboxedHtml renders it in measure mode; the parent applies each reported height, as NotebookPreview does.
+      response.end(`<!doctype html><title>Muster</title><body style="margin:0"><script>window.heights=[];window.ran=[];addEventListener('message',e=>{const f=document.getElementById('frame');if(e.source!==f.contentWindow)return;if(e.data&&e.data.muster==='report-height'){heights.push(e.data.height);f.style.height=e.data.height+'px'}if(e.data&&e.data.muster==='probe-ran')ran.push(e.data.via)});</script>
+        <div style="width:600px"><iframe id="frame" sandbox="allow-scripts" referrerpolicy="no-referrer" allow="" style="display:block;width:100%;border:0" src="/report/${url.searchParams.get('h')}/index.html"></iframe></div></body>`);
+      return;
+    }
+    const match = /^\/report\/(\d+)\/index\.html$/.exec(url.pathname);
+    if (match) {
+      const {url: reportUrl} = registry.register({html: notebookOutputDocument(OUTPUT(Number(match[1])), theme), scripts: false, measure: true});
+      const served = registry.respond(reportUrl);
+      response.writeHead(served.status, served.headers); response.end(served.body);
+      return;
+    }
+    response.writeHead(404); response.end();
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as {port: number}).port;
+  const chrome = await launchChrome();
+  try {
+    const measured: number[] = [];
+    for (const height of [300, 640]) {
+      await chrome.navigate(`http://127.0.0.1:${port}/?h=${height}`, 'window.heights && window.heights.length > 0');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const heights = await chrome.evaluate('window.heights') as number[];
+      const last = heights.at(-1)!;
+      // The content: a table row (about 30px) and the tall block, inside the body's 10px top and bottom padding.
+      assert.ok(last >= height + 20 && last <= height + 80, `the reported height ${last} fits ${height}px of content`);
+      assert.equal(await chrome.evaluate(`document.getElementById('frame').getBoundingClientRect().height`), last, 'the frame is exactly that tall');
+      assert.deepEqual(await chrome.evaluate('window.ran'), [], 'no inline script, event handler, data: script or nested frame of the output ran');
+      measured.push(last);
+    }
+    assert.ok(measured[1]! - measured[0]! >= 300, 'taller content reports a taller frame');
+  } finally {
+    chrome.close();
+    server.close();
+  }
+});
