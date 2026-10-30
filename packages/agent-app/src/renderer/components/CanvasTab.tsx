@@ -12,6 +12,7 @@ import {canvasDiffRows} from '../canvasDiff';
 import {CANVAS_KINDS, type Canvas, type CanvasKind, type CanvasVersion} from '../../shared/domains/artifacts-protocol';
 import {MessageBody} from './MessageBody';
 import {ResourceState} from './ResourceState';
+import {SandboxedHtml} from './SandboxedHtml';
 import './canvas-tab.css';
 import {Tip} from './Tooltip';
 
@@ -124,9 +125,9 @@ export function CanvasTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
         onChange={event => edit(event.currentTarget.value)}
         onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void save(); } }}/>}
       {shown !== 'edit' && <div className="canvas-preview" aria-label="Preview">
-        {kind === 'markdown' ? <div className="canvas-markdown"><MessageBody text={draft} asDocument/></div>
-          // No sandbox tokens: scripts, forms, popups and same-origin access are all off; the page is shown, never run.
-          : <iframe className="canvas-html" title={`${canvas.title} preview`} sandbox="" referrerPolicy="no-referrer" srcDoc={draft}/>}
+        {kind === 'markdown' ? <div className="canvas-markdown"><MessageBody text={draft} asDocument reports/></div>
+          // The shared untrusted-HTML frame (reports use it too): scripts, forms, popups and same-origin access are all off; the page is shown, never run.
+          : <SandboxedHtml className="canvas-html" html={draft} title={`${canvas.title} preview`} storeKey={`canvas:${id}`}/>}
       </div>}
       {history && <CanvasHistory canvas={canvas} current={draft} onClose={() => setHistory(false)} onRestored={adopt}/>}
     </div>

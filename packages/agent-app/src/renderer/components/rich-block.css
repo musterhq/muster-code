@@ -1,0 +1,115 @@
+/* RichBlock: one chrome for diagrams, charts, reports (and, later, 3D models and devices). Same border, radius and
+   surface as a code block (message-body.css .md-code) so a reply reads as one document. Tokens only (UX-19). */
+
+.rich-block { position: relative; display: flex; flex-direction: column; min-width: 0; margin: 8px 0; border: 1px solid var(--hairline); border-radius: var(--radius-8); background: var(--bg-raised); overflow: hidden; color: var(--text); }
+.rich-head { display: flex; align-items: center; gap: 7px; min-height: 31px; padding: 4px 6px 4px 10px; border-bottom: 1px solid var(--hairline); }
+.rich-icon { display: inline-flex; flex: none; color: var(--text-faint); }
+.rich-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-12); font-weight: 560; color: var(--text); }
+.rich-kind { flex: none; margin-right: auto; font-size: var(--fs-11); color: var(--text-faint); white-space: nowrap; }
+.rich-actions { display: inline-flex; align-items: center; flex: none; gap: 1px; }
+.rich-action { display: inline-flex; align-items: center; justify-content: center; gap: 2px; min-width: 22px; height: 22px; padding: 0 4px; border: 0; border-radius: var(--radius-6); background: none; color: var(--text-dim); font-size: var(--fs-11); cursor: pointer; }
+.rich-action:hover, .rich-action[data-popup-open], .rich-action[aria-pressed='true'] { background: var(--bg-hover); color: var(--text); }
+.rich-action[aria-pressed='true'] { background: var(--bg-active); }
+.rich-action:focus-visible, .rich-viewport:focus-visible, .rich-source:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.rich-action[data-state='copied'] { color: var(--accent); }
+.rich-action[data-state='error'] { color: var(--danger); }
+.rich-action:disabled { opacity: .45; cursor: default; }
+/* Chart / Table style switch in the header: the same pill the Canvas layout switch uses. */
+.rich-switch { display: inline-flex; margin-right: 4px; border: 1px solid var(--hairline); border-radius: var(--radius-6); overflow: hidden; }
+.rich-switch button { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border: 0; background: none; color: var(--text-faint); font-size: var(--fs-11); cursor: pointer; }
+.rich-switch button:hover { color: var(--text); background: var(--bg-hover); }
+.rich-switch button[aria-checked='true'] { color: var(--text); background: var(--bg-active); }
+.rich-switch button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.rich-menu { min-width: 150px; }
+.rich-problem { margin: 0; padding: 5px 10px; border-bottom: 1px solid var(--hairline); background: color-mix(in srgb, var(--danger) 8%, transparent); color: var(--text); font-size: var(--fs-12); }
+
+.rich-body { position: relative; min-width: 0; min-height: 0; }
+.rich-body > .resource-state { padding: 10px 12px; }
+.rich-block[data-fixed-height][data-variant='inline'] .rich-body[data-status='ready'] { height: var(--rich-height); }
+.rich-source { max-height: 260px; margin: 0 8px 8px; padding: 8px 10px; overflow: auto; border: 1px solid var(--hairline); border-radius: var(--radius-6); background: var(--bg-sunken); color: var(--text-dim); font: var(--fs-12)/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.rich-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+/* The tab is the block with the pane as its frame. */
+.rich-block[data-variant='tab'] { flex: 1; height: 100%; margin: 0; border: 0; border-radius: 0; }
+.rich-block[data-variant='tab'] .rich-body { flex: 1; display: flex; flex-direction: column; }
+.rich-block[data-variant='tab'] .rich-body[data-status='ready'] > * { flex: 1; min-height: 0; }
+
+/* Full screen: the same block, large. */
+.rich-full-backdrop { position: fixed; inset: 0; z-index: var(--z-modal-backdrop); background: var(--scrim); transition: opacity 150ms ease; }
+.rich-full { position: fixed; z-index: var(--z-modal); inset: clamp(12px, 4vh, 40px) clamp(12px, 4vw, 56px); display: flex; transition: opacity 150ms ease, transform 150ms ease; }
+.rich-full > .rich-block { flex: 1; margin: 0; border-radius: var(--radius-12); box-shadow: var(--shadow-dialog); }
+.rich-full > .rich-block .rich-body { flex: 1; display: flex; flex-direction: column; }
+.rich-full > .rich-block .rich-body[data-status='ready'] > * { flex: 1; min-height: 0; }
+.rich-full[data-starting-style], .rich-full[data-ending-style] { opacity: 0; transform: scale(.985); }
+.rich-full-backdrop[data-starting-style], .rich-full-backdrop[data-ending-style] { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .rich-full, .rich-full-backdrop { transition: none; } }
+
+/* ---- viewports shared by the renderers ---------------------------------------------------------------------------- */
+
+/* A drawing (diagram SVG, chart SVG) centred on the surface, fitted to the width. */
+.rich-viewport { position: relative; overflow: hidden; touch-action: none; outline: 0; }
+.rich-viewport[data-zoomable='true'] { cursor: grab; }
+.rich-viewport[data-zoomable='true'][data-dragging='true'] { cursor: grabbing; }
+.rich-viewport[data-zoomable='false'][data-clickable='true'] { cursor: zoom-in; }
+.rich-stage { transform-origin: 0 0; }
+.rich-stage svg { display: block; width: 100%; height: 100%; max-width: none; overflow: visible; }
+.rich-viewport[data-mode='inline'] { height: var(--rich-stage-height, 200px); }
+.rich-viewport[data-mode='tab'], .rich-viewport[data-mode='fullscreen'] { min-height: 240px; }
+.rich-zoom { display: inline-flex; align-items: center; gap: 1px; margin-right: 4px; }
+.rich-zoom-level { min-width: 38px; text-align: center; font-size: var(--fs-11); color: var(--text-faint); font-variant-numeric: tabular-nums; }
+
+/* Chart */
+.rich-chart { position: relative; padding: 8px 10px 6px; min-width: 0; }
+.rich-chart-canvas { width: 100%; min-width: 0; }
+.rich-chart-canvas svg { display: block; max-width: 100%; }
+.rich-chart-canvas[data-mode='inline'] { height: 300px; }
+.rich-chart-canvas[data-mode='tab'], .rich-chart-canvas[data-mode='fullscreen'] { height: 100%; min-height: 280px; }
+.rich-block[data-variant='tab'] .rich-chart, .rich-full .rich-chart { height: 100%; display: flex; flex-direction: column; }
+.rich-block[data-variant='tab'] .rich-chart-canvas, .rich-full .rich-chart-canvas { flex: 1; }
+.rich-tooltip { position: fixed; z-index: var(--z-popover); max-width: 260px; padding: 6px 9px; border: 1px solid rgb(var(--fg-rgb) / 9%); border-radius: var(--radius-8); background: var(--bg-menu); box-shadow: var(--shadow-popover); color: var(--text); font-size: var(--fs-12); line-height: 1.45; pointer-events: none; }
+.rich-tooltip dl { display: grid; grid-template-columns: auto auto; gap: 1px 12px; margin: 0; }
+.rich-tooltip dt { color: var(--text-dim); }
+.rich-tooltip dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.rich-table-wrap { overflow: auto; max-height: 360px; padding: 4px 0; }
+.rich-block[data-variant='tab'] .rich-table-wrap, .rich-full .rich-table-wrap { max-height: none; height: 100%; }
+.rich-table { width: 100%; border-collapse: collapse; font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.rich-table caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.rich-table th, .rich-table td { padding: 4px 12px; border-bottom: 1px solid var(--hairline); text-align: left; white-space: nowrap; }
+.rich-table th { position: sticky; top: 0; background: var(--bg-raised); color: var(--text-dim); font-weight: 560; }
+.rich-table td { color: var(--text); }
+.rich-table-note { margin: 0; padding: 6px 12px; color: var(--text-faint); font-size: var(--fs-11); }
+
+/* Report: a page on paper, the way the Canvas HTML preview and the file viewer show HTML. */
+.rich-report { position: relative; height: var(--rich-report-height, 320px); background: var(--paper); }
+.rich-block[data-variant='tab'] .rich-report, .rich-full .rich-report { height: 100%; }
+/* A themed page (render_html, or a report written against the theme variables) sits on the card's own surface. */
+.rich-report[data-themed='true'] { background: var(--bg-raised); }
+.rich-report-zoom { width: 100%; height: 100%; }
+/* An offscreen page keeps its last height but no frame: nothing to lay out or paint until it nears the viewport. */
+.rich-report { contain: layout paint; }
+/* A page that asked for the network and has not been allowed it: one quiet line above the page, never a modal. */
+.rich-network { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--hairline); background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--text-dim); font-size: var(--fs-12); }
+.rich-network > span { flex: 1; min-width: 0; }
+.rich-network button { flex: none; height: 22px; padding: 0 8px; border: 1px solid var(--hairline); border-radius: var(--radius-6); background: var(--bg-raised); color: var(--text); font-size: var(--fs-12); cursor: pointer; }
+.rich-network button:hover { background: var(--bg-hover); }
+.rich-network button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+/* SandboxedHtml: the one frame for untrusted HTML (reports, Canvas pages, the file viewer's HTML preview). */
+.sandboxed-html { position: relative; width: 100%; height: 100%; min-height: 0; }
+.sandboxed-html-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--paper); color-scheme: light; }
+.sandboxed-html[data-loading='true'] .sandboxed-html-frame { visibility: hidden; }
+/* An agent page (render_html) follows the theme and sits on the card's own surface; its frame's colour scheme follows the theme once loaded. */
+.sandboxed-html[data-themed='true'] .sandboxed-html-frame { background: transparent; }
+.sandboxed-html-loading { position: absolute; inset: 0; background: var(--bg-raised); }
+.rich-chart-loading { position: absolute; inset: 8px 10px; background: var(--bg-raised); }
+.rich-tab { display: flex; height: 100%; min-height: 0; min-width: 0; }
+/* A diagram never animates: Mermaid's animated edges (`e1@{animate: true}`) loop forever, which would keep the compositor busy while idle. */
+.rich-stage svg *, .rich-stage svg { animation: none !important; }
+
+/* persistent blocks (3D model, device): the viewport stays mounted behind the skeleton or error card, and Full screen enlarges the block in place. */
+.rich-persist { display: flex; flex: 1; min-height: 0; flex-direction: column; min-width: 0; }
+.rich-persist[hidden] { display: none; }
+.rich-persist-card { min-height: 0; }
+.rich-loading-detail { display: flex; justify-content: center; padding: 0 12px 10px; }
+.rich-block[data-fullscreen='true'] { position: fixed; inset: 0; z-index: var(--z-modal); margin: 0; border: 0; border-radius: 0; background: var(--bg); }
+.rich-block[data-fullscreen='true'] .rich-body { flex: 1; display: flex; flex-direction: column; }

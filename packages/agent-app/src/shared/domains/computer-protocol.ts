@@ -27,5 +27,11 @@ export type ComputerAccessibilityText = { available: true; app: string; window: 
 export type ComputerEvent =
   | { type: 'computerControl'; chatId: string; owner: ComputerControlOwner }
   | { type: 'computerFrame'; frame: ComputerFrame }
-  | { type: 'computerBrowserOpened'; chatId: string; owner: string; profileId: string; url: string };
+  | { type: 'computerBrowserOpened'; chatId: string; owner: string; profileId: string; url: string }
+  /** preview_open(url): the agent's tab now shows a preview; `panel` asks for the right pane, else the mini player. */
+  | { type: 'previewShown'; chatId: string; owner: string; profileId: string; url: string; panel: boolean }
+  /** preview_close: the agent closed its preview tab. */
+  | { type: 'previewClosed'; chatId: string; owner: string }
+  /** preview_open(file): a workspace .html file stored as a sandboxed page, to open in the right pane. */
+  | { type: 'previewFile'; chatId: string; renderId: string; title: string };
 export const COMPUTER_COMMANDS = {'computer.image': true, 'computer.control': true, 'computer.lease': true, 'computer.focusApp': true, 'computer.permissions': true, 'computer.openPermissionSettings': true, 'computer.captureSources': true, 'computer.captureSource': true, 'computer.accessibilityText': true} as const satisfies Record<keyof ComputerCommands, true>;

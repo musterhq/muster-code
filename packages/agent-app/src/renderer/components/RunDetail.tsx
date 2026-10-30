@@ -72,7 +72,7 @@ export function RunDetailPage({ snapshot, runId, nav }: { snapshot: WorkspaceSna
         : <ol className="run-steps">{!all && items.length > shown.length && <li className="ws-faint">{items.length - shown.length} earlier steps. Tick “Everything” to see them.</li>}
           {shown.map(i => { const Icon = ICON[i.kind]; return <li key={i.id} className="run-step" data-kind={i.kind}>
             <Icon size={13} aria-hidden="true"/><div className="run-step-body"><span className="run-step-label">{LABEL[i.kind]}{i.status && i.kind === 'tool' ? <span className="ws-faint"> · {i.status}</span> : null}<time className="ws-faint" title={exactTime(i.createdAt)}> · {new Date(i.createdAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time></span>
-              {i.kind === 'assistant' ? <div className="run-step-text"><MessageBody text={i.text}/></div> : <span className="run-step-text">{clip(i.text, i.kind === 'user' ? 600 : 240)}</span>}</div></li>; })}</ol>}
+              {i.kind === 'assistant' ? <div className="run-step-text"><MessageBody text={i.text} reports/></div> : <span className="run-step-text">{clip(i.text, i.kind === 'user' ? 600 : 240)}</span>}</div></li>; })}</ol>}
     </section> : <p className="ws-faint">This run happened on the connected server; its full step-by-step trace stays there.{remote.data?.links.run && <> <a className="ws-link" href={remote.data.links.run} onClick={e => { e.preventDefault(); openLink(remote.data!.links.run!); }}>Open it in the server</a>.</>}{remote.data?.links.task && <> <a className="ws-link" href={remote.data.links.task} onClick={e => { e.preventDefault(); openLink(remote.data!.links.task!); }}>Open its task in the server</a>.</>}</p>}
   </div>;
 }

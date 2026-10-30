@@ -42,17 +42,22 @@ export interface Loadable<T> {
   error?: string;
 }
 
+import type {RichKind} from '../shared/rich-fence';
+
 export interface WorkspaceTab {
   id: string;
   /** 'git' is the one Git surface per folder (Changes · History · Pull request). The older 'changes', 'history' and
    *  'pullRequest' kinds are only read from saved workspaces and are mapped onto 'git' on restore. */
-  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView';
+  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView' | 'rich';
   /** kind: 'git' only — which segment is showing. */
   gitView?: GitView;
   /** kind: 'diff' — comparison local to this tab, independent of the Changes picker. */
   reviewBaseline?: ReviewBaseline;
   /** kind: 'canvas' only (WRK-12). */
   canvasId?: string;
+  /** kind: 'rich' only (visuals): what the block shows and its source (Mermaid text, chart JSON, report HTML). */
+  richKind?: RichKind;
+  richSource?: string;
   /** kind: 'pluginUi' only (EXT-10): the plugin (its folder id) and the app it declares. */
   pluginId?: string;
   appName?: string;
@@ -1353,7 +1358,7 @@ export function loadDir(folderId: string, path: string): Promise<void> {
 
 async function readFileBody(folderId: string, path: string): Promise<FileBody> {
   const kind = filePresentation(path);
-  if (kind === 'quicklook' || kind === 'media' || kind === 'binary') return {text: '', truncated: false};
+  if (kind === 'quicklook' || kind === 'media' || kind === 'binary' || kind === 'model') return {text: '', truncated: false};
   if (['document','workbook'].includes(filePresentation(path)) && await invoke('files.nativeAvailable',undefined).catch(()=>false)) return {native:true,text:'',truncated:false};
   if (filePresentation(path) === 'document') return {text:'',truncated:false,document:await invoke('files.document',{folderId,path})};
   if (filePresentation(path) === 'workbook') return {text:'',truncated:false,workbook:await invoke('files.workbook',{folderId,path})};

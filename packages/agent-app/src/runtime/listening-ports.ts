@@ -1,7 +1,9 @@
+/* Portions adapted from T3 Code (https://github.com/pingdotgg/t3code, commit 13aa882), the web-server probe (WebProbe). Copyright (c) 2026 T3 Tools Inc., MIT License; see THIRD-PARTY-NOTICES.md and licenses/t3code-MIT.txt. */
 import {execFile} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {basename,sep} from 'node:path';
 import type {ListenerSource,ListeningPort,TerminalOwner} from '../shared/process-protocol.ts';
+import {isWebResponse} from '../shared/preview.ts';
 
 /** S3-E / DF-F38: which TCP ports the conversation's shells, commands and agent processes listen on.
  * One global `lsof` + `ps` scan, cached briefly and shared by every caller; attribution is per chat. */
@@ -121,5 +123,40 @@ export class ListeningPorts {
   }
   toPort(row:AttributedListener):ListeningPort {
     return {id:this.idFor(row.pid,row.port),port:row.port,address:row.address,name:basename(row.name||'process').slice(0,64),owner:row.owner,source:row.source};
+  }
+}
+
+/**
+ * #html-preview: is a listener a web server a person would open? Adapted from T3 Code's port scanner (MIT; see
+ * THIRD-PARTY-NOTICES.md): one GET with a short timeout, redirects not followed, and only an HTML answer (or a redirect)
+ * counts. Only listeners already attributed to the chat are probed (never another app's port, which may not speak HTTP),
+ * and answers are cached per process and port, so a poll costs nothing while nothing changes.
+ */
+export type Probe=(url:string,signal:AbortSignal)=>Promise<{status:number;contentType:string|null;location:string|null}>;
+const fetchProbe:Probe=async(url,signal)=>{
+  const response=await fetch(url,{method:'GET',redirect:'manual',signal,headers:{accept:'text/html'}});
+  try{await response.body?.cancel();}catch{/* already closed */}
+  return {status:response.status,contentType:response.headers.get('content-type'),location:response.headers.get('location')};
+};
+export class WebProbe {
+  private cache=new Map<string,{web:boolean;until:number}>();
+  private inflight=new Map<string,Promise<boolean>>();
+  constructor(private options:{probe?:Probe;timeoutMs?:number;ttlMs?:number;now?:()=>number}={}) {}
+  private get now(){return this.options.now?.()??Date.now();}
+  /** Cached while fresh; otherwise http, then https (a dev server with its own certificate is still a web server). */
+  isWeb(pid:number,port:number):Promise<boolean> {
+    const key=`${pid}:${port}`,hit=this.cache.get(key);
+    if(hit&&hit.until>this.now)return Promise.resolve(hit.web);
+    const running=this.inflight.get(key);if(running)return running;
+    const probe=this.options.probe??fetchProbe,timeout=this.options.timeoutMs??1000;
+    const once=async(url:string)=>{try{const answer=await probe(url,AbortSignal.timeout(timeout));return isWebResponse(answer.status,answer.contentType,answer.location);}catch{return false;}};
+    const task=(async()=>{
+      const web=await once(`http://127.0.0.1:${port}/`)||await once(`https://127.0.0.1:${port}/`);
+      this.cache.set(key,{web,until:this.now+(this.options.ttlMs??15_000)});
+      if(this.cache.size>512)this.cache.delete(this.cache.keys().next().value!);
+      return web;
+    })().finally(()=>this.inflight.delete(key));
+    this.inflight.set(key,task);
+    return task;
   }
 }
