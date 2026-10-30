@@ -12,7 +12,7 @@ import { realGit, sameRepo } from '../checkout/git-port.ts';
 import { hasTestSetup } from '../checkout/folder.ts';
 import { badgeOf } from '../checkout/lease.ts';
 import { TurnLedger } from '../turn-ledger.ts';
-import { connectionFor } from '../server/connection.ts';
+import { connectionFor } from '../server/registry.ts';
 import { OutboxRetry } from '../checkout/outbox-policy.ts';
 import { serverHubFor } from '../server/orgs.ts';
 import type { DomainContext, DomainModule } from './types.ts';

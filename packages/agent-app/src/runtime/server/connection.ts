@@ -1,7 +1,8 @@
 /**
- * The runtime's single connection to "Muster Server": stored config (with migration), the token (only ever sent to the origin it was
- * issued for), backend detection, sign-in, Test connection, and building the `ServerBackend` the workspace reads through.
- * Both the `paperclip.*` and `musterServer.*` command families, and the new `server.*` ones, are thin handlers over this.
+ * One connection to one Muster Server: its stored config, the token (only ever sent to the origin it was issued for), backend detection,
+ * sign-in, Test connection, and building the `ServerBackend` that reads through it. Settings keeps several of these side by side (#803):
+ * `registry.ts` holds the list and hands each server its own connection; `connectionFor` is the one that feeds Projects, Roster and Inbox.
+ * The `paperclip.*`, `musterServer.*` and `server.*` command families are thin handlers over these.
  */
 import type { PaperclipConfigInput, PaperclipConfigView, PaperclipMode, PaperclipTestResult, ServerBackendKind, WorkspaceCompany } from '../../shared/domains/paperclip-protocol.ts';
 import { PAPERCLIP_LOCAL_URL } from '../../shared/domains/paperclip-protocol.ts';
@@ -11,7 +12,7 @@ import { activeSecretStore, SecretStore } from '../secret-store.ts';
 import type { BackendOptions, ServerBackend, ServerEndpoint } from './backend.ts';
 import { passwordToken, signInMethods } from './auth.ts';
 import { SIGNED_OUT_BY_SERVER } from '../server-auth.ts';
-import { DEFAULT_SERVER_CONFIG, loadServerConfig, saveServerConfig, SERVER_SECRET, SESSION_SECRET, type ServerConfig } from './config.ts';
+import { DEFAULT_SERVER_CONFIG, loadServerConfig, saveServerConfig, SERVER_SECRET, type ServerConfig } from './config.ts';
 import { liveMode, validSessionCookie, type SessionState } from './session.ts';
 import { detectBackend, type Detection } from './detect.ts';
 import { MusterServerBackend } from './muster-server-backend.ts';
@@ -26,20 +27,34 @@ const message = (cause: unknown) => cause instanceof Error ? cause.message : Str
 const id = (value: unknown) => { if (typeof value !== 'string' || !/^[\w:.-]{1,128}$/.test(value)) throw new Error('Unknown item.'); return value; };
 
 export interface ConnectionOptions { fetch?: FetchLike; secrets?: () => SecretStore | undefined }
+/** Where a connection's config lives. `set` persists it and tells every connection bound to it (when `notify`). */
+export interface ConfigStore { get(): ServerConfig; set(next: ServerConfig, notify: boolean): void }
+/** The single-file store (server.json) a connection used before the list existed; still what a bare `new ServerConnection(dir)` reads. */
+export function fileStore(dataDir: string, changed: () => void): ConfigStore & { migrated: boolean } {
+  const loaded = loadServerConfig(dataDir);
+  let config = loaded.config;
+  return { migrated: loaded.migrated, get: () => config, set(next, notify) { saveServerConfig(dataDir, next); config = next; if (notify) changed(); } };
+}
 export type SignInInput = { baseUrl: string; username: string; password: string; mode?: PaperclipMode };
 
 export class ServerConnection {
-  config: ServerConfig;
   readonly migrated: boolean;
+  private readonly store: ConfigStore;
   private readonly listeners = new Set<() => void>();
   private readonly sessionListeners = new Set<() => void>();
   /** A session cookie that arrived before the sign-in finished (memory only): adopted with the key, dropped otherwise. */
   private pendingSession: { origin: string; cookie: string; at: number } | null = null;
   private expired = false;
-  constructor(readonly dataDir: string, private readonly options: ConnectionOptions = {}) {
-    const loaded = loadServerConfig(dataDir);
-    this.config = loaded.config; this.migrated = loaded.migrated;
+  constructor(readonly dataDir: string, private readonly options: ConnectionOptions = {}, store?: ConfigStore) {
+    if (store) { this.store = store; this.migrated = false; }
+    else { const file = fileStore(dataDir, () => this.changed()); this.store = file; this.migrated = file.migrated; }
   }
+  /** The stored config. Read through the store each time, so two connections bound to one server never disagree. */
+  get config(): ServerConfig { return this.store.get(); }
+  /** The config changed under this connection (saved here or by another view of the same server): listeners re-read. */
+  changed(): void { for (const l of this.listeners) l(); }
+  /** Another server took over this connection's place (the Projects connection moved): an expired mark belonged to the old one. */
+  sessionChanged(): void { this.expired = false; }
   get fetcher(): FetchLike { return this.options.fetch ?? ((input, init) => fetch(input, init)); }
   /** The runtime's secret store, captured when this connection was made (the providers domain of the same runtime made it just before), so a second runtime in one process cannot swap it. */
   private active: SecretStore | undefined = activeSecretStore();
@@ -47,7 +62,7 @@ export class ServerConnection {
   onChange(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   /** The session cookie changed (set, expired, cleared): the live socket is rebuilt, nothing else is. */
   onSession(listener: () => void): () => void { this.sessionListeners.add(listener); return () => this.sessionListeners.delete(listener); }
-  private save(next: ServerConfig, notify = true): void { saveServerConfig(this.dataDir, next); this.config = next; if (notify) for (const l of this.listeners) l(); }
+  private save(next: ServerConfig, notify = true): void { this.store.set(next, notify); }
 
   /** The URL the connection points at. A local server is on this Mac: the Paperclip default unless a Muster Server was found there. */
   baseUrl(config: ServerConfig = this.config): string {
@@ -74,7 +89,7 @@ export class ServerConnection {
   sessionCookie(): { cookie: string; origin: string } | null {
     const origin = this.config.sessionOrigin;
     if (!origin || this.config.mode === 'off' || origin !== originOf(this.baseUrl())) return null;
-    const cookie = this.secrets().get(SESSION_SECRET);
+    const cookie = this.secrets().get(this.config.sessionSecret);
     return cookie ? { cookie, origin } : null;
   }
   sessionState(): SessionState { return !this.sessionCookie() ? 'none' : this.expired ? 'expired' : 'active'; }
@@ -89,8 +104,8 @@ export class ServerConnection {
     return this.storeSession(origin, value);
   }
   private storeSession(origin: string, cookie: string): 'active' {
-    if (!this.secrets().status(SESSION_SECRET).secureStorage) throw new Error('This computer has no secure keychain available, so the server session cannot be stored. Muster will not keep it in plain text.');
-    this.secrets().set(SESSION_SECRET, cookie);
+    if (!this.secrets().status(this.config.sessionSecret).secureStorage) throw new Error('This computer has no secure keychain available, so the server session cannot be stored. Muster will not keep it in plain text.');
+    this.secrets().set(this.config.sessionSecret, cookie);
     this.expired = false;
     if (this.config.sessionOrigin !== origin) this.save({ ...this.config, sessionOrigin: origin }, false);
     this.notifySession();
@@ -101,7 +116,7 @@ export class ServerConnection {
   markSessionActive(): void { if (this.expired) { this.expired = false; this.notifySession(); } }
   clearSession(notify = true): void {
     this.pendingSession = null; this.expired = false;
-    if (this.secrets().status(SESSION_SECRET).stored) this.secrets().clear(SESSION_SECRET);
+    if (this.secrets().status(this.config.sessionSecret).stored) this.secrets().clear(this.config.sessionSecret);
     if (this.config.sessionOrigin !== null) this.save({ ...this.config, sessionOrigin: null }, false);
     if (notify) this.notifySession();
   }
@@ -223,8 +238,9 @@ export class ServerConnection {
     const c = this.config;
     if (this.secrets().status(c.tokenSecret).stored) this.secrets().clear(c.tokenSecret);
     this.clearSession(false);
-    // Disconnect turns the connection off: nothing is kept but where the next token would go.
-    this.save({ ...DEFAULT_SERVER_CONFIG, tokenSecret: c.tokenSecret });
+    // Disconnect turns the connection off and forgets who signed in. The address and kind stay, so the server keeps its place in the list
+    // and Re-authenticate knows where to go; the secret entries stay assigned to it.
+    this.save({ ...DEFAULT_SERVER_CONFIG, tokenSecret: c.tokenSecret, sessionSecret: c.sessionSecret, baseUrl: c.baseUrl, backend: c.backend });
     return this.view();
   }
 
@@ -284,14 +300,5 @@ export function serverOrigin(input: unknown): string {
   return url.origin;
 }
 
-const connections = new WeakMap<object, ServerConnection>();
-/** One connection per runtime (domain context): the `paperclip.*`, `musterServer.*` and `server.*` handlers share it, and a restart reads the files again. */
-export function connectionFor(context: { dataDir: string }, options: ConnectionOptions = {}): ServerConnection {
-  const hit = connections.get(context);
-  if (hit) return hit;
-  const made = new ServerConnection(context.dataDir, options);
-  connections.set(context, made);
-  return made;
-}
 export { SERVER_SECRET };
 export type { WorkspaceCompany };
