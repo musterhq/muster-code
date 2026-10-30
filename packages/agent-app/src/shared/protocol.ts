@@ -1,6 +1,7 @@
 import type {UpdateCommands,UpdateEvent} from './update-protocol.ts';
 import type {PendingAttentionSummary} from './attention-protocol.ts';
 import type {ScopedComputerCommands, ScopedComputerEvent} from './scoped-computer-protocol.ts';
+import type {DeviceCommands, DeviceEvent} from './device-protocol.ts';
 import type {ProcessCommands,ProcessEvent} from './process-protocol.ts';
 export const MAX_ATTACHED_SKILL_BYTES = 48 * 1024;
 import type {BrowserCommands, BrowserEvent} from './browser-protocol.ts';
@@ -130,10 +131,10 @@ export type ContextSource = 'live' | 'restored';
 /** Context-window occupancy telemetry. Unknown values are null ("Unavailable"), never zero. */
 export interface ContextBreakdownEntry { label: string; tokens: number }
 export interface ContextTelemetry { usedTokens: number | null; windowTokens: number | null; source: ContextSource | null; compacted: boolean; updatedAt: string | null; /** #739: the model (`provider::model`) whose turn reported windowTokens; absent on rows written before reports were tagged. */ windowModel?: string; /** Only when the provider reports one; never estimated. */ breakdown?: ContextBreakdownEntry[] }
-export type AgentEvent = DomainEvent | ProcessEvent | BrowserEvent | ScopedComputerEvent | UpdateEvent | {type:'fileMoved';folderId:string;from:string;to:string} | {type:'workspaceChanged';folderId:string} | {type:'projectChanged';projectId:string;taskId:string;seq?:number} | {type:'chatSelected'; chatId:string} | {type:'chatWoke'; chatId:string; title:string; reason:WakeReason} | { type: 'snapshot'; snapshot: Snapshot } | { type: 'timeline'; chatId: string; items: TimelineItem[] } | { type: 'timelinePatch'; chatId: string; patch: TimelinePatch } | { type: 'notice'; message: string } | { type: 'contextTelemetry'; chatId: string; telemetry: ContextTelemetry };
+export type AgentEvent = DomainEvent | ProcessEvent | BrowserEvent | ScopedComputerEvent | DeviceEvent | UpdateEvent | {type:'fileMoved';folderId:string;from:string;to:string} | {type:'workspaceChanged';folderId:string} | {type:'projectChanged';projectId:string;taskId:string;seq?:number} | {type:'chatSelected'; chatId:string} | {type:'chatWoke'; chatId:string; title:string; reason:WakeReason} | { type: 'snapshot'; snapshot: Snapshot } | { type: 'timeline'; chatId: string; items: TimelineItem[] } | { type: 'timelinePatch'; chatId: string; patch: TimelinePatch } | { type: 'notice'; message: string } | { type: 'contextTelemetry'; chatId: string; telemetry: ContextTelemetry };
 export interface MemoryEntry { id: string; kind: string; summary: string; sourceUri?: string; observedAt: string; confidence: number; provenance: string[]; scopes: Array<{kind: string; id: string}>; redactionState: 'none' | 'redacted' | 'hashed' | 'blocked'; links?: string[] }
 export interface HindsightStatus { configured: boolean; endpoint?: string; bankId?: string; error?: string; revision?: number; connection?: 'unchecked' | 'verified' | 'failed'; checkedAt?: string; connectionError?: string }
-export interface Commands extends DomainCommands, BrowserCommands, ScopedComputerCommands, ProcessCommands, UpdateCommands {
+export interface Commands extends DomainCommands, BrowserCommands, ScopedComputerCommands, DeviceCommands, ProcessCommands, UpdateCommands {
  'memory.list': { input: {folderId?: string}; output: MemoryEntry[] };
  'memory.search': { input: {folderId?: string; query: string; limit?: number}; output: MemoryEntry[] };
  'memory.add': { input: {folderId?: string; summary: string; kind?: string; provenance: string[]; scopes: Array<{kind: string; id: string}>}; output: MemoryEntry };
@@ -175,6 +176,8 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  /** Share sheet: saves an export through a save dialog (main process). */
  'chat.export.file': {input:{id:string;format:'markdown'|'html'|'json';redact?:boolean};output:{saved:boolean;fileName?:string}};
  'chat.timeline': { input: {id: string; select?: boolean}; output: TimelineSnapshot };
+ /** The chat's timeline revision alone: a cheap "did anything change?" probe. */
+ 'chat.timelineRevision': { input: {id: string}; output: {revision: number} };
  /** NAV-11 global search over message content (runtime full-text index of every non-archived chat's user and
   *  assistant messages). Every whitespace-separated term must appear in one message; one hit per chat (its best
   *  message), phrase matches first, then recency. Paged by `offset`/`limit` (default 20, max 50): a full page means

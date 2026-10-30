@@ -87,6 +87,18 @@
   --violet: #a8abea;
   --pink: #df8fc1;
   --media-bg: #0b0c0c;
+  /* #363 device frames: physical device finishes, the same in every theme (a device does not change colour with the app). */
+  --device-body: var(--text-faint);
+  --device-frame-dark: #1c1d20;
+  --device-frame-titanium: #5f5c57;
+  --device-frame-light: #d7d5d0;
+  --device-frame-rim: rgba(255,255,255,.14);
+  --device-frame-rim-bright: rgba(255,255,255,.22);
+  --device-frame-rim-dark: rgba(0,0,0,.18);
+  --device-frame-mark: #0a0a0b;
+  --device-frame-mark-edge: rgba(255,255,255,.08);
+  --device-frame-home: rgba(127,127,127,.6);
+  --device-screen-off: #000;
   --paper: #ffffff;
   --paper-ink: #1d1d1f;
   /* Lightness for hue-keyed text (chips, plugin monograms, agent identity): readable on the theme's surface. */
@@ -403,8 +415,11 @@ textarea:focus-visible {
   .status-dot[data-status='running'] > svg { animation: status-spin 1.2s steps(12, end) infinite; }
 }
 @keyframes status-spin { to { transform: rotate(360deg); } }
-/* Nothing animates in a window the user cannot see or is not using (set by windowActivity.ts); motion resumes on focus. */
-:root[data-window-active='false'] *, :root[data-window-active='false'] *::before, :root[data-window-active='false'] *::after { animation-play-state: paused !important; }
+/* Nothing animates in a window the user cannot see or is not using (set by windowActivity.ts); motion resumes on focus.
+   Animations end at once rather than pause (#813): a paused entry animation froze on its first frame, so a panel, notice or
+   streamed word that appeared while the window was inactive stayed at opacity 0. A zero-length infinite animation does not
+   tick either, so idle CPU stays at zero, and spinners pick up again on focus. */
+:root[data-window-active='false'] *, :root[data-window-active='false'] *::before, :root[data-window-active='false'] *::after { animation-duration: 0s !important; animation-delay: 0s !important; }
 
 /* Chat -------------------------------------------------------------------- */
 

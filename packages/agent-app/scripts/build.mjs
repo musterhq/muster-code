@@ -4,6 +4,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statS
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {katexFontsWoff2Only} from './katex-fonts.mjs';
+import {officeLibraryManifest} from './office-libs-manifest.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = (...p) => path.join(root, 'src', ...p);
@@ -197,6 +198,14 @@ mkdirSync(dist('runtime', 'resources'), {recursive: true});
 // Vendored in packages/agent-app/resources so the app builds from its own directory alone (no packages/builtin).
 // The app owns these (generic, any provider); packages/builtin keeps the IDE's own launcher untouched.
 for (const name of ['codex-launch.sh', 'codex-profile.cjs', 'responses-compat.cjs']) cpSync(path.join(root, 'resources', name), dist('runtime', 'resources', name));
+// #772-#775: Muster's own skills for documents, spreadsheets, presentations and PDF, installed into Muster's coding-client home.
+rmSync(dist('runtime', 'resources', 'skills'), {recursive: true, force: true});
+cpSync(path.join(root, 'resources', 'skills'), dist('runtime', 'resources', 'skills'), {recursive: true});
+// #789: the office libraries agent scripts import, pinned to the lockfile; the app downloads them on first use.
+writeFileSync(dist('runtime', 'resources', 'office-libs.json'), JSON.stringify(officeLibraryManifest(JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8')))));
+// #363: the device helper is not bundled; only its pinned manifest and lockfile ship (installed with npm ci on first enable).
+mkdirSync(dist('main', 'device-helper'), {recursive: true});
+for (const name of ['package.json', 'package-lock.json']) cpSync(path.join(root, 'resources', 'device-helper', name), dist('main', 'device-helper', name));
 
 if (watch) {
   const contexts = await Promise.all(builds.map((options) => esbuild.context(options)));

@@ -41,6 +41,8 @@ const support = {
   'tests/fixtures/model-fixtures.ts': '3D model fixtures shared by the model and three-engine suites',
   'tests/fixtures/compressed-models.ts': 'Draco and meshopt model fixtures shared by the 3D suites',
   'tests/large-logo-729.electron.ts': 'nativeImage check run by npm run test:electron',
+  'tests/server-e2e/server-workflows.e2e.ts': 'real Muster Server workflows run by npm run test:server-e2e',
+  'tests/server-e2e/real-server.ts': 'real Muster Server harness for npm run test:server-e2e',
 };
 const problems = [];
 for (const entry of globSync(['tests/**/*', 'test/**/*'], {cwd: root})) {

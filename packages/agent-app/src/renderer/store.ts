@@ -1,3 +1,4 @@
+import {endsWithTab} from './deviceSessions.ts';
 import type {
   ApprovalDecision,
   Chat,
@@ -48,11 +49,13 @@ export interface WorkspaceTab {
   id: string;
   /** 'git' is the one Git surface per folder (Changes · History · Pull request). The older 'changes', 'history' and
    *  'pullRequest' kinds are only read from saved workspaces and are mapped onto 'git' on restore. */
-  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView' | 'rich';
+  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView' | 'rich' | 'device';
   /** kind: 'git' only — which segment is showing. */
   gitView?: GitView;
   /** kind: 'diff' — comparison local to this tab, independent of the Changes picker. */
   reviewBaseline?: ReviewBaseline;
+  /** kind: 'device' only (#363): the simulator UDID or emulator serial; absent for the device picker tab. */
+  deviceId?: string;
   /** kind: 'canvas' only (WRK-12). */
   canvasId?: string;
   /** kind: 'rich' only (visuals): what the block shows and its source (Mermaid text, chart JSON, report HTML). */
@@ -574,12 +577,12 @@ async function readTimeline(id: string, select = false): Promise<void> {
 export async function probeTimeline(id: string, timeoutMs = 4_000): Promise<'live' | 'resynced' | 'failed'> {
   const local = timelineReplicas.get(id)?.value?.revision;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Timeline probe timed out')), timeoutMs); });
   try {
-    const snapshot = await Promise.race([
-      invoke('chat.timeline', {id}),
-      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Timeline probe timed out')), timeoutMs); }),
-    ]);
-    if (local !== undefined && snapshot.revision <= local) return 'live';
+    // #39: a silent chat usually has not changed; the revision alone says so without copying its whole history.
+    const {revision} = await Promise.race([invoke('chat.timelineRevision', {id}), deadline]);
+    if (local !== undefined && revision <= local) return 'live';
+    const snapshot = await Promise.race([invoke('chat.timeline', {id}), deadline]);
     timelineReplica(id).snapshot(snapshot);
     publishTimeline(id);
     return 'resynced';
@@ -1010,6 +1013,9 @@ export function closeTab(id: string): void {
   removeTab(id);
 }
 function removeTab(id: string): void {
+  // #363: the user's own device session ends with its tab; an agent's goes back to its picture-in-picture.
+  const closing = state.tabs.find(t=>t.id===id);
+  if (closing?.kind === 'device' && endsWithTab(closing.deviceId)) void invoke('devices.close', {id: closing.deviceId!}).catch(() => undefined);
   const index = state.tabs.findIndex(t=>t.id===id);
   const tabs = state.tabs.filter((t) => t.id !== id);
   const { [id]: _body, ...fileBodies } = state.fileBodies;

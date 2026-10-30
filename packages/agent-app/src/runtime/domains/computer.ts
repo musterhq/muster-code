@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BROWSER_MCP, BROWSER_NOTE, COMPUTER_MCP, COMPUTER_USE_NOTE, MUSTER_COMPUTER_NOTE, READ_ONLY_NOTE } from '../../shared/computer-use.ts';
 import type { ComputerControlOwner } from '../../shared/domains/computer-protocol.ts';
+import { DEVICE_MCP, DEVICE_MCP_LAUNCHER_ENV, DEVICE_NOTE } from '../../shared/device-protocol.ts';
 import { setToolImageStore, TOOL_IMAGE_ID, TOOL_IMAGE_MIME, imageSize } from '../tool-event-details.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
@@ -23,18 +24,20 @@ const run = (file: string, args: string[]) => new Promise<void>((resolve, reject
 const SETTINGS: Record<string, string> = { accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility', screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture' };
 
 /** Turn notes (and, when main runs the bridge, the per-chat browser MCP) for an agent-mode chat. */
-export function computerRunOptions(chat: { id: string; mode: string; permissionMode?: string }, launcher = process.env[BROWSER_MCP_LAUNCHER_ENV], computerLauncher = process.env[COMPUTER_MCP_LAUNCHER_ENV]) {
+export function computerRunOptions(chat: { id: string; mode: string; permissionMode?: string }, launcher = process.env[BROWSER_MCP_LAUNCHER_ENV], computerLauncher = process.env[COMPUTER_MCP_LAUNCHER_ENV], deviceLauncher = process.env[DEVICE_MCP_LAUNCHER_ENV]) {
   if (chat.mode !== 'agent') return null;
   const readOnly = (chat.permissionMode ?? 'workspace') === 'read-only';
-  const browser = runnable(launcher), computer = runnable(computerLauncher);
+  // #363: main sets the device launcher only while the user allows agents to use devices (a separate opt-in).
+  const browser = runnable(launcher), computer = runnable(computerLauncher), devices = runnable(deviceLauncher);
   const configOverrides: Record<string, string | number> = {
     // Codex spawns the bridge per chat; the chat id tells main which browser tab and lease it drives.
     ...(browser ? { [`mcp_servers.${BROWSER_MCP}.command`]: launcher!, [`mcp_servers.${BROWSER_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${BROWSER_MCP}.tool_timeout_sec`]: 120 } : {}),
     // #721: Muster's own computer use; a read-only chat gets the read tools only (the server enforces it).
     ...(computer ? { [`mcp_servers.${COMPUTER_MCP}.command`]: computerLauncher!, [`mcp_servers.${COMPUTER_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${COMPUTER_MCP}.env.MUSTER_COMPUTER_READ_ONLY`]: readOnly ? '1' : '0', [`mcp_servers.${COMPUTER_MCP}.tool_timeout_sec`]: 90 } : {}),
+    ...(devices ? { [`mcp_servers.${DEVICE_MCP}.command`]: deviceLauncher!, [`mcp_servers.${DEVICE_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${DEVICE_MCP}.tool_timeout_sec`]: 330 } : {}),
   };
   return {
-    developerInstructions: [browser ? BROWSER_NOTE : '', computer ? MUSTER_COMPUTER_NOTE : COMPUTER_USE_NOTE, readOnly ? READ_ONLY_NOTE : ''].filter(Boolean).join('\n\n'),
+    developerInstructions: [browser ? BROWSER_NOTE : '', computer ? MUSTER_COMPUTER_NOTE : COMPUTER_USE_NOTE, devices ? DEVICE_NOTE : '', readOnly ? READ_ONLY_NOTE : ''].filter(Boolean).join('\n\n'),
     ...(Object.keys(configOverrides).length ? { configOverrides } : {}),
   };
 }

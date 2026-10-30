@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { AgentBridge, AgentEvent } from '../shared/protocol.ts';
 import { isMenuAction, MENU_CHANNEL, MENU_CLOSE_CHANNEL, type MenuBridge } from '../shared/menu-protocol.ts';
+import { DEVICE_ACK_CHANNEL, DEVICE_FRAME_CHANNEL, DEVICE_INPUT_CHANNEL, type DeviceBridge, type DeviceFrame } from '../shared/device-protocol.ts';
 
 /** One IPC listener multiplexes every renderer subscription; adding an
  *  ipcRenderer listener per subscriber leaked (MaxListenersExceededWarning). */
@@ -43,5 +44,22 @@ const menu: MenuBridge = {
   },
 };
 
+/** #363: device frames (binary, one channel for all devices), their acknowledgements, and input. Main validates everything. */
+const frameListeners = new Set<(frame: DeviceFrame) => void>();
+let frameDispatcher = false;
+const devices: DeviceBridge = {
+  onFrame(listener) {
+    frameListeners.add(listener);
+    if (!frameDispatcher) {
+      frameDispatcher = true;
+      ipcRenderer.on(DEVICE_FRAME_CHANNEL, (_event: IpcRendererEvent, frame: DeviceFrame) => { for (const each of [...frameListeners]) { try { each(frame); } catch (error) { console.error('device frame listener failed', error); } } });
+    }
+    return () => { frameListeners.delete(listener); };
+  },
+  ack(deviceId) { ipcRenderer.send(DEVICE_ACK_CHANNEL, deviceId); },
+  input(deviceId, input) { ipcRenderer.send(DEVICE_INPUT_CHANNEL, deviceId, input); },
+};
+
 contextBridge.exposeInMainWorld('muster', bridge);
+contextBridge.exposeInMainWorld('musterDevices', devices);
 contextBridge.exposeInMainWorld('musterMenu', menu);

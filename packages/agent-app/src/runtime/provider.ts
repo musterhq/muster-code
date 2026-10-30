@@ -22,10 +22,12 @@ import {codexWindowOverrides, userCompactionKeys} from './codex-window-overrides
 import {unpackedPath} from './unpacked-path.ts';
 import {BROWSER_MCP, BROWSER_NOTE, browserToolStyle, routeBrowserNote} from '../shared/computer-use.ts';
 import {ASK_USER_METHOD, ASK_USER_RULE} from './ask-user.ts';
+import {DEVICE_MCP, DEVICE_NOTE} from '../shared/device-protocol.ts';
 import type {McpServerSpec} from './adapters/types.ts';
 import type {RunnableAdapter} from './adapters/types.ts';
 import {CLAUDE_CODE_LANE_DRIVER, CLAUDE_LANE_DRIVER} from '../shared/provider-lanes.ts';
 import {adoptCodexThread, prepareMusterCodexHome} from './codex-home.ts';
+import {musterSkillsDir} from './office-skills.ts';
 import {claudeLaneAllowed, LANE_DROPPED_SERVERS, withoutUnavailableToolNotes} from './claude-lane.ts';
 import {SANDBOX_MCP_SERVER} from '../shared/sandbox-routes.ts';
 import {routeSandboxNote} from './sandbox-note.ts';
@@ -180,9 +182,14 @@ export const runInstructions = (mode: Chat['mode'], extra?: string, subagents = 
 export function adapterBrowser(driver: string | undefined, mode: Chat['mode'], developerInstructions: string | undefined, overrides: ProviderInput['configOverrides'], subagents = true, permissionMode?: ChatPermissionMode): {instructions?: string; mcpServers?: Record<string, McpServerSpec>; browserTools?: true} {
   const style = browserToolStyle(driver), offered = !!developerInstructions?.includes(BROWSER_NOTE);
   const servers = mcpServersFromOverrides(overrides);
-  if (style === 'native' || style === 'none') delete servers[BROWSER_MCP];
+  // Routes that load no MCP servers never hear about tools they cannot call: the browser (native routes get their own)
+  // and the device tools (#363).
+  const noMcp = style === 'native' || style === 'none';
+  if (noMcp) { delete servers[BROWSER_MCP]; delete servers[DEVICE_MCP]; }
   if (driver === CLAUDE_LANE_DRIVER) for (const name of LANE_DROPPED_SERVERS) delete servers[name];
-  const instructions = runInstructions(mode, routeSandboxNote(routeBrowserNote(driver === CLAUDE_LANE_DRIVER ? withoutUnavailableToolNotes(developerInstructions) : developerInstructions, style), driver), subagents, permissionMode);
+  const notes = driver === CLAUDE_LANE_DRIVER ? withoutUnavailableToolNotes(developerInstructions) : developerInstructions;
+  const withoutDevices = noMcp && notes?.includes(DEVICE_NOTE) ? notes.replace(DEVICE_NOTE, '').replace(/\n{3,}/g, '\n\n').trim() || undefined : notes;
+  const instructions = runInstructions(mode, routeSandboxNote(routeBrowserNote(withoutDevices, style), driver), subagents, permissionMode);
   return {...(instructions ? {instructions} : {}), ...(Object.keys(servers).length ? {mcpServers: servers} : {}), ...(offered && style === 'native' ? {browserTools: true as const} : {})};
 }
 /** #653: a run carries the muster_sandbox server only while its chat is sandboxed (domains/sandbox.ts adds it). */
@@ -449,7 +456,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         const split = splitSecretOverrides(input.configOverrides);
         const extraOverrides = Object.entries(split.args).filter(([name]) => /^[A-Za-z0-9_.-]{1,128}$/.test(name) && !/^(sandbox|approval_policy)/.test(name)).map(([name, value]) => `${name}=${JSON.stringify(value)}`);
         // #720: link the person's shared configuration into Muster's own home, and bring over a thread from before.
-        if (route.env.MUSTER_CODEX_SOURCE_HOME && route.env.CODEX_HOME) { prepareMusterCodexHome(route.env.MUSTER_CODEX_SOURCE_HOME, route.env.CODEX_HOME); adoptCodexThread(route.env.MUSTER_CODEX_SOURCE_HOME, route.env.CODEX_HOME, resumeThread); }
+        if (route.env.MUSTER_CODEX_SOURCE_HOME && route.env.CODEX_HOME) { prepareMusterCodexHome(route.env.MUSTER_CODEX_SOURCE_HOME, route.env.CODEX_HOME, {musterSkills: musterSkillsDir()}); adoptCodexThread(route.env.MUSTER_CODEX_SOURCE_HOME, route.env.CODEX_HOME, resumeThread); }
         const launch = {
           cwd: input.cwd, command: route.command, model, reasoning,
           env: { MUSTER_PROVIDER_NODE: node.node, ...node.env, ...route.env }, transportOwner: session.owner, cacheKey: session.key,

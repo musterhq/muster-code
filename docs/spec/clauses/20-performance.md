@@ -18,6 +18,7 @@ Boundaries:
 | [MUS-SPEC-20-553A](20-performance.md#mus-spec-20-553a) | After 20 streamed reply tokens, the composer has re-rendered at most 2 times. | [`streaming 20 tokens does not re-render the composer`](../../../packages/agent-app/tests/chat-render-bounds-dom.tsx) |
 | [MUS-SPEC-20-553B](20-performance.md#mus-spec-20-553b) | After 20 streamed reply tokens, links in the transcript have re-rendered at most 2 times. | [`streaming 20 tokens does not re-render resource links`](../../../packages/agent-app/tests/chat-render-bounds-dom.tsx) |
 | [MUS-SPEC-20-553C](20-performance.md#mus-spec-20-553c) | After 20 streamed reply tokens, the Changes view has re-rendered at most 2 times. | [`streaming 20 tokens does not re-render the changes view`](../../../packages/agent-app/tests/chat-render-bounds-dom.tsx) |
+| [MUS-SPEC-20-813A](20-performance.md#mus-spec-20-813a) | A panel that opens while the window is inactive ends its fade-in at full opacity, and no animation keeps ticking while inactive; a focused window still fades in and spins. | [`a panel that opens while the window is inactive is visible, and nothing keeps animating`](../../../packages/agent-app/tests/idle-animations-813.test.ts) |
 
 ### Startup size
 
@@ -65,4 +66,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/chat-render-bounds-dom.tsx::streaming 20 tokens does not re-render the changes view`
 - Environment: Real components in a DOM suite (linkedom and React Profiler); fake app bridge; no network. The limit is a count of React commits, so it does not depend on the machine.
 - Known gaps: Counts commits only. The Processes, Subagents and branch picker changes in the same PR have no case of their own.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-20-813a"></a>
+#### MUS-SPEC-20-813A: Panels opened while inactive are visible, and nothing animates
+
+- Precondition: The app's own stylesheets are loaded; the window is marked inactive (`data-window-active="false"`), as when an agent opens something while the person works in another app.
+- Action: A screen that fades in (`main.center[data-screen] > .settings-screen`) and a running status spinner mount; 600 ms pass.
+- Expected result: The screen has opacity 1 and the spinner's animation is not advancing. With the window focused, the screen fades in to opacity 1 and the spinner turns.
+- Test: `packages/agent-app/tests/idle-animations-813.test.ts::a panel that opens while the window is inactive is visible, and nothing keeps animating`
+- Environment: Headless Chrome over CDP with the real styles.css, app-shell.css and message-body.css; skipped when Chrome is not installed.
+- Known gaps: windowActivity.ts, which sets the attribute, is not driven here; the test sets it directly.
 - Evidence: UNVERIFIED

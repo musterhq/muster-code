@@ -32,6 +32,15 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-789J](21-visuals-and-artifacts.md#mus-spec-21-789j) | A render that runs past its timeout rejects, tells the conversion to stop, removes its temp folder and writes nothing to the output folder; a failed conversion cleans up the same way. | [`a render that runs past its timeout stops and leaves no temp files`](../../../packages/agent-app/tests/office-runtime-789.test.ts) |
 | [MUS-SPEC-21-789K](21-visuals-and-artifacts.md#mus-spec-21-789k) | The Settings commands report source, version and size; download returns at once and sends progress events; remove returns to none. | [`Settings commands report the runtime and download it in the background`](../../../packages/agent-app/tests/office-runtime-789.test.ts) |
 | [MUS-SPEC-21-789L](21-visuals-and-artifacts.md#mus-spec-21-789l) | macOS, Linux and Windows on Intel and ARM each have a pinned official LibreOffice build with an https documentfoundation.org URL, a SHA-256 and a plausible size; other platforms have none. | [`every pinned LibreOffice build is an official https download with a SHA-256`](../../../packages/agent-app/tests/office-runtime-789.test.ts) |
+| [MUS-SPEC-21-772A](21-visuals-and-artifacts.md#mus-spec-21-772a) | With no other app installed, an agent turn follows the documents skill: the .docx has headings, lists, a table and an image, and office_render returns page PNGs and inline images. | [`an agent makes a .docx with Muster's documents skill and sees its pages, with no other app installed`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-773A](21-visuals-and-artifacts.md#mus-spec-21-773a) | The .xlsx keeps live formulas (also across sheets), number formats and recalculate-on-open, renders to page images, and an edit keeps them. | [`an agent makes an .xlsx with live formulas using Muster's spreadsheets skill and sees its pages`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-774A](21-visuals-and-artifacts.md#mus-spec-21-774a) | The deck has five slides (title, bullets, chart, table, picture) on slide layouts, the chart is a native chart part and the picture is embedded. | [`an agent makes a .pptx with Muster's presentations skill and sees each slide`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-775A](21-visuals-and-artifacts.md#mus-spec-21-775a) | The PDF has the approver.name and approver.approved fields; filling them reads back. | [`an agent makes a PDF with a form using Muster's pdf skill, reads its text, fills the form and sees its pages`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-772Q](21-visuals-and-artifacts.md#mus-spec-21-772q) | PDF and .xlsx preview with nothing else installed; .docx and .pptx convert through Muster's own office runtime. | [`each office type previews in Muster with no other app installed`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-789M](21-visuals-and-artifacts.md#mus-spec-21-789m) | The service sends officeToolProgress events for that chat with "Downloading LibreOffice…" while the tool waits, then one with no message. | [`the first render shows LibreOffice download progress on the chat's tool row`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-789N](21-visuals-and-artifacts.md#mus-spec-21-789n) | The pinned library tarballs download once with progress, keep the lockfile layout, are refused on a bad integrity or non-registry URL, and can be removed. | [`a packaged app downloads the pinned office libraries once, checks each against its integrity and installs them atomically`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-789O](21-visuals-and-artifacts.md#mus-spec-21-789o) | docx, exceljs, pptxgenjs, pdf-lib, jszip and pdfjs-dist are pinned to their lockfile versions, every entry is an npm registry tarball with a sha512 integrity, no @types package is included, and every runtime dependency of a pinned package is pinned too. | [`the build pins every office library and its dependencies from the lockfile`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-789P](21-visuals-and-artifacts.md#mus-spec-21-789p) | Only this chat's message shows, as a live status line, and it goes away when cleared. | [`A running office tool row shows the first download progress and clears it when done`](../../../packages/agent-app/tests/office-tool-progress-789-dom.tsx) |
 | [MUS-SPEC-21-788A](21-visuals-and-artifacts.md#mus-spec-21-788a) | Right-click on the gallery hero, a gallery thumbnail, a gallery file link, a tool-row thumbnail, an inline reply image and the open image viewer each asks for the image menu, with that image's chat and path. | [`Right-click on every chat image surface asks for the image menu with its path`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
 | [MUS-SPEC-21-788B](21-visuals-and-artifacts.md#mus-spec-21-788b) | Cmd+C in the open image viewer asks the app to copy the shown image to the clipboard. | [`Cmd+C in the image viewer copies the image`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
 | [MUS-SPEC-21-788C](21-visuals-and-artifacts.md#mus-spec-21-788c) | The ContextMenu key and Shift+F10 on a focused image ask for the image menu, placed at the image. | [`ContextMenu key and Shift+F10 open the image menu on a focused image`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
@@ -69,6 +78,18 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-786K](21-visuals-and-artifacts.md#mus-spec-21-786k) | A Mermaid file that does not parse shows "Unable to render diagram: <message>" with its source and Retry; a file with a URL or a %%{ }%% block shows why it is not drawn, with its source, and never reaches Mermaid. | [`an invalid Mermaid file shows the error with its source; a file with a URL or configuration is never handed to Mermaid`](../../../packages/agent-app/tests/notebook-mermaid-786-dom.tsx) |
 | [MUS-SPEC-21-786L](21-visuals-and-artifacts.md#mus-spec-21-786l) | Switching the app between dark and light re-serves a notebook HTML output in the new colour scheme and redraws a Mermaid file in the new theme. | [`both previews follow the app theme: HTML outputs are framed in the active colours and diagrams redraw in light and dark`](../../../packages/agent-app/tests/notebook-mermaid-786-dom.tsx) |
 | [MUS-SPEC-21-366A](21-visuals-and-artifacts.md#mus-spec-21-366a) | A GLB file opens as an interactive 3D preview: canvas, camera views, model info, wireframe, full screen, and all graphics and worker resources released on close. | [`a GLB model opens as an interactive 3D preview: canvas, views, info, wireframe, full screen, released on close`](../../../packages/agent-app/tests/model-viewer-dom.tsx) |
+| [MUS-SPEC-21-363A](21-visuals-and-artifacts.md#mus-spec-21-363a) | Devices start off. Agent access is a separate switch that turns off with devices, and settings are saved 0600. | [`manager: off by default; agent access is a separate opt-in that never outlives devices; settings persist 0600`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363B](21-visuals-and-artifacts.md#mus-spec-21-363b) | The helper installs from the shipped lockfile with scripts off. The install is atomic and a failed one leaves nothing behind. | [`helper install: npm ci of the shipped lockfile with scripts off, atomic, sentinel last; failures leave nothing`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363C](21-visuals-and-artifacts.md#mus-spec-21-363c) | The helper starts on loopback with a per-launch token, a private TMPDIR and an allowlisted environment. | [`helper: banner parsing, loopback-only args with a token, isolated TMPDIR, env scrubbed`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363D](21-visuals-and-artifacts.md#mus-spec-21-363d) | WebCodecs is set up from the AVCC description and decodes queued frames. An unsupported profile asks for MJPEG. | [`iOS H.264 decodes with WebCodecs and falls back to MJPEG when the profile cannot be decoded`](../../../packages/agent-app/tests/devices-components.tsx) |
+| [MUS-SPEC-21-363E](21-visuals-and-artifacts.md#mus-spec-21-363e) | AVCC envelopes demux in order however they are split. A backlog reopens for a keyframe, and MJPEG works on request. | [`iOS H.264: AVCC envelopes demuxed however they arrive; seed, description and frames forwarded in order; a backlog reopens for a fresh keyframe; MJPEG on request`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363F](21-visuals-and-artifacts.md#mus-spec-21-363f) | Android frames stay in order. A backlog skips to the next keyframe and asks for a new one. | [`Android link: H.264 forwarded in order, a backlog skips to the next keyframe and asks for one`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363G](21-visuals-and-artifacts.md#mus-spec-21-363g) | Each device family gets its own frame. The rail uses that OS's names and leaves out what the device lacks. | [`each device wears its own frame and the rail uses its own OS terms`](../../../packages/agent-app/tests/devices-components.tsx) |
+| [MUS-SPEC-21-363H](21-visuals-and-artifacts.md#mus-spec-21-363h) | Consent is checked per call. Read-only chats only look, user control blocks input, and taps are scaled from the screenshot. | [`agent tools: consent re-checked per call, read-only chats look only, user control stops input, taps scaled from the screenshot`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363I](21-visuals-and-artifacts.md#mus-spec-21-363i) | MCP routes get the device server and note; routes with no MCP have both removed. | [`routes without MCP never hear about the device tools; MCP routes get the server and the note`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363J](21-visuals-and-artifacts.md#mus-spec-21-363j) | A checksum mismatch is refused. A match is cached with its source and licence noted, and offline keeps Muster's own body. | [`realistic models: SHA-256 mismatch refused, cache hit, offline fallback, metadata records source and no licence`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363K](21-visuals-and-artifacts.md#mus-spec-21-363k) | The DeviceKit descriptor is read and checked through the read-only route, and sliced chromes fall back to Muster's frame. | [`real frames, iOS: the helper's DeviceKit descriptor is read and validated; images come from its read-only route; sliced chromes fall back`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363L](21-visuals-and-artifacts.md#mus-spec-21-363l) | Discovery lists both platforms. A failed boot gives a plain-English reason and resets the state. | [`manager: discovery lists devices; a failed boot says why in plain English and resets the state`](../../../packages/agent-app/tests/devices.test.ts) |
 | [MUS-SPEC-21-785A](21-visuals-and-artifacts.md#mus-spec-21-785a) | Inline and display formulas typeset with their labels; display maths scrolls sideways; prices, shell variables, code and links stay as written. | [`a reply typesets inline and display maths, labelled, with display maths scrolling sideways`](../../../packages/agent-app/tests/markdown-math-dom.tsx) |
 | [MUS-SPEC-21-785B](21-visuals-and-artifacts.md#mus-spec-21-785b) | Prices and shell variables stay plain text; code spans, code blocks and links are untouched. | [`maths parsing: prices, shell variables, code, escapes and links stay text`](../../../packages/agent-app/tests/markdown-math.test.ts) |
 | [MUS-SPEC-21-785C](21-visuals-and-artifacts.md#mus-spec-21-785c) | The four delimiters typeset as inline or display formulas. | [`maths parsing: the four delimiters, display blocks and source offsets`](../../../packages/agent-app/tests/markdown-math.test.ts) |
@@ -653,6 +674,140 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Known gaps: No real GPU draws the model; pixels are not compared.
 - Evidence: UNVERIFIED
 
+### Devices (#363)
+
+<a id="mus-spec-21-363a"></a>
+#### MUS-SPEC-21-363A: Devices are off until turned on, and agent access is a separate switch
+
+- Precondition: A fresh data folder with no device settings.
+- Action: Read the settings, turn agent access on while devices are off, turn devices on, turn agent access on, then turn devices off.
+- Expected result: Devices start off and agent access cannot be turned on while devices are off. With devices on, agent access turns on separately; turning devices off also turns agent access off. Settings are saved with owner-only (0600) permissions.
+- Test: `packages/agent-app/tests/devices.test.ts::manager: off by default; agent access is a separate opt-in that never outlives devices; settings persist 0600`
+- Environment: Node test with fakes for simctl, adb and the helper; no simulator, emulator or network.
+- Known gaps: The Settings screen is not clicked here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363b"></a>
+#### MUS-SPEC-21-363B: The device helper is installed at run time from the pinned lockfile
+
+- Precondition: Devices are on, and the helper has not been installed.
+- Action: Install the helper, then repeat with an install that fails partway.
+- Expected result: The helper is installed with npm ci from the lockfile shipped with Muster, with package scripts off, into a temporary folder that is moved into place, and the ready marker is written last. A failed install leaves no folder and no marker, and the error says why.
+- Test: `packages/agent-app/tests/devices.test.ts::helper install: npm ci of the shipped lockfile with scripts off, atomic, sentinel last; failures leave nothing`
+- Environment: Node test with a fake npm; no network.
+- Known gaps: The real download from the npm registry is not made in this test.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363c"></a>
+#### MUS-SPEC-21-363C: The helper listens on loopback only, behind a token
+
+- Precondition: An installed helper.
+- Action: Start the helper and read its startup banner.
+- Expected result: The helper is started bound to 127.0.0.1 with a bearer token for this launch, a private TMPDIR, and an environment limited to an allowlist plus the SDK tools on PATH. Its banner is parsed for the port.
+- Test: `packages/agent-app/tests/devices.test.ts::helper: banner parsing, loopback-only args with a token, isolated TMPDIR, env scrubbed`
+- Environment: Node test with a fake helper process.
+- Known gaps: No real helper binary is started.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363d"></a>
+#### MUS-SPEC-21-363D: iOS video decodes with WebCodecs and falls back to MJPEG
+
+- Precondition: A device tab for an iPhone whose feed sends an AVCC description and H.264 frames.
+- Action: Deliver the description and frames, then deliver a description this window cannot decode.
+- Expected result: The feed configures the WebCodecs decoder from the AVCC description and decodes the frames that follow, including those that arrived while it was being set up. A description that is not supported makes the app ask main for the MJPEG stream.
+- Test: `packages/agent-app/tests/devices-components.tsx::iOS H.264 decodes with WebCodecs and falls back to MJPEG when the profile cannot be decoded`
+- Environment: DOM suite (linkedom) with a fake VideoDecoder and the device bridge faked.
+- Known gaps: A real decoder and GPU are not used; pixels are not compared.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363e"></a>
+#### MUS-SPEC-21-363E: iOS H.264 frames reach the screen in order and a backlog gets a fresh keyframe
+
+- Precondition: A booted iPhone and a helper that serves the AVCC stream.
+- Action: Stream envelopes split at arbitrary byte boundaries, let the viewer fall behind, then ask for MJPEG.
+- Expected result: Envelopes are demuxed however the bytes are split. The seed picture, the description and the frames go to the viewer in order. A viewer about a second behind makes main reopen the stream for a fresh keyframe instead of queueing. A request for MJPEG switches the stream.
+- Test: `packages/agent-app/tests/devices.test.ts::iOS H.264: AVCC envelopes demuxed however they arrive; seed, description and frames forwarded in order; a backlog reopens for a fresh keyframe; MJPEG on request`
+- Environment: Node test with fakes for simctl, adb and the helper; no simulator, emulator or network.
+- Known gaps: A real simulator stream is covered only by the device smoke, not here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363f"></a>
+#### MUS-SPEC-21-363F: Android H.264 frames stay in order and a backlog skips to a keyframe
+
+- Precondition: A running emulator and a helper socket sending scrcpy H.264 frames.
+- Action: Stream frames, then let the viewer fall behind.
+- Expected result: Frames reach the viewer in order. A backlog drops frames up to the next keyframe and asks the device for a new one.
+- Test: `packages/agent-app/tests/devices.test.ts::Android link: H.264 forwarded in order, a backlog skips to the next keyframe and asks for one`
+- Environment: Node test with fakes for simctl, adb and the helper; no simulator, emulator or network.
+- Known gaps: A real emulator stream is covered only by the device smoke, not here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363g"></a>
+#### MUS-SPEC-21-363G: Each device has its own frame and its own controls
+
+- Precondition: Device tabs for iPhones, iPads, Pixel phones, a foldable, a watch, a TV and a car display.
+- Action: Open each one and read its frame and its control rail.
+- Expected result: Each device gets the frame that matches what it reports (the simctl device type, the AVD config, or the picture's shape for a foldable's posture). The rail uses its own OS's terms: Home and App Switcher on iOS; Back, Home and Recents on Android. Watches, TVs and car displays have no Recents and no Rotate.
+- Test: `packages/agent-app/tests/devices-components.tsx::each device wears its own frame and the rail uses its own OS terms`
+- Environment: DOM suite (linkedom) with the device bridge faked.
+- Known gaps: linkedom has no layout, so frame proportions are not measured; pixels are not compared.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363h"></a>
+#### MUS-SPEC-21-363H: Agent device tools need consent and stop when the user takes control
+
+- Precondition: Devices on, agent access on, and a chat with an open device session.
+- Action: Call the tools from an agent chat, a read-only chat, after turning agent access off, and after the user takes control.
+- Expected result: Consent is checked again on every call. A read-only chat can list and look but cannot tap or type. Under user control the agent's input is refused. Tap positions are scaled from the screenshot to the device.
+- Test: `packages/agent-app/tests/devices.test.ts::agent tools: consent re-checked per call, read-only chats look only, user control stops input, taps scaled from the screenshot`
+- Environment: Node test with fakes for simctl, adb and the helper; no simulator, emulator or network.
+- Known gaps: Agents read the screen from screenshots only; the accessibility tree is not offered yet.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363i"></a>
+#### MUS-SPEC-21-363I: Routes without MCP never hear about the device tools
+
+- Precondition: Agent access on and the device tool launcher present.
+- Action: Build the turn options for routes with native, none and MCP tool styles.
+- Expected result: Routes that load MCP servers get the device server and its note. Routes that load none have both removed, so their instructions never name tools they cannot call.
+- Test: `packages/agent-app/tests/devices.test.ts::routes without MCP never hear about the device tools; MCP routes get the server and the note`
+- Environment: Node test of the provider routing; no provider runs.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363j"></a>
+#### MUS-SPEC-21-363J: Realistic device models are downloaded, checked and cached, never bundled
+
+- Precondition: Realistic models on and an empty model cache.
+- Action: Fetch a model whose checksum does not match, one that matches, fetch it again, then fetch while offline.
+- Expected result: A download whose SHA-256 does not match is refused and not cached. A matching one is cached with metadata that records its source and that it has no redistribution licence. A second request is served from the cache. Offline, the app keeps its own body.
+- Test: `packages/agent-app/tests/devices.test.ts::realistic models: SHA-256 mismatch refused, cache hit, offline fallback, metadata records source and no licence`
+- Environment: Node test with a fake fetch; no network.
+- Known gaps: The real apple.com download and the visual quality of the converted model are not checked.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363k"></a>
+#### MUS-SPEC-21-363K: Real iOS frames are read from the user's Xcode at run time
+
+- Precondition: A helper that serves a DeviceKit chrome descriptor and its images.
+- Action: Read the frame for a device, then for a device whose chrome is sliced.
+- Expected result: The descriptor is read and checked, and the images come from the helper's read-only route. A sliced chrome falls back to Muster's own frame. Nothing is read from the repository or the build.
+- Test: `packages/agent-app/tests/devices.test.ts::real frames, iOS: the helper's DeviceKit descriptor is read and validated; images come from its read-only route; sliced chromes fall back`
+- Environment: Node test with synthetic fixtures made for the test.
+- Known gaps: No real Xcode chrome is read here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363l"></a>
+#### MUS-SPEC-21-363L: Device discovery lists devices and a failed boot says why
+
+- Precondition: Devices on, with fake simctl and adb listings.
+- Action: List devices, then boot one whose boot fails.
+- Expected result: The list shows the simulators and emulators. A failed boot gives a plain-English reason and the device goes back to its earlier state.
+- Test: `packages/agent-app/tests/devices.test.ts::manager: discovery lists devices; a failed boot says why in plain English and resets the state`
+- Environment: Node test with fakes for simctl, adb and the helper; no simulator, emulator or network.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
 ### Maths in replies
 
 <a id="mus-spec-21-785a"></a>
@@ -742,3 +897,104 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Environment: DOM suite (linkedom) with a stubbed bridge.
 - Known gaps: The Settings row itself is not clicked in this suite.
 - Evidence: local; cd packages/agent-app && npm run test:renderer (suite markdown-math-dom); exit 0; 4 passed, 0 failed, 0 skipped; commit d39a4695fc03f8469a0bfcd36098da30320c734e
+
+### Office files for agents (#772-#775, #789)
+
+<a id="mus-spec-21-772a"></a>
+#### MUS-SPEC-21-772A: An agent makes a .docx with Muster's documents skill and sees its pages
+
+- Precondition: Another app's home is absent (HOME is an empty folder). LibreOffice is a stand-in soffice that writes a two-page PDF. A project folder holds a picture.
+- Action: In an agent-mode chat, a fake coding client follows the note: it reads the documents skill the note names, calls office_setup, copies the skill's example script into the project, runs it with the command office_setup returned, then calls office_render on report.docx.
+- Expected result: The note names Muster's shipped documents skill. The server lists office_setup and office_render, and setup reports docx. report.docx has Heading 1 paragraphs, a table, a numbered list, the title text and the image in word/media. The render answer lists a PDF and two page PNGs and carries the first two pages as images. An edit with jszip (as the skill shows) keeps word/styles.xml byte for byte. Nothing is created in another app's home.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::an agent makes a .docx with Muster's documents skill and sees its pages, with no other app installed`
+- Environment: Node test runner; the real service and office domain, a fake provider and a stand-in soffice; real docx, pdf.js and canvas; no network.
+- Known gaps: A real LibreOffice conversion is not run in the test (checked by hand: the example renders to one clean page).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-773a"></a>
+#### MUS-SPEC-21-773A: An agent makes an .xlsx with live formulas and sees its pages
+
+- Precondition: As 772A.
+- Action: The same agent turn with the spreadsheets skill and its example script, writing budget.xlsx.
+- Expected result: The workbook has Sales and Summary sheets. Revenue, totals and a cross-sheet reference are formulas (B2*C2, SUM(D2:D4), Sales!D5), money and percent cells keep their number formats, and the workbook is set to recalculate on open. Page images come back as in 772A. Changing an input and saving keeps the formulas and formats.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::an agent makes an .xlsx with live formulas using Muster's spreadsheets skill and sees its pages`
+- Environment: As 772A.
+- Known gaps: exceljs writes no native Excel charts; the skill says so and places a chart picture (or points to a presentation). Recalculated values were checked by hand with a real LibreOffice render.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-774a"></a>
+#### MUS-SPEC-21-774A: An agent makes a .pptx and sees each slide
+
+- Precondition: As 772A.
+- Action: The same agent turn with the presentations skill and its example script, writing deck.pptx.
+- Expected result: The deck has five slides (title, bullets, chart, table, picture) on slide layouts, the chart is a native chart part and the picture is embedded. Page images come back as in 772A.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::an agent makes a .pptx with Muster's presentations skill and sees each slide`
+- Environment: As 772A.
+- Known gaps: Editing an existing deck is by XML with jszip as the skill describes; the test does not edit a deck.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-775a"></a>
+#### MUS-SPEC-21-775A: An agent makes a PDF with a form, reads it, fills it and sees its pages
+
+- Precondition: As 772A.
+- Action: The same agent turn with the pdf skill and its example script, writing report.pdf; then fill its form with pdf-lib and read its text with pdfjs-dist as the skill shows.
+- Expected result: The PDF has the approver.name and approver.approved fields; filling them reads back. The text of page one includes the title and a table cell. The render answer lists one page and names the source PDF itself: a PDF renders without LibreOffice.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::an agent makes a PDF with a form using Muster's pdf skill, reads its text, fills the form and sees its pages`
+- Environment: As 772A.
+- Known gaps: Scanned PDFs have no text; the skill tells the agent to read the page images instead.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-772q"></a>
+#### MUS-SPEC-21-772Q: Each office type previews with no other app installed
+
+- Precondition: A project folder with the four example outputs. No MUSTER_SOFFICE_PATH. First no office runtime, then Muster's office runtime with a stand-in soffice.
+- Action: Read the PDF and the Word and PowerPoint files through the document preview, and the workbook through the workbook preview.
+- Expected result: The PDF is read directly (not converted). The workbook shows its two sheets, its header and the formula behind a total. The .docx and .pptx are converted to a PDF by Muster's own runtime.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::each office type previews in Muster with no other app installed`
+- Environment: Node test runner; no network.
+- Known gaps: Without any LibreOffice the viewer falls back to macOS Quick Look, and elsewhere to a note that points to Settings › Storage.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-789m"></a>
+#### MUS-SPEC-21-789M: The first render downloads LibreOffice with progress on the chat's tool row
+
+- Precondition: No LibreOffice installed. The pinned build is served by a fake download server; the fake unpacker puts a stand-in soffice in place.
+- Action: An agent turn calls office_render on a .docx.
+- Expected result: The service sends officeToolProgress events for that chat with "Downloading LibreOffice…" while the tool waits, then one with no message. LibreOffice lands in Muster's data folder and the render succeeds through it.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::the first render shows LibreOffice download progress on the chat's tool row`
+- Environment: Node test runner; fake network and unpacker.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-789n"></a>
+#### MUS-SPEC-21-789N: A packaged app downloads the pinned office libraries once
+
+- Precondition: A manifest of npm-style tarballs (one nested under another, as in the lockfile) served by a fake registry.
+- Action: Ensure the libraries twice at once, run a script, ensure again; then try a tampered integrity and a non-registry URL; then remove.
+- Expected result: One download serves both callers with progress from 0 to all packages. The nested layout is kept, so a dependency resolves. A second ensure fetches nothing. A tarball that fails its sha512 integrity installs nothing and leaves no staging folder; a non-registry URL is refused before any fetch. Remove frees the bytes and the status is no longer ready.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::a packaged app downloads the pinned office libraries once, checks each against its integrity and installs them atomically`
+- Environment: Node test runner; system tar; fake registry.
+- Known gaps: Interrupted downloads restart the package set rather than resume each tarball.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-789o"></a>
+#### MUS-SPEC-21-789O: The office libraries are pinned from the lockfile
+
+- Precondition: The app's package-lock.json.
+- Action: Build the office library manifest the way the build does.
+- Expected result: docx, exceljs, pptxgenjs, pdf-lib, jszip and pdfjs-dist are pinned to their lockfile versions, every entry is an npm registry tarball with a sha512 integrity, no @types package is included, and every runtime dependency of a pinned package is pinned too.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::the build pins every office library and its dependencies from the lockfile`
+- Environment: Node test runner.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-789p"></a>
+#### MUS-SPEC-21-789P: A running office tool row shows the download progress
+
+- Precondition: A running muster_office tool row in a chat.
+- Action: Send progress for another chat, for this chat, then clear it; then show a finished row and a row of another server.
+- Expected result: Only this chat's message shows, as a live status line, and it goes away when cleared. A finished row and another server's row show nothing.
+- Test: `packages/agent-app/tests/office-tool-progress-789-dom.tsx::A running office tool row shows the first download progress and clears it when done`
+- Environment: DOM suite (linkedom) with a stubbed bridge.
+- Known gaps: None known.
+- Evidence: UNVERIFIED

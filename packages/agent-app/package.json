@@ -20,6 +20,7 @@
     "test": "node --max-old-space-size=1536 --experimental-transform-types --import ./tests/pin-device-platform.mjs --test 'tests/*.test.ts' 'tests/*.test.cjs'",
     "test:renderer": "node scripts/test-renderer.mjs",
     "test:electron": "node scripts/test-electron.mjs",
+    "test:server-e2e": "node scripts/test-server-e2e.mjs",
     "rebuild:native": "node scripts/postinstall.mjs --force",
     "postinstall": "node scripts/postinstall.mjs",
     "vendor:sync": "node scripts/vendor-sync.mjs",
@@ -85,7 +86,8 @@
     "dompurify": "3.4.17",
     "mdast-util-math": "$mdast-util-math",
     "micromark-extension-gfm-table": "$micromark-extension-gfm-table",
-    "micromark-extension-math": "$micromark-extension-math"
+    "micromark-extension-math": "$micromark-extension-math",
+    "image-size": "2.0.3"
   },
   "author": {
     "name": "Muster",
