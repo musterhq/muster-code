@@ -43,6 +43,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-772Q](21-visuals-and-artifacts.md#mus-spec-21-772q) | PDF and .xlsx preview with nothing else installed; .docx and .pptx convert through Muster's own office runtime. | [`each office type previews in Muster with no other app installed`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
 | [MUS-SPEC-21-789M](21-visuals-and-artifacts.md#mus-spec-21-789m) | The service sends officeToolProgress events for that chat with "Downloading LibreOffice…" while the tool waits, then one with no message. | [`the first render shows LibreOffice download progress on the chat's tool row`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
 | [MUS-SPEC-21-789N](21-visuals-and-artifacts.md#mus-spec-21-789n) | The pinned library tarballs download once with progress, keep the lockfile layout, are refused on a bad integrity or non-registry URL, and can be removed. | [`a packaged app downloads the pinned office libraries once, checks each against its integrity and installs them atomically`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-21-789Q](21-visuals-and-artifacts.md#mus-spec-21-789q) | A tarball that fails its checksum while others are still unpacking: the install waits for them, reports the checksum error (never a cleanup error) and leaves no staging folder. | [`a tarball that fails its checksum while other downloads are still running reports the checksum and leaves nothing behind`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
 | [MUS-SPEC-21-789O](21-visuals-and-artifacts.md#mus-spec-21-789o) | docx, exceljs, pptxgenjs, pdf-lib, jszip and pdfjs-dist are pinned to their lockfile versions, every entry is an npm registry tarball with a sha512 integrity, no @types package is included, and every runtime dependency of a pinned package is pinned too. | [`the build pins every office library and its dependencies from the lockfile`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
 | [MUS-SPEC-21-789P](21-visuals-and-artifacts.md#mus-spec-21-789p) | Only this chat's message shows, as a live status line, and it goes away when cleared. | [`A running office tool row shows the first download progress and clears it when done`](../../../packages/agent-app/tests/office-tool-progress-789-dom.tsx) |
 | [MUS-SPEC-21-788A](21-visuals-and-artifacts.md#mus-spec-21-788a) | Right-click on the gallery hero, a gallery thumbnail, a gallery file link, a tool-row thumbnail, an inline reply image and the open image viewer each asks for the image menu, with that image's chat and path. | [`Right-click on every chat image surface asks for the image menu with its path`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
@@ -1023,6 +1024,17 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/office-skills-772.test.ts::a packaged app downloads the pinned office libraries once, checks each against its integrity and installs them atomically`
 - Environment: Node test runner; system tar; fake registry.
 - Known gaps: Interrupted downloads restart the package set rather than resume each tarball.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-789q"></a>
+#### MUS-SPEC-21-789Q: A failed library download waits for the others and reports its checksum
+
+- Precondition: A fake registry serving the office library tarballs; docx's integrity is wrong and answers last; the other packages unpack slowly, creating folders and files as tar does.
+- Action: Ensure the libraries.
+- Expected result: The ensure rejects with "docx 1.0.0 did not match its checksum", only after every running unpack has finished. No node_modules is installed and no staging folder is left or recreated.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::a tarball that fails its checksum while other downloads are still running reports the checksum and leaves nothing behind`
+- Environment: Node test runner; fake registry and unpack; no network.
+- Known gaps: None.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-21-789o"></a>

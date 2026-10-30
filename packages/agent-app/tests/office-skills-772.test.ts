@@ -419,6 +419,42 @@ test('a packaged app downloads the pinned office libraries once, checks each aga
   assert.equal((await libraries.status()).ready, false);
 });
 
+// Spec: MUS-SPEC-21-789Q (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-789q)
+test('a tarball that fails its checksum while other downloads are still running reports the checksum and leaves nothing behind', async t => {
+  const root = await directory(t);
+  const packages: OfficeLibraryManifest['packages'] = [];
+  const served = new Map<string, Buffer>();
+  for (const name of OFFICE_LIBRARY_NAMES) {
+    const {data, integrity} = await tarball(join(root, 'registry'), name, '1.0.0', 'module.exports = {};');
+    const url = `https://registry.npmjs.org/${name}/-/${name}-1.0.0.tgz`;
+    served.set(url, data);
+    packages.push({path: `node_modules/${name}`, name, version: '1.0.0', resolved: url, integrity: name === 'docx' ? `sha512-${createHash('sha512').update('else').digest('base64')}` : integrity});
+  }
+  // The other packages are still unpacking (as tar does: it creates folders and files as it goes) when docx, the
+  // tampered one, fails its checksum.
+  const fetch = async (url: string) => {
+    if (url.includes('/docx/')) await new Promise(wait => setTimeout(wait, 50));
+    const data = served.get(url)!;
+    return {status: 200, headers: {get: () => null}, body: (async function* () { yield data; })()};
+  };
+  let unpacking = 0, allDone!: () => void;
+  const unpacked = new Promise<void>(done => { allDone = done; });
+  const unpack = async (_tarball: string, into: string) => {
+    unpacking++;
+    await new Promise(wait => setTimeout(wait, 200));
+    await mkdir(into, {recursive: true});
+    await writeFile(join(into, 'index.js'), 'module.exports = {};');
+    await writeFile(join(into, 'package.json'), '{"name":"x","version":"1.0.0"}');
+    if (--unpacking === 0) allDone();
+  };
+  const libraries = new OfficeLibraries({root: join(root, 'libs'), execPath: process.execPath, manifest: {packages}, localModules: null, fetch, unpack});
+  await assert.rejects(libraries.ensure(), /docx 1\.0\.0 did not match its checksum/);
+  assert.equal(unpacking, 0, 'the failed install waited for the downloads already running');
+  await unpacked;
+  assert.ok(!existsSync(join(root, 'libs', 'node_modules')), 'nothing was installed');
+  assert.deepEqual((await readdir(join(root, 'libs'))).filter(name => name.startsWith('staging-')), [], 'no staging folder is left or recreated');
+});
+
 // Spec: MUS-SPEC-21-789O (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-789o)
 test('the build pins every office library and its dependencies from the lockfile', () => {
   const lock = JSON.parse(readFileSync(join(appDir, 'package-lock.json'), 'utf8'));
