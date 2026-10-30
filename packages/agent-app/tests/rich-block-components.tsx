@@ -142,6 +142,7 @@ setRichRenderers({
   const closed='```mermaid\nflowchart LR\n  A-->B\n```';
   const open='```mermaid\nflowchart LR\n  A-->B';
   // Spec: MUS-SPEC-21-361A (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-361a)
+  // Spec: MUS-SPEC-21-771C (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-771c)
   await check('a closed mermaid fence in a reply draws as a diagram; while streaming it stays code', async()=>{
   mermaidCalls=0;
   await show(<MessageBody text={reply(open)}/>);
@@ -165,6 +166,7 @@ setRichRenderers({
 
   // Spec: MUS-SPEC-21-361B (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-361b)
   // Spec: MUS-SPEC-21-787D (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-787d)
+  // Spec: MUS-SPEC-21-771D (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-771d)
   await check('an invalid mermaid fence shows the error card with the parse error and its source', async()=>{
   // Parse failure: error card with the source, never a blank block.
   mermaidFail='Parse error on line 2: expected node';

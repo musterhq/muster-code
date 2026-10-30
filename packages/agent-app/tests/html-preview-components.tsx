@@ -49,6 +49,8 @@ const {THEME_FRAGMENT_KEY}=await import('../src/shared/html-render');
 
 // ---- the frame of an agent page --------------------------------------------------------------------------------------------
 {
+  // Spec: MUS-SPEC-21-771A (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-771a)
+  await check('an agent page frame is scripts-only sandboxed and follows a light and dark theme switch without reloading', async()=>{
   await show(<SandboxedHtml html="<p>hi</p>" scripts themed title="Page" storeKey="p1"/>,300);
   const frame=$('iframe.sandboxed-html-frame')!;
   assert.ok(frame,'a frame');
@@ -71,6 +73,8 @@ const {THEME_FRAGMENT_KEY}=await import('../src/shared/html-render');
   document.documentElement.setAttribute('data-theme','light');await delay(60);
   assert.equal(sent.at(-1)[0].theme.appearance,'light','a theme change reaches the open page');
   assert.equal($('iframe')!.getAttribute('src'),src,'the frame is not reloaded for a theme change');
+  });
+  const frame=$('iframe.sandboxed-html-frame')!;
 
   // Heights: only this frame, and one layout write per frame however often the page reports.
   const heights:number[]=[];
