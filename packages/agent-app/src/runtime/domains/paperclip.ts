@@ -31,7 +31,8 @@ import { createServerSignIn } from '../server-auth.ts';
 import { createAutoAuth } from '../server/auto-auth.ts';
 import { detectBackend } from '../server/detect.ts';
 import { normalizeBaseUrl as normalizeUrl } from '../paperclip-client.ts';
-import { connectionFor, isLoopback as connectionLoopback, originOf } from '../server/connection.ts';
+import { isLoopback as connectionLoopback, originOf, type ServerConnection } from '../server/connection.ts';
+import { connectionFor, registryFor } from '../server/registry.ts';
 import { arr, mapBudgets } from '../paperclip-map.ts';
 import { cachedOutput, localOutput, MAX_OUTPUT_BYTES, nameWithExtension, outputCacheRoot, outputMime, PREVIEW_IMAGE_BYTES, previewOutput, projectRelativePath, sanitizeOutputName, storeOutput } from '../server-outputs.ts';
 import { OrgReader, serverHubFor } from '../server/orgs.ts';
@@ -106,8 +107,14 @@ export function rankMemories(records: readonly MemoryRecord[], query: string, li
 export function createPaperclipDomain(context: DomainContext, options: PaperclipDomainOptions = {}): DomainModule {
   const timers = options.timers ?? { setTimeout, clearTimeout };
   const conn = connectionFor(context, { fetch: options.fetch, secrets: options.secrets });
+  /** Every server in Settings › Integrations (#803). `conn` above is the one that feeds Projects, Roster and Inbox. */
+  const registry = registryFor(context);
   const secrets = () => conn.secrets();
-  const view = (): PaperclipConfigView => conn.view();
+  /** A connection's view, saying which server in the list it is. */
+  const viewOf = (c: ServerConnection, serverId: string | null): PaperclipConfigView => { const entry = serverId ? registry.get(serverId) : undefined; return { ...c.view(), serverId: entry?.id ?? null, serverName: entry ? registry.nameOf(entry) : null }; };
+  const view = (): PaperclipConfigView => viewOf(conn, registry.workspaceEntry()?.id ?? null);
+  /** The server a command names (`serverId`), else the one that feeds Projects. */
+  const serverIdOf = (input: unknown): string | undefined => { const v = (input as { serverId?: unknown } | undefined)?.serverId; return typeof v === 'string' && v ? v : undefined; };
 
   // --- the server connection (Paperclip or Muster Server, whichever the URL is) ----------------------------------------------
   let backend: ServerBackend | null = null;
@@ -713,7 +720,16 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     },
     server: async projectId => {
       const c = connection(), source = imports()?.projectSource(projectId);
-      if (!c || !source) return null;
+      if (!source) return null;
+      // Imported from another server in the list (#803): read its history through that server's own connection and sign-in.
+      const elsewhere = source.serverOrigin && (!c || source.serverOrigin !== originOf(conn.baseUrl())) ? registry.byOrigin(source.serverOrigin) : undefined;
+      if (elsewhere && elsewhere.config.mode !== 'off') {
+        const other = registry.connection(elsewhere.id), endpoint = other.endpoint();
+        if (!endpoint) return null;
+        const kind = await other.resolveBackend();
+        return { backend: other.makeBackend(kind, endpoint, { orgName: registry.nameOf(elsewhere) }), label: registry.nameOf(elsewhere) };
+      }
+      if (!c) return null;
       // Only the server the project was imported from (an older import did not record it: then the same org).
       if (source.serverOrigin ? source.serverOrigin !== originOf(conn.baseUrl()) : source.companyId !== (built?.companyId ?? conn.config.companyId ?? null)) return null;
       await paperclipPart(false).catch(() => undefined);
@@ -841,12 +857,24 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   };
 
   /** Browser-approval sign-in (the ServerAuth seam): the approved key is stored like a pasted token, bound to its origin. */
-  const auth = createAutoAuth(conn.fetcher, origin => conn.config.backend && originOf(conn.config.baseUrl) === origin ? conn.config.backend : null);
+  const auth = createAutoAuth(conn.fetcher, origin => (conn.config.backend && originOf(conn.config.baseUrl) === origin ? conn.config.backend : null) ?? registry.byOrigin(origin)?.config.backend ?? null);
+  /** Which server the running browser sign-in belongs to: the one it was started for, else the one at its address, else a new entry. */
+  let signInFor: string | undefined;
   const signIn = createServerSignIn(auth, {
     timers,
     changed: () => context.emit({ type: 'projectsWorkspaceChanged', scopes: ['config'], taskIds: [] }),
-    approved: result => conn.adoptSignIn({ ...result, backend: auth.backendFor(result.origin) }),
+    approved: result => registry.target({ serverId: signInFor, origin: result.origin }).adoptSignIn({ ...result, backend: auth.backendFor(result.origin) }),
   });
+  /** Signs out of a server that signed in by browser approval: its key is revoked on the server, then everything about it is forgotten here. */
+  const disconnectOne = async (target: ServerConnection) => {
+    let revoked = false, message: string | undefined;
+    if (target.config.signedIn) {
+      const baseUrl = target.baseUrl(), key = target.tokenFor(baseUrl);
+      if (key) { const outcome = await signIn.revoke(baseUrl, key); revoked = outcome.revoked; message = outcome.message; }
+    }
+    target.disconnect();
+    return { revoked, message };
+  };
   const text = (value: unknown, label: string, max: number) => { if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} is required.`); if (value.length > max) throw new Error(`${label} is too long.`); return value; };
   const id = (value: unknown) => { if (typeof value !== 'string' || !/^[\w:.-]{1,128}$/.test(value)) throw new Error('Unknown item.'); return value; };
   const sourceOf = (value: unknown): WorkspaceSource => value === 'paperclip' ? 'paperclip' : 'local';
@@ -867,9 +895,10 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   return {
     handlers: {
       'paperclip.config.get': () => ({ ...view(), live: live.channel }),
-      'paperclip.signin.start': input => signIn.start(input.baseUrl),
+      'paperclip.signin.start': input => { signInFor = serverIdOf(input); if (signInFor && signInFor !== 'new') registry.connection(signInFor); return signIn.start(input.baseUrl); },
       'paperclip.signin.status': () => signIn.state(),
-      'paperclip.session.set': input => ({ state: conn.setSession(String(input.baseUrl ?? ''), input.cookie) }),
+      // A cookie belongs to the server at its origin; one for an address not in the list yet waits on the Projects connection.
+      'paperclip.session.set': input => { const origin = originOf(String(input.baseUrl ?? '')), entry = registry.byOrigin(origin); const target = entry && entry.id !== registry.workspaceEntry()?.id ? registry.connection(entry.id) : conn; return { state: target.setSession(String(input.baseUrl ?? ''), input.cookie) }; },
       'paperclip.session.clear': () => { conn.clearSession(); return { ok: true as const }; },
       'paperclip.signin.cancel': () => signIn.cancel(),
       'paperclip.signin.signout': async () => {
@@ -880,21 +909,30 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         signIn.reset();
         return { config: view(), revoked: outcome.revoked, ...(outcome.message ? { message: outcome.message } : {}) };
       },
-      'paperclip.disconnect': async () => {
-        // Disconnect: a key this app was given by browser approval is revoked on the server; every key, session and the link itself is forgotten here.
-        let revoked = false, message: string | undefined;
-        if (conn.config.signedIn) {
-          const baseUrl = conn.baseUrl(), key = conn.tokenFor(baseUrl);
-          if (key) { const outcome = await signIn.revoke(baseUrl, key); revoked = outcome.revoked; message = outcome.message; }
-        }
-        conn.disconnect(); signIn.reset();
-        return { config: view(), revoked, ...(message ? { message } : {}) };
+      'paperclip.disconnect': async input => {
+        // Disconnect: a key this app was given by browser approval is revoked on the server; every key and session is forgotten here. The
+        // server keeps its place in Settings › Integrations, disconnected; the others are untouched.
+        const id = serverIdOf(input);
+        const target = id ? registry.connection(id) : conn, which = id ?? registry.workspaceEntry()?.id ?? null;
+        const { revoked, message } = await disconnectOne(target);
+        if (!id || target === conn) signIn.reset();
+        return { config: id ? viewOf(target, which) : view(), revoked, ...(message ? { message } : {}) };
       },
       'paperclip.config.set': input => {
+        const id = serverIdOf(input);
+        if (id) {
+          // Another server in the list (or a new one): the Projects connection is told by the registry only if it is affected.
+          const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl : undefined;
+          let origin: string | null = null; try { origin = baseUrl ? originOf(input.mode === 'custom' ? normalizeUrl(baseUrl) : baseUrl) : null; } catch { /* configure() says what is wrong */ }
+          const target = registry.target({ serverId: id, origin });
+          target.configure(input as never);
+          const entry = registry.byOrigin(originOf(target.config.baseUrl)) ?? null;
+          return viewOf(target, entry?.id ?? null);
+        }
         const next = conn.configure(input as never);
         closeSocket(); stopPoll(); built = null; backend = null; companies = []; lastError = undefined;
         queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']);
-        return next;
+        return { ...next, serverId: registry.workspaceEntry()?.id ?? null, serverName: (() => { const e = registry.workspaceEntry(); return e ? registry.nameOf(e) : null; })() };
       },
       'paperclip.test': input => conn.test(input),
       'paperclip.snapshot': input => snapshot(input.refresh === true),

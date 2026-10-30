@@ -12,7 +12,8 @@ import { realGit, sameRepo } from '../checkout/git-port.ts';
 import { hasTestSetup } from '../checkout/folder.ts';
 import { badgeOf } from '../checkout/lease.ts';
 import { TurnLedger } from '../turn-ledger.ts';
-import { connectionFor } from '../server/connection.ts';
+import { connectionFor, registryFor } from '../server/registry.ts';
+import { originOf } from '../server/connection.ts';
 import { OutboxRetry } from '../checkout/outbox-policy.ts';
 import { serverHubFor } from '../server/orgs.ts';
 import type { DomainContext, DomainModule } from './types.ts';
@@ -89,7 +90,13 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
   const offStarted = ctx.hooks.onRunStarted?.(({ chat }) => { if (service) service.runStarted(chat.id); });
   const offSettled = ctx.hooks.onRunSettled(run => { if (store.openLeases().length && svc().leaseForChat(run.chat.id)) return svc().onTurn(run.chat.id, run.runId, run.status).catch(() => undefined); });
   // Disconnecting forgets what was kept for the server: org copies, ended check-outs and the posts that were never sent (security review M6).
-  const offCommand = ctx.hooks.onCommand?.(event => { if (event.command === 'paperclip.disconnect' || event.command === 'paperclip.signin.signout' || event.command === 'musterServer.disconnect') for (const o of new Set(store.leases().map(l => l.origin))) store.purge({ origin: o }); });
+  // With several servers (#803) only what belonged to servers no longer connected goes; the other servers' check-outs stay.
+  const offCommand = ctx.hooks.onCommand?.(event => {
+    if (!['paperclip.disconnect', 'paperclip.signin.signout', 'musterServer.disconnect', 'musterServer.remove'].includes(event.command)) return;
+    const keep = new Set(registryFor(ctx).list().filter(s => s.config.mode !== 'off').map(s => originOf(s.config.baseUrl)));
+    if (event.command === 'paperclip.signin.signout') keep.delete(originOf(conn.baseUrl()));
+    for (const o of new Set(store.leases().map(l => l.origin))) if (!keep.has(o)) store.purge({ origin: o });
+  });
 
   const work = async (fresh: boolean): Promise<MyWork> => {
     if (!hub.reader || !hub.backend?.()) return { connected: false, me: null, orgs: [], fetchedAt: new Date().toISOString() };

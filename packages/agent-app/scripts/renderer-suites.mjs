@@ -22,6 +22,7 @@ export const split = new Set([
   'projects-parity-components',
   'paperclip-integration-dom',
   'paperclip-signin-dom',
+  'muster-server-list-dom',
   'work-components',
   'nav-components',
   'org-components',

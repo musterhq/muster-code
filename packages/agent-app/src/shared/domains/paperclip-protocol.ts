@@ -24,6 +24,8 @@ export type WorkspaceSource = 'paperclip' | 'local';
 /** The token never reaches the renderer: only whether one is stored. */
 export interface PaperclipConfigView {
   mode: PaperclipMode; baseUrl: string; hasToken: boolean; secureStorage: boolean; companyId: string | null;
+  /** Which server in Settings › Integrations this is, and its name (#803). Null while no server is in the list. */
+  serverId?: string | null; serverName?: string | null;
   /** Detected from the URL; null until it has been. */
   backend?: ServerBackendKind | null;
   /** "Paperclip-compatible" when the backend is a Paperclip instance: the one place that word is allowed to appear (connection details). */
@@ -55,7 +57,8 @@ export interface PaperclipSignInState {
   user?: { name: string | null; email: string | null };
 }
 /** `token`: omitted keeps the stored one, '' removes it. */
-export interface PaperclipConfigInput { mode: PaperclipMode; baseUrl?: string; token?: string; companyId?: string | null; backend?: ServerBackendKind }
+/** `serverId`: which server in the list to set (`'new'` adds one, or reuses the one already at that address). Without it: the server that feeds Projects. */
+export interface PaperclipConfigInput { mode: PaperclipMode; baseUrl?: string; token?: string; companyId?: string | null; backend?: ServerBackendKind; serverId?: string }
 export interface PaperclipTestResult {
   ok: boolean; stage: 'config' | 'network' | 'auth' | 'service' | 'ok'; message: string; latencyMs?: number;
   version?: string; deploymentMode?: string; companies?: WorkspaceCompany[];
@@ -401,13 +404,15 @@ export interface PaperclipCommands {
   'paperclip.config.get': { input: Record<string, never>; output: PaperclipConfigView };
   'paperclip.config.set': { input: PaperclipConfigInput; output: PaperclipConfigView };
   /** Starts the server's browser approval for this URL and returns the page to open. Polls only while waiting. */
-  'paperclip.signin.start': { input: { baseUrl: string }; output: PaperclipSignInState };
+  /** `serverId`: the server the approved key belongs to (`'new'`, or omitted: the one at that address, else a new entry in the list). */
+  'paperclip.signin.start': { input: { baseUrl: string; serverId?: string }; output: PaperclipSignInState };
   'paperclip.signin.status': { input: Record<string, never>; output: PaperclipSignInState };
   'paperclip.signin.cancel': { input: Record<string, never>; output: PaperclipSignInState };
   /** Revokes the key the server issued to this Mac and removes it. `message`: anything to tell the person (a revoke the server did not confirm). */
   'paperclip.signin.signout': { input: Record<string, never>; output: { config: PaperclipConfigView; revoked: boolean; message?: string } };
   /** Disconnect: revokes the key a browser approval issued (when it did), forgets every key and session, and turns the connection off. */
-  'paperclip.disconnect': { input: Record<string, never>; output: { config: PaperclipConfigView; revoked: boolean; message?: string } };
+  /** `serverId`: disconnect that server; omitted: the one that feeds Projects. */
+  'paperclip.disconnect': { input: { serverId?: string }; output: { config: PaperclipConfigView; revoked: boolean; message?: string } };
   /** The app's sign-in window obtained the server's session cookie (the main process calls this; the cookie never reaches the renderer). */
   'paperclip.session.set': { input: { baseUrl: string; cookie: string }; output: { state: 'pending' | 'active' } };
   'paperclip.session.clear': { input: Record<string, never>; output: { ok: true } };

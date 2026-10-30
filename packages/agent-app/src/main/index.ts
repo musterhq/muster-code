@@ -839,11 +839,15 @@ async function main(): Promise<void> {
       if (command === 'files.trash') onEvent({type:'workspaceChanged',folderId:folder.id});
       return;
     }
-    if (command === 'paperclip.signin.signout' || command === 'paperclip.disconnect' || command === 'musterServer.disconnect') {
-      // Signing out clears BOTH the key (the runtime revokes it) and this server's sign-in window session (its partition).
-      const before = await service.invoke('paperclip.config.get', {}).catch(() => null);
+    if (command === 'paperclip.signin.signout' || command === 'paperclip.disconnect' || command === 'musterServer.disconnect' || command === 'musterServer.remove') {
+      // Signing out clears BOTH the key (the runtime revokes it) and that server's sign-in window session (its partition). A command that
+      // names a server (#803) clears that server's; otherwise the one that feeds Projects.
+      const serverId = (input as {serverId?: unknown} | undefined)?.serverId;
+      const before = typeof serverId === 'string'
+        ? await service.invoke('musterServer.list', {}).then(list => { const s = list.servers.find(x => x.id === serverId); return s && s.state !== 'disconnected' ? {baseUrl: s.url} : null; }).catch(() => null)
+        : await service.invoke('paperclip.config.get', {}).then(view => view.mode !== 'off' ? {baseUrl: view.baseUrl} : null).catch(() => null);
       const outcome = await desktopWork.invoke(command, input as Commands[typeof command]['input']);
-      if (before && before.mode !== 'off') await signInWindows.clear(before.baseUrl).catch(() => undefined);
+      if (before) await signInWindows.clear(before.baseUrl).catch(() => undefined);
       return outcome;
     }
     const result = await desktopWork.invoke(command, input as Commands[typeof command]['input']);
