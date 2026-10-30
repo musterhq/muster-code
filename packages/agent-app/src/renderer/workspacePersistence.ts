@@ -3,7 +3,7 @@ import {browserURL} from '../shared/browser-protocol.ts';
 import {MAX_SAVED_RICH_SOURCE, richTabId, type RichKind} from '../shared/rich-fence.ts';
 export interface SavedTab {
   id: string;
-  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView' | 'rich';
+  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView' | 'rich' | 'device';
   gitView?: 'changes' | 'history' | 'pullRequest';
   sha?: string;
   canvasId?: string;
@@ -158,7 +158,7 @@ export function redactBrowserURL(value: string): string {
 
 export function saveWorkspace(storage: Pick<Storage, 'setItem'>, workspace: SavedWorkspace, scope = 'personal'): boolean {
   try {
-    storage.setItem(storageKey(scope), JSON.stringify({version:2, scope, tabs:workspace.tabs.filter(tab=>tab.kind!=='liveView'&&!(tab.kind==='rich'&&(tab.richSource?.length??0)>MAX_SAVED_RICH_SOURCE)&&!(tab.kind==='browser'&&tab.id.startsWith('browser:agent-'))).slice(0,MAX_TABS).map(tab=>{
+    storage.setItem(storageKey(scope), JSON.stringify({version:2, scope, tabs:workspace.tabs.filter(tab=>tab.kind!=='liveView'&&tab.kind!=='device'&&!(tab.kind==='rich'&&(tab.richSource?.length??0)>MAX_SAVED_RICH_SOURCE)&&!(tab.kind==='browser'&&tab.id.startsWith('browser:agent-'))).slice(0,MAX_TABS).map(tab=>{
       if(tab.kind!=='browser')return tab;
       let url='about:blank';
       try {if(tab.url!==undefined)url=redactBrowserURL(browserURL(tab.url));} catch {}

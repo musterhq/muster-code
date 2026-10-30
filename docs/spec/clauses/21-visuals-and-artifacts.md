@@ -69,6 +69,18 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-786K](21-visuals-and-artifacts.md#mus-spec-21-786k) | A Mermaid file that does not parse shows "Unable to render diagram: <message>" with its source and Retry; a file with a URL or a %%{ }%% block shows why it is not drawn, with its source, and never reaches Mermaid. | [`an invalid Mermaid file shows the error with its source; a file with a URL or configuration is never handed to Mermaid`](../../../packages/agent-app/tests/notebook-mermaid-786-dom.tsx) |
 | [MUS-SPEC-21-786L](21-visuals-and-artifacts.md#mus-spec-21-786l) | Switching the app between dark and light re-serves a notebook HTML output in the new colour scheme and redraws a Mermaid file in the new theme. | [`both previews follow the app theme: HTML outputs are framed in the active colours and diagrams redraw in light and dark`](../../../packages/agent-app/tests/notebook-mermaid-786-dom.tsx) |
 | [MUS-SPEC-21-366A](21-visuals-and-artifacts.md#mus-spec-21-366a) | A GLB file opens as an interactive 3D preview: canvas, camera views, model info, wireframe, full screen, and all graphics and worker resources released on close. | [`a GLB model opens as an interactive 3D preview: canvas, views, info, wireframe, full screen, released on close`](../../../packages/agent-app/tests/model-viewer-dom.tsx) |
+| [MUS-SPEC-21-363A](21-visuals-and-artifacts.md#mus-spec-21-363a) | Devices start off. Agent access is a separate switch that turns off with devices, and settings are saved 0600. | [`manager: off by default; agent access is a separate opt-in that never outlives devices; settings persist 0600`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363B](21-visuals-and-artifacts.md#mus-spec-21-363b) | The helper installs from the shipped lockfile with scripts off. The install is atomic and a failed one leaves nothing behind. | [`helper install: npm ci of the shipped lockfile with scripts off, atomic, sentinel last; failures leave nothing`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363C](21-visuals-and-artifacts.md#mus-spec-21-363c) | The helper starts on loopback with a per-launch token, a private TMPDIR and an allowlisted environment. | [`helper: banner parsing, loopback-only args with a token, isolated TMPDIR, env scrubbed`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363D](21-visuals-and-artifacts.md#mus-spec-21-363d) | WebCodecs is set up from the AVCC description and decodes queued frames. An unsupported profile asks for MJPEG. | [`iOS H.264 decodes with WebCodecs and falls back to MJPEG when the profile cannot be decoded`](../../../packages/agent-app/tests/devices-components.tsx) |
+| [MUS-SPEC-21-363E](21-visuals-and-artifacts.md#mus-spec-21-363e) | AVCC envelopes demux in order however they are split. A backlog reopens for a keyframe, and MJPEG works on request. | [`iOS H.264: AVCC envelopes demuxed however they arrive; seed, description and frames forwarded in order; a backlog reopens for a fresh keyframe; MJPEG on request`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363F](21-visuals-and-artifacts.md#mus-spec-21-363f) | Android frames stay in order. A backlog skips to the next keyframe and asks for a new one. | [`Android link: H.264 forwarded in order, a backlog skips to the next keyframe and asks for one`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363G](21-visuals-and-artifacts.md#mus-spec-21-363g) | Each device family gets its own frame. The rail uses that OS's names and leaves out what the device lacks. | [`each device wears its own frame and the rail uses its own OS terms`](../../../packages/agent-app/tests/devices-components.tsx) |
+| [MUS-SPEC-21-363H](21-visuals-and-artifacts.md#mus-spec-21-363h) | Consent is checked per call. Read-only chats only look, user control blocks input, and taps are scaled from the screenshot. | [`agent tools: consent re-checked per call, read-only chats look only, user control stops input, taps scaled from the screenshot`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363I](21-visuals-and-artifacts.md#mus-spec-21-363i) | MCP routes get the device server and note; routes with no MCP have both removed. | [`routes without MCP never hear about the device tools; MCP routes get the server and the note`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363J](21-visuals-and-artifacts.md#mus-spec-21-363j) | A checksum mismatch is refused. A match is cached with its source and licence noted, and offline keeps Muster's own body. | [`realistic models: SHA-256 mismatch refused, cache hit, offline fallback, metadata records source and no licence`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363K](21-visuals-and-artifacts.md#mus-spec-21-363k) | The DeviceKit descriptor is read and checked through the read-only route, and sliced chromes fall back to Muster's frame. | [`real frames, iOS: the helper's DeviceKit descriptor is read and validated; images come from its read-only route; sliced chromes fall back`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363L](21-visuals-and-artifacts.md#mus-spec-21-363l) | Discovery lists both platforms. A failed boot gives a plain-English reason and resets the state. | [`manager: discovery lists devices; a failed boot says why in plain English and resets the state`](../../../packages/agent-app/tests/devices.test.ts) |
 | [MUS-SPEC-21-785A](21-visuals-and-artifacts.md#mus-spec-21-785a) | Inline and display formulas typeset with their labels; display maths scrolls sideways; prices, shell variables, code and links stay as written. | [`a reply typesets inline and display maths, labelled, with display maths scrolling sideways`](../../../packages/agent-app/tests/markdown-math-dom.tsx) |
 | [MUS-SPEC-21-785B](21-visuals-and-artifacts.md#mus-spec-21-785b) | Prices and shell variables stay plain text; code spans, code blocks and links are untouched. | [`maths parsing: prices, shell variables, code, escapes and links stay text`](../../../packages/agent-app/tests/markdown-math.test.ts) |
 | [MUS-SPEC-21-785C](21-visuals-and-artifacts.md#mus-spec-21-785c) | The four delimiters typeset as inline or display formulas. | [`maths parsing: the four delimiters, display blocks and source offsets`](../../../packages/agent-app/tests/markdown-math.test.ts) |
@@ -651,6 +663,140 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/model-viewer-dom.tsx::a GLB model opens as an interactive 3D preview: canvas, views, info, wireframe, full screen, released on close`
 - Environment: DOM suite (linkedom) built by tests/run-model-viewer-dom.mjs, with a fake WebGL renderer and a stubbed `files.modelChunk` bridge.
 - Known gaps: No real GPU draws the model; pixels are not compared.
+- Evidence: UNVERIFIED
+
+### Devices (#363)
+
+<a id="mus-spec-21-363a"></a>
+#### MUS-SPEC-21-363A: Devices are off until turned on, and agent access is a separate switch
+
+- Precondition: A fresh data folder with no device settings.
+- Action: Read the settings, turn agent access on while devices are off, turn devices on, turn agent access on, then turn devices off.
+- Expected result: Devices start off and agent access cannot be turned on while devices are off. With devices on, agent access turns on separately; turning devices off also turns agent access off. Settings are saved with owner-only (0600) permissions.
+- Test: `packages/agent-app/tests/devices.test.ts::manager: off by default; agent access is a separate opt-in that never outlives devices; settings persist 0600`
+- Environment: Node test with fakes for simctl, adb and the helper; no simulator, emulator or network.
+- Known gaps: The Settings screen is not clicked here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363b"></a>
+#### MUS-SPEC-21-363B: The device helper is installed at run time from the pinned lockfile
+
+- Precondition: Devices are on, and the helper has not been installed.
+- Action: Install the helper, then repeat with an install that fails partway.
+- Expected result: The helper is installed with npm ci from the lockfile shipped with Muster, with package scripts off, into a temporary folder that is moved into place, and the ready marker is written last. A failed install leaves no folder and no marker, and the error says why.
+- Test: `packages/agent-app/tests/devices.test.ts::helper install: npm ci of the shipped lockfile with scripts off, atomic, sentinel last; failures leave nothing`
+- Environment: Node test with a fake npm; no network.
+- Known gaps: The real download from the npm registry is not made in this test.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363c"></a>
+#### MUS-SPEC-21-363C: The helper listens on loopback only, behind a token
+
+- Precondition: An installed helper.
+- Action: Start the helper and read its startup banner.
+- Expected result: The helper is started bound to 127.0.0.1 with a bearer token for this launch, a private TMPDIR, and an environment limited to an allowlist plus the SDK tools on PATH. Its banner is parsed for the port.
+- Test: `packages/agent-app/tests/devices.test.ts::helper: banner parsing, loopback-only args with a token, isolated TMPDIR, env scrubbed`
+- Environment: Node test with a fake helper process.
+- Known gaps: No real helper binary is started.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363d"></a>
+#### MUS-SPEC-21-363D: iOS video decodes with WebCodecs and falls back to MJPEG
+
+- Precondition: A device tab for an iPhone whose feed sends an AVCC description and H.264 frames.
+- Action: Deliver the description and frames, then deliver a description this window cannot decode.
+- Expected result: The feed configures the WebCodecs decoder from the AVCC description and decodes the frames that follow, including those that arrived while it was being set up. A description that is not supported makes the app ask main for the MJPEG stream.
+- Test: `packages/agent-app/tests/devices-components.tsx::iOS H.264 decodes with WebCodecs and falls back to MJPEG when the profile cannot be decoded`
+- Environment: DOM suite (linkedom) with a fake VideoDecoder and the device bridge faked.
+- Known gaps: A real decoder and GPU are not used; pixels are not compared.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363e"></a>
+#### MUS-SPEC-21-363E: iOS H.264 frames reach the screen in order and a backlog gets a fresh keyframe
+
+- Precondition: A booted iPhone and a helper that serves the AVCC stream.
+- Action: Stream envelopes split at arbitrary byte boundaries, let the viewer fall behind, then ask for MJPEG.
+- Expected result: Envelopes are demuxed however the bytes are split. The seed picture, the description and the frames go to the viewer in order. A viewer about a second behind makes main reopen the stream for a fresh keyframe instead of queueing. A request for MJPEG switches the stream.
+- Test: `packages/agent-app/tests/devices.test.ts::iOS H.264: AVCC envelopes demuxed however they arrive; seed, description and frames forwarded in order; a backlog reopens for a fresh keyframe; MJPEG on request`
+- Environment: Node test with fakes for simctl, adb and the helper; no simulator, emulator or network.
+- Known gaps: A real simulator stream is covered only by the device smoke, not here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363f"></a>
+#### MUS-SPEC-21-363F: Android H.264 frames stay in order and a backlog skips to a keyframe
+
+- Precondition: A running emulator and a helper socket sending scrcpy H.264 frames.
+- Action: Stream frames, then let the viewer fall behind.
+- Expected result: Frames reach the viewer in order. A backlog drops frames up to the next keyframe and asks the device for a new one.
+- Test: `packages/agent-app/tests/devices.test.ts::Android link: H.264 forwarded in order, a backlog skips to the next keyframe and asks for one`
+- Environment: Node test with fakes for simctl, adb and the helper; no simulator, emulator or network.
+- Known gaps: A real emulator stream is covered only by the device smoke, not here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363g"></a>
+#### MUS-SPEC-21-363G: Each device has its own frame and its own controls
+
+- Precondition: Device tabs for iPhones, iPads, Pixel phones, a foldable, a watch, a TV and a car display.
+- Action: Open each one and read its frame and its control rail.
+- Expected result: Each device gets the frame that matches what it reports (the simctl device type, the AVD config, or the picture's shape for a foldable's posture). The rail uses its own OS's terms: Home and App Switcher on iOS; Back, Home and Recents on Android. Watches, TVs and car displays have no Recents and no Rotate.
+- Test: `packages/agent-app/tests/devices-components.tsx::each device wears its own frame and the rail uses its own OS terms`
+- Environment: DOM suite (linkedom) with the device bridge faked.
+- Known gaps: linkedom has no layout, so frame proportions are not measured; pixels are not compared.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363h"></a>
+#### MUS-SPEC-21-363H: Agent device tools need consent and stop when the user takes control
+
+- Precondition: Devices on, agent access on, and a chat with an open device session.
+- Action: Call the tools from an agent chat, a read-only chat, after turning agent access off, and after the user takes control.
+- Expected result: Consent is checked again on every call. A read-only chat can list and look but cannot tap or type. Under user control the agent's input is refused. Tap positions are scaled from the screenshot to the device.
+- Test: `packages/agent-app/tests/devices.test.ts::agent tools: consent re-checked per call, read-only chats look only, user control stops input, taps scaled from the screenshot`
+- Environment: Node test with fakes for simctl, adb and the helper; no simulator, emulator or network.
+- Known gaps: Agents read the screen from screenshots only; the accessibility tree is not offered yet.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363i"></a>
+#### MUS-SPEC-21-363I: Routes without MCP never hear about the device tools
+
+- Precondition: Agent access on and the device tool launcher present.
+- Action: Build the turn options for routes with native, none and MCP tool styles.
+- Expected result: Routes that load MCP servers get the device server and its note. Routes that load none have both removed, so their instructions never name tools they cannot call.
+- Test: `packages/agent-app/tests/devices.test.ts::routes without MCP never hear about the device tools; MCP routes get the server and the note`
+- Environment: Node test of the provider routing; no provider runs.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363j"></a>
+#### MUS-SPEC-21-363J: Realistic device models are downloaded, checked and cached, never bundled
+
+- Precondition: Realistic models on and an empty model cache.
+- Action: Fetch a model whose checksum does not match, one that matches, fetch it again, then fetch while offline.
+- Expected result: A download whose SHA-256 does not match is refused and not cached. A matching one is cached with metadata that records its source and that it has no redistribution licence. A second request is served from the cache. Offline, the app keeps its own body.
+- Test: `packages/agent-app/tests/devices.test.ts::realistic models: SHA-256 mismatch refused, cache hit, offline fallback, metadata records source and no licence`
+- Environment: Node test with a fake fetch; no network.
+- Known gaps: The real apple.com download and the visual quality of the converted model are not checked.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363k"></a>
+#### MUS-SPEC-21-363K: Real iOS frames are read from the user's Xcode at run time
+
+- Precondition: A helper that serves a DeviceKit chrome descriptor and its images.
+- Action: Read the frame for a device, then for a device whose chrome is sliced.
+- Expected result: The descriptor is read and checked, and the images come from the helper's read-only route. A sliced chrome falls back to Muster's own frame. Nothing is read from the repository or the build.
+- Test: `packages/agent-app/tests/devices.test.ts::real frames, iOS: the helper's DeviceKit descriptor is read and validated; images come from its read-only route; sliced chromes fall back`
+- Environment: Node test with synthetic fixtures made for the test.
+- Known gaps: No real Xcode chrome is read here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363l"></a>
+#### MUS-SPEC-21-363L: Device discovery lists devices and a failed boot says why
+
+- Precondition: Devices on, with fake simctl and adb listings.
+- Action: List devices, then boot one whose boot fails.
+- Expected result: The list shows the simulators and emulators. A failed boot gives a plain-English reason and the device goes back to its earlier state.
+- Test: `packages/agent-app/tests/devices.test.ts::manager: discovery lists devices; a failed boot says why in plain English and resets the state`
+- Environment: Node test with fakes for simctl, adb and the helper; no simulator, emulator or network.
+- Known gaps: None known.
 - Evidence: UNVERIFIED
 
 ### Maths in replies

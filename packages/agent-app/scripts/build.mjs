@@ -197,6 +197,9 @@ mkdirSync(dist('runtime', 'resources'), {recursive: true});
 // Vendored in packages/agent-app/resources so the app builds from its own directory alone (no packages/builtin).
 // The app owns these (generic, any provider); packages/builtin keeps the IDE's own launcher untouched.
 for (const name of ['codex-launch.sh', 'codex-profile.cjs', 'responses-compat.cjs']) cpSync(path.join(root, 'resources', name), dist('runtime', 'resources', name));
+// #363: the device helper is not bundled; only its pinned manifest and lockfile ship (installed with npm ci on first enable).
+mkdirSync(dist('main', 'device-helper'), {recursive: true});
+for (const name of ['package.json', 'package-lock.json']) cpSync(path.join(root, 'resources', 'device-helper', name), dist('main', 'device-helper', name));
 
 if (watch) {
   const contexts = await Promise.all(builds.map((options) => esbuild.context(options)));

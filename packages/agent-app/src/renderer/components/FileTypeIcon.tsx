@@ -24,7 +24,7 @@ export function FileTypeIcon({path, directory = false, open = false, size = 13, 
 
 const KIND_GLYPHS: Record<Exclude<WorkspaceTab['kind'], 'file' | 'attachment'>, LucideIcon> = {
   diff: GitCompare, git: GitBranch, changes: GitCompare, files: Files, browser: Globe, processes: SquareTerminal, computer: Monitor, subagents: Bot, pullRequest: GitPullRequest, history: History, conflict: GitMerge,
-  canvas: NotebookPen, sideChat: MessagesSquare, pluginUi: AppWindow, inbox: Inbox, liveView: PictureInPicture2, rich: Workflow,
+  canvas: NotebookPen, sideChat: MessagesSquare, pluginUi: AppWindow, inbox: Inbox, liveView: PictureInPicture2, rich: Workflow, device: Smartphone,
 };
 
 const RICH_GLYPHS: Record<RichKind, LucideIcon> = {diagram: Workflow, chart: ChartColumn, report: FileCode, model: Box, device: Smartphone};
