@@ -366,7 +366,7 @@ export class DeviceManager {
       return dataUrl(bytes, 'image/png');
     };
     const [composite, ...buttons] = await Promise.all([image(described.composite), ...described.buttons.map(button => image(button.image).catch(() => null))]);
-    return {source: 'xcode', detail: `Xcode DeviceKit chrome ${described.identifier}, read from this Mac's Xcode`, width: described.width, height: described.height,
+    return {source: 'xcode', detail: `Xcode DeviceKit chrome ${described.identifier}, read from the installed Xcode`, width: described.width, height: described.height,
       image: {rect: described.body, dataUrl: composite!}, screen: {...described.screen, radii: described.radii},
       buttons: described.buttons.flatMap((button, i) => buttons[i] ? [{rect: button.rect, onTop: button.onTop, dataUrl: buttons[i]!}] : [])};
   }
