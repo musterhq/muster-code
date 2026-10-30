@@ -142,12 +142,16 @@ export interface DeviceCommands {
   /** A realistic 3D model: the cached conversion, or the verified apple.com download for the renderer to convert. */
   'devices.model': { input: { id: 'iphone' | 'ipad' }; output: { id: string; bodyNode: string; screenNode: string; glb?: Uint8Array; usdz?: Uint8Array } };
   'devices.modelStore': { input: { id: 'iphone' | 'ipad'; glb: Uint8Array }; output: void };
+  /** The device's current settings, read back from simctl or adb (#809). Unreadable values are left out. */
+  'devices.detail': { input: { id: string }; output: DeviceDetail };
+  /** Runs one typed setting change on a running device, then reads the settings back (#809). */
+  'devices.action': { input: { id: string; action: DeviceAction }; output: DeviceDetail };
 }
 export type DeviceEvent =
   | { type: 'deviceSetup'; setup: DeviceSetup }
   | { type: 'deviceList'; list: DeviceList }
   | { type: 'deviceSessions'; sessions: DeviceSession[] };
-export const DEVICE_COMMANDS = {'devices.setup': true, 'devices.configure': true, 'devices.installHelper': true, 'devices.list': true, 'devices.boot': true, 'devices.shutdown': true, 'devices.open': true, 'devices.close': true, 'devices.sessions': true, 'devices.view': true, 'devices.button': true, 'devices.rotate': true, 'devices.screenshot': true, 'devices.control': true, 'devices.streamFallback': true, 'devices.chrome': true, 'devices.model': true, 'devices.modelStore': true} as const satisfies Record<keyof DeviceCommands, true>;
+export const DEVICE_COMMANDS = {'devices.setup': true, 'devices.configure': true, 'devices.installHelper': true, 'devices.list': true, 'devices.boot': true, 'devices.shutdown': true, 'devices.open': true, 'devices.close': true, 'devices.sessions': true, 'devices.view': true, 'devices.button': true, 'devices.rotate': true, 'devices.screenshot': true, 'devices.control': true, 'devices.streamFallback': true, 'devices.chrome': true, 'devices.model': true, 'devices.modelStore': true, 'devices.detail': true, 'devices.action': true} as const satisfies Record<keyof DeviceCommands, true>;
 
 /** IPC: main → renderer frames, renderer → main frame acknowledgements (flow control) and input. */
 export const DEVICE_FRAME_CHANNEL = 'muster:device-frame';
@@ -180,6 +184,117 @@ export function parseDeviceInput(value: unknown): DeviceInput | null {
   if (input.kind === 'key' && (input.phase === 'down' || input.phase === 'up') && typeof input.code === 'string' && typeof input.key === 'string' && input.code.length <= 32 && input.key.length <= 32) return { kind: 'key', phase: input.phase, code: input.code, key: input.key };
   if (input.kind === 'text' && typeof input.text === 'string' && input.text.length > 0 && input.text.length <= 4000) return { kind: 'text', text: input.text };
   return null;
+}
+// --- Device settings (#809) ----------------------------------------------------------------------------------------
+// Typed actions only: nothing free-form reaches simctl or adb. Shapes follow T3 Code's device contract (MIT, T3 Tools Inc.,
+// packages/contracts/src/device.ts at fa4e4677c0ecc437aece2dcea39f76ef31414152), written as plain unions with a validator.
+export type DeviceAppearance = 'light' | 'dark';
+export type DeviceTextSize = 'small' | 'default' | 'large' | 'extra-large';
+export type DeviceColorFilter = 'none' | 'grayscale' | 'red-green' | 'green-red' | 'blue-yellow';
+export type DeviceToggle = 'reduceMotion' | 'increaseContrast' | 'reduceTransparency' | 'showBorders' | 'voiceOver' | 'networkEnabled';
+export type DevicePermission = 'camera' | 'microphone' | 'photos' | 'contacts' | 'calendar' | 'reminders' | 'location' | 'notifications' | 'motion' | 'media-library' | 'faceid';
+export type DevicePermissionDecision = 'grant' | 'revoke' | 'reset';
+export type DeviceAction =
+  | { type: 'setAppearance'; value: DeviceAppearance }
+  | { type: 'setTextSize'; value: DeviceTextSize }
+  | { type: 'setToggle'; setting: DeviceToggle; value: boolean }
+  | { type: 'setLiquidGlass'; value: 'clear' | 'tinted' }
+  | { type: 'setColorFilter'; value: DeviceColorFilter }
+  | { type: 'setOrientation'; value: DeviceOrientation }
+  | { type: 'rotate' }
+  | { type: 'setLocation'; latitude: number; longitude: number }
+  | { type: 'clearLocation' }
+  | { type: 'setPermission'; appId: string; permission: DevicePermission; decision: DevicePermissionDecision }
+  | { type: 'openUrl'; url: string }
+  | { type: 'launchApp'; appId: string }
+  | { type: 'terminateApp'; appId: string }
+  | { type: 'sendPush'; appId: string; payload: string | Record<string, unknown> }
+  | { type: 'shake' };
+export type DeviceActionType = DeviceAction['type'];
+/** Settings as read back from the device. A key that could not be read is absent (unknown), never guessed. */
+export interface DeviceSettingValues {
+  appearance?: DeviceAppearance; textSize?: DeviceTextSize;
+  reduceMotion?: boolean; increaseContrast?: boolean; reduceTransparency?: boolean; showBorders?: boolean; voiceOver?: boolean; networkEnabled?: boolean;
+  liquidGlass?: 'clear' | 'tinted'; colorFilter?: DeviceColorFilter;
+}
+export interface DeviceDetail { deviceId: string; platform: DevicePlatform; settings: DeviceSettingValues; foregroundApp: string | null; readAt: number }
+export const DEVICE_APPEARANCES: readonly DeviceAppearance[] = ['light', 'dark'];
+export const DEVICE_TEXT_SIZES: readonly DeviceTextSize[] = ['small', 'default', 'large', 'extra-large'];
+export const DEVICE_COLOR_FILTERS: readonly DeviceColorFilter[] = ['none', 'grayscale', 'red-green', 'green-red', 'blue-yellow'];
+export const DEVICE_TOGGLES: readonly DeviceToggle[] = ['reduceMotion', 'increaseContrast', 'reduceTransparency', 'showBorders', 'voiceOver', 'networkEnabled'];
+export const DEVICE_PERMISSIONS: readonly DevicePermission[] = ['camera', 'microphone', 'photos', 'contacts', 'calendar', 'reminders', 'location', 'notifications', 'motion', 'media-library', 'faceid'];
+const ORIENTATION_VALUES: readonly DeviceOrientation[] = ['portrait', 'landscape_left', 'portrait_upside_down', 'landscape_right'];
+/** What each platform can do. Anything else is refused with a plain "not supported" (never a silent no-op). */
+export const DEVICE_ACTION_SUPPORT: Record<DevicePlatform, {actions: readonly DeviceActionType[]; toggles: readonly DeviceToggle[]; permissions: readonly DevicePermission[]}> = {
+  ios: {actions: ['setAppearance', 'setTextSize', 'setToggle', 'setLiquidGlass', 'setColorFilter', 'rotate', 'setLocation', 'clearLocation', 'setPermission', 'openUrl', 'launchApp', 'terminateApp', 'sendPush'],
+    toggles: ['reduceMotion', 'increaseContrast', 'reduceTransparency', 'showBorders', 'voiceOver'], permissions: DEVICE_PERMISSIONS},
+  android: {actions: ['setAppearance', 'setTextSize', 'setToggle', 'setOrientation', 'rotate', 'setLocation', 'setPermission', 'openUrl', 'launchApp', 'terminateApp'],
+    toggles: ['reduceMotion', 'networkEnabled'], permissions: ['camera', 'microphone', 'photos', 'contacts', 'calendar', 'location', 'notifications', 'motion']},
+};
+/** Why an action is refused on a platform, in plain words; null when it is supported. */
+export function deviceActionUnsupported(platform: DevicePlatform, action: DeviceAction): string | null {
+  const support = DEVICE_ACTION_SUPPORT[platform], os = platform === 'ios' ? 'the iOS Simulator' : 'the Android Emulator';
+  if (action.type === 'shake') return `Shake is not supported on ${os}: neither ${platform === 'ios' ? 'simctl' : 'adb'} nor the device helper can shake the device.`;
+  if (action.type === 'setOrientation' && platform === 'ios') return 'Setting an exact orientation is not supported on the iOS Simulator; use rotate, which turns it a quarter clockwise.';
+  if (action.type === 'clearLocation' && platform === 'android') return 'The Android Emulator cannot clear its location; set another location instead.';
+  if (action.type === 'sendPush' && platform === 'android') return 'Sending a push notification is not supported on the Android Emulator (it needs Firebase Cloud Messaging); it works on the iOS Simulator.';
+  if (!support.actions.includes(action.type)) return `${action.type} is not supported on ${os}.`;
+  if (action.type === 'setToggle' && !support.toggles.includes(action.setting)) return `The ${action.setting} setting is not supported on ${os}.`;
+  if (action.type === 'setPermission' && !support.permissions.includes(action.permission)) return `The ${action.permission} permission is not supported on ${os}.`;
+  return null;
+}
+const DEVICE_APP_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
+const oneOf = <T extends string>(list: readonly T[], value: unknown, what: string): T => {
+  if (typeof value !== 'string' || !(list as readonly string[]).includes(value)) throw new Error(`Choose ${what}: ${list.join(', ')}.`);
+  return value as T;
+};
+const appIdOf = (value: unknown): string => {
+  if (typeof value !== 'string' || !DEVICE_APP_ID.test(value)) throw new Error('Pass the app\'s bundle id (iOS) or package name (Android).');
+  return value;
+};
+/** Validates a settings action from the renderer or an agent; anything malformed is refused with the reason. */
+export function parseDeviceAction(value: unknown): DeviceAction {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Pass a device action.');
+  const input = value as Record<string, unknown>;
+  switch (input.type) {
+    case 'setAppearance': return {type: 'setAppearance', value: oneOf(DEVICE_APPEARANCES, input.value, 'an appearance')};
+    case 'setTextSize': return {type: 'setTextSize', value: oneOf(DEVICE_TEXT_SIZES, input.value, 'a text size')};
+    case 'setToggle': {
+      const setting = oneOf(DEVICE_TOGGLES, input.setting, 'a setting');
+      if (typeof input.value !== 'boolean') throw new Error('Pass value true (on) or false (off).');
+      return {type: 'setToggle', setting, value: input.value};
+    }
+    case 'setLiquidGlass': return {type: 'setLiquidGlass', value: oneOf(['clear', 'tinted'] as const, input.value, 'a Liquid Glass look')};
+    case 'setColorFilter': return {type: 'setColorFilter', value: oneOf(DEVICE_COLOR_FILTERS, input.value, 'a colour filter')};
+    case 'setOrientation': return {type: 'setOrientation', value: oneOf(ORIENTATION_VALUES, input.value, 'an orientation')};
+    case 'rotate': return {type: 'rotate'};
+    case 'shake': return {type: 'shake'};
+    case 'clearLocation': return {type: 'clearLocation'};
+    case 'setLocation': {
+      const latitude = input.latitude, longitude = input.longitude;
+      if (typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90) throw new Error('Latitude must be a number from -90 to 90.');
+      if (typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) throw new Error('Longitude must be a number from -180 to 180.');
+      return {type: 'setLocation', latitude, longitude};
+    }
+    case 'setPermission': return {type: 'setPermission', appId: appIdOf(input.appId), permission: oneOf(DEVICE_PERMISSIONS, input.permission, 'a permission'), decision: oneOf(['grant', 'revoke', 'reset'] as const, input.decision, 'grant, revoke or reset')};
+    case 'openUrl': {
+      const url = typeof input.url === 'string' ? input.url.trim() : '';
+      // Any scheme (deep links), but one argument: no control characters, no leading dash, bounded length.
+      if (!/^[A-Za-z][A-Za-z0-9+.-]{0,31}:\S/.test(url) || url.length > 2048 || /[\u0000-\u001f\u007f]/.test(url)) throw new Error('Pass a URL with its scheme, such as https://example.com or myapp://path (up to 2048 characters).');
+      return {type: 'openUrl', url};
+    }
+    case 'launchApp': return {type: 'launchApp', appId: appIdOf(input.appId)};
+    case 'terminateApp': return {type: 'terminateApp', appId: appIdOf(input.appId)};
+    case 'sendPush': {
+      const appId = appIdOf(input.appId), payload = input.payload;
+      if (typeof payload === 'string') { if (!payload.trim() || payload.length > 1000) throw new Error('A push message must be 1 to 1000 characters.'); return {type: 'sendPush', appId, payload}; }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Pass the push payload as a message or a JSON object (an APNs payload such as {"aps":{"alert":"Hi"}}).');
+      // APNs caps a payload at 4 KB.
+      if (new TextEncoder().encode(JSON.stringify(payload)).length > 4096) throw new Error('A push payload must be 4 KB or less.');
+      return {type: 'sendPush', appId, payload: payload as Record<string, unknown>};
+    }
+    default: throw new Error(`Unknown device action ${typeof input.type === 'string' ? input.type.slice(0, 40) : ''}.`.replace(' .', '.'));
+  }
 }
 /** A device's name for a tab or a card: "iPhone 17 Pro", or the AVD name with underscores as spaces. */
 export const deviceTitle = (device: Pick<DeviceInfo, 'name'>): string => device.name.replace(/_/g, ' ');
