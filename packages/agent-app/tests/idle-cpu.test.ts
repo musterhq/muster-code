@@ -11,11 +11,13 @@ const css = files.filter(f => f.endsWith('.css')), source = files.filter(f => /\
 const read = (path: string) => readFileSync(path, 'utf8');
 const stylesCss = read(join(root, 'styles.css'));
 
-test('every infinite CSS animation pauses while the window is hidden or unfocused', () => {
+test('every infinite CSS animation stops while the window is hidden or unfocused', () => {
   const infinite = css.flatMap(f => read(f).split('\n').filter(l => /\binfinite\b/.test(l)).map(l => `${f.slice(root.length)}: ${l.trim().slice(0, 80)}`));
   assert.ok(infinite.length > 0, 'the app has live-state animations');
   // One global rule covers all of them, including pseudo-elements; it must not be scoped to a subset.
-  assert.match(stylesCss, /:root\[data-window-active='false'\] \*,[^{]*\*::before,[^{]*\*::after\s*\{\s*animation-play-state:\s*paused\s*!important/);
+  // Animations end at once rather than pause, so a paused entry animation can't hold a panel at opacity 0 (#813); the
+  // real-browser check is tests/idle-animations-813.test.ts.
+  assert.match(stylesCss, /:root\[data-window-active='false'\] \*,[^{]*\*::before,[^{]*\*::after\s*\{\s*animation-duration:\s*0s\s*!important;\s*animation-delay:\s*0s\s*!important/);
 });
 
 test('the sidebar and header status spinner is stepped, not a 60 Hz continuous rotation', () => {

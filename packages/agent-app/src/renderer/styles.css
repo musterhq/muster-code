@@ -403,8 +403,11 @@ textarea:focus-visible {
   .status-dot[data-status='running'] > svg { animation: status-spin 1.2s steps(12, end) infinite; }
 }
 @keyframes status-spin { to { transform: rotate(360deg); } }
-/* Nothing animates in a window the user cannot see or is not using (set by windowActivity.ts); motion resumes on focus. */
-:root[data-window-active='false'] *, :root[data-window-active='false'] *::before, :root[data-window-active='false'] *::after { animation-play-state: paused !important; }
+/* Nothing animates in a window the user cannot see or is not using (set by windowActivity.ts); motion resumes on focus.
+   Animations end at once rather than pause (#813): a paused entry animation froze on its first frame, so a panel, notice or
+   streamed word that appeared while the window was inactive stayed at opacity 0. A zero-length infinite animation does not
+   tick either, so idle CPU stays at zero, and spinners pick up again on focus. */
+:root[data-window-active='false'] *, :root[data-window-active='false'] *::before, :root[data-window-active='false'] *::after { animation-duration: 0s !important; animation-delay: 0s !important; }
 
 /* Chat -------------------------------------------------------------------- */
 
