@@ -315,7 +315,8 @@ export class OfficeLibraries {
       this.error = error instanceof Error ? error.message : String(error);
       throw error;
     } finally {
-      await fs.rm(staging, { recursive: true, force: true });
+      // A leftover staging folder is cleared before the next install (clearStaging); it must not hide the real error.
+      await fs.rm(staging, { recursive: true, force: true }).catch(() => undefined);
       this.installing = false;
       this.progress(null);
     }
@@ -324,10 +325,10 @@ export class OfficeLibraries {
   private async download(modules: string): Promise<void> {
     const entries = this.manifest!.packages, total = entries.length;
     const scratch = await fs.mkdtemp(join(dirname(modules), 'tarballs-'));
-    let done = 0, next = 0;
+    let done = 0, next = 0, failure: { error: unknown } | null = null;
     this.progress({ phase: 'downloading', done, total });
     const worker = async () => {
-      while (next < entries.length) {
+      while (!failure && next < entries.length) {
         const entry = entries[next++]!;
         if (!/^https:\/\/registry\.npmjs\.org\//.test(entry.resolved)) throw new Error(`${entry.name} is not an npm registry download.`);
         if (!/^(node_modules\/(@[a-z0-9._-]+\/)?[a-z0-9._-]+)(\/node_modules\/(@[a-z0-9._-]+\/)?[a-z0-9._-]+)*$/i.test(entry.path) || entry.path.split('/').includes('..')) throw new Error(`Bad library path ${entry.path}.`);
@@ -345,8 +346,12 @@ export class OfficeLibraries {
         this.progress({ phase: 'downloading', done, total });
       }
     };
-    try { await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, worker)); }
-    finally { await fs.rm(scratch, { recursive: true, force: true }); }
+    // One failure stops new downloads, but the ones already running finish (an unpack still writes into the staging
+    // folder) before anything is removed; the first error is the one reported, never a cleanup error.
+    const run = () => worker().catch(error => { failure ??= { error }; });
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, run));
+    await fs.rm(scratch, { recursive: true, force: true }).catch(() => undefined);
+    if (failure) throw (failure as { error: unknown }).error;
   }
 
   private async writeRunner(): Promise<void> {
