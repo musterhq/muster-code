@@ -86,7 +86,8 @@
     "dompurify": "3.4.17",
     "mdast-util-math": "$mdast-util-math",
     "micromark-extension-gfm-table": "$micromark-extension-gfm-table",
-    "micromark-extension-math": "$micromark-extension-math"
+    "micromark-extension-math": "$micromark-extension-math",
+    "image-size": "2.0.3"
   },
   "author": {
     "name": "Muster",

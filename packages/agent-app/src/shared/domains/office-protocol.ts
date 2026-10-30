@@ -33,6 +33,24 @@ export interface OfficeCommands {
   'office.runtime.download': { input: Record<string, never>; output: OfficeRuntimeStatus };
   /** Deletes Muster's downloaded copy and any partial download. A LibreOffice the user installed is never touched. */
   'office.runtime.remove': { input: Record<string, never>; output: OfficeRuntimeStatus };
+  /** The office libraries agent scripts import (docx, exceljs, pptxgenjs, pdf-lib, jszip, pdfjs-dist). */
+  'office.libraries.status': { input: Record<string, never>; output: OfficeLibrariesStatus };
+  /** Deletes the libraries Muster downloaded; the next office_setup installs them again. */
+  'office.libraries.remove': { input: Record<string, never>; output: OfficeLibrariesStatus };
 }
-export const OFFICE_COMMANDS = { 'office.runtime.status': true, 'office.runtime.download': true, 'office.runtime.remove': true } as const satisfies Record<keyof OfficeCommands, true>;
-export type OfficeEvent = { type: 'officeRuntimeChanged'; status: OfficeRuntimeStatus };
+export interface OfficeLibrariesStatus {
+  ready: boolean;
+  /** local: linked from a source checkout; downloaded: Muster's own copy. */
+  source: 'local' | 'downloaded' | 'none';
+  /** Bytes on disk of the downloaded copy. */
+  bytes: number | null;
+  modules: string;
+  node: string;
+  versions: Record<string, string>;
+  busy: boolean;
+  error?: string;
+}
+export const OFFICE_COMMANDS = { 'office.runtime.status': true, 'office.runtime.download': true, 'office.runtime.remove': true, 'office.libraries.status': true, 'office.libraries.remove': true } as const satisfies Record<keyof OfficeCommands, true>;
+export type OfficeEvent = { type: 'officeRuntimeChanged'; status: OfficeRuntimeStatus }
+  /** What a chat's running muster_office tool is waiting on (a first download); null when it is done. */
+  | { type: 'officeToolProgress'; chatId: string; message: string | null };

@@ -106,7 +106,7 @@ export function AttachmentTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
   let truncatedNotice: React.ReactNode = null;
   if (state.phase === 'loading') content = <ResourceState kind="loading" label={`Loading ${name}`} rows={6}/>;
   else if (state.phase === 'error') content = isLibreOfficeMissing(state.error)
-    ? <UnsupportedCard name={name} reason="The in-app reader needs LibreOffice for this format, and this file lives outside a workspace folder so macOS preview is not available either. Install LibreOffice to preview it here."/>
+    ? <UnsupportedCard name={name} reason="The in-app reader needs LibreOffice for this format, and this file lives outside a workspace folder so macOS preview is not available either. Download Muster’s copy in Settings › Storage or install LibreOffice to preview it here."/>
     : <ResourceState kind="error" message={state.error} detail="This file was staged for this chat; retry if the runtime was briefly unavailable." onRetry={() => setAttempt(value => value + 1)}/>;
   else {
     const value = state.value;

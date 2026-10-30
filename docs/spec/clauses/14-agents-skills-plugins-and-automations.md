@@ -66,6 +66,9 @@ Boundaries:
 | [MUS-SPEC-14-732J](14-agents-skills-plugins-and-automations.md#mus-spec-14-732j) | A command's arguments reach the run as typed: a quoted argument stays whole in $0, $1…, its spacing and the command's own name inside it are kept, inlined and native | [`an inlined command keeps a quoted argument whole, splitting its arguments the way Claude Code does`](../../../packages/agent-app/tests/claude-skills-729.test.ts) |
 | [MUS-SPEC-14-732K](14-agents-skills-plugins-and-automations.md#mus-spec-14-732k) | The app's real image scaler shrinks a large plugin logo so it shows; an undecodable one keeps the monogram | [`a plugin logo over the icon budget is scaled by the app's real image scaler and shown; one it cannot decode keeps the monogram`](../../../packages/agent-app/tests/large-logo-729.electron.ts) |
 | [MUS-SPEC-14-756A](14-agents-skills-plugins-and-automations.md#mus-spec-14-756a) | On a router model without tool search, a chat that names Figma (then Google Drive) loads only those connectors, keeps sub-agents on and never loads the whole connector catalog; no connector asked means none load; tool search keeps the catalog deferred. | [`a router chat that asks for Figma loads only the Figma connector and keeps sub-agents on, turn after turn`](../../../packages/agent-app/tests/router-subagents-756.test.ts) |
+| [MUS-SPEC-14-772B](14-agents-skills-plugins-and-automations.md#mus-spec-14-772b) | The person's own skills and plugins stay linked; another app's docx skill and documents/pdf plugins are left out; Muster's four skills are installed; the person's home is untouched. | [`Muster's home links the person's own skills and plugins but not another app's office ones, and installs Muster's`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-14-772C](14-agents-skills-plugins-and-automations.md#mus-spec-14-772c) | Only agent chats get muster_office and a note naming Muster's four skill files; the Messages route drops both and router chats keep their route. | [`agent chats get the muster_office server and a note naming Muster's skills; router chats are not forced off their route`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-14-772D](14-agents-skills-plugins-and-automations.md#mus-spec-14-772d) | With office_setup's command, ES module imports and require() of the office libraries work from any folder; a project's own copy still wins. | [`the office libraries resolve from an agent script's own working folder, by import and by require`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
 
 ### Claude Code background sub-agents
 
@@ -626,3 +629,38 @@ Boundaries:
 - Environment: Node test runner; the real service and provider adapter with a fake Codex core; no network.
 - Known gaps: A connector request Muster cannot match to a cached connector (an unknown name, or "Codex apps" in general) still loads the whole catalog, as before.
 - Evidence: local; ~/.muster-work/review/756/green.log; exit 0; 1 passed, 0 failed, 0 skipped; commit 1a3ac4fdddd9e638abb3e1d9ffe7d9c04d26f70d
+
+### Muster office skills (#772-#775)
+
+<a id="mus-spec-14-772b"></a>
+#### MUS-SPEC-14-772B: Muster's home keeps the person's skills and plugins but not another app's office ones
+
+- Precondition: A person's home with skills (their own, a pdf and a docx skill, .system) and a plugin cache where one marketplace has documents, pdf and another plugin. Muster's home still has the old whole-folder links for skills and plugins.
+- Action: Prepare Muster's home; remove one of the person's skills and add another; prepare again; prepare a home whose source has no skills folder.
+- Expected result: skills and plugins become real folders. The person's own skill, .system, plugins/data, a marketplace with no office plugin and the other plugin are links. The docx skill and the documents and pdf plugins are not linked in. documents, spreadsheets, presentations and pdf are Muster's own copies. The person's home is unchanged. A removed skill disappears and a new one appears. A source with no skills folder still gets Muster's four skills.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::Muster's home links the person's own skills and plugins but not another app's office ones, and installs Muster's`
+- Environment: Node test runner; temp folders.
+- Known gaps: When a chat runs in the person's own home (shared-home mode or a Keychain sign-in), their office skills stay visible; the note still points at Muster's and says they win. The plugins' enabled entries in the shared config are left as they are; the coding client finds no plugin to load. Not run against a real coding client here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-772c"></a>
+#### MUS-SPEC-14-772C: Agent chats get the office tools and a note that names Muster's skills
+
+- Precondition: The office domain with a stub context.
+- Action: Ask for run options for a plan chat and an agent chat; strip the note for the Messages route; check whether a Full access router chat with the office server may stay on its route.
+- Expected result: A plan chat gets nothing. An agent chat gets mcp_servers.muster_office with its chat id and a timeout of at least 10 minutes, and a note naming the four skill files in the shipped skills folder that says they take precedence. Each skill has a name, a description, mentions office_setup and office_render, and names no other product or Python. The Messages route drops the note and the server, and the chat may stay on its route.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::agent chats get the muster_office server and a note naming Muster's skills; router chats are not forced off their route`
+- Environment: Node test runner.
+- Known gaps: OpenCode and Grok get the server through the same overrides but are not checked here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-772d"></a>
+#### MUS-SPEC-14-772D: The office libraries resolve from an agent script's own working folder
+
+- Precondition: Office libraries linked from the checkout into a temp Muster data folder; a script folder with a space in its path and no node_modules.
+- Action: Run an ES module that imports all six libraries and a CommonJS script that requires five of them with the command office_setup returns; add a project copy of jszip and import it; remove the libraries.
+- Expected result: Both scripts load every library. The project's own jszip wins over Muster's. Remove deletes Muster's links and leaves the checkout's packages alone.
+- Test: `packages/agent-app/tests/office-skills-772.test.ts::the office libraries resolve from an agent script's own working folder, by import and by require`
+- Environment: Node test runner; node stands in for Muster's Electron-as-Node.
+- Known gaps: Not run inside the coding client's sandbox on a packaged build.
+- Evidence: UNVERIFIED

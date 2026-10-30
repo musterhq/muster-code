@@ -12,7 +12,7 @@ import {PluginIcon} from './PluginIcon';
 import {openTerminalTab} from './ProcessesTab';
 import './tool-card.css';
 import {Collapsible} from '@base-ui/react/collapsible';
-import {invoke} from '../bridge';
+import {invoke,subscribe} from '../bridge';
 import {computerAction,type ComputerAction} from '../../shared/computer-use';
 import {toolImageUrl,toolShots,type PipSource,type ToolShot} from '../computerUse';
 import {itemPatches} from '../patchModel';
@@ -175,6 +175,13 @@ function computerStepSubject(action:ComputerAction):string {
   if(action.object)return action.object;
   return action.target==='computer'&&action.app&&action.verb!=='Listed apps'?action.app:'';
 }
+/** #789: while a muster_office tool waits on a first download (LibreOffice or the office libraries), its row says so. */
+export function OfficeToolProgress({chatId}:{chatId:string}){
+  const [message,setMessage]=useState<string|null>(null);
+  useEffect(()=>subscribe(event=>{if(event.type==='officeToolProgress'&&event.chatId===chatId)setMessage(event.message);}),[chatId]);
+  return message?<p className="tool-row-excerpt" role="status" aria-live="polite">{message}</p>:null;
+}
+const isOfficeTool=(data:TimelineItem['data'])=>typeof data?.server==='string'&&/^muster[_-]office$/.test(data.server);
 export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolean}) {
   const [open, setOpen] = useDisclosure('tool:'+item.id);
   useEffect(()=>{if(reveal&&!open)setOpen(true);},[reveal]);
@@ -218,6 +225,7 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
       {duration&&<span className="tool-row-duration">{duration}</span>}
       <ChevronRight className="tool-chevron" size={13} aria-hidden="true"/>
     </div>
+    {running&&isOfficeTool(item.data)&&<OfficeToolProgress chatId={item.chatId}/>}
     {(live.length>0||excerpt.length>0)&&<pre className={`tool-row-excerpt${excerpt.length?' is-error':''}`} aria-label={excerpt.length?'Last error output':'Latest output'}>{(excerpt.length?excerpt:live).join('\n')}</pre>}
     {steps.length>0&&!open&&<PlanChecklist steps={steps}/>}
     {images.length>0&&<ImageThumbs item={item} paths={images}/>}
