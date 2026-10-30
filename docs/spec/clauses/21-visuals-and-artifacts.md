@@ -81,6 +81,15 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-363J](21-visuals-and-artifacts.md#mus-spec-21-363j) | A checksum mismatch is refused. A match is cached with its source and licence noted, and offline keeps Muster's own body. | [`realistic models: SHA-256 mismatch refused, cache hit, offline fallback, metadata records source and no licence`](../../../packages/agent-app/tests/devices.test.ts) |
 | [MUS-SPEC-21-363K](21-visuals-and-artifacts.md#mus-spec-21-363k) | The DeviceKit descriptor is read and checked through the read-only route, and sliced chromes fall back to Muster's frame. | [`real frames, iOS: the helper's DeviceKit descriptor is read and validated; images come from its read-only route; sliced chromes fall back`](../../../packages/agent-app/tests/devices.test.ts) |
 | [MUS-SPEC-21-363L](21-visuals-and-artifacts.md#mus-spec-21-363l) | Discovery lists both platforms. A failed boot gives a plain-English reason and resets the state. | [`manager: discovery lists devices; a failed boot says why in plain English and resets the state`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-810A](21-visuals-and-artifacts.md#mus-spec-21-810a) | Trackpad scroll and pinch go to the device over its screen and to the camera elsewhere. | [`gesture mapping: scroll and pinch over the screen reach the device; off it they move the camera or the Duo hinge, never both`](../../../packages/agent-app/tests/devices-810.test.ts) |
+| [MUS-SPEC-21-810B](21-visuals-and-artifacts.md#mus-spec-21-810b) | Main checks scroll and pinch input and encodes it for each platform. | [`scroll and pinch input: validated and clamped, HID 0x0B and 0x05 on iOS with rotation, one batched swipe and two pointers on Android`](../../../packages/agent-app/tests/devices-810.test.ts) |
+| [MUS-SPEC-21-810C](21-visuals-and-artifacts.md#mus-spec-21-810c) | In the flat view, the wheel and pinch on the screen picture reach the device. | [`the flat view forwards trackpad scroll and pinch on the screen to the device`](../../../packages/agent-app/tests/devices-components.tsx) |
+| [MUS-SPEC-21-810D](21-visuals-and-artifacts.md#mus-spec-21-810d) | Android foldables fold and unfold through the helper. | [`Android fold: state read and set through the helper with its token, adb fallback, malformed replies refused`](../../../packages/agent-app/tests/devices-810.test.ts) |
+| [MUS-SPEC-21-810E](21-visuals-and-artifacts.md#mus-spec-21-810e) | The iPhone Duo hinge and pose controls are queued, acknowledged and read back. | [`Duo hinge: fold-state table, commands coalesced behind acknowledgements, failures and timeouts reported, pinch accumulates and clamps`](../../../packages/agent-app/tests/devices-810.test.ts) |
+| [MUS-SPEC-21-810F](21-visuals-and-artifacts.md#mus-spec-21-810f) | Hinged frames build from stub models and map touches to the live display. | [`hinged frames: Android fold scene, the Duo rig converted from a stub file and Muster's own Duo body all fold and map touches to the live display`](../../../packages/agent-app/tests/devices-810.test.ts) |
+| [MUS-SPEC-21-810G](21-visuals-and-artifacts.md#mus-spec-21-810g) | Duo and Magic Keyboard models download from apple.com, are checked and cached, and are never bundled. | [`Duo and Magic Keyboard models: pinned apple.com sources, one shared iPad download, checksum refusal, per-model cache, nothing bundled`](../../../packages/agent-app/tests/devices-810.test.ts) |
+| [MUS-SPEC-21-810H](21-visuals-and-artifacts.md#mus-spec-21-810h) | The iPad's Magic Keyboard lines up with its screen. | [`iPad Magic Keyboard: converted with the iPad's own transform and Muster's keyboard both sit centred under the turned screen`](../../../packages/agent-app/tests/devices-810.test.ts) |
+| [MUS-SPEC-21-810I](21-visuals-and-artifacts.md#mus-spec-21-810i) | Foldables, iPads and the iPhone Duo get their own controls on the rail. | [`foldables, iPads and the Duo get fold, keyboard and pose controls on the rail`](../../../packages/agent-app/tests/devices-components.tsx) |
 | [MUS-SPEC-21-785A](21-visuals-and-artifacts.md#mus-spec-21-785a) | Inline and display formulas typeset with their labels; display maths scrolls sideways; prices, shell variables, code and links stay as written. | [`a reply typesets inline and display maths, labelled, with display maths scrolling sideways`](../../../packages/agent-app/tests/markdown-math-dom.tsx) |
 | [MUS-SPEC-21-785B](21-visuals-and-artifacts.md#mus-spec-21-785b) | Prices and shell variables stay plain text; code spans, code blocks and links are untouched. | [`maths parsing: prices, shell variables, code, escapes and links stay text`](../../../packages/agent-app/tests/markdown-math.test.ts) |
 | [MUS-SPEC-21-785C](21-visuals-and-artifacts.md#mus-spec-21-785c) | The four delimiters typeset as inline or display formulas. | [`maths parsing: the four delimiters, display blocks and source offsets`](../../../packages/agent-app/tests/markdown-math.test.ts) |
@@ -797,6 +806,107 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/devices.test.ts::manager: discovery lists devices; a failed boot says why in plain English and resets the state`
 - Environment: Node test with fakes for simctl, adb and the helper; no simulator, emulator or network.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### Device gestures and hinged frames (#810)
+
+<a id="mus-spec-21-810a"></a>
+#### MUS-SPEC-21-810A: Trackpad scroll and pinch go to the device over its screen and to the camera elsewhere
+
+- Precondition: A live device view, either flat or 3D, with a pointer over the live screen, over the body or over the background.
+- Action: Scroll with two fingers, pinch (ctrl+wheel) and use a mouse wheel in line, page and pixel units, over each target. Then pinch over the iPhone Duo's body, and let a scroll that starts on the screen drift off it.
+- Expected result: Over the live screen, a scroll becomes one device scroll per frame at the pointer, in fractions of the screen and clamped. A pinch becomes a two-finger device pinch around the pointer: begin, move and end, ending 180 ms after the last event. Off the screen in 3D, a scroll orbits the camera and a pinch zooms it. A pinch over the Duo's body moves its hinge. Camera and hinge gestures never send device input, and a gesture keeps the target it started on.
+- Test: `packages/agent-app/tests/devices-810.test.ts::gesture mapping: scroll and pinch over the screen reach the device; off it they move the camera or the Duo hinge, never both`
+- Environment: Node test of the pure gesture router with a fake clock and a fake frame scheduler.
+- Known gaps: Safari's gesture events are not handled (Electron is Chromium). Chromium does not mark momentum scrolls, so momentum ends a gesture only by going quiet.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-810b"></a>
+#### MUS-SPEC-21-810B: Main checks scroll and pinch input and encodes it for each platform
+
+- Precondition: An open iOS session and an open Android session, each with its input socket admitted.
+- Action: Send scroll and pinch input with values out of range and not a number, in portrait and with the picture turned. Then send a burst of Android scroll events.
+- Expected result: Points are clamped to 0..1 and scroll deltas to ±1. Anything not finite is dropped. On iOS a scroll is HID 0x0B `{dx, dy, x, y}` and a pinch is HID 0x05 `{type, x1, y1, x2, y2}`, with both points mapped back to the raw framebuffer. On Android a burst of scroll events becomes one swipe per gesture, against the scroll direction, and a pinch becomes two touch streams with pointer ids 0 and 1. A raw touch (the Duo's own mapping) skips the rotation mapping.
+- Test: `packages/agent-app/tests/devices-810.test.ts::scroll and pinch input: validated and clamped, HID 0x0B and 0x05 on iOS with rotation, one batched swipe and two pointers on Android`
+- Environment: Node test with a fake helper socket and a fake clock; no simulator or emulator.
+- Known gaps: Whether serve-emu 0.15.3 passes `pointerId` through to a real multi-touch, and how serve-sim's scroll feels in a UIScrollView, need a live device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-810c"></a>
+#### MUS-SPEC-21-810C: In the flat view, the wheel and pinch on the screen picture reach the device
+
+- Precondition: The flat live view of an iPhone with a picture showing.
+- Action: Scroll with the wheel over the screen picture, then pinch with ctrl+wheel.
+- Expected result: The scroll is sent as a scroll input at the pointer. The pinch is sent as a pinch input that begins, moves and ends. The page itself does not scroll or zoom.
+- Test: `packages/agent-app/tests/devices-components.tsx::the flat view forwards trackpad scroll and pinch on the screen to the device`
+- Environment: DOM suite (linkedom) with the device bridge faked.
+- Known gaps: linkedom has no layout, so the picture's rectangle is the fixed test rectangle.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-810d"></a>
+#### MUS-SPEC-21-810D: Android foldables fold and unfold through the helper
+
+- Precondition: An open session for an Android foldable emulator, and a helper that serves the fold route.
+- Action: Read the fold state, fold it, unfold it, then try again with a helper that has no fold route, and with a reply that is malformed.
+- Expected result: The state is read with GET and set with POST `{posture}` on `/vendor/serve-emu/api/fold?device=<serial>` with the bearer token. The reply is parsed into supported, posture and hinge angle. Without the route, Muster falls back to `adb emu fold` or `unfold`. A malformed reply is refused with a plain reason, and a posture other than closed or opened is rejected before anything is sent.
+- Test: `packages/agent-app/tests/devices-810.test.ts::Android fold: state read and set through the helper with its token, adb fallback, malformed replies refused`
+- Environment: Node test with a fake fetch and fake adb; no emulator.
+- Known gaps: No real foldable emulator is folded here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-810e"></a>
+#### MUS-SPEC-21-810E: The iPhone Duo hinge and pose controls are queued, acknowledged and read back
+
+- Precondition: An iPhone Duo session whose screen config reports hinge support.
+- Action: Read screen configs for each display, angle and pose, send hinge and pose commands quickly in a row, answer them with acknowledgements and failures, let one time out, disconnect while sending, and pinch over the device.
+- Expected result: Screen configs give the fold state (closed, half or open), whether a stand pose is in use, how the phone is held and whether the display handoff has settled. Commands go out as HID 0x10 `{requestId, command}` one at a time. Edits made while one is in flight are coalesced, and a preset replaces queued edits. A 0x90 reply settles its request. A failure, a timeout or a disconnect is reported in plain words. A hinge pinch counts only over the device, accumulates, clamps to 0-180° and ends cleanly.
+- Test: `packages/agent-app/tests/devices-810.test.ts::Duo hinge: fold-state table, commands coalesced behind acknowledgements, failures and timeouts reported, pinch accumulates and clamps`
+- Environment: Node test with a fake helper socket and a fake clock.
+- Known gaps: No iPhone Duo simulator was available. The command payloads follow the reference client and the helper's source, not a live run.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-810f"></a>
+#### MUS-SPEC-21-810F: Hinged frames build from stub models and map touches to the live display
+
+- Precondition: Stub files made for the test: a small USDZ in the shape of Apple's iPhone Duo file (two halves, an inner display across the fold and a cover display), and nothing from the network.
+- Action: Build the Android fold scene and fold it. Convert the stub Duo file into the hinge rig and build the Duo scene from it, then from Muster's own Duo body. Set hinge angles, and probe touches on each half, on the cover, on the rear and on the inactive display.
+- Expected result: The Android fold scene maps touches on each open half to their half of the frame, and on the closed cover to the whole frame. The converted rig has `left-half` and `right-half` groups pivoting on the hinge and the `cover-display`, `inner-display-left` and `inner-display-right` meshes, with the inner display height normalised to 2.2. Both Duo scenes fold symmetrically about the hinge. Touches on the active display map to raw display points, with the inner display a quarter turn. Touches on the rear or on the inactive display are blocked.
+- Test: `packages/agent-app/tests/devices-810.test.ts::hinged frames: Android fold scene, the Duo rig converted from a stub file and Muster's own Duo body all fold and map touches to the live display`
+- Environment: Node test with three.js and synthetic fixtures; no WebGL and no network.
+- Known gaps: The real Apple file's look after conversion is not compared in pixels. The Duo's two displays share one live feed (the active display), so the inactive display shows dark.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-810g"></a>
+#### MUS-SPEC-21-810G: Duo and Magic Keyboard models download from apple.com, are checked and cached, and are never bundled
+
+- Precondition: Realistic models on, an empty cache, and a fake network.
+- Action: Ask for the iPhone Duo model, then the iPad and the Magic Keyboard, then a Duo file with the wrong checksum. Store the conversions, ask again, and look at the app's own model list.
+- Expected result: The Duo file comes from its pinned apple.com URL and is refused when its SHA-256 does not match. The iPad and the Magic Keyboard share one verified download of the iPad file. Each conversion is cached under its own name, with metadata that records the source and that the file has no redistribution licence. Asking again serves the cache with no download. No model file is in the repository or the app.
+- Test: `packages/agent-app/tests/devices-810.test.ts::Duo and Magic Keyboard models: pinned apple.com sources, one shared iPad download, checksum refusal, per-model cache, nothing bundled`
+- Environment: Node test with a fake fetch and a temporary folder.
+- Known gaps: The real download is not made in the test. The real files' checksums were checked against the pins once, by hand, on 2026-10-30.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-810h"></a>
+#### MUS-SPEC-21-810H: The iPad's Magic Keyboard lines up with its screen
+
+- Precondition: A stub USDZ in the shape of Apple's iPad file, with the iPad tilted on a keyboard accessory and a pencil to drop, plus Muster's own keyboard.
+- Action: Convert the iPad and the keyboard from the stub, attach the keyboard, and turn the iPad to landscape as the keyboard requires. Then do the same with Muster's own iPad body and keyboard.
+- Expected result: The iPad and the keyboard are converted with one shared transform, so they keep their relationship. Once turned, the keyboard sits under the screen, centred on it, as wide as the device to within 10%, with its hinge edge at the screen's bottom edge. The pencil is dropped. Muster's own keyboard meets the same checks.
+- Test: `packages/agent-app/tests/devices-810.test.ts::iPad Magic Keyboard: converted with the iPad's own transform and Muster's keyboard both sit centred under the turned screen`
+- Environment: Node test with three.js and synthetic fixtures; no WebGL and no network.
+- Known gaps: The look of the real converted keyboard is not compared in pixels.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-810i"></a>
+#### MUS-SPEC-21-810I: Foldables, iPads and the iPhone Duo get their own controls on the rail
+
+- Precondition: Live views for an Android foldable, an iPad and an iPhone Duo whose screen reports hinge support.
+- Action: Read each rail, press Fold on the foldable, Keyboard on the iPad, and choose a pose for the Duo.
+- Expected result: The foldable has Fold (or Unfold, from the read state), which sends `devices.fold`. The iPad has Keyboard, which sends `devices.keyboard` and shows as pressed. The Duo has a Hinge menu with Closed, Book, Open, Laptop and Tent, each sending `devices.duo` with that pose. Other devices have none of these.
+- Test: `packages/agent-app/tests/devices-components.tsx::foldables, iPads and the Duo get fold, keyboard and pose controls on the rail`
+- Environment: DOM suite (linkedom) with the device bridge faked.
+- Known gaps: The 3D view's fold animation is not rendered here.
 - Evidence: UNVERIFIED
 
 ### Maths in replies
