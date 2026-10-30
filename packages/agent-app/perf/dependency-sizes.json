@@ -1,21 +1,21 @@
 {
-  "generatedAt": "2026-10-30T04:01:54.553Z",
+  "generatedAt": "2026-10-30T04:56:21.352Z",
   "note": "Minified bytes each package contributes to the shipped bundles (renderer chunks are lazy where split). Regenerate with node scripts/dependency-report.mjs and commit with any dependency change.",
   "totals": {
-    "renderer": 16319733,
-    "main": 383075,
+    "renderer": 16730106,
+    "main": 387192,
     "preload": 1055,
-    "runtime": 2882131
+    "runtime": 2882710
   },
   "packages": [
     {
       "name": "(app source)",
-      "bytes": 5969238,
+      "bytes": 5990630,
       "targets": {
-        "renderer": 3726047,
-        "main": 382587,
+        "renderer": 3742743,
+        "main": 386704,
         "preload": 1041,
-        "runtime": 1859563
+        "runtime": 1860142
       },
       "version": "0.3.16",
       "license": "UNLICENSED",
@@ -78,6 +78,17 @@
       "direct": false
     },
     {
+      "name": "katex",
+      "bytes": 640454,
+      "targets": {
+        "renderer": 640454
+      },
+      "version": "0.18.2",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
       "name": "@shikijs/engine-oniguruma",
       "bytes": 628935,
       "targets": {
@@ -122,17 +133,6 @@
       "direct": true
     },
     {
-      "name": "katex",
-      "bytes": 267062,
-      "targets": {
-        "renderer": 267062
-      },
-      "version": "0.18.2",
-      "license": "MIT",
-      "licenseFile": "LICENSE",
-      "direct": false
-    },
-    {
       "name": "vega-lite",
       "bytes": 254289,
       "targets": {
@@ -167,9 +167,9 @@
     },
     {
       "name": "@base-ui/react",
-      "bytes": 192179,
+      "bytes": 192176,
       "targets": {
-        "renderer": 192179
+        "renderer": 192176
       },
       "version": "1.9.0",
       "license": "MIT",
@@ -410,9 +410,9 @@
     },
     {
       "name": "micromark-core-commonmark",
-      "bytes": 27297,
+      "bytes": 27314,
       "targets": {
-        "renderer": 27297
+        "renderer": 27314
       },
       "version": "2.0.3",
       "license": "MIT",
@@ -906,17 +906,6 @@
       "direct": false
     },
     {
-      "name": "mdast-util-from-markdown",
-      "bytes": 10235,
-      "targets": {
-        "renderer": 10235
-      },
-      "version": "2.0.3",
-      "license": "MIT",
-      "licenseFile": "license",
-      "direct": false
-    },
-    {
       "name": "d3-color",
       "bytes": 10233,
       "targets": {
@@ -928,10 +917,21 @@
       "direct": false
     },
     {
-      "name": "micromark",
-      "bytes": 9400,
+      "name": "mdast-util-from-markdown",
+      "bytes": 10232,
       "targets": {
-        "renderer": 9400
+        "renderer": 10232
+      },
+      "version": "2.0.3",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "micromark",
+      "bytes": 9396,
+      "targets": {
+        "renderer": 9396
       },
       "version": "4.0.2",
       "license": "MIT",
@@ -984,9 +984,9 @@
     },
     {
       "name": "react",
-      "bytes": 8285,
+      "bytes": 8266,
       "targets": {
-        "renderer": 8285
+        "renderer": 8266
       },
       "version": "19.3.1",
       "license": "MIT",
@@ -1000,6 +1000,17 @@
         "renderer": 7876
       },
       "version": "9.0.5",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "micromark-extension-llm-math",
+      "bytes": 7795,
+      "targets": {
+        "renderer": 7795
+      },
+      "version": "3.1.0",
       "license": "MIT",
       "licenseFile": "license",
       "direct": false
@@ -1036,6 +1047,17 @@
       "license": "BSD-3-Clause",
       "licenseFile": "LICENSE",
       "direct": false
+    },
+    {
+      "name": "micromark-extension-gfm-table",
+      "bytes": 7355,
+      "targets": {
+        "renderer": 7355
+      },
+      "version": "2.1.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": true
     },
     {
       "name": "@floating-ui/dom",
@@ -1137,6 +1159,17 @@
       "direct": false
     },
     {
+      "name": "micromark-util-symbol",
+      "bytes": 6044,
+      "targets": {
+        "renderer": 6044
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
       "name": "vega-hierarchy",
       "bytes": 5902,
       "targets": {
@@ -1189,17 +1222,6 @@
       "version": "4.1.0",
       "license": "MIT",
       "licenseFile": "LICENSE.md",
-      "direct": false
-    },
-    {
-      "name": "micromark-extension-gfm-table",
-      "bytes": 5638,
-      "targets": {
-        "renderer": 5638
-      },
-      "version": "2.1.2",
-      "license": "MIT",
-      "licenseFile": "license",
       "direct": false
     },
     {
@@ -1380,9 +1402,9 @@
     },
     {
       "name": "micromark-extension-gfm-footnote",
-      "bytes": 4029,
+      "bytes": 4032,
       "targets": {
-        "renderer": 4029
+        "renderer": 4032
       },
       "version": "2.1.0",
       "license": "MIT",
@@ -1457,9 +1479,9 @@
     },
     {
       "name": "micromark-extension-gfm-autolink-literal",
-      "bytes": 3733,
+      "bytes": 3738,
       "targets": {
-        "renderer": 3733
+        "renderer": 3738
       },
       "version": "2.1.0",
       "license": "MIT",
@@ -1654,6 +1676,17 @@
       "direct": false
     },
     {
+      "name": "mdast-util-math",
+      "bytes": 2499,
+      "targets": {
+        "renderer": 2499
+      },
+      "version": "3.0.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": true
+    },
+    {
       "name": "vega-regression",
       "bytes": 2486,
       "targets": {
@@ -1842,9 +1875,9 @@
     },
     {
       "name": "mdast-util-gfm-footnote",
-      "bytes": 1645,
+      "bytes": 1647,
       "targets": {
-        "renderer": 1645
+        "renderer": 1647
       },
       "version": "2.1.0",
       "license": "MIT",
@@ -2381,9 +2414,9 @@
     },
     {
       "name": "micromark-util-character",
-      "bytes": 433,
+      "bytes": 434,
       "targets": {
-        "renderer": 433
+        "renderer": 434
       },
       "version": "2.1.1",
       "license": "MIT",
@@ -2502,9 +2535,9 @@
     },
     {
       "name": "micromark-util-chunked",
-      "bytes": 299,
+      "bytes": 300,
       "targets": {
-        "renderer": 299
+        "renderer": 300
       },
       "version": "2.0.1",
       "license": "MIT",
@@ -2532,6 +2565,17 @@
       "license": "MIT",
       "licenseFile": "license",
       "direct": false
+    },
+    {
+      "name": "remark-math",
+      "bytes": 260,
+      "targets": {
+        "renderer": 260
+      },
+      "version": "6.0.0",
+      "license": "MIT",
+      "licenseFile": null,
+      "direct": true
     },
     {
       "name": "remark-gfm",
@@ -2799,9 +2843,9 @@
     },
     {
       "name": "micromark-util-normalize-identifier",
-      "bytes": 99,
+      "bytes": 100,
       "targets": {
-        "renderer": 99
+        "renderer": 100
       },
       "version": "2.0.1",
       "license": "MIT",
@@ -2920,6 +2964,10 @@
     }
   ],
   "unbundledDirectDependencies": [
+    {
+      "name": "micromark-extension-math",
+      "reason": "not reached from any entry point (loaded at runtime or unused)"
+    },
     {
       "name": "node-pty",
       "reason": "native, shipped from node_modules by the packager"

@@ -1,0 +1,42 @@
+{
+  "name": "micromark-extension-llm-math",
+  "version": "3.1.0",
+  "description": "micromark extension to support math (`$C_L$`, `\\(C_L\\)`)",
+  "license": "MIT",
+  "keywords": [
+    "micromark",
+    "micromark-extension",
+    "math",
+    "katex",
+    "latex",
+    "tex",
+    "markdown",
+    "unified"
+  ],
+  "repository": "ofk/micromark-extension-llm-math",
+  "bugs": "https://github.com/ofk/micromark-extension-llm-math/issues",
+  "funding": {
+    "type": "opencollective",
+    "url": "https://opencollective.com/unified"
+  },
+  "author": "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)",
+  "contributors": [
+    "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)"
+  ],
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    "types": "./dev/index.d.ts",
+    "default": "./dev/index.js"
+  },
+  "files": [
+    "dev/"
+  ],
+  "dependencies": {
+    "devlop": "^1.0.0",
+    "micromark-factory-space": "^2.0.0",
+    "micromark-util-character": "^2.0.0",
+    "micromark-util-symbol": "^2.0.0",
+    "micromark-util-types": "^2.0.0"
+  }
+}

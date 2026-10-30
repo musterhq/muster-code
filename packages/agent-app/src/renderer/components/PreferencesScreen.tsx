@@ -354,6 +354,9 @@ export function PreferencesScreen():React.ReactElement {
               <Row setting="chat.inlineDiffs" title="Show file diffs inline" scope="All chats" description="Show syntax-coloured code additions and removals in the conversation. The files-changed pill and the Changes tab stay available either way.">
                 <Switch label="Show file diffs inline" checked={settings['chat.inlineDiffs']} onChange={value=>set('chat.inlineDiffs',value)}/>
               </Row>
+              <Row setting="chat.mathRendering" title="Typeset maths in replies" scope="All chats" description="Show $…$, $$…$$, \(…\) and \[…\] in replies as formulas. Copying a formula copies its TeX either way.">
+                <Switch label="Typeset maths in replies" checked={settings['chat.mathRendering']} onChange={value=>set('chat.mathRendering',value)}/>
+              </Row>
               <Row setting="chats.autoArchiveDays" title="Archive idle chats" scope="All chats · off by default" description="Archive chats with no activity for this long. Pinned, snoozed, unread and working chats, and chats waiting for your input, are never archived. Archived chats stay searchable and can be restored.">
                 <Segmented label="Archive idle chats after" value={settings['chats.autoArchiveDays']} options={AUTO_ARCHIVE_DAYS.map(days=>({value:days,label:days===0?'Never':`${days} days`}))} onChange={value=>set('chats.autoArchiveDays',value)}/>
               </Row>

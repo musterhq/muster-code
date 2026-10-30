@@ -125,6 +125,21 @@ await check('copying a selection with maths or a diagram gives back the TeX and 
   result = copy(body);
   assert.equal(result.prevented, false, 'a selection without maths or a diagram copies as the browser does');
   assert.equal(result.data.size, 0);
+  // Lists, code blocks and tables around a formula come back as Markdown; the table's own Copy as Markdown keeps the TeX too.
+  const mixed = '- item with **bold** and $a^2$\n- second\n\n```ts\nconst x = 1;\n```\n\n| Name | Value |\n| --- | --- |\n| area | $\\pi r^2$ |';
+  await show(mixed);
+  await until(() => $$('[data-markdown-math] .katex').length === 2, 'formulas in the list and the table typeset');
+  const mixedBody = $('.md-body')!;
+  select([...mixedBody.childNodes].filter(node => !(node as Element).classList?.contains('md-quote')), mixedBody);
+  assert.equal(copy(mixedBody).data.get('text/plain'), mixed, 'the reply copies back as the Markdown it was written in');
+  const clipboard: string[] = [];
+  (window as any).muster.invoke = async (command: string, input: any) => { if (command === 'clipboard.write') clipboard.push(input.text); return undefined; };
+  ($('.md-table [aria-label="Copy table"]') as HTMLElement).dispatchEvent(new window.Event('click', {bubbles: true}));
+  await until(() => $('.md-table-copy-menu'), 'the table copy menu');
+  ($$('.md-table-copy-menu button').find(button => button.textContent === 'Copy as Markdown') as HTMLElement).dispatchEvent(new window.Event('click', {bubbles: true}));
+  await until(() => clipboard.length, 'the table copy');
+  assert.match(clipboard[0]!, /\| area \| \$\\pi r\^2\$ \|/, 'Copy table keeps the formula as TeX');
+  (window as any).muster.invoke = async () => undefined;
   selection = null;
 }).catch(fail);
 
@@ -143,3 +158,4 @@ await check('maths is on by default and the Chat setting turns it off', async ()
 root.unmount();
 if (failures.length) { console.error(`markdown-math-dom: ${failures.length} check(s) failed`); process.exit(1); }
 console.log('markdown-math-dom: passed');
+process.exit(0);

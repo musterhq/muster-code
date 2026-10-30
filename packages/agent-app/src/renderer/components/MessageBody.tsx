@@ -22,6 +22,12 @@ import {remarkProseBreaks} from '../markdown-breaks';
 import {remarkRichFences} from '../markdown-rich-fences';
 import {richKindOfFence} from '../../shared/rich-fence';
 import {RichFence, RichPreload} from './RichFence';
+import remarkMath from 'remark-math';
+import {mathKind, mayContainMath, REMARK_MATH_OPTIONS} from '../../shared/markdown-math';
+import {fenceIsClosed} from '../../shared/rich-fence';
+import {MarkdownMath} from './MarkdownMath';
+import {markdownClipboardPayload, serializeCodeBlockToMarkdown} from '../markdown-clipboard';
+import {useStoreSelector} from '../useStore';
 
 import './message-body.css';
 
@@ -106,13 +112,31 @@ export function languageLabel(lang?: string): string {
   return LANGUAGE_NAMES[key] ?? (lang.length <= 4 ? lang.toUpperCase() : lang[0]!.toUpperCase() + lang.slice(1));
 }
 
+/** #785: whether formulas are typeset (Settings › Chat), and the text the reply was parsed from, so a formula copies as it was written. */
+const MathContext = React.createContext<{on: boolean; source: string}>({on: false, source: ''});
+type Positioned = {position?: {start?: {offset?: number}; end?: {offset?: number}}};
+/** The text a hast node was parsed from, when the parser kept its position. */
+function authored(source: string, node: unknown): string | undefined {
+  const start = (node as Positioned | undefined)?.position?.start?.offset, end = (node as Positioned | undefined)?.position?.end?.offset;
+  return start !== undefined && end !== undefined && end <= source.length ? source.slice(start, end) : undefined;
+}
+
+/** Inline code, or an inline formula (remark-math marks it `language-math math-inline`; `$$…$$` within a sentence is `math-display`). */
+function InlineCode({node, className, children, ...props}: {node?: unknown; className?: string; children?: React.ReactNode} & React.HTMLAttributes<HTMLElement>): React.ReactElement {
+  const math = React.useContext(MathContext);
+  const kind = math.on ? mathKind(className) : null;
+  if (kind) return <MarkdownMath tex={codeText(children)} display={kind === 'display'} source={authored(math.source, node)}/>;
+  return <code className={className} {...props}>{children}</code>;
+}
+
 /** Whether this body may run an agent's ```html-report fences (in a sandbox). Only the surfaces that show an agent's or the user's own text opt in: a README, a teammate's comment or an installed skill never do. A context, not a prop on `pre`, so the renderer map stays stable while a reply streams. */
 const ReportsContext = React.createContext(false);
 
-function Pre({ children }: { children?: React.ReactNode }): React.ReactElement {
+function Pre({ children, node }: { children?: React.ReactNode; node?: unknown }): React.ReactElement {
   const child = Array.isArray(children) ? children[0] : children;
   const [wrap, setWrap] = useState(false);
   const reports = React.useContext(ReportsContext);
+  const math = React.useContext(MathContext);
   if (React.isValidElement<{ className?: string; children?: React.ReactNode }>(child)) {
     const lang = /language-([\w+-]+)/.exec(child.props.className ?? '')?.[1];
     // The fence's closing newline is not a code line (QA: a blank line trailed every block).
@@ -120,9 +144,18 @@ function Pre({ children }: { children?: React.ReactNode }): React.ReactElement {
     // A closed ```mermaid / ```chart / ```html-report fence is drawn; one still streaming stays code until it closes.
     const rich = richKindOfFence(lang);
     const open = (child.props as Record<string, unknown>)['data-fence-open'] === 'true' || (child.props as Record<string, unknown>).dataFenceOpen === 'true';
-    if (rich && !open && (rich !== 'report' || reports)) return <RichFence kind={rich} source={text}/>;
+    // A display formula ($$…$$ or \[…\] on its own lines), or a ```math fence once it has closed.
+    if (math.on && lang === 'math') {
+      const written = authored(math.source, node);
+      const fenceStart = (node as Positioned | undefined)?.position?.start?.offset ?? 0;
+      if (mathKind(child.props.className) === 'display' || (written !== undefined && fenceIsClosed(math.source, fenceStart, fenceStart + written.length))) {
+        return <MarkdownMath tex={text} display block source={written}/>;
+      }
+    }
+    // Copying across a drawn fence gives back the fence as written (markdown-clipboard.ts).
+    if (rich && !open && (rich !== 'report' || reports)) return <div className="md-rich" data-markdown-rich="" data-markdown-copy={serializeCodeBlockToMarkdown(text, lang)}><RichFence kind={rich} source={text}/></div>;
     return (
-      <div className="md-code">
+      <div className="md-code" data-language={lang ?? 'text'}>
         {rich && open && (rich !== 'report' || reports) && <RichPreload kind={rich}/>}
         <div className="md-code-head">
           <span className="md-code-lang"><Code size={13} aria-hidden="true" />{languageLabel(lang)}</span>
@@ -160,6 +193,7 @@ function Heading({
 
 const components: Components = {
   pre: Pre,
+  code: InlineCode,
   // Right-to-left prose: each block takes its direction (and list-marker side) from its own first strong character.
   p: ({node: _node, ...props}) => <p dir="auto" {...props}/>,
   ul: ({node: _node, ...props}) => <ul dir="auto" {...props}/>,
@@ -187,7 +221,8 @@ function SelectionQuote({ container }: { container: React.RefObject<HTMLDivEleme
     const body = container.current;
     if (!body) return;
     const read = () => {
-      const selection = window.getSelection?.(), value = selection?.toString().trim() ?? '';
+      // A formula or diagram in the selection is quoted as its source, not as its glyphs.
+      const selection = window.getSelection?.() ?? null, value = (markdownClipboardPayload(selection)?.text ?? selection?.toString() ?? '').trim();
       const row = body.closest<HTMLElement>('[data-item-id]');
       if (!selection || !value || !selection.rangeCount || !row || !body.closest('.msg-assistant') || !body.contains(selection.anchorNode) || !body.contains(selection.focusNode)) { setOffer(null); return; }
       const rect = selection.getRangeAt(0).getBoundingClientRect(), box = body.getBoundingClientRect();
@@ -247,13 +282,18 @@ function MessageBodyContent({ text, resourceContext, animate = false, linkFiles 
   // Replies link the files they mention (markdown-file-links.ts); documents and previews render as written.
   // Agent prose keeps its single line breaks (markdown-breaks.ts); a Markdown document keeps CommonMark soft
   // breaks, so a hard-wrapped README still reads as flowing paragraphs.
+  const renderedText = React.useMemo(() => inferMarkdownCodeLanguages(text), [text]);
+  // #785: maths is on unless Settings › Chat turns it off; text with no `$`, `\(`, `\[` or ```math skips the maths tokenizer.
+  const mathOn = useStoreSelector(state => state.settings['chat.mathRendering'] !== false);
+  const withMath = mathOn && mayContainMath(renderedText);
   const remarkPlugins = React.useMemo(() => {
     const plugins: PluggableList = [remarkGfm, createIncrementalMarkdownPlugin(), remarkRichFences];
+    if (withMath) plugins.unshift([remarkMath, REMARK_MATH_OPTIONS]);
     if (linkFiles) plugins.push(remarkLeadingLabels, remarkFileLinks);
     if (!asDocument) plugins.push(remarkProseBreaks);
     return plugins;
-  }, [linkFiles, asDocument]);
-  const renderedText = React.useMemo(() => inferMarkdownCodeLanguages(text), [text]);
+  }, [linkFiles, asDocument, withMath]);
+  const math = React.useMemo(() => ({on: withMath, source: renderedText}), [withMath, renderedText]);
   // Streaming fade (markdown-fade.ts): text that arrives after the first render fades in.
   const fade = useRef<FadeState | null>(null);
   fade.current = animate ? (fade.current ? advanceFade(fade.current, renderedText) : createFadeState(renderedText)) : null;
@@ -282,9 +322,18 @@ function MessageBodyContent({ text, resourceContext, animate = false, linkFiles 
     } as Components;
   }, [text, resourceContext?.folderId, resourceContext?.path]);
   const body = useRef<HTMLDivElement>(null);
+  // A selection holding a formula or a drawn fence copies as Markdown with their source; anything else is the browser's copy.
+  const onCopy = React.useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
+    const payload = markdownClipboardPayload(window.getSelection?.() ?? null);
+    if (!payload || !event.clipboardData) return;
+    event.preventDefault();
+    event.clipboardData.setData('text/plain', payload.text);
+    event.clipboardData.setData('text/html', payload.html);
+  }, []);
   return (
     <ReportsContext.Provider value={reports}>
-    <div className="md-body" ref={body}>
+    <MathContext.Provider value={math}>
+    <div className="md-body" ref={body} onCopy={onCopy}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={rehypePlugins}
@@ -296,6 +345,7 @@ function MessageBodyContent({ text, resourceContext, animate = false, linkFiles 
       </ReactMarkdown>
       <SelectionQuote container={body} />
     </div>
+    </MathContext.Provider>
     </ReportsContext.Provider>
   );
 }

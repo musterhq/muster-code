@@ -40,14 +40,19 @@
     "diff": "9.0.0",
     "dompurify": "3.4.17",
     "exceljs": "^4.4.0",
+    "katex": "^0.18.2",
     "lucide-react": "1.61.0",
+    "mdast-util-math": "file:patched-packages/mdast-util-math",
     "mermaid": "12.1.0",
+    "micromark-extension-gfm-table": "file:patched-packages/micromark-extension-gfm-table",
+    "micromark-extension-math": "file:patched-packages/micromark-extension-llm-math",
     "node-pty": "1.1.0",
     "pdfjs-dist": "^6.4.299",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "remark-math": "6.0.0",
     "shiki": "4.5.0",
     "ssf": "^0.11.2",
     "three": "0.186.1",
@@ -72,8 +77,11 @@
   },
   "overrides": {
     "uuid": "^11.1.0",
-    "katex": "0.18.2",
-    "dompurify": "3.4.17"
+    "katex": "$katex",
+    "dompurify": "3.4.17",
+    "mdast-util-math": "$mdast-util-math",
+    "micromark-extension-gfm-table": "$micromark-extension-gfm-table",
+    "micromark-extension-math": "$micromark-extension-math"
   },
   "author": {
     "name": "Muster",

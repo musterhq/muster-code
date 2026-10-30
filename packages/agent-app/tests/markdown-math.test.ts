@@ -36,7 +36,7 @@ function like(actual: unknown, expected: unknown, message?: string): void {
     assert.ok(Array.isArray(actual), message ?? 'expected an array');
     assert.equal(actual.length, expected.length, message ?? 'array length');
     expected.forEach((value, index) => like(actual[index], value, message));
-  } else assert.deepEqual(actual, expected, message);
+  } else assert.deepEqual(actual, expected, message ?? "unexpected value");
 }
 
 // Spec: MUS-SPEC-21-785B (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-785b)

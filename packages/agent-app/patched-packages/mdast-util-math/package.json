@@ -1,0 +1,46 @@
+{
+  "name": "mdast-util-math",
+  "version": "3.0.0",
+  "description": "mdast extension to parse and serialize math",
+  "license": "MIT",
+  "keywords": [
+    "unist",
+    "mdast",
+    "mdast-util",
+    "util",
+    "utility",
+    "markdown",
+    "markup",
+    "math",
+    "katex",
+    "latex",
+    "tex"
+  ],
+  "repository": "syntax-tree/mdast-util-math",
+  "bugs": "https://github.com/syntax-tree/mdast-util-math/issues",
+  "funding": {
+    "type": "opencollective",
+    "url": "https://opencollective.com/unified"
+  },
+  "author": "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)",
+  "contributors": [
+    "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)"
+  ],
+  "sideEffects": false,
+  "type": "module",
+  "exports": "./index.js",
+  "files": [
+    "lib/",
+    "index.d.ts",
+    "index.js"
+  ],
+  "dependencies": {
+    "@types/hast": "^3.0.0",
+    "@types/mdast": "^4.0.0",
+    "devlop": "^1.0.0",
+    "longest-streak": "^3.0.0",
+    "mdast-util-from-markdown": "^2.0.0",
+    "mdast-util-to-markdown": "^2.1.0",
+    "unist-util-remove-position": "^5.0.0"
+  }
+}

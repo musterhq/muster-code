@@ -242,3 +242,8 @@
 /* Right-to-left prose: each block takes its direction from its first strong character; code stays left-to-right. */
 .md-body :is(h1, h2, h3, h4, h5, h6) { unicode-bidi: plaintext; }
 .md-body :is(pre, code) { direction: ltr; unicode-bidi: isolate; }
+
+/* A drawn fence sits in a source-carrying wrapper for copying; the wrapper adds no box. */
+.md-rich { display: contents; }
+.md-body > .md-rich:first-child > .rich-block { margin-top: 0; }
+.md-body > .md-rich:last-child > .rich-block { margin-bottom: 0; }
