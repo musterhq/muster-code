@@ -506,7 +506,9 @@ test('agent tool host: bearer token required, launcher written 0700 and endpoint
   const on = computerRunOptions({id: 'c1', mode: 'agent'}, undefined, undefined, launcher)!;
   assert.equal(on.configOverrides?.['mcp_servers.muster_device.command'], launcher);assert.equal(on.configOverrides?.['mcp_servers.muster_device.env.MUSTER_CHAT_ID'], 'c1');assert.match(on.developerInstructions, /device_open/);
   const off = computerRunOptions({id: 'c1', mode: 'agent'}, undefined, undefined, undefined)!;
-  assert.ok(!off.developerInstructions.includes('muster_device'));assert.equal(off.configOverrides, undefined);
+  assert.ok(!off.developerInstructions.includes('muster_device'));
+  // Only the device server is in question: the browser and computer servers come from this machine's installed launchers.
+  assert.deepEqual(Object.keys(off.configOverrides ?? {}).filter(key => key.startsWith('mcp_servers.muster_device')), []);
   host.dispose();
   fs.rmSync(dir, {recursive: true, force: true});
 });
