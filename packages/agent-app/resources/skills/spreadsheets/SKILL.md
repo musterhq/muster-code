@@ -1,6 +1,6 @@
 ---
 name: spreadsheets
-description: Create, edit and review Excel workbooks (.xlsx) with Muster. Use whenever the person asks for a spreadsheet, budget, model, tracker, table of data as .xlsx, or to change an existing workbook. Writes live formulas with exceljs, keeps existing formatting when editing, renders the sheets to page images with office_render and fixes them until they read well.
+description: Create, edit and review Excel workbooks (.xlsx) with Muster. Use whenever the person asks for a spreadsheet, budget, model, tracker, table of data as .xlsx, or to change an existing workbook. Writes live formulas with exceljs and native, editable charts, keeps existing formatting when editing, renders the sheets to page images with office_render and fixes them until they read well.
 metadata:
   short-description: Excel workbooks (.xlsx) with live formulas and a render check
 ---
@@ -21,7 +21,7 @@ reply, or a .csv the person asked for, you do not need a workbook.
   validation, conditional formatting and pictures.
 
 `example.mjs` next to this file is a tested starting point (two sheets, formulas across sheets, number formats, a
-frozen header, a total row, a picture, print setup). Copy it into the working folder and change it.
+frozen header, a total row, a native chart, a picture, print setup). Copy it into the working folder and change it.
 
 ## The loop
 
@@ -62,17 +62,37 @@ check.eachSheet(sheet => sheet.eachRow(row => row.eachCell(cell => {
 
 ## Charts
 
-exceljs cannot write native Excel charts. Tell the person, then either put a chart picture on the sheet
-(`workbook.addImage` and `sheet.addImage`) or, if they want an editable chart, make it in a presentation with the
-presentations skill. Never leave a sheet with a promised chart missing.
+Make charts native and editable with Muster's chart writer, `muster-xlsx-charts` (importable once `office_setup` ran,
+like exceljs). It adds real Excel chart parts to a file exceljs saved; every series points at a sheet range, so the
+chart follows the cells in Excel, LibreOffice and Numbers. Never put a picture of a chart in a workbook.
+
+```js
+import { addCharts } from 'muster-xlsx-charts';
+await workbook.xlsx.writeFile('out.xlsx');            // the last exceljs save: saving with exceljs again drops charts
+await addCharts('out.xlsx', [{
+  type: 'column', sheet: 'Summary', title: 'Revenue by month', position: { from: 'A5', width: 480, height: 280 },
+  series: [{ name: 'Sales!$D$1', categories: 'Sales!$A$2:$A$13', values: 'Sales!$D$2:$D$13' }],
+  xAxisTitle: 'Month', yAxisTitle: 'Revenue', numberFormat: '"$"#,##0',
+}]);
+```
+
+- `type`: `column`, `bar`, `line`, `area` (each with `stacked: true` or `'percent'`), `pie` (one series), `doughnut`,
+  `scatter` (series are `{ name, x, y }` ranges).
+- Ranges are absolute and name their sheet; quote names with spaces: `'Q1 Spend'!$A$2:$A$9`. `name` is a header cell
+  or plain text.
+- Options: `sheet` (where the chart goes; default the sheet of the first series), `position` (`from` cell plus
+  `width`/`height` in pixels, or `from` and `to` cells; default to the right of the data), `legend` (`right`, `left`,
+  `top`, `bottom` or `false`), `dataLabels`, `numberFormat` (value axis), `xNumberFormat` (scatter), series `color`.
+- Look at the render: every chart should show its bars, lines or slices, readable titles and no overlap with cells.
 
 ## Editing an existing workbook
 
 Load it with exceljs, change only the cells you need, and save to a new file unless the person asked to overwrite
 theirs. exceljs keeps cell styles, number formats, merged cells, column widths and formulas it read. It does not keep
-charts, pivot tables, slicers or macros: if the workbook has any (look for `xl/charts/`, `xl/pivotTables/` or
-`vbaProject.bin` inside the file with `jszip`), say so and ask before saving over it, or change cell values directly in
-the sheet XML with `jszip`.
+charts, pivot tables, slicers or macros. If you made the workbook, run the script again (it adds its charts after the
+last save) or call `addCharts` again after saving. If it is someone else's and has any (look for `xl/charts/`,
+`xl/pivotTables/` or `vbaProject.bin` inside the file with `jszip`), say so and ask before saving over it, or change
+cell values directly in the sheet XML with `jszip`: their charts read the edited cells.
 
 ```js
 const workbook = new ExcelJS.Workbook();
