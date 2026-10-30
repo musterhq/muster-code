@@ -285,7 +285,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/summary-card-empty-dom.tsx::a chat with nothing to summarise shows no summary card and reserves no room`
 - Environment: Real SummaryCard inside a `.center` element in a DOM suite (linkedom); fake app bridge; no network.
 - Known gaps: Layout width is not measured in linkedom, so the check is on the `data-summary` attribute that drives the reserve CSS, not on pixel positions.
-- Evidence: UNVERIFIED
+- Evidence: local; node packages/agent-app/dist/tests/summary-card-empty-dom.mjs; exit 0; 2 passed, 0 failed, 0 skipped; commit 51d98019fafa5b2fe3842c1acb1a3e7c3cbe9d56
 
 <a id="mus-spec-01-792b"></a>
 #### MUS-SPEC-01-792B: The summary card appears as soon as there is a section
@@ -296,4 +296,4 @@ Boundaries:
 - Test: `packages/agent-app/tests/summary-card-empty-dom.tsx::the summary card appears once the chat changes a file`
 - Environment: Real SummaryCard inside a `.center` element in a DOM suite (linkedom); fake app bridge; no network.
 - Known gaps: Covers the Sources section only; folders, processes, subagents and scheduled automations use the same visibility check but are not each tested here.
-- Evidence: UNVERIFIED
+- Evidence: local; node packages/agent-app/dist/tests/summary-card-empty-dom.mjs; exit 0; 2 passed, 0 failed, 0 skipped; commit 51d98019fafa5b2fe3842c1acb1a3e7c3cbe9d56
