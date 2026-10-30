@@ -45,14 +45,16 @@ export function plainHttpWarning(url: string, hasToken: boolean): string | undef
 }
 
 /**
- * Settings › Integrations › Muster Server: one address, one Connect. Connect finds out what the address is (Muster Server, or a
+ * Settings › Integrations › Muster Server (the add flow, and the server that feeds Projects): one address, one Connect. Connect finds out what the address is (Muster Server, or a
  * Paperclip-compatible one) and what sign-in it needs, then opens that server's own sign-in page in an app window: Muster never sees the
  * password. Nobody picks a method. Connected shows who and how live it is, with Disconnect and Import a copy. "Paperclip-compatible"
  * appears only in the Details line.
  */
-export function ConnectionPanel({ onSaved, compact = false, signInAvailable = true }: { onSaved?: (view: PaperclipConfigView) => void; compact?: boolean; signInAvailable?: boolean }): React.ReactElement {
+/** `addOnly`: just the add flow, for Add server and Re-authenticate in the list of servers (#803). `serverId` is the server it signs in
+ *  (`'new'`: a new one, or the one already at that address); `initialAddress` fills the address; `onCancel` adds a Cancel button. */
+export function ConnectionPanel({ onSaved, compact = false, signInAvailable = true, addOnly = false, serverId, initialAddress = '', onCancel }: { onSaved?: (view: PaperclipConfigView) => void; compact?: boolean; signInAvailable?: boolean; addOnly?: boolean; serverId?: string; initialAddress?: string; onCancel?: () => void }): React.ReactElement {
   const [config, setConfig] = useState<PaperclipConfigView | null>(null);
-  const [address, setAddress] = useState('');
+  const [address, setAddress] = useState(initialAddress);
   const [token, setToken] = useState('');
   const [others, setOthers] = useState(false);
   const [local, setLocal] = useState<{ baseUrl: string; version?: string } | null>(null);
@@ -61,7 +63,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
   const [signInState, setSignInState] = useState<PaperclipSignInState>({ phase: 'idle' });
   const [imported, setImported] = useState<PaperclipImportReport | null>(null);
   const [error, setError] = useState('');
-  const connectedNow = (view: PaperclipConfigView | null) => Boolean(view && view.mode !== 'off' && (view.hasToken || (isLocalUrl(view.baseUrl) && !view.signInNotice)));
+  const connectedNow = (view: PaperclipConfigView | null) => !addOnly && Boolean(view && view.mode !== 'off' && (view.hasToken || (isLocalUrl(view.baseUrl) && !view.signInNotice)));
   const load = (view: PaperclipConfigView, live: { current: boolean }) => {
     setConfig(view);
     if (connectedNow(view)) void invoke('paperclip.test', {}).then(result => { if (live.current) setCompanies(result.companies ?? []); }, () => undefined);
@@ -69,7 +71,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
   };
   useEffect(() => {
     const alive = { current: true };
-    invoke('paperclip.config.get', {}).then(view => { if (!alive.current) return; setAddress(view.mode !== 'off' ? view.baseUrl : ''); load(view, alive); }, e => { if (alive.current) setError(errorText(e)); });
+    invoke('paperclip.config.get', {}).then(view => { if (!alive.current) return; if (!addOnly) setAddress(view.mode !== 'off' ? view.baseUrl : ''); load(view, alive); }, e => { if (alive.current) setError(errorText(e)); });
     void invoke('paperclip.signin.status', {}).then(state => { if (alive.current) setSignInState(state); }, () => undefined);
     // Signing in finishing, the server revoking a key, or the session ending all change the connection under us: the runtime says so, nothing here polls.
     const off = subscribe(event => {
@@ -93,7 +95,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
   /** Opens the server's own sign-in page in an app window (the system browser is the fallback). */
   const beginSignIn = async (baseUrl: string) => {
     if (!signInAvailable) { setOthers(true); throw new Error('Signing in opens a window in the Muster desktop app. From here, connect with an API token under “Other ways to connect”.'); }
-    const state = await invoke('paperclip.signin.start', { baseUrl });
+    const state = await invoke('paperclip.signin.start', { baseUrl, ...(serverId ? { serverId } : {}) });
     setSignInState(state);
     if (state.approvalUrl) await invoke('musterServer.signInWindow', { url: state.approvalUrl, baseUrl: state.baseUrl ?? baseUrl }).catch(() => invoke('link.open', { url: state.approvalUrl! })).catch(() => setError('Muster could not open the sign-in window. Use “Open window again”, or copy the link into a browser.'));
   };
@@ -105,9 +107,9 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
     try {
       const probe = await invoke('paperclip.test', { mode: 'custom', baseUrl });
       if (probe.ok) {
-        const view = await invoke('paperclip.config.set', { mode: isLocalUrl(baseUrl) ? 'local' : 'custom', baseUrl, ...(probe.backend ? { backend: probe.backend } : {}), companyId: probe.companies?.[0]?.id ?? null });
+        const view = await invoke('paperclip.config.set', { mode: isLocalUrl(baseUrl) ? 'local' : 'custom', baseUrl, ...(probe.backend ? { backend: probe.backend } : {}), companyId: probe.companies?.[0]?.id ?? null, ...(serverId ? { serverId } : {}) });
         setAddress(view.baseUrl); load(view, { current: true }); setLocal(null);
-        notifySuccess(`Connected to ${hostOf(view.baseUrl)}. Its projects appear under Projects.`);
+        notifySuccess(addOnly ? `Connected to ${hostOf(view.baseUrl)}. Its projects are listed under its name.` : `Connected to ${hostOf(view.baseUrl)}. Its projects appear under Projects.`);
         await refreshWorkspace(true); onSaved?.(view);
       } else if (probe.stage === 'auth') await beginSignIn(baseUrl);
       else setError(plainProbeError(probe, baseUrl));
@@ -121,7 +123,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
     try {
       const probe = await invoke('paperclip.test', { mode: 'custom', baseUrl, token });
       if (!probe.ok) { setError(probe.stage === 'auth' ? 'The server didn’t accept that token.' : plainProbeError(probe, baseUrl)); return; }
-      const view = await invoke('paperclip.config.set', { mode: 'custom', baseUrl, token, ...(probe.backend ? { backend: probe.backend } : {}), companyId: probe.companies?.[0]?.id ?? null });
+      const view = await invoke('paperclip.config.set', { mode: 'custom', baseUrl, token, ...(probe.backend ? { backend: probe.backend } : {}), companyId: probe.companies?.[0]?.id ?? null, ...(serverId ? { serverId } : {}) });
       setToken(''); setAddress(view.baseUrl); load(view, { current: true });
       notifySuccess(`Connected to ${hostOf(view.baseUrl)} with an API token.`);
       await refreshWorkspace(true); onSaved?.(view);
@@ -195,6 +197,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
         {(error || notice || warning) && <p role="alert" className="settings-error">{error || notice || warning}</p>}
       </div>
       <div className="project-edit-actions"><span className="project-edit-spacer"/>
+        {onCancel && <button type="button" className="project-edit-cancel" disabled={busy !== null} onClick={onCancel}>Cancel</button>}
         <button type="button" className="settings-button" disabled={busy !== null || !address.trim()} onClick={() => void connect()}>{busy === 'connect' ? 'Connecting…' : 'Connect'}</button>
       </div>
       <section className="ws-connect-steps" aria-label="How connecting works">

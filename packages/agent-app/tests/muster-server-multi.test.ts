@@ -53,7 +53,7 @@ function runtime(t:TestContext,dir:string,servers:ReturnType<typeof fakeServers>
   const ms=createMusterServerDomain(ctx,{fetch:servers.fetch,secrets:()=>secrets.store as never});
   const pc=createPaperclipDomain(ctx,{fetch:servers.fetch,secrets:()=>secrets.store as never,timers:NO_TIMERS});
   t.after(()=>{pc.dispose?.();ms.dispose?.();});
-  const call=<T>(command:string,input:Record<string,unknown>={})=>Promise.resolve((ms.handlers[command]??pc.handlers[command])!(input as never)) as Promise<T>;
+  const call=<T>(command:string,input:Record<string,unknown>={})=>Promise.resolve().then(()=>(ms.handlers[command]??pc.handlers[command])!(input as never)) as Promise<T>;
   return {events,secrets,call,list:async()=>(await call<{servers:MusterServerEntryView[]}>('musterServer.list')).servers};
 }
 const connectPassword=(r:ReturnType<typeof runtime>,s:FakeServer,extra:Record<string,unknown>={})=>r.call('musterServer.connect',{url:s.origin,method:'password',username:s.user.username,password:s.password,...extra});
@@ -143,7 +143,7 @@ test('projects from every connected server are listed at once and labelled with 
   assert.deepEqual([ws.serverId,ws.serverName,ws.baseUrl,ws.hasToken],[b!.id,'beta.example.com','https://beta.example.com',true],'choosing another server moves the sync there');
   assert.deepEqual((await r.list()).map(s=>s.workspace),[false,true]);
   assert.equal((await r.list()).every(s=>s.account),true,'switching the sync signs nobody out');
-  assert.ok(r.events.some(e=>(e as {type:string}).type==='projectsWorkspaceChanged'),'the screens are told to read the other server');
+  assert.ok(r.events.some(e=>(e as {type:string}).type==='musterServerChanged'),'Settings is told the sync moved');
 });
 
 // Spec: MUS-SPEC-13-803D (docs/spec/clauses/13-muster-server.md#mus-spec-13-803d)
@@ -151,7 +151,7 @@ test('an existing single-server setup moves into the list on first launch with n
   const dir=await home(t),servers=fakeServers([ALPHA]);
   const old={version:2,mode:'custom',baseUrl:ALPHA.origin,companyId:'muster-server',backend:'muster-server',tokenOrigin:ALPHA.origin,tokenSecret:LEGACY_MUSTER_SERVER_SECRET,
     user:ALPHA.user,serverVersion:'0.3.0',connectedAt:'2026-10-01T00:00:00.000Z',signedIn:null,signInNotice:null,sessionOrigin:null,
-    orgs:{'muster-server':{enabled:true,sidebar:'all'}},me:{id:'u-olivia',name:'Olivia Owner',origin:ALPHA.origin}};
+    orgs:{'muster-server':{enabled:true,sidebar:'team'},'old-org':{enabled:false,sidebar:'none'}},me:{id:'u-olivia',name:'Olivia Owner',origin:ALPHA.origin}};
   const text=JSON.stringify(old,null,2);
   await writeFile(join(dir,'server.json'),text);
   const secrets=secretsFake({[LEGACY_MUSTER_SERVER_SECRET]:ALPHA.token});

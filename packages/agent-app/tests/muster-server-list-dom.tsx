@@ -4,6 +4,7 @@
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
+import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url);
 const {parseHTML}=require('linkedom');
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
@@ -20,7 +21,6 @@ const text=(el:Element|null|undefined)=>(el?.textContent??'').replace(/\s+/g,' '
 const click=async(el:Element|undefined|null)=>{assert.ok(el,'click target');await act(async()=>{(el as HTMLElement).click();await delay(30);});};
 const type=async(el:Element|null,value:string)=>{assert.ok(el,'input');let proto=Object.getPrototypeOf(el),descriptor:PropertyDescriptor|undefined;while(proto&&!(descriptor=Object.getOwnPropertyDescriptor(proto,'value')))proto=Object.getPrototypeOf(proto);await act(async()=>{descriptor!.set!.call(el,value);el!.dispatchEvent(new window.Event('input',{bubbles:true}));el!.dispatchEvent(new window.Event('change',{bubbles:true}));await delay(10);});};
 const byText=(root:Element,selector:string,t:string)=>[...root.querySelectorAll(selector)].find(e=>text(e)===t||text(e).includes(t));
-const check=async(name:string,fn:()=>Promise<void>)=>{try{await fn();console.log(`✔ ${name}`);}catch(cause){console.error(`✖ ${name}`);throw cause;}};
 
 const entry=(id:string,name:string,url:string,extra:Record<string,unknown>={})=>({id,name,url,kind:'muster-server',account:null,state:'online',error:null,checkedAt:null,serverVersion:'0.3.0',connectedAt:null,workspace:false,...extra});
 let servers:any[]=[
