@@ -9,7 +9,8 @@
 // asar header marks as unpacked counts only if it is really in app.asar.unpacked (after-pack.cjs prunes some).
 //
 // Fails when
-//   - resources/app/node_modules holds anything but node-pty (every other dependency is already bundled by esbuild),
+//   - resources/app/node_modules holds anything but node-pty, pdf.js and this platform's canvas package (every other
+//     dependency is already bundled by esbuild),
 //   - node-pty ships build intermediates, debug symbols or another platform's prebuilds,
 //   - a bundled main/runtime file requires something other than a Node builtin, electron or node-pty.
 // Always prints a table of sizes (the unpacked app directories and every archive in release-dist/).
@@ -79,12 +80,17 @@ const total = list => ({total: list.reduce((sum, entry) => sum + entry.size, 0),
 function checkApp(app) {
   const files = entries(app);
   const under = prefix => files.filter(entry => entry.relative.startsWith(prefix));
-  const present = [...new Set(under('node_modules/').map(entry => entry.relative.split('/')[1]).filter(name => name && !name.startsWith('.')))];
-  const extra = present.filter(name => name !== 'node-pty');
-  if (extra.length) fail(`${app}: node_modules must hold only node-pty, found ${extra.length} other entries: ${extra.slice(0, 12).join(', ')}${extra.length > 12 ? ', ...' : ''}`);
-  const pty = under('node_modules/node-pty/').map(entry => ({...entry, relative: entry.relative.slice('node_modules/node-pty/'.length)}));
   const here = process.platform === 'win32' ? 'win32' : process.platform;
   const target = process.env.MUSTER_CHECK_PLATFORM || (/win(-[a-z0-9]+)?-unpacked/.test(app) ? 'win32' : /linux(-[a-z0-9]+)?-unpacked/.test(app) ? 'linux' : app.endsWith(path.join('Contents', 'Resources', 'app')) ? 'darwin' : here);
+  // A scoped package counts by its full name (@napi-rs/canvas), so a scope cannot carry anything else in with it.
+  const present = [...new Set(under('node_modules/').map(entry => { const [, scope, name] = entry.relative.split('/'); return scope?.startsWith('@') && name ? `${scope}/${name}` : scope; }).filter(name => name && !name.startsWith('.')))];
+  // #789: office page images need pdf.js and its native canvas package for this platform (package-release.mjs copies them).
+  const shipped = name => name === 'node-pty' || name === 'pdfjs-dist' || name === '@napi-rs/canvas' || name.startsWith(`@napi-rs/canvas-${target}-`);
+  const foreignCanvas = present.filter(name => name.startsWith('@napi-rs/canvas-') && !shipped(name));
+  for (const name of foreignCanvas) fail(`${app}: node_modules ships another platform's canvas package: ${name}`);
+  const extra = present.filter(name => !shipped(name) && !foreignCanvas.includes(name));
+  if (extra.length) fail(`${app}: node_modules must hold only node-pty, found ${extra.length} other entries: ${extra.slice(0, 12).join(', ')}${extra.length > 12 ? ', ...' : ''}`);
+  const pty = under('node_modules/node-pty/').map(entry => ({...entry, relative: entry.relative.slice('node_modules/node-pty/'.length)}));
   const foreign = new Set();
   for (const {relative} of pty) {
     if (/\.(iobj|ipdb|tlog|obj|pdb|exp)$/.test(relative) || /^build\/.*\.lib$/.test(relative)) fail(`${app}: node-pty ships a build intermediate: ${relative}`);
@@ -123,4 +129,4 @@ if (existsSync(releaseDir)) {
 
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Package size\n\n\`\`\`\n${report.join('\n')}\n\`\`\`\n`);
 if (failures.length) { console.error('\nSize budget FAILED:'); for (const message of failures) console.error(` - ${message}`); process.exit(1); }
-say('\nSize budget ok: node_modules holds only node-pty, no build intermediates or foreign prebuilds, bundles require only builtins, electron and node-pty.');
+say('\nSize budget ok: node_modules holds only node-pty (and pdf.js with its canvas package), no build intermediates or foreign prebuilds, bundles require only builtins, electron and node-pty.');

@@ -35,12 +35,31 @@ test('size budget: only node-pty in node_modules passes and prints a size table'
 });
 
 test('size budget: any other package in node_modules fails the build', () => {
-  const {base, app} = fixture({'node-pty': ['package.json'], react: ['package.json'], '@napi-rs': ['canvas/index.js']});
+  const {base, app} = fixture({'node-pty': ['package.json'], react: ['package.json']});
   try {
     const result = run(app);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /node_modules must hold only node-pty/);
     assert.match(result.stderr, /react/);
+  } finally { rmSync(base, {recursive: true, force: true}); }
+});
+
+// #789: office page images need pdf.js and its native canvas package beside the bundle (package-release.mjs copies them).
+test('size budget: pdf.js and this platform\'s canvas package may ship beside node-pty', () => {
+  const {base, app} = fixture({'node-pty': ['package.json'], 'pdfjs-dist': ['package.json', 'legacy/build/pdf.mjs'], '@napi-rs': ['canvas/index.js', 'canvas-win32-x64-msvc/skia.win32-x64-msvc.node']});
+  try {
+    const result = run(app);
+    assert.equal(result.status, 0, result.stderr);
+  } finally { rmSync(base, {recursive: true, force: true}); }
+});
+
+test('size budget: another platform\'s canvas package or any other @napi-rs package fails', () => {
+  const {base, app} = fixture({'node-pty': ['package.json'], '@napi-rs': ['canvas/index.js', 'canvas-darwin-arm64/skia.darwin-arm64.node', 'snappy/index.js']});
+  try {
+    const result = run(app);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /another platform's canvas package: @napi-rs\/canvas-darwin-arm64/);
+    assert.match(result.stderr, /node_modules must hold only node-pty.*@napi-rs\/snappy/);
   } finally { rmSync(base, {recursive: true, force: true}); }
 });
 
