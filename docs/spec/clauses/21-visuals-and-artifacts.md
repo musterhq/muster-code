@@ -1089,7 +1089,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/html-preview.test.ts::no network by default; an allowed page gets https only, never http, file:, frames, workers, forms or eval`
 - Environment: Node test runner; the report origin and policy builders, no Electron.
 - Known gaps: The policy is checked as served; Chromium enforcing it is not exercised here.
-- Evidence: UNVERIFIED
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test --test-concurrency=1 tests/html-preview.test.ts; exit 0; 14 passed, 0 failed, 0 skipped; commit 90520d21
 
 <a id="mus-spec-21-771c"></a>
 #### MUS-SPEC-21-771C: A Mermaid block in a reply renders
@@ -1122,7 +1122,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/visualize-771.test.ts::an agent renders its page to a PNG saved with the chat and attaches it to the reply`
 - Environment: Node test runner; the real bridge and page store, a stand-in capture; no Electron.
 - Known gaps: Chromium drawing the page is checked by MUS-SPEC-21-771F with a fake window, and by hand in the app.
-- Evidence: UNVERIFIED
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test --test-concurrency=1 tests/visualize-771.test.ts; exit 0; 4 passed, 0 failed, 0 skipped (red before a0b4f8a9..6a10e759: MUSTER_SKILLS missing); commit 90520d21
 
 <a id="mus-spec-21-771f"></a>
 #### MUS-SPEC-21-771F: The PNG is drawn in a hidden, sandboxed window that always closes
@@ -1133,7 +1133,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/visualize-771.test.ts::the page is drawn to a PNG in a hidden window sized to its content, with network only when granted, and the window always closes`
 - Environment: Node test runner; the report registry and capture logic with a fake window, no Electron.
 - Known gaps: A real offscreen Electron window is not started in this suite.
-- Evidence: UNVERIFIED
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test --test-concurrency=1 tests/visualize-771.test.ts; exit 0; 4 passed, 0 failed, 0 skipped (red before a0b4f8a9..6a10e759: MUSTER_SKILLS missing); commit 90520d21
 
 <a id="mus-spec-21-771g"></a>
 #### MUS-SPEC-21-771G: Another app's visualize plugin is not linked in; Muster's skill is
@@ -1144,7 +1144,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/visualize-771.test.ts::Muster's home leaves out another app's visualize plugin and installs Muster's own visualize skill`
 - Environment: Node test runner on temp folders.
 - Known gaps: None known.
-- Evidence: UNVERIFIED
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test --test-concurrency=1 tests/visualize-771.test.ts; exit 0; 4 passed, 0 failed, 0 skipped (red before a0b4f8a9..6a10e759: MUSTER_SKILLS missing); commit 90520d21
 
 <a id="mus-spec-21-771h"></a>
 #### MUS-SPEC-21-771H: Visuals work with no other app's plugin cache
@@ -1155,4 +1155,4 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/visualize-771.test.ts::with no other app's plugin cache, an agent chat is told to visualize with Muster's own tools`
 - Environment: Node test runner on temp folders; no coding client is started.
 - Known gaps: A live coding client loading the skill is checked by hand.
-- Evidence: UNVERIFIED
+- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test --test-concurrency=1 tests/visualize-771.test.ts; exit 0; 4 passed, 0 failed, 0 skipped (red before a0b4f8a9..6a10e759: MUSTER_SKILLS missing); commit 90520d21
