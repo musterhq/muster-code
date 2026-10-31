@@ -20,6 +20,7 @@ const tmp = (name: string) => fs.mkdtempSync(path.join(os.tmpdir(), `muster-${na
 
 // ---- the sandbox: CSP, served document, frame messages -------------------------------------------------------------------
 
+// Spec: MUS-SPEC-21-771B (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-771b)
 test('no network by default; an allowed page gets https only, never http, file:, frames, workers, forms or eval', () => {
   const local = reportCsp(true);
   assert.doesNotMatch(local, /https?:|file:|\*|unsafe-eval|'self'/);

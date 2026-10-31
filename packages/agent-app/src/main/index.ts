@@ -3,7 +3,8 @@ import {execFile} from 'node:child_process';
 import {downscaleIcon} from './icon-downscale.ts';
 import {BrowserSessionVault} from './browser-session-vault.ts';
 import {PLUGIN_SCHEME,PluginUiRegistry} from './plugin-ui.ts';
-import {REPORT_SCHEME,ReportRegistry,printReport} from './report-origin.ts';
+import {REPORT_SCHEME,ReportRegistry,capturePage,printReport} from './report-origin.ts';
+import {HTML_RENDER_FALLBACK} from '../shared/html-render.ts';
 import {HtmlRenderStore} from './agent-tools/html-render-store.ts';
 import {exportFileName} from '../shared/rich-block.ts';
 import {applyThemeSource,themeFromSettingsResult,windowBackground} from './theme';
@@ -384,11 +385,39 @@ async function main(): Promise<void> {
     }
     return printSession;
   };
+  /** #771: render_html(image) draws the page offscreen on a throwaway session: the report origin only, plus https when the page has network. */
+  const reportCaptureSession = (network: boolean) => {
+    const captureSession = session.fromPartition(network ? 'muster-report-capture-net' : 'muster-report-capture');
+    if (!captureSession.protocol.isProtocolHandled(REPORT_SCHEME)) {
+      captureSession.protocol.handle(REPORT_SCHEME, serveReport);
+      captureSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+      captureSession.setPermissionCheckHandler(() => false);
+      captureSession.webRequest.onBeforeRequest((details, callback) => callback({cancel: !(network ? /^(muster-report|data|blob|https):/ : /^(muster-report|data|blob):/).test(details.url)}));
+    }
+    return captureSession;
+  };
+  const capturePagePng = (page: Parameters<typeof capturePage>[1]) => capturePage(reports, page, {
+    theme: (() => { const appearance = nativeTheme.shouldUseDarkColors ? 'dark' as const : 'light' as const; return {appearance, variables: HTML_RENDER_FALLBACK[appearance]}; })(),
+    createWindow: ({network}) => {
+      const shot = new BrowserWindow({ show: false, width: 720, height: 480, useContentSize: true, webPreferences: { offscreen: true, session: reportCaptureSession(network), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, spellcheck: false } });
+      shot.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      shot.webContents.on('will-navigate', event => event.preventDefault());
+      return {
+        // The inline card pads the page (the layout guide tells agents not to); the picture gets the same margin.
+        loadURL: async url => { await shot.loadURL(url); await shot.webContents.insertCSS('html{padding:16px 20px}'); },
+        // Read by main from the page's own document; the page has no channel to main.
+        contentHeight: async () => Number(await shot.webContents.executeJavaScript('Math.ceil(Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0))', false)),
+        setSize: (width, height) => shot.setContentSize(width, height),
+        capture: async () => (await shot.webContents.capturePage()).toPNG(),
+        destroy: () => { if (!shot.isDestroyed()) shot.destroy(); },
+      };
+    },
+  });
   // RUN-X1: the agent drives this same browser through the muster_browser MCP bridge; each chat's tab shows in the right pane.
   // #html-preview: pages agents show inline (render_html) and workspace .html files opened with preview_open.
   const htmlRenders = new HtmlRenderStore(path.join(dataDir,'html-renders'));
   const browserBridge = new BrowserBridge({dir:path.join(dataDir,'agent-tools'),browser:browserWorkspace,execPath:process.execPath,script:unpackedPath(path.join(__dirname,'browser-mcp.cjs')),
-    renders:htmlRenders,realpath:file=>fs.realpath(file),readFile:async file=>{const stat=await fs.stat(file);if(!stat.isFile())throw new Error('Not a file.');if(stat.size>4_000_000)throw new Error(`This file is ${(stat.size/1_000_000).toFixed(1)} MB; previews take at most 4 MB. Serve it with a dev server and preview its URL instead.`);return fs.readFile(file,'utf8');},
+    renders:htmlRenders,capture:capturePagePng,imagesDir:path.join(dataDir,'html-render-images'),realpath:file=>fs.realpath(file),readFile:async file=>{const stat=await fs.stat(file);if(!stat.isFile())throw new Error('Not a file.');if(stat.size>4_000_000)throw new Error(`This file is ${(stat.size/1_000_000).toFixed(1)} MB; previews take at most 4 MB. Serve it with a dev server and preview its URL instead.`);return fs.readFile(file,'utf8');},
     snapshot:()=>loaded.service.invoke('app.snapshot',undefined),lease:async chatId=>(await loaded.service.invoke('computer.lease',{chatId})).owner,emit:onEvent});
   // #387/#424: started now (retried once), and again on first use if that failed; HTTP routes call it in-process.
   const startBrowserBridge=()=>browserBridge.ensureStarted().then(launcher=>{process.env.MUSTER_BROWSER_MCP_LAUNCHER=launcher;return launcher;});

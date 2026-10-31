@@ -46,6 +46,14 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-789Q](21-visuals-and-artifacts.md#mus-spec-21-789q) | A tarball that fails its checksum while others are still unpacking: the install waits for them, reports the checksum error (never a cleanup error) and leaves no staging folder. | [`a tarball that fails its checksum while other downloads are still running reports the checksum and leaves nothing behind`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
 | [MUS-SPEC-21-789O](21-visuals-and-artifacts.md#mus-spec-21-789o) | docx, exceljs, pptxgenjs, pdf-lib, jszip and pdfjs-dist are pinned to their lockfile versions, every entry is an npm registry tarball with a sha512 integrity, no @types package is included, and every runtime dependency of a pinned package is pinned too. | [`the build pins every office library and its dependencies from the lockfile`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
 | [MUS-SPEC-21-789P](21-visuals-and-artifacts.md#mus-spec-21-789p) | Only this chat's message shows, as a live status line, and it goes away when cleared. | [`A running office tool row shows the first download progress and clears it when done`](../../../packages/agent-app/tests/office-tool-progress-789-dom.tsx) |
+| [MUS-SPEC-21-771A](21-visuals-and-artifacts.md#mus-spec-21-771a) | An agent page is shown in a scripts-only sandboxed frame (no same-origin, no permissions, no referrer) on its own `muster-report://` origin, gets the app theme for its first paint and a theme message on every light or dark switch without reloading. | [`an agent page frame is scripts-only sandboxed and follows a light and dark theme switch without reloading`](../../../packages/agent-app/tests/html-preview-components.tsx) |
+| [MUS-SPEC-21-771B](21-visuals-and-artifacts.md#mus-spec-21-771b) | An agent page has no network unless the person (or a Full access chat) allowed it, and then https only: never http, file:, frames, workers, forms or eval. | [`no network by default; an allowed page gets https only, never http, file:, frames, workers, forms or eval`](../../../packages/agent-app/tests/html-preview.test.ts) |
+| [MUS-SPEC-21-771C](21-visuals-and-artifacts.md#mus-spec-21-771c) | A closed mermaid fence in a reply draws as a diagram (the case MUS-SPEC-21-361A checks). | [`a closed mermaid fence in a reply draws as a diagram; while streaming it stays code`](../../../packages/agent-app/tests/rich-block-components.tsx) |
+| [MUS-SPEC-21-771D](21-visuals-and-artifacts.md#mus-spec-21-771d) | A mermaid fence that does not parse shows the parse error and its source (the case MUS-SPEC-21-361B checks). | [`an invalid mermaid fence shows the error card with the parse error and its source`](../../../packages/agent-app/tests/rich-block-components.tsx) |
+| [MUS-SPEC-21-771E](21-visuals-and-artifacts.md#mus-spec-21-771e) | render_html with image: true still shows the page inline and also saves a real PNG of it with the chat, answers with its path and the Markdown to attach it, and that Markdown is a reply image the chat can load. | [`an agent renders its page to a PNG saved with the chat and attaches it to the reply`](../../../packages/agent-app/tests/visualize-771.test.ts) |
+| [MUS-SPEC-21-771F](21-visuals-and-artifacts.md#mus-spec-21-771f) | The picture is drawn in a hidden window from the page's own sandboxed origin with the theme, sized to the page's height (bounded), with network only when the page has it, and the window is closed after success, failure or a timeout. | [`the page is drawn to a PNG in a hidden window sized to its content, with network only when granted, and the window always closes`](../../../packages/agent-app/tests/visualize-771.test.ts) |
+| [MUS-SPEC-21-771G](21-visuals-and-artifacts.md#mus-spec-21-771g) | By default Muster's coding-client home does not link another app's visualize plugin (in any marketplace) or visualize skill, keeps the person's other plugins and skills, and installs Muster's own visualize skill; choosing an installed version in Skills & plugins links only that one and leaves Muster's skill out, Off loads neither, and choosing Muster's again copies its skill back. | [`Muster's home leaves out another app's visualize plugin and installs Muster's own visualize skill`](../../../packages/agent-app/tests/visualize-771.test.ts) |
+| [MUS-SPEC-21-771H](21-visuals-and-artifacts.md#mus-spec-21-771h) | With no other app's plugin cache, an agent chat gets Muster's visualize skill and turn notes that name only Muster's own visual tools (render_html with its image option, diagram and chart blocks), never another app's visualize plugin. | [`with no other app's plugin cache, an agent chat is told to visualize with Muster's own tools`](../../../packages/agent-app/tests/visualize-771.test.ts) |
 | [MUS-SPEC-21-788A](21-visuals-and-artifacts.md#mus-spec-21-788a) | Right-click on the gallery hero, a gallery thumbnail, a gallery file link, a tool-row thumbnail, an inline reply image and the open image viewer each asks for the image menu, with that image's chat and path. | [`Right-click on every chat image surface asks for the image menu with its path`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
 | [MUS-SPEC-21-788B](21-visuals-and-artifacts.md#mus-spec-21-788b) | Cmd+C in the open image viewer asks the app to copy the shown image to the clipboard. | [`Cmd+C in the image viewer copies the image`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
 | [MUS-SPEC-21-788C](21-visuals-and-artifacts.md#mus-spec-21-788c) | The ContextMenu key and Shift+F10 on a focused image ask for the image menu, placed at the image. | [`ContextMenu key and Shift+F10 open the image menu on a focused image`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
@@ -1057,4 +1065,94 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/office-tool-progress-789-dom.tsx::A running office tool row shows the first download progress and clears it when done`
 - Environment: DOM suite (linkedom) with a stubbed bridge.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### Muster's visualize plugin (#771)
+
+<a id="mus-spec-21-771a"></a>
+#### MUS-SPEC-21-771A: An agent page opens in a sandboxed frame that follows the theme
+
+- Precondition: Muster Agent desktop shell; an agent called render_html for a page; the app is in dark theme.
+- Action: Show the page frame, load it, switch the app to light theme.
+- Expected result: The frame's sandbox is exactly "allow-scripts" (never allow-same-origin), with no referrer and no permissions; its src is a `muster-report://` URL carrying the `#muster-theme=` fragment with the dark appearance and the theme variables. On load it gets one theme message; switching to light sends a light theme message and the frame src is unchanged (no reload).
+- Test: `packages/agent-app/tests/html-preview-components.tsx::an agent page frame is scripts-only sandboxed and follows a light and dark theme switch without reloading`
+- Environment: DOM suite (linkedom) with a stubbed bridge.
+- Known gaps: linkedom does not run the page, so the page applying the variables is checked by the served-document tests in html-preview.test.ts.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-771b"></a>
+#### MUS-SPEC-21-771B: An agent page has no network unless allowed
+
+- Precondition: A page registered for an agent page with and without a network grant.
+- Action: Build the content security policy for each case and serve the page.
+- Expected result: Without a grant connect-src, script, style, image, font and media sources allow no remote origin. With a grant they add https: only; http:, file:, custom schemes, frames, workers, forms and eval stay blocked.
+- Test: `packages/agent-app/tests/html-preview.test.ts::no network by default; an allowed page gets https only, never http, file:, frames, workers, forms or eval`
+- Environment: Node test runner; the report origin and policy builders, no Electron.
+- Known gaps: The policy is checked as served; Chromium enforcing it is not exercised here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-771c"></a>
+#### MUS-SPEC-21-771C: A Mermaid block in a reply renders
+
+- Precondition: An assistant reply holds a mermaid fence.
+- Action: Show the reply while the fence is open, then closed.
+- Expected result: The open fence stays code; once closed it draws as a diagram block. Same assertions as MUS-SPEC-21-361A.
+- Test: `packages/agent-app/tests/rich-block-components.tsx::a closed mermaid fence in a reply draws as a diagram; while streaming it stays code`
+- Environment: DOM suite (linkedom) with a stubbed bridge; the Mermaid renderer is a stub that returns an SVG.
+- Known gaps: The real mermaid library is not loaded in this suite.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-771d"></a>
+#### MUS-SPEC-21-771D: Invalid Mermaid shows its source and the error
+
+- Precondition: An assistant reply holds a closed mermaid fence that does not parse.
+- Action: Show the reply, then click Show source.
+- Expected result: The error card shows the parse error, and Show source reveals the original source. Same assertions as MUS-SPEC-21-361B.
+- Test: `packages/agent-app/tests/rich-block-components.tsx::an invalid mermaid fence shows the error card with the parse error and its source`
+- Environment: DOM suite (linkedom) with a stubbed bridge; the Mermaid renderer is a stub that throws the parse error.
+- Known gaps: The parse error comes from the stub, not the real mermaid parser.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-771e"></a>
+#### MUS-SPEC-21-771E: The agent renders its page to a PNG and attaches it to the reply
+
+- Precondition: A Workspace-mode agent chat; the bridge's capture is a stand-in that draws a real 640x400 PNG with @napi-rs/canvas.
+- Action: The agent calls render_html with a title, a page and image: true; then a call with image: true where capture fails; then one on a bridge with no capture.
+- Expected result: The page is stored and shown inline as before. A PNG file is saved under the chat's own images folder (not the project folder), readable as a 640x400 chat image; the answer names its path and the `![title](path)` Markdown to attach it, and that Markdown reads as a local reply image (so the reply and the turn's gallery show it). A failed capture still shows the page and says the picture could not be made; without capture the answer says pictures are not available here. The capture got the stored page with its network grant.
+- Test: `packages/agent-app/tests/visualize-771.test.ts::an agent renders its page to a PNG saved with the chat and attaches it to the reply`
+- Environment: Node test runner; the real bridge and page store, a stand-in capture; no Electron.
+- Known gaps: Chromium drawing the page is checked by MUS-SPEC-21-771F with a fake window, and by hand in the app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-771f"></a>
+#### MUS-SPEC-21-771F: The PNG is drawn in a hidden, sandboxed window that always closes
+
+- Precondition: A registered agent page, once without and once with a network grant; a fake hidden window that records what it is asked to do.
+- Action: Capture the page; then a window whose capture throws; then one whose load never finishes.
+- Expected result: The window is created with network matching the grant, loads the page's `muster-report://` URL with the `#muster-theme=` fragment, is resized to the page's measured height (clamped to 4000 px), captures and is destroyed. A failure and a timeout reject with a plain message and still destroy the window. The served page is themed and scripts-only, with the CSP its grant allows.
+- Test: `packages/agent-app/tests/visualize-771.test.ts::the page is drawn to a PNG in a hidden window sized to its content, with network only when granted, and the window always closes`
+- Environment: Node test runner; the report registry and capture logic with a fake window, no Electron.
+- Known gaps: A real offscreen Electron window is not started in this suite.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-771g"></a>
+#### MUS-SPEC-21-771G: Another app's visualize plugin is not linked in; Muster's skill is
+
+- Precondition: A person's coding-client home with another app's visualize plugin in two marketplaces, a visualize skill, a plugin of their own and a skill of their own; Muster's home previously linked the whole plugins folder.
+- Action: Prepare Muster's home twice with no choice saved; then prepare a chat's home with Visualize set to the installed plugin in one marketplace, then Off, then Muster's.
+- Expected result: By default the visualize plugin folders and the visualize skill are not linked in; the person's own plugin and skill are; Muster's visualize skill is a real copy of the shipped one; the person's home is untouched. With the installed plugin chosen, only that plugin loads (the other marketplace's plugin and the visualize skill stay out, and Muster's skill is removed). With Off neither loads and the person's own skill still does. With Muster's chosen again its skill is copied back and the installed plugin stays out.
+- Test: `packages/agent-app/tests/visualize-771.test.ts::Muster's home leaves out another app's visualize plugin and installs Muster's own visualize skill`
+- Environment: Node test runner on temp folders.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-771h"></a>
+#### MUS-SPEC-21-771H: Visuals work with no other app's plugin cache
+
+- Precondition: HOME is an empty folder (no other app's plugin cache).
+- Action: Prepare Muster's home from the empty source and build the turn options of an agent chat with and without Muster's computer use.
+- Expected result: Muster's home holds the visualize skill, which names render_html, its image option, mermaid and chart blocks and names no other product. The notes name render_html and its image option and never another app's visualize plugin; the render_html tool takes image.
+- Test: `packages/agent-app/tests/visualize-771.test.ts::with no other app's plugin cache, an agent chat is told to visualize with Muster's own tools`
+- Environment: Node test runner on temp folders; no coding client is started.
+- Known gaps: A live coding client loading the skill is checked by hand.
 - Evidence: UNVERIFIED

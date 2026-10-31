@@ -26,9 +26,12 @@ export const PLUGIN_CAPABILITIES: readonly CapabilitySpec[] = [
   {id: 'spreadsheets', displayName: 'Spreadsheets', plugins: ['spreadsheets'], skills: ['spreadsheets', 'xlsx', 'excel', 'spreadsheet'], muster: 'skill'},
   {id: 'presentations', displayName: 'Presentations', plugins: ['presentations'], skills: ['presentations', 'pptx', 'powerpoint', 'slides', 'presentation'], muster: 'skill'},
   {id: 'pdf', displayName: 'PDF', plugins: ['pdf'], skills: ['pdf'], muster: 'skill'},
-  {id: 'visualize', displayName: 'Visualize', plugins: ['visualize'], skills: [], muster: 'visualize'},
+  {id: 'visualize', displayName: 'Visualize', plugins: ['visualize'], skills: ['visualize'], muster: 'visualize'},
   {id: 'computer-use', displayName: 'Computer use', plugins: ['computer-use', 'unified-computer-use'], skills: [], muster: 'computer'},
 ];
+/** #771: Muster's skills a chat's home gets when Muster's version is chosen: the office ones, and visualize (its skill
+ *  goes with the render_html tool). Computer use is a server, not a skill. */
+export const MUSTER_SKILL_NAMES: readonly PluginCapabilityId[] = PLUGIN_CAPABILITIES.filter(spec => spec.muster !== 'computer').map(spec => spec.id);
 const CAPABILITY_IDS = new Set<string>(PLUGIN_CAPABILITIES.map(spec => spec.id));
 export const isPluginCapability = (value: unknown): value is PluginCapabilityId => typeof value === 'string' && CAPABILITY_IDS.has(value);
 
@@ -142,7 +145,7 @@ export function planPluginProviders(sourceHome: string, choices: PluginChoices, 
       if (!active && stored?.installedId) { missing = true; active = muster; }
     }
     for (const entry of installed) if (entry.id !== active?.id) blocked.add(entry.path);
-    if (active?.origin === 'muster' && spec.muster === 'skill') copy.add(spec.id);
+    if (active?.origin === 'muster' && spec.muster !== 'computer') copy.add(spec.id);
     if (active?.origin === 'muster' && spec.muster === 'computer') musterComputer = true;
     capabilities.push({id: spec.id, displayName: spec.displayName, muster, installed, choice, ...(stored?.installedId && choice === 'installed' ? {installedId: stored.installedId} : {}), active, ...(missing ? {missing} : {})});
   }

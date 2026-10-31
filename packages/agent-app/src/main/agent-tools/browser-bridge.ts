@@ -9,7 +9,7 @@ import {launcherFile, nodeLauncherScript} from '../../runtime/launcher-script.ts
 import {runBrowserTool, type AgentBrowserHost, type AgentPage} from './browser-actions.ts';
 import {BROWSER_TOOL_NAMES, PREVIEW_TOOL_NAMES, textResult, type McpToolResult} from './browser-tools.ts';
 import type {HtmlRenderStore} from './html-render-store.ts';
-import {htmlRenderRef} from '../../shared/html-render.ts';
+import {htmlRenderRef, type HtmlRenderRecord} from '../../shared/html-render.ts';
 import {previewFilePath, previewUrl, describeLoadError} from '../../shared/preview.ts';
 
 /** What the bridge needs from the browser workspace (BrowserWorkspaceController satisfies it). */
@@ -34,6 +34,10 @@ export interface BridgeOptions {
   emit(event: AgentEvent): void;
   /** render_html pages (#html-preview); without it the tool says it is unavailable. */
   renders?: HtmlRenderStore;
+  /** #771: draws a stored page to a PNG (main: a hidden, sandboxed window); without it render_html(image) says pictures are not available. */
+  capture?(page: HtmlRenderRecord): Promise<Buffer>;
+  /** Where those pictures are saved, one folder per chat (never the project folder). */
+  imagesDir?: string;
   /** Reads an .html file for preview_open(file): absolute, already checked to be inside the chat's folder. */
   readFile?(path: string): Promise<string>;
   /** Resolves symlinks, so a link inside the folder can never point a preview outside it. */
@@ -146,7 +150,7 @@ export class BrowserBridge {
     const chat = snapshot.chats.find(item => item.id === chatId);
     if (!chat) return textResult('This chat no longer exists in Muster.', true);
     // CUA-03/09: the user holding control revokes the agent's input lease.
-    if (tool === 'render_html') return this.renderHtml(chat, args);
+    if (tool === 'render_html') return await this.renderHtml(chat, args);
     if (await this.options.lease(chatId) === 'user') return textResult('The user has taken control of the browser. Stop using browser tools and wait until they hand control back.', true);
     const owner = agentBrowserOwner(chatId, session), profileId = browserScopeProfile(chat), browser = this.options.browser;
     if (tool === 'preview_close') {
@@ -211,16 +215,40 @@ export class BrowserBridge {
   }
   /** render_html: stores the page and answers with its reference; the transcript card draws it from the tool row. A Full
    *  access chat that asked for network gets it up front (Full access never prompts); otherwise the person decides on the card. */
-  private renderHtml(chat: Snapshot['chats'][number], args: unknown): McpToolResult {
+  private async renderHtml(chat: Snapshot['chats'][number], args: unknown): Promise<McpToolResult> {
     const store = this.options.renders;
     if (!store) return textResult('Inline pages are not available in this Muster window.', true);
     const input = args && typeof args === 'object' ? args as Record<string, unknown> : {};
+    let page: HtmlRenderRecord;
     try {
       const full = chat.mode === 'agent' && chat.permissionMode === 'full';
-      const page = store.create({chatId: chat.id, title: input.title, html: input.html, network: input.network, allowNetwork: full});
-      const network = !page.networkRequested ? 'It has no network access.' : page.networkAllowed ? 'Network access (https only) is allowed for it.' : 'It asked for network access; the user is asked on the card and it shows without remote content until they allow it.';
-      return textResult(`Shown to the user inline as “${page.title}” (${htmlRenderRef(page.id)}). ${network} Don't mention or describe the page; reply with only what it doesn't already say.`);
+      page = store.create({chatId: chat.id, title: input.title, html: input.html, network: input.network, allowNetwork: full});
     } catch (error) { return textResult(error instanceof Error ? error.message : String(error), true); }
+    const network = !page.networkRequested ? 'It has no network access.' : page.networkAllowed ? 'Network access (https only) is allowed for it.' : 'It asked for network access; the user is asked on the card and it shows without remote content until they allow it.';
+    const shown = `Shown to the user inline as “${page.title}” (${htmlRenderRef(page.id)}). ${network}`;
+    const reply = 'Don\'t mention or describe the page; reply with only what it doesn\'t already say.';
+    if (input.image !== true) return textResult(`${shown} ${reply}`);
+    return textResult(`${shown} ${await this.pagePicture(page)} ${reply}`);
+  }
+  /** #771: a PNG of a stored page, saved with the chat; the sentence the agent gets about it (never an error: the page is shown either way). */
+  private async pagePicture(page: HtmlRenderRecord): Promise<string> {
+    const {capture, imagesDir} = this.options;
+    if (!capture || !imagesDir) return 'Pictures of pages are not available in this Muster window, so no PNG was saved.';
+    try {
+      const png = await capture(page);
+      if (!Buffer.isBuffer(png) || png.length < 24 || png.readUInt32BE(0) !== 0x89504e47 || png.toString('latin1', 12, 16) !== 'IHDR') throw new Error('the picture was not a PNG');
+      const width = png.readUInt32BE(16), height = png.readUInt32BE(20);
+      const dir = path.join(imagesDir, page.chatId);
+      const name = `${page.title.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60).toLowerCase() || 'page'}-${page.id.slice(0, 8)}.png`;
+      fs.mkdirSync(dir, {recursive: true, mode: 0o700});
+      const file = path.join(dir, name);
+      fs.writeFileSync(file, png, {mode: 0o600});
+      // Encoded, so a data folder with spaces or brackets (Application Support) stays one Markdown image.
+      const alt = page.title.replace(/[[\]\\]/g, '');
+      return `Saved a PNG of it at ${file} (${width}×${height}). To attach it to your reply, put this Markdown where the picture belongs: ![${alt}](${encodeURI(file).replace(/[()]/g, c => c === '(' ? '%28' : '%29')})`;
+    } catch (error) {
+      return `Muster could not make a picture of it: ${error instanceof Error ? error.message : String(error)}.`;
+    }
   }
   /** preview_open(file): an .html file inside the chat's folder, shown as a sandboxed page (no network) in the right pane. */
   private async previewFile(chat: Snapshot['chats'][number], snapshot: Snapshot, file: string): Promise<McpToolResult> {
