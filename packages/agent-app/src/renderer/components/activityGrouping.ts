@@ -1,5 +1,6 @@
 import type {TimelineItem} from '../../shared/protocol';
 import {APPROVAL_WAIT_LABEL,awaitingApproval,classifyTool,executionDenied} from './toolPresentation.ts';
+import {htmlRenderIdOf,isHtmlRenderTool} from '../../shared/html-render.ts';
 import {agentDisplayName,agentDisplayNames} from '../agentIdentity.ts';
 import {projectSubagentActivity,subagentLifecycle,subagentState,type SubagentActivity,type SubagentLifecycleEvent} from '../subagentActivity.ts';
 
@@ -7,8 +8,12 @@ export interface ActivityEntry {kind:'activity';id:string;items:TimelineItem[];
   /** Sub-agent lifecycle already shown by earlier groups, so a later group does not repeat it (#582). */
   prior?:ReadonlyMap<string,SubagentLifecycleEvent>;
   /** The chat's sub-agents in report order, on groups that report one: every group names and numbers them alike (#582). */
-  agents?:readonly SubagentActivity[]}
+  agents?:readonly SubagentActivity[];
+  /** #771: a page the agent showed (render_html). Its own row, never folded with the tool activity around it. */
+  visual?:true}
 export type TranscriptEntry = TimelineItem | ActivityEntry;
+/** #771: a finished render_html row that drew a page: the reader sees it where it was drawn, not inside a folded group. */
+export const showsVisual=(item:TimelineItem)=>item.kind==='tool'&&item.status==='completed'&&isHtmlRenderTool(item.data)&&!!htmlRenderIdOf(item.data);
 const isCollab=(item:TimelineItem)=>item.kind==='tool'&&item.data?.type==='collabAgentToolCall';
 // Timeline items are immutable: parse a report's lifecycle once, not on every streamed update.
 const lifecycles=new WeakMap<TimelineItem,ReturnType<typeof subagentLifecycle>>();
@@ -55,8 +60,8 @@ export function groupActivity(items:TimelineItem[]):TranscriptEntry[] {
     const previous=rows.at(-1);
     if(item.kind==='tool') {
       let row:ActivityEntry;
-      if(previous?.kind==='activity'){row=previous;row.items.push(item);}
-      else {row=context.open({kind:'activity',id:item.id,items:[item]});rows.push(row);}
+      if(previous?.kind==='activity'&&!previous.visual&&!showsVisual(item)){row=previous;row.items.push(item);}
+      else {row=context.open({kind:'activity',id:item.id,items:[item],...(showsVisual(item)?{visual:true as const}:{})});rows.push(row);}
       context.see(row,item);
     } else rows.push(item);
   }

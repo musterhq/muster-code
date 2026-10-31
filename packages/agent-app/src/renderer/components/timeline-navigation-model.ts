@@ -1,4 +1,4 @@
-import {subagentContext,type SubagentRoster,type TranscriptEntry} from './activityGrouping.ts';
+import {showsVisual,subagentContext,type SubagentRoster,type TranscriptEntry} from './activityGrouping.ts';
 import type {TimelineItem} from '../../shared/protocol';
 
 export interface TurnSummary {id:string;rowIndex:number;prompt:string;response:string}
@@ -63,11 +63,11 @@ export function createTimelineProjection(){
       // Memory suggestions live in the Memory inbox, never inline in the transcript.
       if(item.kind==='notice'&&item.data?.kind==='memory-offer')continue;
       const last=rows.at(-1);
-      if(item.kind==='tool'&&last?.kind==='activity'){last.items.push(item);subagents.see(last,item);continue;}
+      if(item.kind==='tool'&&last?.kind==='activity'&&!last.visual&&!showsVisual(item)){last.items.push(item);subagents.see(last,item);continue;}
       const rowIndex=rows.length;
       sameRows&&=prior.rows[rowIndex]?.id===item.id;
       if(item.kind==='tool'){
-        const row=subagents.open({kind:'activity',id:item.id,items:[item]});
+        const row=subagents.open({kind:'activity',id:item.id,items:[item],...(showsVisual(item)?{visual:true as const}:{})});
         rows.push(row);subagents.see(row,item);
       } else rows.push(item);
       if(item.kind==='user'||item.kind==='assistant'){
