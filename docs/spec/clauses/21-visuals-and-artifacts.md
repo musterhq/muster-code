@@ -54,6 +54,9 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-771F](21-visuals-and-artifacts.md#mus-spec-21-771f) | The picture is drawn in a hidden window from the page's own sandboxed origin with the theme, sized to the page's height (bounded), with network only when the page has it, and the window is closed after success, failure or a timeout. | [`the page is drawn to a PNG in a hidden window sized to its content, with network only when granted, and the window always closes`](../../../packages/agent-app/tests/visualize-771.test.ts) |
 | [MUS-SPEC-21-771G](21-visuals-and-artifacts.md#mus-spec-21-771g) | By default Muster's coding-client home does not link another app's visualize plugin (in any marketplace) or visualize skill, keeps the person's other plugins and skills, and installs Muster's own visualize skill; choosing an installed version in Skills & plugins links only that one and leaves Muster's skill out, Off loads neither, and choosing Muster's again copies its skill back. | [`Muster's home leaves out another app's visualize plugin and installs Muster's own visualize skill`](../../../packages/agent-app/tests/visualize-771.test.ts) |
 | [MUS-SPEC-21-771H](21-visuals-and-artifacts.md#mus-spec-21-771h) | With no other app's plugin cache, an agent chat gets Muster's visualize skill and turn notes that name only Muster's own visual tools (render_html with its image option, diagram and chart blocks), never another app's visualize plugin. | [`with no other app's plugin cache, an agent chat is told to visualize with Muster's own tools`](../../../packages/agent-app/tests/visualize-771.test.ts) |
+| [MUS-SPEC-21-771I](21-visuals-and-artifacts.md#mus-spec-21-771i) | A page the agent showed with render_html is its own row between the tool groups before and after it, in the saved and the live chat view. | [`a shown page is its own row between the tool groups before and after it`](../../../packages/agent-app/tests/visual-rows-stay-open-771.test.ts) |
+| [MUS-SPEC-21-771J](21-visuals-and-artifacts.md#mus-spec-21-771j) | A finished turn folds its tool activity but never the page it showed. | [`a finished turn folds its tool activity but never the page it showed`](../../../packages/agent-app/tests/visual-rows-stay-open-771.test.ts) |
+| [MUS-SPEC-21-771K](21-visuals-and-artifacts.md#mus-spec-21-771k) | A render_html that failed or drew nothing folds with its tools like any tool row. | [`a page that failed or is still drawing folds with its tools like any tool row`](../../../packages/agent-app/tests/visual-rows-stay-open-771.test.ts) |
 | [MUS-SPEC-21-788A](21-visuals-and-artifacts.md#mus-spec-21-788a) | Right-click on the gallery hero, a gallery thumbnail, a gallery file link, a tool-row thumbnail, an inline reply image and the open image viewer each asks for the image menu, with that image's chat and path. | [`Right-click on every chat image surface asks for the image menu with its path`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
 | [MUS-SPEC-21-788B](21-visuals-and-artifacts.md#mus-spec-21-788b) | Cmd+C in the open image viewer asks the app to copy the shown image to the clipboard. | [`Cmd+C in the image viewer copies the image`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
 | [MUS-SPEC-21-788C](21-visuals-and-artifacts.md#mus-spec-21-788c) | The ContextMenu key and Shift+F10 on a focused image ask for the image menu, placed at the image. | [`ContextMenu key and Shift+F10 open the image menu on a focused image`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
@@ -1155,4 +1158,37 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/visualize-771.test.ts::with no other app's plugin cache, an agent chat is told to visualize with Muster's own tools`
 - Environment: Node test runner on temp folders; no coding client is started.
 - Known gaps: A live coding client loading the skill is checked by hand.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-771i"></a>
+#### MUS-SPEC-21-771I: A shown page is its own row
+
+- Precondition: A chat turn with two commands, a completed render_html that drew a page, another command and a reply, then a second turn.
+- Action: Build the transcript rows, once with the saved-history grouping and once with the live chat view's projection.
+- Expected result: Both give the same rows: the two commands in one tool group, the page as its own row, the last command in a new tool group, then the reply and the second turn.
+- Test: `packages/agent-app/tests/visual-rows-stay-open-771.test.ts::a shown page is its own row between the tool groups before and after it`
+- Environment: Node test runner on the renderer's transcript model; no window is drawn.
+- Known gaps: The drawn chat (the card under its tool row) is checked by hand in the app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-771j"></a>
+#### MUS-SPEC-21-771J: A shown page stays visible when its turn folds
+
+- Precondition: The same turn, finished and not the latest.
+- Action: Ask which of its rows a finished, folded turn hides.
+- Expected result: Both tool groups fold with the turn; the page row and the reply never fold.
+- Test: `packages/agent-app/tests/visual-rows-stay-open-771.test.ts::a finished turn folds its tool activity but never the page it showed`
+- Environment: Node test runner on the renderer's transcript model; no window is drawn.
+- Known gaps: The drawn chat (the card under its tool row) is checked by hand in the app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-771k"></a>
+#### MUS-SPEC-21-771K: A page that failed folds with its tools
+
+- Precondition: A turn whose render_html failed between two commands.
+- Action: Build the transcript rows.
+- Expected result: The failed render_html stays inside the one tool group with the commands; nothing is drawn, so nothing is kept open.
+- Test: `packages/agent-app/tests/visual-rows-stay-open-771.test.ts::a page that failed or is still drawing folds with its tools like any tool row`
+- Environment: Node test runner on the renderer's transcript model; no window is drawn.
+- Known gaps: The drawn chat (the card under its tool row) is checked by hand in the app.
 - Evidence: UNVERIFIED

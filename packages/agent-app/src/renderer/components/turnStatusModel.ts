@@ -42,8 +42,8 @@ export function describeTurns(rows:readonly TranscriptEntry[],running:boolean):{
   finish(true);
   return {turns,rowTurn,last:current?.id};
 }
-/** Rows a completed, folded turn hides: its tool activity and reasoning. Prose and approvals stay. */
-export const foldable=(row:TranscriptEntry)=>row.kind==='activity'||row.kind==='reasoning';
+/** Rows a completed, folded turn hides: its tool activity and reasoning. Prose, approvals and pages the agent showed (#771) stay. */
+export const foldable=(row:TranscriptEntry)=>row.kind==='activity'?!row.visual:row.kind==='reasoning';
 
 export interface TailStatus {label:string;kind:'thinking'|'tool'|'responding'|'approval'|'retry';since?:string;retryAt?:number}
 /** Live tail: what the agent is doing right now, and since when (the current turn's user message). */
