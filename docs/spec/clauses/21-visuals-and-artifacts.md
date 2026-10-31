@@ -52,7 +52,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-771D](21-visuals-and-artifacts.md#mus-spec-21-771d) | A mermaid fence that does not parse shows the parse error and its source (the case MUS-SPEC-21-361B checks). | [`an invalid mermaid fence shows the error card with the parse error and its source`](../../../packages/agent-app/tests/rich-block-components.tsx) |
 | [MUS-SPEC-21-771E](21-visuals-and-artifacts.md#mus-spec-21-771e) | render_html with image: true still shows the page inline and also saves a real PNG of it with the chat, answers with its path and the Markdown to attach it, and that Markdown is a reply image the chat can load. | [`an agent renders its page to a PNG saved with the chat and attaches it to the reply`](../../../packages/agent-app/tests/visualize-771.test.ts) |
 | [MUS-SPEC-21-771F](21-visuals-and-artifacts.md#mus-spec-21-771f) | The picture is drawn in a hidden window from the page's own sandboxed origin with the theme, sized to the page's height (bounded), with network only when the page has it, and the window is closed after success, failure or a timeout. | [`the page is drawn to a PNG in a hidden window sized to its content, with network only when granted, and the window always closes`](../../../packages/agent-app/tests/visualize-771.test.ts) |
-| [MUS-SPEC-21-771G](21-visuals-and-artifacts.md#mus-spec-21-771g) | Muster's coding-client home does not link another app's visualize plugin (in any marketplace) or visualize skill, keeps the person's other plugins and skills, and installs Muster's own visualize skill. | [`Muster's home leaves out another app's visualize plugin and installs Muster's own visualize skill`](../../../packages/agent-app/tests/visualize-771.test.ts) |
+| [MUS-SPEC-21-771G](21-visuals-and-artifacts.md#mus-spec-21-771g) | By default Muster's coding-client home does not link another app's visualize plugin (in any marketplace) or visualize skill, keeps the person's other plugins and skills, and installs Muster's own visualize skill; choosing an installed version in Skills & plugins links only that one and leaves Muster's skill out, Off loads neither, and choosing Muster's again copies its skill back. | [`Muster's home leaves out another app's visualize plugin and installs Muster's own visualize skill`](../../../packages/agent-app/tests/visualize-771.test.ts) |
 | [MUS-SPEC-21-771H](21-visuals-and-artifacts.md#mus-spec-21-771h) | With no other app's plugin cache, an agent chat gets Muster's visualize skill and turn notes that name only Muster's own visual tools (render_html with its image option, diagram and chart blocks), never another app's visualize plugin. | [`with no other app's plugin cache, an agent chat is told to visualize with Muster's own tools`](../../../packages/agent-app/tests/visualize-771.test.ts) |
 | [MUS-SPEC-21-788A](21-visuals-and-artifacts.md#mus-spec-21-788a) | Right-click on the gallery hero, a gallery thumbnail, a gallery file link, a tool-row thumbnail, an inline reply image and the open image viewer each asks for the image menu, with that image's chat and path. | [`Right-click on every chat image surface asks for the image menu with its path`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
 | [MUS-SPEC-21-788B](21-visuals-and-artifacts.md#mus-spec-21-788b) | Cmd+C in the open image viewer asks the app to copy the shown image to the clipboard. | [`Cmd+C in the image viewer copies the image`](../../../packages/agent-app/tests/image-context-menu-788-dom.tsx) |
@@ -1089,7 +1089,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/html-preview.test.ts::no network by default; an allowed page gets https only, never http, file:, frames, workers, forms or eval`
 - Environment: Node test runner; the report origin and policy builders, no Electron.
 - Known gaps: The policy is checked as served; Chromium enforcing it is not exercised here.
-- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test --test-concurrency=1 tests/html-preview.test.ts; exit 0; 14 passed, 0 failed, 0 skipped; commit 90520d21
+- Evidence: UNVERIFIED
 
 <a id="mus-spec-21-771c"></a>
 #### MUS-SPEC-21-771C: A Mermaid block in a reply renders
@@ -1122,7 +1122,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/visualize-771.test.ts::an agent renders its page to a PNG saved with the chat and attaches it to the reply`
 - Environment: Node test runner; the real bridge and page store, a stand-in capture; no Electron.
 - Known gaps: Chromium drawing the page is checked by MUS-SPEC-21-771F with a fake window, and by hand in the app.
-- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test --test-concurrency=1 tests/visualize-771.test.ts; exit 0; 4 passed, 0 failed, 0 skipped (red before a0b4f8a9..6a10e759: MUSTER_SKILLS missing); commit 90520d21
+- Evidence: UNVERIFIED
 
 <a id="mus-spec-21-771f"></a>
 #### MUS-SPEC-21-771F: The PNG is drawn in a hidden, sandboxed window that always closes
@@ -1133,18 +1133,18 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/visualize-771.test.ts::the page is drawn to a PNG in a hidden window sized to its content, with network only when granted, and the window always closes`
 - Environment: Node test runner; the report registry and capture logic with a fake window, no Electron.
 - Known gaps: A real offscreen Electron window is not started in this suite.
-- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test --test-concurrency=1 tests/visualize-771.test.ts; exit 0; 4 passed, 0 failed, 0 skipped (red before a0b4f8a9..6a10e759: MUSTER_SKILLS missing); commit 90520d21
+- Evidence: UNVERIFIED
 
 <a id="mus-spec-21-771g"></a>
 #### MUS-SPEC-21-771G: Another app's visualize plugin is not linked in; Muster's skill is
 
 - Precondition: A person's coding-client home with another app's visualize plugin in two marketplaces, a visualize skill, a plugin of their own and a skill of their own; Muster's home previously linked the whole plugins folder.
-- Action: Prepare Muster's home twice.
-- Expected result: The visualize plugin folders and the visualize skill are not linked in; the person's own plugin and skill are; Muster's visualize skill is a real copy of the shipped one; the person's home is untouched.
+- Action: Prepare Muster's home twice with no choice saved; then prepare a chat's home with Visualize set to the installed plugin in one marketplace, then Off, then Muster's.
+- Expected result: By default the visualize plugin folders and the visualize skill are not linked in; the person's own plugin and skill are; Muster's visualize skill is a real copy of the shipped one; the person's home is untouched. With the installed plugin chosen, only that plugin loads (the other marketplace's plugin and the visualize skill stay out, and Muster's skill is removed). With Off neither loads and the person's own skill still does. With Muster's chosen again its skill is copied back and the installed plugin stays out.
 - Test: `packages/agent-app/tests/visualize-771.test.ts::Muster's home leaves out another app's visualize plugin and installs Muster's own visualize skill`
 - Environment: Node test runner on temp folders.
 - Known gaps: None known.
-- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test --test-concurrency=1 tests/visualize-771.test.ts; exit 0; 4 passed, 0 failed, 0 skipped (red before a0b4f8a9..6a10e759: MUSTER_SKILLS missing); commit 90520d21
+- Evidence: UNVERIFIED
 
 <a id="mus-spec-21-771h"></a>
 #### MUS-SPEC-21-771H: Visuals work with no other app's plugin cache
@@ -1155,4 +1155,4 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/visualize-771.test.ts::with no other app's plugin cache, an agent chat is told to visualize with Muster's own tools`
 - Environment: Node test runner on temp folders; no coding client is started.
 - Known gaps: A live coding client loading the skill is checked by hand.
-- Evidence: local; cd packages/agent-app && node --experimental-transform-types --test --test-concurrency=1 tests/visualize-771.test.ts; exit 0; 4 passed, 0 failed, 0 skipped (red before a0b4f8a9..6a10e759: MUSTER_SKILLS missing); commit 90520d21
+- Evidence: UNVERIFIED
