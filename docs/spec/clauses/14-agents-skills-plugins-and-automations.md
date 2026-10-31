@@ -69,6 +69,12 @@ Boundaries:
 | [MUS-SPEC-14-772B](14-agents-skills-plugins-and-automations.md#mus-spec-14-772b) | The person's own skills and plugins stay linked; another app's docx skill and documents/pdf plugins are left out; Muster's four skills are installed; the person's home is untouched. | [`Muster's home links the person's own skills and plugins but not another app's office ones, and installs Muster's`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
 | [MUS-SPEC-14-772C](14-agents-skills-plugins-and-automations.md#mus-spec-14-772c) | Only agent chats get muster_office and a note naming Muster's four skill files; the Messages route drops both and router chats keep their route. | [`agent chats get the muster_office server and a note naming Muster's skills; router chats are not forced off their route`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
 | [MUS-SPEC-14-772D](14-agents-skills-plugins-and-automations.md#mus-spec-14-772d) | With office_setup's command, ES module imports and require() of the office libraries work from any folder; a project's own copy still wins. | [`the office libraries resolve from an agent script's own working folder, by import and by require`](../../../packages/agent-app/tests/office-skills-772.test.ts) |
+| [MUS-SPEC-14-776A](14-agents-skills-plugins-and-automations.md#mus-spec-14-776a) | Every plugin Muster ships lists Muster's version next to installed ones | [`with another app's plugin cache and Muster's built-ins, every plugin lists Muster's version next to the installed one`](../../../packages/agent-app/tests/plugin-choice-776.test.ts) |
+| [MUS-SPEC-14-776B](14-agents-skills-plugins-and-automations.md#mus-spec-14-776b) | Choosing a version links only that one into the chat's home | [`choosing the installed version links only that one into the chat's home, and choosing Muster's links only Muster's`](../../../packages/agent-app/tests/plugin-choice-776.test.ts) |
+| [MUS-SPEC-14-776C](14-agents-skills-plugins-and-automations.md#mus-spec-14-776c) | Removing the installed app falls back to Muster's version | [`when the chosen installed app is removed the next turn falls back to Muster's version and says so once`](../../../packages/agent-app/tests/plugin-choice-776.test.ts) |
+| [MUS-SPEC-14-776D](14-agents-skills-plugins-and-automations.md#mus-spec-14-776d) | Old whole-folder links get the defaults; the person's own skills are never removed | [`old whole-folder links get the defaults and a person's own unrelated skill is never removed`](../../../packages/agent-app/tests/plugin-choice-776.test.ts) |
+| [MUS-SPEC-14-776E](14-agents-skills-plugins-and-automations.md#mus-spec-14-776e) | Computer use follows the choice too | [`choosing installed or off for computer use leaves Muster's computer-use server out of the turn`](../../../packages/agent-app/tests/plugin-choice-776.test.ts) |
+| [MUS-SPEC-14-776F](14-agents-skills-plugins-and-automations.md#mus-spec-14-776f) | Each plugin row in Skills & plugins has a version picker | [`#776 each plugin row picks Muster's version, an installed one or off`](../../../packages/agent-app/tests/plugin-choice-776-components.tsx) |
 
 ### Claude Code background sub-agents
 
@@ -663,4 +669,74 @@ Boundaries:
 - Test: `packages/agent-app/tests/office-skills-772.test.ts::the office libraries resolve from an agent script's own working folder, by import and by require`
 - Environment: Node test runner; node stands in for Muster's Electron-as-Node.
 - Known gaps: Not run inside the coding client's sandbox on a packaged build.
+- Evidence: UNVERIFIED
+
+### Choosing Muster's or an installed version (#776)
+
+For each plugin Muster ships (documents, spreadsheets, presentations, PDF, visualize, computer use) the person picks Muster's version, an installed one or none. Only the chosen one is loaded into a chat's home.
+
+<a id="mus-spec-14-776a"></a>
+#### MUS-SPEC-14-776A: Every plugin Muster ships lists Muster's version next to installed ones
+
+- Precondition: Another app's plugin cache with documents, pdf and visualize plugins (two marketplaces), the person's own docx and pdf skills, and Muster's shipped skills.
+- Action: List the plugin choices through the extensions domain.
+- Expected result: Documents, spreadsheets, presentations, PDF, visualize and computer use are listed. Each has Muster's version (name, source, version, path) and every installed version found, each with name, source, version and path. No choice was made, so each with a Muster version is set to Muster's. Nothing found is run: the folders are only read.
+- Test: `packages/agent-app/tests/plugin-choice-776.test.ts::with another app's plugin cache and Muster's built-ins, every plugin lists Muster's version next to the installed one`
+- Environment: Node test runner; temp folders; the real extensions domain in an agent service.
+- Known gaps: Only the coding client's home is searched (skills and plugins/cache); skills under ~/.agents/skills are not offered as an installed version.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-776b"></a>
+#### MUS-SPEC-14-776B: Choosing a version links only that one into the chat's home
+
+- Precondition: The same person's home and Muster's home prepared for a chat.
+- Action: Choose the installed documents plugin, then the installed pdf skill, prepare the home the way a turn does; then choose Muster's for both and prepare again; then choose off for spreadsheets.
+- Expected result: With installed chosen, the installed documents plugin is linked and Muster's documents skill is gone from the home; the other app's docx skill stays out; the pdf skill link points at the person's pdf skill. With Muster's chosen, Muster's copies are back and neither installed one is linked. Off leaves both out. The turn's key changes with each choice, so a warm session restarts on the next turn.
+- Test: `packages/agent-app/tests/plugin-choice-776.test.ts::choosing the installed version links only that one into the chat's home, and choosing Muster's links only Muster's`
+- Environment: Node test runner; temp folders.
+- Known gaps: A chat already running a turn keeps what it loaded until its next turn. Choices are per person, not per chat or folder. Muster's render_html and office tools stay on whatever is chosen; only the skills and plugins in the home follow the choice.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-776c"></a>
+#### MUS-SPEC-14-776C: Removing the installed app falls back to Muster's version
+
+- Precondition: The installed visualize plugin is chosen and linked.
+- Action: Delete the other app's plugin cache folder, then prepare the home and ask for the turn's run options twice.
+- Expected result: Preparing does not throw; the broken link is gone, nothing of the other app is linked, and the plugin row reports Muster's version in use with the installed one missing. The first turn's notes say once that Muster's version is used; the second turn's do not.
+- Test: `packages/agent-app/tests/plugin-choice-776.test.ts::when the chosen installed app is removed the next turn falls back to Muster's version and says so once`
+- Environment: Node test runner; temp folders.
+- Known gaps: The note goes to the agent as turn context; the app itself shows no banner, only the row's badge in Skills & plugins.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-776d"></a>
+#### MUS-SPEC-14-776D: Old whole-folder links get the defaults; the person's own skills are never removed
+
+- Precondition: Muster's home from before #772 with skills and plugins as single links into the person's home, which has their own skill and another app's office plugins.
+- Action: Prepare the home with no saved choices; change every choice to off and back; prepare after each.
+- Expected result: The old links are replaced by real folders with Muster's versions in place and the other app's office plugins left out. The person's own skill stays linked through every change, and the person's home keeps every file it had.
+- Test: `packages/agent-app/tests/plugin-choice-776.test.ts::old whole-folder links get the defaults and a person's own unrelated skill is never removed`
+- Environment: Node test runner; temp folders.
+- Known gaps: Not run against a real coding client.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-776e"></a>
+#### MUS-SPEC-14-776E: Computer use follows the choice too
+
+- Precondition: Muster's computer-use launcher is present.
+- Action: Ask the computer domain's run options for an agent chat with Muster's chosen, then installed, then off.
+- Expected result: With Muster's, the turn gets muster_computer. With installed or off it does not, and the installed plugin is linked only for installed.
+- Test: `packages/agent-app/tests/plugin-choice-776.test.ts::choosing installed or off for computer use leaves Muster's computer-use server out of the turn`
+- Environment: Node test runner; temp folders.
+- Known gaps: The Claude Code route keeps its own tools and does not read this choice.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-776f"></a>
+#### MUS-SPEC-14-776F: Each plugin row in Skills & plugins has a version picker
+
+- Precondition: The Installed tab with Muster's documents and visualize plus installed versions of both, one installed version missing.
+- Action: Open the Installed tab, read the plugin rows, pick the installed documents version, then off.
+- Expected result: A Muster's plugins group shows one row per plugin with the usual row look: name, which version is in use and a picker with Muster's, each installed version and Off. Muster's is selected by default. Picking sends the choice and the row updates. The missing one shows a badge that Muster's is in use.
+- Test: `packages/agent-app/tests/plugin-choice-776-components.tsx::#776 each plugin row picks Muster's version, an installed one or off`
+- Environment: Renderer DOM suite (linkedom); stubbed bridge.
+- Known gaps: Not a screenshot of the real app.
 - Evidence: UNVERIFIED

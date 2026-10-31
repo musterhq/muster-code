@@ -30,6 +30,23 @@ export interface InstallReview { package: MarketplacePackage; permissions: { mcp
 export interface LocalSkillDraft { name: string; description: string; body: string }
 export interface LocalSkill extends LocalSkillDraft { path: string; assets: string[]; history: Array<{ id: string; savedAt: string }> }
 
+/** #776: a plugin Muster ships its own version of, and the versions of it the person may already have. */
+export type PluginCapabilityId = 'documents' | 'spreadsheets' | 'presentations' | 'pdf' | 'visualize' | 'computer-use';
+/** Which version a chat loads: Muster's, an installed one, or none. */
+export type PluginChoiceValue = 'muster' | 'installed' | 'off';
+/** One version of a plugin. Found by reading folders only; nothing found is ever run. `path` is the plugin or skill folder
+ *  (for Muster's built-in tools, the server and tool they come from). */
+export interface PluginProvider { id: string; origin: 'muster' | 'installed'; form: 'skill' | 'plugin' | 'tool'; name: string; source: string; version: string; path: string }
+export interface PluginCapability {
+  id: PluginCapabilityId; displayName: string; muster: PluginProvider | null; installed: PluginProvider[];
+  /** What the person chose (Muster's by default where there is one). `installedId` names the installed version. */
+  choice: PluginChoiceValue; installedId?: string;
+  /** The version a new turn loads; null when off or nothing is available. */
+  active: PluginProvider | null;
+  /** The chosen installed version is gone; Muster's is used instead. */
+  missing?: boolean;
+}
+
 export interface ExtensionsCommands {
   'extensions.sources.list': { input: undefined; output: ExtensionSource[] };
   'extensions.sources.add': { input: { kind: ExtensionSourceKind; url?: string; path?: string; pinnedCommit?: string; label?: string }; output: ExtensionSource };
@@ -50,6 +67,9 @@ export interface ExtensionsCommands {
   'extensions.skills.read': { input: { name: string }; output: LocalSkill };
   'extensions.skills.save': { input: LocalSkillDraft & { previousName?: string }; output: LocalSkill };
   'extensions.skills.restore': { input: { name: string; historyId: string }; output: LocalSkill };
+  /** #776: per plugin, Muster's version, the installed ones and the choice. */
+  'extensions.providers.list': { input: undefined; output: PluginCapability[] };
+  'extensions.providers.set': { input: { capability: PluginCapabilityId; choice: PluginChoiceValue; installedId?: string }; output: PluginCapability[] };
 }
 /** #729: logos for remote plugins arrived or changed; plugin marks should be read again. */
 export type ExtensionsEvent = { type: 'pluginIconsChanged' };
@@ -58,6 +78,7 @@ export const EXTENSIONS_COMMANDS = {
   'extensions.catalog': true, 'extensions.inventory': true, 'extensions.review': true, 'extensions.install': true, 'extensions.installed': true, 'extensions.update': true,
   'extensions.rollback': true, 'extensions.uninstall': true, 'extensions.enablement.list': true, 'extensions.enablement.set': true,
   'extensions.skills.read': true, 'extensions.skills.save': true, 'extensions.skills.restore': true,
+  'extensions.providers.list': true, 'extensions.providers.set': true,
 } as const satisfies Record<keyof ExtensionsCommands, true>;
 
 /** Enablement ids: installed marketplace extensions use their name; local skills and Codex cache plugins are prefixed. */

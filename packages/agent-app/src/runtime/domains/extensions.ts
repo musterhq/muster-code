@@ -8,6 +8,8 @@ import type { Chat } from '../../shared/protocol.ts';
 import { brandIcon, discoverCodexProvenance, discoverPlugins, discoverSkills, setDiscoveryGates, setExtensionSkillRoots, type PluginEntry, type SkillRoot } from '../plugin-library.ts';
 import { compareVersions, expandRoot, extensionsRoot, installPackage, NAME, packageFiles, readCatalog, removeInstall, sourceRoot, sweepStaging, syncGitSource, type CatalogEntry } from '../plugin-install.ts';
 import { readLocalSkill, restoreLocalSkill, saveLocalSkill } from '../skill-editor.ts';
+import { musterSkillsDir } from '../office-skills.ts';
+import { currentPluginPlan, isPluginCapability, pluginFallbackNote, readPluginChoices, writePluginChoices } from '../plugin-providers.ts';
 import { PROMPT_CONTRIBUTION_MAX_BYTES } from './hooks.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
@@ -226,6 +228,12 @@ export function createExtensionsDomain(ctx: DomainContext): DomainModule {
     pinned.delete(chat.id);
     for (const path of [...pendingRemoval]) if (!isPinned(path)) { pendingRemoval.delete(path); await removeInstall(ctx.dataDir, path); }
   });
+  // #776: Muster's or an installed version per plugin. Read from disk on every call: another app may come or go.
+  const pluginPlan = () => currentPluginPlan(ctx.dataDir, musterSkillsDir());
+  const offFallback = ctx.hooks.addRunOptionsContributor(async () => {
+    const note = pluginFallbackNote(ctx.dataDir, pluginPlan());
+    return note ? { turnContext: note } : null;
+  });
   const offOptions = ctx.hooks.addRunOptionsContributor(async (chat: Chat) => {
     const rules = enablement(), at = { folderId: chat.folderId, projectId: chat.projectId };
     const active = installed().filter(entry => entry.state !== 'Failed' && entry.state !== 'Staging' && isEnabled(rules, entry.id, at) && entry.manifest);
@@ -349,7 +357,21 @@ export function createExtensionsDomain(ctx: DomainContext): DomainModule {
     },
     'extensions.skills.read': input => readLocalSkill(text(input.name, 'skill name', 64), extensionsOptions.home),
     'extensions.skills.save': input => saveLocalSkill({ name: text(input.name, 'skill name', 64), description: typeof input.description === 'string' ? input.description : '', body: typeof input.body === 'string' ? input.body : '', ...(typeof input.previousName === 'string' && input.previousName ? { previousName: input.previousName } : {}) }, extensionsOptions.home),
+    'extensions.providers.list': () => pluginPlan().capabilities,
+    'extensions.providers.set': input => {
+      if (!isPluginCapability(input.capability)) throw new Error('Invalid plugin.');
+      if (input.choice !== 'muster' && input.choice !== 'installed' && input.choice !== 'off') throw new Error('Invalid choice.');
+      const current = pluginPlan().capabilities.find(entry => entry.id === input.capability)!;
+      if (input.choice === 'muster' && !current.muster) throw new Error(`Muster has no ${current.displayName} version on this computer.`);
+      const installedId = input.choice === 'installed' ? optional(input.installedId, 'installed version') ?? current.installed[0]?.id : undefined;
+      if (input.choice === 'installed' && !current.installed.some(entry => entry.id === installedId)) throw new Error(`That is not an installed version of ${current.displayName}.`);
+      const stored = readPluginChoices(ctx.dataDir);
+      stored.choices[input.capability] = { choice: input.choice, ...(installedId ? { installedId } : {}) };
+      delete stored.noticed[input.capability];
+      writePluginChoices(ctx.dataDir, stored);
+      return pluginPlan().capabilities;
+    },
     'extensions.skills.restore': input => restoreLocalSkill(text(input.name, 'skill name', 64), text(input.historyId, 'version', 64), extensionsOptions.home),
   };
-  return { handlers, dispose() { offSettled(); offOptions(); setExtensionSkillRoots([]); setDiscoveryGates({ skill: null, plugin: null }); } };
+  return { handlers, dispose() { offSettled(); offOptions(); offFallback(); setExtensionSkillRoots([]); setDiscoveryGates({ skill: null, plugin: null }); } };
 }

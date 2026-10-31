@@ -2,7 +2,7 @@ import { AlertTriangle, AppWindow, ArrowLeft, BookOpen, Boxes, Check, Download, 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ItemIcon, PluginEntry, SkillEntry } from '../../shared/protocol';
 import { brandIcons, discoverCards, iconFor, isHiddenUnsupported, isSystemSkill, type CatalogCard, type InstalledTarget } from '../marketplaceCatalog';
-import { isEnabled, pluginExtensionId, qualifiedSkillName, skillExtensionId, skillShadows, skillTier, type ExtensionEnablement, type ExtensionScope, type ExtensionSource, type InstalledExtension, type InstallReview, type MarketplacePackage } from '../../shared/domains/extensions-protocol';
+import { isEnabled, pluginExtensionId, qualifiedSkillName, skillExtensionId, skillShadows, skillTier, type ExtensionEnablement, type ExtensionScope, type ExtensionSource, type InstalledExtension, type InstallReview, type MarketplacePackage, type PluginCapability, type PluginProvider } from '../../shared/domains/extensions-protocol';
 import { invoke } from '../bridge';
 import { closeSettings, loadPlugins, loadSkills, notifySuccess } from '../store';
 import { openPluginUiTab } from '../artifacts';
@@ -25,8 +25,8 @@ import { skillLabel } from './ComposerMenu';
 type Tab = 'discover' | 'installed' | 'sources' | 'mcp';
 type Kind = 'all' | 'plugin' | 'skill';
 type Selection = { kind: 'package'; id: string } | { kind: 'installed'; id: string } | { kind: 'skill'; id: string } | { kind: 'codex'; id: string } | { kind: 'editor'; name: string | null } | null;
-interface Data { sources: ExtensionSource[]; catalog: MarketplacePackage[]; installed: InstalledExtension[]; enablement: ExtensionEnablement[]; skills: SkillEntry[]; plugins: PluginEntry[] }
-const EMPTY: Data = { sources: [], catalog: [], installed: [], enablement: [], skills: [], plugins: [] };
+interface Data { sources: ExtensionSource[]; catalog: MarketplacePackage[]; installed: InstalledExtension[]; enablement: ExtensionEnablement[]; skills: SkillEntry[]; plugins: PluginEntry[]; providers: PluginCapability[] }
+const EMPTY: Data = { sources: [], catalog: [], installed: [], enablement: [], skills: [], plugins: [], providers: [] };
 const message = (error: unknown) => error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error);
 const bytes = (value: number) => value < 1024 ? `${value} B` : value < 1048576 ? `${(value / 1024).toFixed(1)} KB` : `${(value / 1048576).toFixed(1)} MB`;
 const LOCAL_SKILLS = '~/.agents/skills';
@@ -58,8 +58,9 @@ export function PluginsScreen(): React.ReactElement {
   const reload = useCallback(async () => {
     setPhase(current => current === 'ready' ? 'ready' : 'loading');
     try {
-      const [sources, catalog, installed, enablement, inventory] = await Promise.all([invoke('extensions.sources.list', undefined), invoke('extensions.catalog', undefined), invoke('extensions.installed', undefined), invoke('extensions.enablement.list', undefined), invoke('extensions.inventory', undefined)]);
-      setData({ sources, catalog, installed, enablement, skills: inventory.skills, plugins: inventory.plugins }); setPhase('ready'); setError(null);
+      // #776: Muster's plugins never block the rest of the screen.
+      const [sources, catalog, installed, enablement, inventory, providers] = await Promise.all([invoke('extensions.sources.list', undefined), invoke('extensions.catalog', undefined), invoke('extensions.installed', undefined), invoke('extensions.enablement.list', undefined), invoke('extensions.inventory', undefined), invoke('extensions.providers.list', undefined).catch(() => [])]);
+      setData({ sources, catalog, installed, enablement, skills: inventory.skills, plugins: inventory.plugins, providers: Array.isArray(providers) ? providers : [] }); setPhase('ready'); setError(null);
     } catch (cause) { setError(message(cause)); setPhase('error'); }
   }, []);
   useEffect(() => { void reload(); }, [reload, state.pluginIconsRevision]);
@@ -92,6 +93,7 @@ export function PluginsScreen(): React.ReactElement {
   const shadows = useMemo(() => skillShadows(data.skills), [data.skills]);
   const localSkills = useMemo(() => userSkills.filter(skill => skillTier(skill.provenance) !== 'global' && (kind === 'all' || kind === 'skill') && matches(q, skill.displayName, skill.name, skill.shortDescription, skill.provenance)), [userSkills, kind, q]);
   const installs = data.installed.filter(entry => (kind === 'all' || entry.kind === kind) && matches(q, entry.manifest?.displayName, entry.name, entry.manifest?.description, entry.manifest?.publisher));
+  const musterPlugins = data.providers.filter(entry => matches(q, entry.displayName, entry.id));
   const codexPlugins = data.plugins.filter(plugin => (kind === 'all' || kind === 'plugin') && matches(q, plugin.displayName, plugin.name, plugin.shortDescription, plugin.provenance));
   const switchTab = (next: Tab) => { setTab(next); setSelection(null); };
   const refreshing = phase === 'loading' || Object.keys(pending).some(key => key.startsWith('sync:'));
@@ -140,11 +142,12 @@ export function PluginsScreen(): React.ReactElement {
           : <ul className="plugins-grid" role="list">{catalog.map(card => { const pkg = card.pkg; return <li key={pkg.id}><PackageCard card={card} busy={pending[pkg.id]} failed={!!failed[pkg.id]} onOpen={() => setSelection({ kind: 'package', id: pkg.id })} onInstall={() => setReviewing(pkg.id)} onManage={card.installedAs ? () => manage(card.installedAs!) : undefined} onUpdate={() => void run(pkg.id, 'Updating…', () => invoke('extensions.update', { id: pkg.name }), `${pkg.displayName} updated.`)} /></li>; })}</ul>)}
         {phase === 'ready' && tab === 'installed' && <div className="plugins-installed">
           <p className="plugins-scope-note">Toggles apply {scopeLabel}. Folder settings override project settings, which override user settings.</p>
+          {musterPlugins.length > 0 && <InstalledGroup title="Muster's plugins">{musterPlugins.map(entry => <MusterPluginRow key={entry.id} entry={entry} busy={!!pending[`provider:${entry.id}`]} onPick={(choice, installedId) => void run(`provider:${entry.id}`, 'Saving…', () => invoke('extensions.providers.set', { capability: entry.id, choice, ...(installedId ? { installedId } : {}) }))} />)}</InstalledGroup>}
           {installs.length > 0 && <InstalledGroup title="From marketplace">{installs.map(entry => <InstalledRow key={entry.id} name={entry.manifest?.displayName ?? entry.name} icon={<ItemTile icon={iconFor(icons, data.catalog.find(pkg => pkg.id === entry.packageId)?.icon, entry.name, entry.manifest?.displayName)} name={entry.manifest?.displayName ?? entry.name} seed={entry.name} shape={entry.kind === 'skill' ? 'skill' : 'square'} size={28} />} meta={`${entry.version} · ${entry.manifest?.source.label ?? entry.sourceId}`} badge={pending[entry.id] ?? (failed[entry.id] ? 'Failed' : entry.state)} tone={failed[entry.id] || entry.state === 'Failed' ? 'danger' : entry.state === 'Needs connection' ? 'warn' : entry.state === 'Ready' ? 'ok' : 'dim'} enabled={enabled(entry.id)} busy={!!pending[`enable:${entry.id}`]} onToggle={value => toggle(entry.id, value)} onOpen={() => setSelection({ kind: 'installed', id: entry.id })} />)}</InstalledGroup>}
           {(kind !== 'plugin') && <InstalledGroup title="Local skills" action={<button type="button" className="plugins-link" onClick={() => setSelection({ kind: 'editor', name: null })}><Plus size={12} />New skill</button>}>{localSkills.length ? localSkills.map(skill => { const id = skillExtensionId(skill), shadow = shadows.get(skill.id); return <InstalledRow key={skill.id} name={skillLabel(skill)} icon={<ItemTile icon={skill.icon} name={skill.displayName ?? skill.name} seed={skill.name} shape="skill" size={28} />} meta={qualifiedSkillName(skill)} badge={shadow ? `Shadowed by ${shadow}` : skill.claude ? 'Claude Code' : undefined} tone="dim" enabled={enabled(id)} busy={!!pending[`enable:${id}`]} onToggle={value => toggle(id, value)} onOpen={() => setSelection({ kind: 'skill', id: skill.id })} />; }) : <p className="plugins-group-empty">No local skills. Create one, put folders with a SKILL.md in {LOCAL_SKILLS}, or add Claude Code skills and commands under ~/.claude.</p>}</InstalledGroup>}
           {codexPlugins.length > 0 && <InstalledGroup title="Codex plugins">{codexPlugins.map(plugin => { const id = pluginExtensionId(plugin); return <InstalledRow key={plugin.id} name={plugin.displayName ?? plugin.name} icon={<ItemTile icon={plugin.icon} name={plugin.displayName ?? plugin.name} seed={plugin.name} brandColor={plugin.brandColor} size={28} />} meta={`${plugin.version} · ${plugin.provenance}`} badge={plugin.readError ? 'Manifest warning' : undefined} tone={plugin.readError ? 'warn' : 'dim'} enabled={enabled(id)} busy={!!pending[`enable:${id}`]} scopeLocked={scopeKind !== 'user'} onToggle={value => toggle(id, value)} onOpen={() => setSelection({ kind: 'codex', id: plugin.id })} />; })}</InstalledGroup>}
           {!installs.length && !codexPlugins.length && kind === 'plugin' && <EmptyState icon={<Boxes size={24} />} title="No plugins installed" text="Install one from Discover." action={<button type="button" className="plugins-primary" onClick={() => switchTab('discover')}>Browse plugins</button>} />}
-          {Object.entries(failed).filter(([key]) => key.startsWith('enable:')).map(([key, text]) => <p key={key} className="settings-error" role="alert">{text}</p>)}
+          {Object.entries(failed).filter(([key]) => key.startsWith('enable:') || key.startsWith('provider:')).map(([key, text]) => <p key={key} className="settings-error" role="alert">{text}</p>)}
         </div>}
         {tab === 'mcp' && <McpServers />}
         {phase === 'ready' && tab === 'sources' && <SourcesPanel sources={data.sources} pending={pending} failed={failed} onAdd={input => run('source:add', 'Adding…', () => invoke('extensions.sources.add', input), 'Source added.')} onSync={(id, latest) => void run(`sync:${id}`, latest ? 'Updating…' : 'Syncing…', () => invoke('extensions.sources.sync', { id, ...(latest ? { latest } : {}) }))} onRemove={id => void run(`sync:${id}`, 'Removing…', () => invoke('extensions.sources.remove', { id }), 'Source removed. Installed packages stay installed.')} />}
@@ -244,6 +247,23 @@ function InstalledRow({ name, icon, meta, badge, tone, enabled, busy, scopeLocke
   return <li className={`plugins-row${enabled ? '' : ' is-disabled'}`}>
     <button type="button" className="plugins-row-main" onClick={onOpen}>{icon}<span className="plugins-card-text"><strong>{name}</strong><em>{meta}</em></span>{badge && <span className={`plugins-badge is-${tone}`}>{badge}</span>}</button>
     <button type="button" role="switch" aria-checked={enabled} aria-label={`${enabled ? 'Disable' : 'Enable'} ${name}`} title={scopeLocked ? 'Codex cache plugins are enabled or disabled for the user scope only.' : undefined} className="plugins-switch" disabled={busy || scopeLocked} onClick={() => onToggle(!enabled)}><span /></button>
+  </li>;
+}
+
+const providerLabel = (provider: PluginProvider) => [provider.name, provider.version, provider.source].filter(Boolean).join(' · ');
+/** #776: one of Muster's plugins with the version a new chat loads: Muster's, an installed one, or off. */
+function MusterPluginRow({ entry, busy, onPick }: { entry: PluginCapability; busy: boolean; onPick(choice: PluginCapability['choice'], installedId?: string): void }): React.ReactElement {
+  const value = entry.choice === 'installed' ? `installed:${entry.installedId ?? entry.active?.id ?? ''}` : entry.choice;
+  const inUse = entry.active ? (entry.active.origin === 'muster' ? `Muster's · ${entry.active.version}` : providerLabel(entry.active)) : 'Off';
+  const pick = (next: string) => next.startsWith('installed:') ? onPick('installed', next.slice('installed:'.length)) : onPick(next as PluginCapability['choice']);
+  return <li className={`plugins-row${entry.active ? '' : ' is-disabled'}`}>
+    <div className="plugins-row-main"><ItemTile name={entry.displayName} seed={entry.id} size={28} /><span className="plugins-card-text"><strong>{entry.displayName}</strong><em>{inUse}</em></span>{entry.missing && <span className="plugins-badge is-warn">Installed version missing · Muster's in use</span>}</div>
+    <select className="plugins-version" aria-label={`${entry.displayName} version`} value={value} disabled={busy} onChange={event => pick(event.target.value)}>
+      {entry.muster && <option value="muster">Muster's</option>}
+      {entry.installed.map(provider => <option key={provider.id} value={`installed:${provider.id}`}>{providerLabel(provider)}</option>)}
+      {entry.missing && <option value={value} disabled>Installed version (missing)</option>}
+      <option value="off">Off</option>
+    </select>
   </li>;
 }
 

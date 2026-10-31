@@ -5,13 +5,17 @@
  * the thread index, logs, history and memories stay private to Muster's home.
  *
  * #772-#775: `skills` and `plugins` are no longer one link each. They are real folders in Muster's home with a link per
- * entry of the person's folder, so the person's own skills and plugins still load, except those for documents,
- * spreadsheets, presentations and PDF: Muster installs its own skills for those and the other copies are not linked in.
+ * entry of the person's folder, so the person's own skills and plugins still load.
+ *
+ * #776: for documents, spreadsheets, presentations, PDF, visualize and computer use only the version the person chose in
+ * Skills & plugins is loaded (plugin-providers.ts): Muster's (its skill is copied in) or one installed version (its link
+ * stays), never both. Every other installed version of the same plugin is left out.
  */
 import {createHash} from 'node:crypto';
-import {copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, rmdirSync, statSync, symlinkSync, unlinkSync, type Dirent} from 'node:fs';
+import {copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, rmdirSync, rmSync, statSync, symlinkSync, unlinkSync, type Dirent} from 'node:fs';
 import {join, resolve, sep} from 'node:path';
-import {installMusterSkills, OFFICE_SKILL_ALIASES} from './office-skills.ts';
+import {installMusterSkills, isMusterSkillCopy, MUSTER_OFFICE_SKILLS} from './office-skills.ts';
+import {musterComputerLauncher, planPluginProviders, readPluginChoices, type PluginPlan} from './plugin-providers.ts';
 
 const SHARED = new Set(['auth.json', 'config.toml', 'models_cache.json', 'model-catalogs', 'skills', 'plugins', 'rules', 'prompts',
   'AGENTS.md', 'AGENTS.override.md', 'helpers', 'computer-use', 'node_repl', 'packages', 'vendor_imports']);
@@ -23,21 +27,24 @@ export function musterCodexHome(dataDir: string, sourceHome: string): string {
   return join(dataDir, 'codex-home', createHash('sha256').update(resolve(sourceHome)).digest('hex').slice(0, 12));
 }
 
-/** Plugin folders (in any marketplace of the plugin cache) for the file types Muster's own skills cover. */
-export const OFFICE_PLUGIN_NAMES: ReadonlySet<string> = new Set(['documents', 'spreadsheets', 'presentations', 'pdf']);
-
 /** What to do with one entry of a person's folder: link it, leave it out, or mirror it one level down with another rule. */
 type MirrorRule = (name: string, target: string) => 'link' | 'skip' | MirrorRule;
-const skillsRule: MirrorRule = name => OFFICE_SKILL_ALIASES.has(name) ? 'skip' : 'link';
-const marketplaceRule: MirrorRule = name => OFFICE_PLUGIN_NAMES.has(name) ? 'skip' : 'link';
-const hasOfficePlugin = (dir: string) => { try { return readdirSync(dir).some(name => OFFICE_PLUGIN_NAMES.has(name)); } catch { return false; } };
-const pluginsRule: MirrorRule = name => name === 'cache' ? (_marketplace, target) => hasOfficePlugin(target) ? marketplaceRule : 'link' : 'link';
-const MIRRORED: Record<string, MirrorRule> = {skills: skillsRule, plugins: pluginsRule};
+/** Skills and plugins are mirrored per entry, leaving out the installed plugin versions the person did not choose. */
+function mirroredRules(blocked: ReadonlySet<string>): Record<string, MirrorRule> {
+  const leaveOut: MirrorRule = (_name, target) => blocked.has(target) ? 'skip' : 'link';
+  const holdsBlocked = (dir: string) => { try { return readdirSync(dir).some(name => blocked.has(join(dir, name))); } catch { return false; } };
+  const plugins: MirrorRule = name => name === 'cache' ? (_marketplace, target) => holdsBlocked(target) ? leaveOut : 'link' : 'link';
+  return {skills: leaveOut, plugins};
+}
 
 const isLink = (path: string) => { try { return lstatSync(path).isSymbolicLink(); } catch { return false; } };
 /** A folder this file made as a mirror: nothing in it but links and such folders, so it can be replaced by a link again. */
 function onlyLinks(dir: string): boolean {
   try { return readdirSync(dir, {withFileTypes: true}).every(entry => entry.isSymbolicLink() || (entry.isDirectory() && onlyLinks(join(dir, entry.name)))); } catch { return false; }
+}
+/** Whether a mirror folder holds a link into `target` (so it is one this file made for an entry of `target`). */
+function hasLinkInto(dir: string, target: string): boolean {
+  try { return readdirSync(dir, {withFileTypes: true}).some(entry => entry.isSymbolicLink() ? readlinkSync(join(dir, entry.name)).startsWith(target + sep) : entry.isDirectory() && hasLinkInto(join(dir, entry.name), target)); } catch { return false; }
 }
 function removeMirror(dir: string): void {
   for (const entry of readdirSync(dir, {withFileTypes: true})) { const path = join(dir, entry.name); if (entry.isSymbolicLink()) unlinkSync(path); else removeMirror(path); }
@@ -82,17 +89,20 @@ function mirror(target: string, link: string, rule: MirrorRule): void {
     if (action === 'link') { linkEntry(from, to, directory, true); continue; }
     if (directory) mirror(from, to, action); else linkEntry(from, to, false);
   }
-  // Links to entries the person has since removed.
+  // Links to entries the person has since removed, and mirror folders of removed folders (another app uninstalled).
   for (const entry of readdirSync(link, {withFileTypes: true})) {
-    if (names.has(entry.name) || !entry.isSymbolicLink()) continue;
+    if (names.has(entry.name)) continue;
     const path = join(link, entry.name);
-    try { if (readlinkSync(path).startsWith(target + sep)) unlinkSync(path); } catch { /* stays */ }
+    if (entry.isSymbolicLink()) { try { if (readlinkSync(path).startsWith(target + sep)) unlinkSync(path); } catch { /* stays */ } }
+    else if (entry.isDirectory() && hasLinkInto(path, target) && onlyLinks(path)) try { removeMirror(path); } catch { /* stays */ }
   }
 }
 
 export interface PrepareCodexHomeOptions {
   /** Muster's own skills folder (resources/skills); its skills are installed into Muster's home. */
   musterSkills?: string;
+  /** #776: which version of each plugin to load; without one, the defaults (Muster's where it has one). */
+  plan?: Pick<PluginPlan, 'copy' | 'blocked'>;
 }
 
 /** Links the shared entries of the person's home into Muster's home. Run before each launch, so profiles added since
@@ -100,7 +110,14 @@ export interface PrepareCodexHomeOptions {
  *  goes to the person's home and the link is restored. Where links can't be made (Windows without the privilege),
  *  directories use junctions and files are copied both ways by age. Skills and plugins are mirrored per entry (see top). */
 export function prepareMusterCodexHome(sourceHome: string, home: string, options: PrepareCodexHomeOptions = {}): void {
+  const plan = options.plan ?? planPluginProviders(sourceHome, {choices: {}, noticed: {}}, {musterSkills: options.musterSkills, computerLauncher: musterComputerLauncher()});
+  const rules = mirroredRules(plan.blocked);
   mkdirSync(home, {recursive: true, mode: 0o700});
+  // Muster's copy of a skill the person no longer loads goes first, so a chosen installed skill of the same name links.
+  for (const name of MUSTER_OFFICE_SKILLS) {
+    const path = join(home, 'skills', name);
+    if (!plan.copy.has(name) && isMusterSkillCopy(path)) try { rmSync(path, {recursive: true, force: true}); } catch { /* stays */ }
+  }
   let entries: Dirent[] = [];
   try { entries = readdirSync(sourceHome, {withFileTypes: true}); } catch { entries = []; }
   for (const entry of entries) {
@@ -108,15 +125,23 @@ export function prepareMusterCodexHome(sourceHome: string, home: string, options
     const target = join(sourceHome, entry.name), link = join(home, entry.name);
     let directory = entry.isDirectory();
     try { if (entry.isSymbolicLink()) directory = statSync(target).isDirectory(); } catch { continue; }
-    const rule = MIRRORED[entry.name];
+    const rule = rules[entry.name];
     if (rule && directory) mirror(target, link, rule);
     else linkEntry(target, link, directory);
   }
-  if (options.musterSkills) {
+  if (options.musterSkills && plan.copy.size) {
     // Without a skills folder in the person's home there is still one in Muster's, for Muster's own skills.
     if (isLink(join(home, 'skills'))) try { unlinkSync(join(home, 'skills')); } catch { /* stays */ }
-    installMusterSkills(options.musterSkills, join(home, 'skills'));
+    installMusterSkills(options.musterSkills, join(home, 'skills'), plan.copy);
   }
+}
+
+/** #776: what a turn runs before it starts: reads the person's choices, links only the chosen versions into the chat's
+ *  home and returns the plan (its key joins the warm session's signature, so a changed choice applies on the next turn). */
+export function prepareChatCodexHome(sourceHome: string, home: string, options: {dataDir: string | undefined; musterSkills?: string; computerLauncher?: string}): PluginPlan {
+  const plan = planPluginProviders(sourceHome, readPluginChoices(options.dataDir), {musterSkills: options.musterSkills, computerLauncher: options.computerLauncher ?? musterComputerLauncher()});
+  prepareMusterCodexHome(sourceHome, home, {musterSkills: options.musterSkills, plan});
+  return plan;
 }
 
 const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
