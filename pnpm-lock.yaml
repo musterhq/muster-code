@@ -15,11 +15,11 @@ importers:
         version: link:../../../muster/packages/core
     devDependencies:
       '@types/node':
-        specifier: ^26.6.5
-        version: 26.6.5
+        specifier: ^26.6.6
+        version: 26.6.6
       '@types/vscode':
-        specifier: ^1.140.0
-        version: 1.140.0
+        specifier: ^1.144.0
+        version: 1.144.0
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
@@ -27,8 +27,8 @@ importers:
         specifier: ^0.18.14
         version: 0.18.14
       lucide-static:
-        specifier: ^1.61.0
-        version: 1.61.0
+        specifier: ^1.66.0
+        version: 1.66.0
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -199,11 +199,11 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@types/node@26.6.5':
-    resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
+  '@types/node@26.6.6':
+    resolution: {integrity: sha512-MzQj+8Kx3XI40OmUAE6Qoh58ZMNstNNMwn2nfd3qWsfe7nDNSqJNzes4njhz6AHwrSHOffSLwXU6yb474Q4aog==}
 
-  '@types/vscode@1.140.0':
-    resolution: {integrity: sha512-KAB5RBZIgnUhpp4mKsVJPPHLOQKu6WtGy2xpfWjaajEXO4xIIC+UESAXLiQ9ewx6QD1uBmvC/S8BJzkbvv4bRA==}
+  '@types/vscode@1.144.0':
+    resolution: {integrity: sha512-IDd4eQzu6MjGucfaQF0V/TY5vHX9o1albkKyZD6K/iVXSCcL5NSj4KW1wWfx1QDadPKWyxMaE/+M1wKLCJlXpA==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -403,8 +403,8 @@ packages:
       canvas:
         optional: true
 
-  lucide-static@1.61.0:
-    resolution: {integrity: sha512-yLAiQB3MWUJEstsEDAwenSA3m7vr1tdLvgnC16Q/XMxRRma0DWwMs8M2bWlvgShrIs1m2mWMJ+0AiahqQO4GrA==}
+  lucide-static@1.66.0:
+    resolution: {integrity: sha512-j8Bjf/f21PtlD8p0wx1lRxyOrs98WZ1QEImkWmfskuJ8mOCwTN7Dwc6EHUzJDSzh79aB+Bo7SWcoTCM2zEjnJg==}
 
   nth-check@3.0.1:
     resolution: {integrity: sha512-GX0gsdbGVCgnRgbeGaubfjpBXyYRWOOCVeYh08bSQvDZqxz5ndXs1OTfAt/h36G1xvI94YIspsI0sVFqAV9+RQ==}
@@ -508,11 +508,11 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@types/node@26.6.5':
+  '@types/node@26.6.6':
     dependencies:
       undici-types: 8.9.0
 
-  '@types/vscode@1.140.0': {}
+  '@types/vscode@1.144.0': {}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
@@ -677,7 +677,7 @@ snapshots:
       htmlparser2: 10.1.0
       uhyphen: 0.2.0
 
-  lucide-static@1.61.0: {}
+  lucide-static@1.66.0: {}
 
   nth-check@3.0.1:
     dependencies:
