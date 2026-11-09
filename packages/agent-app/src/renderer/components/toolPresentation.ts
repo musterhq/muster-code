@@ -1,5 +1,5 @@
 import {computerAction,parseArguments,type ComputerAction} from '../../shared/computer-use.ts';
-import {htmlRenderIdOf,htmlRenderTitle,isHtmlRenderTool} from '../../shared/html-render.ts';
+import {htmlRenderIdOf,htmlRenderTitle,htmlRenderUpdateOf,isHtmlRenderTool} from '../../shared/html-render.ts';
 import {countPatch,itemPatches} from '../patchModel.ts';
 export type ToolKind = 'read' | 'edit' | 'search' | 'list' | 'command' | 'subagent' | 'mcp' | 'computer' | 'skill' | 'generic';
 export interface FileStat {path:string;adds:number;dels:number}
@@ -41,7 +41,10 @@ export function classifyTool(data:Record<string,unknown>|undefined):ToolPresenta
  }
  // #html-preview: a page the agent showed inline. The row says so; the page itself is drawn under it.
  if((type==='mcpToolCall'||type==='dynamicToolCall'||!type)&&isHtmlRenderTool(data)){
-  const title=htmlRenderTitle(parseArguments(data?.arguments).title),id=htmlRenderIdOf(data);
+  const args=parseArguments(data?.arguments),title=htmlRenderTitle(args.title),id=htmlRenderIdOf(data);
+  // #829: an update in place is drawn by the card it updated; its row is one compact line ("Updated Revenue").
+  const updating=htmlRenderUpdateOf(data)!==undefined||(!id&&typeof args.replaces==='string'&&args.replaces.trim()!=='');
+  if(updating)return {kind:'mcp',verb:'Updated',runningVerb:'Updating',subject:title,htmlRender:{title}};
   return {kind:'mcp',verb:'Showed',runningVerb:'Rendering',subject:title,htmlRender:{title,...(id?{id}:{})}};
  }
  // CUA-04: computer and browser use read as actions ("Clicked “Send” in Mail"), never as a generic MCP call.

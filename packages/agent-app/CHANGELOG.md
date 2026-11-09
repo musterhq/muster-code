@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - **Edit any visual in the chat.** Diagrams, charts, HTML reports and pages the agent showed have an Edit button: the source sits beside a preview that redraws as you type, and source that doesn't parse shows its error while the last good drawing stays. Save keeps your edit as a new version (the original is one click away under Original); Cancel discards it. Edits are kept with the chat as canvases, and the agent sees your edited source on its next turn (#829).
+- **The agent updates a page in place.** When the agent changes a page it showed earlier in the chat, the page's card shows the new version instead of a second card appearing, and a compact "Updated" line marks the change. The card keeps every version, your own edits included, behind a "v2 of 3" switch. Pages from another chat can't be updated.
 
 ## 0.3.17
 

@@ -9,13 +9,17 @@ import {invoke} from './bridge';
 import {onCanvasEvent} from './artifacts';
 import {getState} from './store';
 import {richHash} from '../shared/rich-fence';
-import type {Canvas, CanvasKind, CanvasSummary, CanvasVisual, CanvasVisualKind} from '../shared/domains/artifacts-protocol';
+import type {Canvas, CanvasKind, CanvasSummary, CanvasVersion, CanvasVisual, CanvasVisualKind} from '../shared/domains/artifacts-protocol';
 
 interface ChatEdits {ready: boolean; byKey: Map<string, CanvasSummary>}
 const chats = new Map<string, ChatEdits>();
 const contents = new Map<string, Canvas>();
 const fetching = new Set<string>();
 const listeners = new Set<() => void>();
+/** #829 part 2: a visual canvas's version list (as of its `version`) and the content of older versions, fetched when shown. */
+const versionLists = new Map<string, {version: number; versions: CanvasVersion[]}>();
+const versionContents = new Map<string, string>();
+const versionFetching = new Set<string>();
 let revision = 0;
 let offCanvas: (() => void) | undefined;
 const summaryOf = ({content, ...rest}: Canvas): CanvasSummary => ({...rest, size: new TextEncoder().encode(content).length});
@@ -71,6 +75,39 @@ export function useVisualEdit(chatId: string | undefined, key: string | undefine
   return {ready: entry.ready && !stale, canvas: canvas ?? null};
 }
 
+const useRevision = () => useSyncExternalStore(listener => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => revision, () => revision);
+
+/** The versions of a visual's canvas, newest first; undefined while they load. Read again when the canvas gains a version. */
+export function useVisualVersions(canvas: Pick<Canvas, 'id' | 'version'> | null): CanvasVersion[] | undefined {
+  useRevision();
+  const known = canvas ? versionLists.get(canvas.id) : undefined;
+  const current = !!canvas && known?.version === canvas.version;
+  useEffect(() => {
+    if (!canvas || current) return;
+    const key = `list:${canvas.id}:${canvas.version}`;
+    if (versionFetching.has(key)) return;
+    versionFetching.add(key);
+    void invoke('artifacts.canvas.versions', {id: canvas.id}).then(result => {
+      const latest = versionLists.get(canvas.id);
+      if (!latest || latest.version <= canvas.version) { versionLists.set(canvas.id, {version: canvas.version, versions: result.versions}); notify(); }
+    }, () => {}).finally(() => versionFetching.delete(key));
+  }, [canvas?.id, canvas?.version, current]); // eslint-disable-line react-hooks/exhaustive-deps
+  return current ? known!.versions : undefined;
+}
+
+/** The content of one saved version of a canvas (versions never change once saved); undefined while it loads. */
+export function useVisualVersionContent(canvasId: string | undefined, version: number | undefined): string | undefined {
+  useRevision();
+  const key = canvasId && version ? `${canvasId}:${version}` : undefined;
+  const content = key ? versionContents.get(key) : undefined;
+  useEffect(() => {
+    if (!key || content !== undefined || versionFetching.has(key)) return;
+    versionFetching.add(key);
+    void invoke('artifacts.canvas.version', {id: canvasId!, version: version!}).then(result => { versionContents.set(key, result.content); notify(); }, () => {}).finally(() => versionFetching.delete(key));
+  }, [key, content]); // eslint-disable-line react-hooks/exhaustive-deps
+  return content;
+}
+
 export interface VisualSave {
   chatId: string; visual: CanvasVisual; title: string;
   /** The visual as the reply drew it: version 1 when this is its first edit. */
@@ -103,4 +140,4 @@ export async function saveVisualEdit(input: VisualSave): Promise<Canvas> {
 }
 
 /** Tests: forget every chat's links and contents, as after a restart. */
-export function resetVisualEdits(): void { chats.clear(); contents.clear(); fetching.clear(); notify(); }
+export function resetVisualEdits(): void { chats.clear(); contents.clear(); fetching.clear(); versionLists.clear(); versionContents.clear(); versionFetching.clear(); notify(); }
