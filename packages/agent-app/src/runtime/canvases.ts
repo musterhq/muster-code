@@ -108,9 +108,10 @@ export class CanvasStore {
       : this.db().prepare('SELECT * FROM canvases WHERE chat_id = ? ORDER BY updated_at DESC').all(idOf(chatId, 'a chat'))) as unknown as Row[];
     return rows.map(row => summaryOf(toCanvas(row)));
   }
-  /** #829: a chat's edited visuals (a saved edit on top of the original), newest first. One indexed read of that chat's rows. */
+  /** #829: a chat's edited visuals (a saved edit on top of the original), newest first. One indexed read of that chat's rows.
+   *  A visual whose newest version the agent wrote (render_html `replaces`, canvas_update) is left out: the agent knows it. */
   visualEdits(chatId: string, limit: number): Canvas[] {
-    return (this.db().prepare('SELECT * FROM canvases WHERE chat_id = ? AND visual_key IS NOT NULL AND version > 1 ORDER BY updated_at DESC LIMIT ?')
+    return (this.db().prepare('SELECT * FROM canvases WHERE chat_id = ? AND visual_key IS NOT NULL AND version > 1 AND updated_by = \'user\' ORDER BY updated_at DESC LIMIT ?')
       .all(idOf(chatId, 'a chat'), limit) as unknown as Row[]).map(toCanvas);
   }
   get(id: unknown): Canvas { return toCanvas(this.must(canvasId(id))); }
@@ -154,6 +155,17 @@ export class CanvasStore {
       .run(next.title, next.kind, next.language, next.content, next.version, next.updated_at, next.updated_by, next.id, prior.version);
     this.appendVersion(next, author, noteOf(input.note), null);
     return { conflict: false, canvas: toCanvas(next) };
+  }
+
+  /** #829: the agent replaced a visual (render_html `replaces`). Its content becomes the next version of the visual's canvas
+   *  in the chat, the same canvas the user's edits go to; the first time, the canvas is made with `original` as version 1. */
+  agentVisualVersion(input: { chatId: unknown; visual: unknown; title?: unknown; original: unknown; content: unknown; folderId?: unknown; note?: unknown }): { canvas: Canvas; created: boolean } {
+    const chatId = idOf(input.chatId, 'a chat'), visual = visualOf(input.visual);
+    if (!visual) throw new Error('Choose a visual.');
+    const existing = this.db().prepare('SELECT id FROM canvases WHERE chat_id = ? AND visual_key = ?').get(chatId, visual.key) as { id: string } | undefined;
+    const created = !existing;
+    const id = existing?.id ?? this.create({ kind: 'html', title: input.title, content: input.original, chatId, visual, note: 'Original from the chat', ...(input.folderId === undefined ? {} : { folderId: input.folderId }) }, 'agent').id;
+    return { canvas: this.update(id, { content: input.content, title: input.title, note: input.note }, 'agent').canvas, created };
   }
 
   versions(id: unknown): CanvasVersion[] {

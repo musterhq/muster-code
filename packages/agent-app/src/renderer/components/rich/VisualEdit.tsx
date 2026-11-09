@@ -6,12 +6,12 @@
  * keeps the last good drawing.
  */
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {PenLine} from 'lucide-react';
+import {ChevronLeft, ChevronRight, PenLine} from 'lucide-react';
 import {notifyError} from '../../store';
-import {saveVisualEdit, useVisualEdit} from '../../visualEdits';
+import {saveVisualEdit, useVisualEdit, useVisualVersionContent, useVisualVersions} from '../../visualEdits';
 import {Tip} from '../Tooltip';
 import type {RichContext} from '../RichBlock';
-import type {CanvasKind, CanvasVisual} from '../../../shared/domains/artifacts-protocol';
+import type {CanvasKind, CanvasVersion, CanvasVisual} from '../../../shared/domains/artifacts-protocol';
 
 /** Redraw delay after the last keystroke. */
 export const EDIT_PREVIEW_DELAY_MS = 250;
@@ -30,14 +30,20 @@ export interface VisualEditOptions {
   canvasKind: CanvasKind;
   language?: string;
   variant: 'inline' | 'tab';
+  /** #829 part 2: step through every version ("v2 of 3") instead of Original / Edited (a page the agent may update in place). */
+  versions?: boolean;
 }
+/** The version a block shows when it steps through versions. `saved` is its entry in the list, once that has loaded. */
+export interface ShownVersion { version: number; of: number; saved?: CanvasVersion }
 export interface VisualEditing {
   enabled: boolean;
   editing: boolean;
   /** A saved edit exists and is the one shown. */
   showingEdit: boolean;
-  /** What the block draws: the saved edit, unless Original is chosen. */
+  /** What the block draws: the saved edit, unless Original (or an earlier version) is chosen. */
   source: string | undefined;
+  /** With `versions`, once the visual has a canvas: which version is shown. */
+  version?: ShownVersion;
   /** An Edit button for the block's error card: source that does not draw is the first thing to fix. */
   errorAction?: React.ReactNode;
   /** Header controls, placed before the block's own extras. */
@@ -51,8 +57,19 @@ export function useVisualEditing(options: VisualEditOptions): VisualEditing {
   const {canvas} = useVisualEdit(enabled ? options.chatId : undefined, enabled ? options.visual.key : undefined);
   const [editing, setEditing] = useState(false);
   const [view, setView] = useState<'edited' | 'original'>('edited');
-  const showingEdit = !!canvas && view === 'edited';
-  const source = showingEdit ? canvas.content : options.original;
+  // #829 part 2: the version picked with the switch; null follows the newest, and a new version (the agent's or a Save) shows at once.
+  const stepping = !!options.versions && !!canvas;
+  const [picked, setPicked] = useState<number | null>(null);
+  const newest = canvas?.version;
+  useEffect(() => { setPicked(null); }, [newest]);
+  const savedVersions = useVisualVersions(stepping ? canvas : null);
+  const shownNumber = stepping ? Math.min(picked ?? canvas!.version, canvas!.version) : undefined;
+  const older = useVisualVersionContent(stepping && shownNumber! > 1 && shownNumber !== canvas!.version ? canvas!.id : undefined, shownNumber);
+  const showingEdit = stepping ? shownNumber! > 1 : !!canvas && view === 'edited';
+  const source = stepping ? (shownNumber === canvas!.version ? canvas!.content : shownNumber === 1 ? options.original : older) : showingEdit ? canvas!.content : options.original;
+  const saved = savedVersions?.find(item => item.version === shownNumber);
+  const version: ShownVersion | undefined = stepping ? {version: shownNumber!, of: canvas!.version, ...(saved ? {saved} : {})} : undefined;
+  const oldest = savedVersions?.length ? Math.min(...savedVersions.map(item => item.version)) : 1;
   const latest = useRef(options);
   latest.current = options;
   const hasEdit = useRef(false);
@@ -64,16 +81,22 @@ export function useVisualEditing(options: VisualEditOptions): VisualEditing {
     if (!current.chatId || (current.original === undefined && !hasEdit.current)) return;
     await saveVisualEdit({chatId: current.chatId, visual: current.visual, title: current.title, original: current.original ?? '', content, kind: current.canvasKind, ...(current.language ? {language: current.language} : {})});
     setView('edited');
+    setPicked(null);
     setEditing(false);
   }, []);
 
   const extras = (context: RichContext): React.ReactNode => {
-    if (!enabled || context.mode !== 'inline' || source === undefined) return null;
+    if (!enabled || context.mode !== 'inline' || (source === undefined && !version)) return null;
     return <>
-      <Tip label={editing ? 'Close editor' : 'Edit'}>
+      {source !== undefined && <Tip label={editing ? 'Close editor' : 'Edit'}>
         <button type="button" className="rich-action" aria-label="Edit" aria-pressed={editing} onClick={() => setEditing(value => !value)}><PenLine size={13} aria-hidden="true"/></button>
-      </Tip>
-      {canvas && !editing && <span className="rich-switch" role="radiogroup" aria-label="Version">
+      </Tip>}
+      {version && !editing && <span className="rich-switch rich-versions" role="group" aria-label="Version">
+        <button type="button" aria-label="Previous version" disabled={version.version <= oldest} onClick={() => setPicked(version.version - 1)}><ChevronLeft size={12} aria-hidden="true"/></button>
+        <span className="rich-versions-label" aria-live="polite">v{version.version} of {version.of}</span>
+        <button type="button" aria-label="Next version" disabled={version.version >= version.of} onClick={() => setPicked(version.version + 1 >= version.of ? null : version.version + 1)}><ChevronRight size={12} aria-hidden="true"/></button>
+      </span>}
+      {canvas && !stepping && !editing && <span className="rich-switch" role="radiogroup" aria-label="Version">
         <button type="button" role="radio" aria-checked={view === 'original'} onClick={() => setView('original')}>Original</button>
         <button type="button" role="radio" aria-checked={view === 'edited'} onClick={() => setView('edited')}>Edited</button>
       </span>}
@@ -81,7 +104,7 @@ export function useVisualEditing(options: VisualEditOptions): VisualEditing {
   };
   const editor = (preview: PreviewRenderer) => <VisualEditor initial={source ?? ''} label={`${options.title} source`} preview={preview} onSave={save} onCancel={() => setEditing(false)}/>;
   const errorAction = enabled && source !== undefined && !editing ? <button type="button" onClick={() => setEditing(true)}><PenLine size={12} aria-hidden="true"/>Edit</button> : undefined;
-  return {enabled, editing: enabled && editing, showingEdit, source, extras, editor, ...(errorAction ? {errorAction} : {})};
+  return {enabled, editing: enabled && editing, showingEdit, source, extras, editor, ...(version ? {version} : {}), ...(errorAction ? {errorAction} : {})};
 }
 
 function useSettled<T>(value: T, ms: number): T {

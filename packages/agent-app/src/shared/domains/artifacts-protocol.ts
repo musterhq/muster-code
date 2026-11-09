@@ -55,6 +55,9 @@ export interface ArtifactsCommands {
   /** Restoring never rewrites history: it saves the old content as a new version. */
   'artifacts.canvas.restore': { input: { id: string; version: number }; output: Canvas };
   'artifacts.canvas.delete': { input: { id: string }; output: void };
+  /** #829: the agent replaced a visual (render_html `replaces`, from main): its new content becomes the next version of the
+   *  visual's canvas in the chat, made on first use with `original` as version 1. Authored by the agent. */
+  'artifacts.visual.agentUpdate': { input: { chatId: string; visual: CanvasVisual; title: string; original: string; content: string; note?: string }; output: { id: string; version: number } };
   /** Creates a chat bound to a resource; it stays out of the sidebar until promoted. */
   'artifacts.sideChat.create': { input: { parentChatId?: string; binding: SideChatBinding }; output: SideChat };
   'artifacts.sideChat.list': { input: undefined; output: { sideChats: SideChat[] } };
@@ -87,7 +90,7 @@ export type ArtifactsEvent =
   | { type: 'sideChatsChanged'; sideChats: SideChat[] };
 export const ARTIFACTS_COMMANDS = {
   'artifacts.canvas.list': true, 'artifacts.canvas.get': true, 'artifacts.canvas.create': true, 'artifacts.canvas.update': true,
-  'artifacts.canvas.versions': true, 'artifacts.canvas.version': true, 'artifacts.canvas.restore': true, 'artifacts.canvas.delete': true,
+  'artifacts.canvas.versions': true, 'artifacts.canvas.version': true, 'artifacts.canvas.restore': true, 'artifacts.canvas.delete': true, 'artifacts.visual.agentUpdate': true,
   'artifacts.sideChat.create': true, 'artifacts.sideChat.list': true, 'artifacts.sideChat.promote': true, 'artifacts.sideChat.discard': true,
   'artifacts.authorize': true, 'artifacts.read': true,
   'plugins.ui.entry': true, 'plugins.ui.open': true,

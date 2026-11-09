@@ -9,7 +9,7 @@
  */
 import React, {useMemo, useState} from 'react';
 import {exportFileName} from '../../../shared/rich-block';
-import {htmlRenderTitle, type HtmlRenderView} from '../../../shared/html-render';
+import {HTML_RENDER_REF, htmlRenderTitle, type HtmlRenderView} from '../../../shared/html-render';
 import {invoke} from '../../bridge';
 import {openRichTab} from '../../richTabs';
 import {notifyError, pushNotice} from '../../store';
@@ -33,17 +33,26 @@ export interface HtmlRenderCardProps {
 
 export default function HtmlRenderCard({renderId, title: requestedTitle, chatId}: HtmlRenderCardProps): React.ReactElement {
   const [page, setPage] = useState<HtmlRenderView | null>(null);
+  /** #829: the stored page of an agent's later version, when that is the one shown. */
+  const [drawnPage, setDrawnPage] = useState<HtmlRenderView | null>(null);
   const [height, setHeight] = useState<number | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [allowing, setAllowing] = useState(false);
   const {zoom, extras} = usePageZoom();
-  const title = page?.title ?? htmlRenderTitle(requestedTitle);
   const visual = useMemo(() => ({kind: 'page' as const, key: pageVisualKey(renderId)}), [renderId]);
-  const edit = useVisualEditing({chatId, visual, original: page?.html, title, canvasKind: 'html', variant: 'inline'});
-  // #829: a saved edit is drawn from its text like a report (themed, scripts-only); the original stays the stored page.
+  const edit = useVisualEditing({chatId, visual, original: page?.html, title: page?.title ?? htmlRenderTitle(requestedTitle), canvasKind: 'html', variant: 'inline', versions: true});
+  // #829: once the page has versions (the agent's updates, the person's edits), the card shows the one picked with its switch.
+  // Version 1 is the stored page; an agent's update is the stored page its note names (with that page's own network
+  // decision); the person's edit is drawn from its text like a report (themed, scripts-only).
+  const shown = edit.version;
+  const agentPageId = shown && shown.version > 1 && shown.saved?.author === 'agent' ? HTML_RENDER_REF.exec(shown.saved.note ?? '')?.[1] : undefined;
+  const drawId = !shown || shown.version === 1 ? renderId : agentPageId;
+  const waiting = !!shown && shown.version > 1 && !shown.saved;
+  const framePage = drawId === renderId ? page : drawnPage?.id === drawId ? drawnPage : null;
+  const title = shown?.saved?.title ?? framePage?.title ?? page?.title ?? htmlRenderTitle(requestedTitle);
   const source = edit.source ?? page?.html;
-  const showingEdit = edit.showingEdit && source !== undefined;
+  const showingEdit = !drawId && !waiting && edit.showingEdit && edit.source !== undefined;
   const exports: RichExport[] = source === undefined ? [] : [
     {id: 'html', label: 'Download HTML', run: () => downloadText(source, exportFileName(title, 'html'), 'text/html')},
     ...(isWebHost() ? [] : [{id: 'pdf', label: 'Export PDF…', disabled: !token, run: async () => {
@@ -53,13 +62,14 @@ export default function HtmlRenderCard({renderId, title: requestedTitle, chatId}
     }}, openInCanvasExport(source, title, chatId)]),
   ];
   const allow = async () => {
+    if (!drawId) return;
     setAllowing(true);
-    try { setPage(await invoke('htmlRenders.allowNetwork', {id: renderId})); setRevision(value => value + 1); }
+    try { const allowed = await invoke('htmlRenders.allowNetwork', {id: drawId}); if (drawId === renderId) setPage(allowed); else setDrawnPage(allowed); setRevision(value => value + 1); }
     catch (cause) { notifyError(cause); }
     finally { setAllowing(false); }
   };
   const inlineHeight = inlinePageHeight(height, INLINE_MIN, INLINE_MAX);
-  const askNetwork = page?.networkRequested === true && !page.networkAllowed;
+  const askNetwork = !!drawId && framePage?.networkRequested === true && !framePage.networkAllowed;
   return <RichBlock
     kind="report" kindLabel="Page" title={title} status="ready" variant="inline" exports={exports} extras={context => <>{edit.extras(context)}{extras(context)}</>}
     {...(edit.editing ? {fullscreen: false} : {})}
@@ -74,8 +84,9 @@ export default function HtmlRenderCard({renderId, title: requestedTitle, chatId}
       </div>}
       <div className="rich-report" data-mode={context.mode} data-themed="true" style={context.mode === 'inline' && inlineHeight ? {['--rich-report-height' as string]: `${inlineHeight}px`} : undefined}>
         {context.suspended ? null : <div className="rich-report-zoom" style={context.mode === 'fullscreen' && zoom !== 1 ? {zoom} : undefined}>
-          {showingEdit ? <SandboxedHtml html={source} scripts themed lazy={context.mode === 'inline'} title={`${title} (page)`} storeKey={`shown:${visual.key}`} className="rich-report-sandbox" onHeight={setHeight} onToken={setToken} debounceMs={0}/>
-          : <SandboxedHtml html="" renderId={renderId} revision={revision} lazy={context.mode === 'inline'} title={`${title} (page)`} className="rich-report-sandbox" onHeight={setHeight} onToken={setToken} onPage={setPage} debounceMs={0}/>}
+          {drawId ? <SandboxedHtml key={drawId} html="" renderId={drawId} revision={revision} lazy={context.mode === 'inline'} title={`${title} (page)`} className="rich-report-sandbox" onHeight={setHeight} onToken={setToken} onPage={drawId === renderId ? setPage : setDrawnPage} debounceMs={0}/>
+          : showingEdit ? <SandboxedHtml html={edit.source!} scripts themed lazy={context.mode === 'inline'} title={`${title} (page)`} storeKey={`shown:${visual.key}`} className="rich-report-sandbox" onHeight={setHeight} onToken={setToken} debounceMs={0}/>
+          : null}
         </div>}
       </div>
     </>}

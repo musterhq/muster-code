@@ -418,6 +418,7 @@ async function main(): Promise<void> {
   const htmlRenders = new HtmlRenderStore(path.join(dataDir,'html-renders'));
   const browserBridge = new BrowserBridge({dir:path.join(dataDir,'agent-tools'),browser:browserWorkspace,execPath:process.execPath,script:unpackedPath(path.join(__dirname,'browser-mcp.cjs')),
     renders:htmlRenders,capture:capturePagePng,imagesDir:path.join(dataDir,'html-render-images'),realpath:file=>fs.realpath(file),readFile:async file=>{const stat=await fs.stat(file);if(!stat.isFile())throw new Error('Not a file.');if(stat.size>4_000_000)throw new Error(`This file is ${(stat.size/1_000_000).toFixed(1)} MB; previews take at most 4 MB. Serve it with a dev server and preview its URL instead.`);return fs.readFile(file,'utf8');},
+    updateVisual:input=>loaded.service.invoke('artifacts.visual.agentUpdate',input),
     snapshot:()=>loaded.service.invoke('app.snapshot',undefined),lease:async chatId=>(await loaded.service.invoke('computer.lease',{chatId})).owner,emit:onEvent});
   // #387/#424: started now (retried once), and again on first use if that failed; HTTP routes call it in-process.
   const startBrowserBridge=()=>browserBridge.ensureStarted().then(launcher=>{process.env.MUSTER_BROWSER_MCP_LAUNCHER=launcher;return launcher;});
