@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - **Edit any visual in the chat.** Diagrams, charts, HTML reports and pages the agent showed have an Edit button: the source sits beside a preview that redraws as you type, and source that doesn't parse shows its error while the last good drawing stays. Save keeps your edit as a new version (the original is one click away under Original); Cancel discards it. Edits are kept with the chat as canvases, and the agent sees your edited source on its next turn (#829).
+- **Office previews keep up with the file.** A Word, Excel, PowerPoint or PDF file shown in the chat or the file viewer redraws by itself about a second after the file changes, whether you saved it in Word, Excel, Numbers or PowerPoint or the agent wrote it, and says "Updated just now". Only previews on screen are watched; if a redraw fails, the last pages stay with the reason. It uses the LibreOffice already installed and never downloads it (#829).
 
 ## 0.3.17
 

@@ -201,7 +201,9 @@ test('an office_render preview re-renders a changed file with the installed Libr
   assert.ok((await fs.readdir(liveDir)).length > 0, 'refreshed pages are kept under the renders folder');
   domain.dispose?.(); disposed = true; setOfficeRuntime(null);
   await until(() => opened.every(handle => handle.closed), 'every watch closed');
-  await fs.access(liveDir).then(() => assert.fail('refreshed pages removed on dispose'), () => undefined);
+  let removed = false;
+  for (let tries = 0; tries < 200 && !removed; tries++) { removed = await fs.access(liveDir).then(() => false, () => true); if (!removed) await delay(10); }
+  assert.ok(removed, 'refreshed pages are removed on dispose');
 
   // No LibreOffice at all: the refresh says so and nothing is downloaded.
   officeRuntimeTesting.options = {candidates: [], env: {}, build: null, fetch};
