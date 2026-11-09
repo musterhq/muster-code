@@ -114,6 +114,13 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-785F](21-visuals-and-artifacts.md#mus-spec-21-785f) | While a reply streams an unfinished formula shows as its source; invalid TeX shows its source. | [`a streaming formula shows its source until it closes, and invalid TeX shows its source`](../../../packages/agent-app/tests/markdown-math-dom.tsx) |
 | [MUS-SPEC-21-785G](21-visuals-and-artifacts.md#mus-spec-21-785g) | Copying a selection that includes a formula copies the whole TeX source with its delimiters; the same for Mermaid diagrams. | [`copying a selection with maths or a diagram gives back the TeX and the fenced source`](../../../packages/agent-app/tests/markdown-math-dom.tsx) |
 | [MUS-SPEC-21-785H](21-visuals-and-artifacts.md#mus-spec-21-785h) | Replies render formulas, on by default. | [`maths is on by default and the Chat setting turns it off`](../../../packages/agent-app/tests/markdown-math-dom.tsx) |
+| [MUS-SPEC-21-829A](21-visuals-and-artifacts.md#mus-spec-21-829a) | A diagram header offers Edit; Edit shows the source beside a preview that redraws about 250 ms after typing stops; source that does not parse shows its parse error and keeps the last good drawing. | [`editing a diagram redraws the preview as you type and keeps the last good drawing on a parse error`](../../../packages/agent-app/tests/visual-edit-829-dom.tsx) |
+| [MUS-SPEC-21-829B](21-visuals-and-artifacts.md#mus-spec-21-829b) | Cancel closes the editor, the block draws the original source again and nothing is saved. | [`cancel closes the editor, draws the original and saves nothing`](../../../packages/agent-app/tests/visual-edit-829-dom.tsx) |
+| [MUS-SPEC-21-829C](21-visuals-and-artifacts.md#mus-spec-21-829c) | Save stores a Canvas linked to the chat and the visual with the original as version 1 and the edit as version 2; the block draws the edit with an Original/Edited switch; a fresh mount (restart) still draws the edit. | [`saving keeps the edit as version 2 of a linked canvas, the original stays one click away, and a reload draws the edit`](../../../packages/agent-app/tests/visual-edit-829-dom.tsx) |
+| [MUS-SPEC-21-829D](21-visuals-and-artifacts.md#mus-spec-21-829d) | A chart's Edit shows its JSON; invalid JSON shows the parse error and keeps the last good chart; a report's Edit re-registers the draft in its sandbox after the debounce; Save links the canvas to the chart or report. | [`charts and html reports edit with a live preview and save as linked canvases`](../../../packages/agent-app/tests/visual-edit-829-dom.tsx) |
+| [MUS-SPEC-21-829E](21-visuals-and-artifacts.md#mus-spec-21-829e) | A render_html card's Edit shows the stored page's HTML; Save links an html canvas to that page; the card then shows the edit in the scripts-only, themed sandbox. | [`a render_html page edits with a live preview and the card shows the saved edit in its sandbox`](../../../packages/agent-app/tests/visual-edit-829-dom.tsx) |
+| [MUS-SPEC-21-829F](21-visuals-and-artifacts.md#mus-spec-21-829f) | artifacts.canvas.create with a visual link keeps the link, the original as version 1 and the edit as version 2; a second edit canvas for the same visual or one with no chat is refused; the link and both versions survive a service restart; an older canvases table gains the link column. | [`a saved visual edit is a canvas linked to its chat and visual, and it survives a restart`](../../../packages/agent-app/tests/visual-edit-829.test.ts) |
+| [MUS-SPEC-21-829G](21-visuals-and-artifacts.md#mus-spec-21-829g) | The next turn in the chat carries a visual-edits context block with the edited source in a fence of its kind; a visual with no edit and another chat's edits are left out. | [`the next turn carries the edited source of a visual, and only in its own chat`](../../../packages/agent-app/tests/visual-edit-829.test.ts) |
 
 ### Side chats
 
@@ -1191,4 +1198,81 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/visual-rows-stay-open-771.test.ts::a page that failed or is still drawing folds with its tools like any tool row`
 - Environment: Node test runner on the renderer's transcript model; no window is drawn.
 - Known gaps: The drawn chat (the card under its tool row) is checked by hand in the app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829a"></a>
+#### MUS-SPEC-21-829A: Edit a diagram with a live preview
+
+- Precondition: A reply in a chat holds a closed mermaid fence that draws.
+- Action: Click Edit in the block header, change the source, wait, then type source that does not parse.
+- Expected result: The header reads Edit, Show code, Copy source, Download, Open in tab, Full screen. Edit (pressed) shows a source box holding the fence's source beside a preview. A change is not drawn at once; about 250 ms after the last keystroke the preview shows the new drawing. Source that does not parse shows the parse error in an alert while the preview keeps the last drawing that worked.
+- Test: `packages/agent-app/tests/visual-edit-829-dom.tsx::editing a diagram redraws the preview as you type and keeps the last good drawing on a parse error`
+- Environment: DOM suite (linkedom) with a stubbed bridge backed by the real canvas store on an in-memory SQLite database; the Mermaid renderer is a stub that returns an SVG and throws a parse error on demand.
+- Known gaps: linkedom has no layout: the side-by-side placement and the textarea's look are checked by hand in the app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829b"></a>
+#### MUS-SPEC-21-829B: Cancel discards an edit
+
+- Precondition: A diagram is open in Edit with a changed source.
+- Action: Click Cancel.
+- Expected result: The editor closes, the block draws the reply's original source, the header has no Original or Edited switch and no canvas was created.
+- Test: `packages/agent-app/tests/visual-edit-829-dom.tsx::cancel closes the editor, draws the original and saves nothing`
+- Environment: DOM suite (linkedom) with a stubbed bridge backed by the real canvas store on an in-memory SQLite database; the Mermaid renderer is a stub.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829c"></a>
+#### MUS-SPEC-21-829C: Save keeps the edit as a new version and the original stays reachable
+
+- Precondition: A diagram in a chat is open in Edit with a changed source.
+- Action: Click Save, then Original, then Edited, then mount the reply again with an empty renderer cache.
+- Expected result: The canvas store has one canvas for the chat, linked to the diagram (kind diagram, key from the original source), whose version 1 is the original and version 2 the edit. The block draws the edit and shows an Original/Edited switch with Edited checked; Original draws the reply's source and Edited draws the edit again. Mounted again with nothing cached, the block reads the link from the store and draws the edit.
+- Test: `packages/agent-app/tests/visual-edit-829-dom.tsx::saving keeps the edit as version 2 of a linked canvas, the original stays one click away, and a reload draws the edit`
+- Environment: DOM suite (linkedom) with a stubbed bridge backed by the real canvas store on an in-memory SQLite database; the Mermaid renderer is a stub.
+- Known gaps: The restart is a fresh mount over the same store, not a relaunch of the app; MUS-SPEC-21-829F checks the store across a real service restart.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829d"></a>
+#### MUS-SPEC-21-829D: Charts and HTML reports edit the same way
+
+- Precondition: A reply holds a closed chart fence and a closed html-report fence.
+- Action: Edit the chart: change a value, then break the JSON; Save. Edit the report: change its heading; Save.
+- Expected result: The chart's editor holds its JSON; a valid change redraws the chart after the debounce; broken JSON shows the parse error while the last chart stays drawn and is not disposed. Save stores a code canvas (json) linked as a chart. The report's editor holds its HTML; after the debounce the sandboxed frame is registered again with the changed HTML, scripts on and the report's own key; Save stores an html canvas linked as a report and the block shows the edit.
+- Test: `packages/agent-app/tests/visual-edit-829-dom.tsx::charts and html reports edit with a live preview and save as linked canvases`
+- Environment: DOM suite (linkedom) with a stubbed bridge backed by the real canvas store on an in-memory SQLite database; the chart renderer is a stub that writes an SVG.
+- Known gaps: Vega itself is not run; a spec that parses as JSON but fails in Vega shows the renderer's error, which is checked by hand.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829e"></a>
+#### MUS-SPEC-21-829E: A page the agent showed edits the same way
+
+- Precondition: A chat holds a render_html card whose stored page has loaded.
+- Action: Click Edit, change the HTML, Save.
+- Expected result: The editor holds the stored page's HTML. Save stores an html canvas linked as a page with the render id as its key, version 1 the stored page and version 2 the edit. The card's frame is then registered from the edited HTML with scripts and the theme on, never same-origin.
+- Test: `packages/agent-app/tests/visual-edit-829-dom.tsx::a render_html page edits with a live preview and the card shows the saved edit in its sandbox`
+- Environment: DOM suite (linkedom) with a stubbed bridge (htmlRenders.open and reports.open) backed by the real canvas store on an in-memory SQLite database.
+- Known gaps: An edited page is served like a report, without the network the person may have allowed for the original page.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829f"></a>
+#### MUS-SPEC-21-829F: A visual edit is a Canvas linked to its chat
+
+- Precondition: A chat exists; one database was made by an older Muster without the visual link column.
+- Action: Create a canvas with a visual link and the original, update it with the edit, try a duplicate and an unbound one, restart the service, and open the older database.
+- Expected result: The canvas lists for its chat with the visual link; version 1 holds the original with its note and version 2 the edit. A second canvas for the same chat and visual, a link with no chat and a malformed key are refused. After a restart the link and both versions are still there. The older database opens, gains the column, keeps its canvas and accepts a linked one.
+- Test: `packages/agent-app/tests/visual-edit-829.test.ts::a saved visual edit is a canvas linked to its chat and visual, and it survives a restart`
+- Environment: Node test runner with the real agent service and a fixture provider; SQLite on disk in a temporary folder.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829g"></a>
+#### MUS-SPEC-21-829G: The agent sees the edited source on its next turn
+
+- Precondition: Two chats; the first has a diagram with a saved edit and a chart canvas that was linked but never edited.
+- Action: Send a message in each chat.
+- Expected result: The first chat's prompt holds a visual-edits context block naming the diagram, its canvas id and version, with the edited source in a mermaid fence, and not the unedited chart. The second chat's prompt has no visual-edits block.
+- Test: `packages/agent-app/tests/visual-edit-829.test.ts::the next turn carries the edited source of a visual, and only in its own chat`
+- Environment: Node test runner with the real agent service and a recording fixture provider.
+- Known gaps: Whether a model then uses the edit is not tested; the block is resent only when the edit changes, per the context ledger.
 - Evidence: UNVERIFIED
