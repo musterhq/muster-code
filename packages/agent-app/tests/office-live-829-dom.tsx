@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {setTimeout as delay} from 'node:timers/promises';
 import {check} from './dom-check.ts';
+import {until} from './dom-wait.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
 const saved=new Map<string,string>();
@@ -51,29 +52,36 @@ await check('an office_render row redraws its pages when the file changes, only 
   const at=new Date(Date.now()-60_000).toISOString();
   const item={id:'tool-render-1',chatId:'chat-1',kind:'tool',status:'completed',text:'muster_office / office_render',createdAt:at,
     data:{type:'mcpToolCall',server:'muster_office',tool:'office_render',arguments:{path:'report.docx'},images:[{dataUrl:png('old-1')},{dataUrl:png('old-2')}]}};
-  root.render(<ToolCard item={item as never}/>);await delay(40);
+  root.render(<ToolCard item={item as never}/>);
+  // The watch starts two renders after the pages show (the observer's effect, then the on-screen re-render's effect).
+  await until(()=>images().length===2&&of('office.live.watch').length>0,'the row to show its pages and watch its file');
   assert.deepEqual(images(),['old-1','old-2'],'the row shows the pages the agent saw');
   const watches=of('office.live.watch');
   assert.equal(watches.length,1,'on screen, the row watches its file once');
   assert.deepEqual(watches[0]!.input,{id:'render:tool-render-1',source:{kind:'render',chatId:'chat-1',path:'report.docx',pages:2},since:Date.parse(at)});
   emit({type:'officeLiveChanged',id:'render:other',phase:'updated',version:1});await delay(20);
   assert.equal(of('office.live.pages').length,0,'another preview\'s change is not ours');
-  emit({type:'officeLiveChanged',id:'render:tool-render-1',phase:'rendering',version:0});await delay(20);
-  assert.match(status(),/Updating/);
-  emit({type:'officeLiveChanged',id:'render:tool-render-1',phase:'updated',version:1});await delay(40);
+  emit({type:'officeLiveChanged',id:'render:tool-render-1',phase:'rendering',version:0});
+  await until(()=>/Updating/.test(status()),'the row to say it is updating');
+  emit({type:'officeLiveChanged',id:'render:tool-render-1',phase:'updated',version:1});
+  await until(()=>images()[0]==='new-1'&&/Updated just now/.test(status()),'the new pages');
   assert.deepEqual(of('office.live.pages').map(call=>call.input),[{id:'render:tool-render-1'}]);
   assert.deepEqual(images(),['new-1','new-2'],'the new pages replace the old ones');
   assert.match(status(),/Updated just now/);
-  emit({type:'officeLiveChanged',id:'render:tool-render-1',phase:'failed',version:1,error:'LibreOffice exited with code 1.'});await delay(20);
+  emit({type:'officeLiveChanged',id:'render:tool-render-1',phase:'failed',version:1,error:'LibreOffice exited with code 1.'});
+  await until(()=>/LibreOffice exited with code 1/.test(status()),'the failure to show');
   assert.deepEqual(images(),['new-1','new-2'],'a failed refresh keeps the last pages');
   assert.match(status(),/LibreOffice exited with code 1/);
   assert.equal(document.querySelector('.office-live-status')?.getAttribute('data-state'),'failed');
 
-  setOnScreen(false);await delay(20);
+  setOnScreen(false);
+  await until(()=>of('office.live.unwatch').length>0,'the row to stop watching off screen');
   assert.deepEqual(of('office.live.unwatch').map(call=>call.input),[{id:'render:tool-render-1'}],'off screen it stops watching');
-  setOnScreen(true);await delay(20);
+  setOnScreen(true);
+  await until(()=>of('office.live.watch').length>1,'the row to watch again on screen');
   assert.equal(of('office.live.watch').length,2,'back on screen it watches again');
-  root.render(<div/>);await delay(20);
+  root.render(<div/>);
+  await until(()=>of('office.live.unwatch').length>1,'the unmounted row to stop watching');
   assert.equal(of('office.live.unwatch').length,2,'unmounting stops watching');
 
   // A row with no pages to show, a failed row and another server's tool never watch.
@@ -82,7 +90,9 @@ await check('an office_render row redraws its pages when the file changes, only 
     <ToolCard item={{...item,id:'tool-none',data:{...item.data,images:[]}} as never}/>
     <ToolCard item={{...item,id:'tool-failed',status:'failed'} as never}/>
     <ToolCard item={{...item,id:'tool-other',data:{...item.data,server:'other_server'}} as never}/>
-  </>);await delay(40);
+  </>);
+  // Nothing to wait for in a watch that must not happen: wait for the rows, then give the effects time to run.
+  await until(()=>document.querySelectorAll('.tool-shot img').length>=2,'the rows to render');await delay(40);
   assert.equal(of('office.live.watch').length,0);
   root.render(<div/>);await delay(20);
 });
@@ -91,16 +101,17 @@ await check('an office_render row redraws its pages when the file changes, only 
 await check("the file viewer's office preview redraws in place when the file changes and keeps the last preview on a failure",async()=>{
   calls.length=0;cell='Before';failRead=false;
   const revision={};
-  root.render(<NativeDocument folderId="folder-1" path="book.xlsx" revision={revision}/>);await delay(60);
+  root.render(<NativeDocument folderId="folder-1" path="book.xlsx" revision={revision}/>);
   const cellText=()=>document.querySelector('.native-document')?.textContent??'';
-  assert.match(cellText(),/Before/);
+  await until(()=>/Before/.test(cellText())&&of('office.live.watch').length>0,'the workbook to show and be watched');
   assert.deepEqual(of('office.live.watch').map(call=>({id:call.input.id,source:call.input.source})),[{id:'file:folder-1:book.xlsx',source:{kind:'file',folderId:'folder-1',path:'book.xlsx'}}]);
   const reads=of('files.workbook').length;
   cell='After';
   let sawLoading=false;
   const seen=new MutationObserver(()=>{if(document.querySelector('.pane-loading'))sawLoading=true;});
   seen.observe(document.body,{childList:true,subtree:true});
-  emit({type:'officeLiveChanged',id:'file:folder-1:book.xlsx',phase:'updated',version:1});await delay(60);
+  emit({type:'officeLiveChanged',id:'file:folder-1:book.xlsx',phase:'updated',version:1});
+  await until(()=>/After/.test(cellText())&&/Updated just now/.test(status()),'the re-read workbook');
   seen.disconnect();
   assert.equal(of('files.workbook').length,reads+1,'the change re-reads the file');
   assert.match(cellText(),/After/);assert.doesNotMatch(cellText(),/Before/);
@@ -108,11 +119,13 @@ await check("the file viewer's office preview redraws in place when the file cha
   assert.match(status(),/Updated just now/);
 
   failRead=true;
-  emit({type:'officeLiveChanged',id:'file:folder-1:book.xlsx',phase:'updated',version:2});await delay(60);
+  emit({type:'officeLiveChanged',id:'file:folder-1:book.xlsx',phase:'updated',version:2});
+  await until(()=>/open in another app/.test(status()),'the failed re-read to show');
   assert.match(cellText(),/After/,'a failed re-read keeps the last preview');
   assert.match(status(),/open in another app/);
 
-  root.render(<div/>);await delay(20);
+  root.render(<div/>);
+  await until(()=>of('office.live.unwatch').length>0,'the closed preview to stop watching');
   assert.deepEqual(of('office.live.unwatch').map(call=>call.input),[{id:'file:folder-1:book.xlsx'}],'closing the preview stops watching');
 });
 assert.deepEqual(errors,[]);
