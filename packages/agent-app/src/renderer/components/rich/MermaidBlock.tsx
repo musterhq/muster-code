@@ -17,6 +17,9 @@ import {copyPngImage, downloadBlob, downloadText, standaloneSvg, svgToPngBlob} f
 import {HighlightedCode} from '../HighlightedCode';
 import {Tip} from '../Tooltip';
 import {SvgStage, useZoom, ZoomControls} from './SvgStage';
+import {useVisualEditing, type PreviewReport} from './VisualEdit';
+import {visualKey} from '../../visualEdits';
+import {ResourceState} from '../ResourceState';
 import type {RichBlockBody} from '../RichFence';
 import type {MermaidResult} from './mermaidRender';
 
@@ -27,7 +30,24 @@ const CACHE_LIMIT = 40;
 const CHUNK_FAILURE = /dynamically imported module|Importing a module script failed|error loading dynamically imported module|ChunkLoadError/i;
 const remember = (key: string, result: MermaidResult) => { cache.delete(key); cache.set(key, result); while (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value as string); };
 
-export default function MermaidBlock({source, variant, onOpenInTab}: RichBlockBody): React.ReactElement {
+/** #829: the editor's preview. Draws each settled draft; a draft that does not parse reports its error and the last drawing stays. */
+function MermaidPreview({source, report}: {source: string; report: PreviewReport}): React.ReactElement {
+  const signature = useRichThemeSignature();
+  const zoom = useZoom();
+  const [good, setGood] = useState<MermaidResult | null>(null);
+  useEffect(() => {
+    if (source.length > MAX_RICH_SOURCE.diagram) { report(`This diagram is ${(source.length / 1000).toFixed(0)} KB; the limit is ${MAX_RICH_SOURCE.diagram / 1000} KB.`); return; }
+    let live = true;
+    void renderMermaid(source, readRichTheme(), signature).then(result => { if (live) { setGood(result); report(null); } }, cause => { if (live) report(libraryMessage(cause)); });
+    return () => { live = false; };
+  }, [source, signature, report]);
+  return good ? <SvgStage svg={good.svg} width={good.width} height={good.height} mode="inline" zoom={zoom} label="Diagram preview"/> : <ResourceState kind="loading" label="Drawing diagram…" compact rows={2}/>;
+}
+
+export default function MermaidBlock({source: original, variant, onOpenInTab, chatId}: RichBlockBody): React.ReactElement {
+  const originalMeta = useMemo(() => mermaidMeta(original), [original]);
+  const edit = useVisualEditing({chatId, visual: {kind: 'diagram', key: visualKey('diagram', original)}, original, title: originalMeta.title || originalMeta.type, canvasKind: 'code', language: 'mermaid', variant});
+  const source = edit.source ?? original;
   const signature = useRichThemeSignature();
   const key = `${signature}\u0000${source}`;
   const [attempt, setAttempt] = useState(0);
@@ -59,7 +79,7 @@ export default function MermaidBlock({source, variant, onOpenInTab}: RichBlockBo
 
   const title = meta.title || meta.type;
   const { result } = state;
-  const status = state.error ? 'error' : result ? 'ready' : 'loading';
+  const status = edit.editing ? 'ready' : state.error ? 'error' : result ? 'ready' : 'loading';
   const exports: RichExport[] = result ? [
     {id: 'svg', label: 'Download SVG', run: () => downloadText(standaloneSvg(result.svg, readRichTheme().surface), exportFileName(title, 'svg'), 'image/svg+xml')},
     {id: 'png', label: 'Download PNG', run: async () => downloadBlob(await svgToPngBlob(result.svg, result.width, result.height, readRichTheme().surface), exportFileName(title, 'png'))},
@@ -74,15 +94,17 @@ export default function MermaidBlock({source, variant, onOpenInTab}: RichBlockBo
   const copyLabel = copied === 'copied' ? 'Image copied' : copied === 'error' ? 'Copy image failed' : 'Copy image';
   return <RichBlock
     kind="diagram" kindLabel={meta.title ? meta.type : 'Diagram'} title={title} status={status} source={source} variant={variant} exports={exports}
-    {...(state.error ? {error: {message: chunkFailed ? 'Couldn’t load the diagram renderer' : 'Couldn’t render this diagram', detail: state.error, onRetry: () => setAttempt(value => value + 1)}} : {})}
+    {...(edit.editing ? {fullscreen: false} : {})}
+    {...(state.error && !edit.editing ? {error: {message: chunkFailed ? 'Couldn’t load the diagram renderer' : 'Couldn’t render this diagram', detail: state.error, onRetry: () => setAttempt(value => value + 1), ...(edit.errorAction ? {actions: edit.errorAction} : {})}} : {})}
     {...(onOpenInTab ? {onOpenInTab} : {})}
     description={`${meta.type}. Its Mermaid source follows.`}
     extras={context => <>
-      <Tip label={showCode ? 'Show diagram' : 'Show code'}>
+      {edit.extras(context)}
+      {!edit.editing && <Tip label={showCode ? 'Show diagram' : 'Show code'}>
         <button type="button" className="rich-action" aria-label={showCode ? 'Show diagram' : 'Show code'} aria-pressed={showCode} onClick={() => setShowCode(value => !value)}>
           {showCode ? <Workflow size={13} aria-hidden="true"/> : <Code size={13} aria-hidden="true"/>}
         </button>
-      </Tip>
+      </Tip>}
       {context.mode !== 'inline' && !showCode && <ZoomControls zoom={zoom}/>}
       {context.mode !== 'inline' && <Tip label={copyLabel}>
         <button type="button" className="rich-action" data-state={copied} aria-label={copyLabel} onClick={copyImage}>
@@ -91,7 +113,7 @@ export default function MermaidBlock({source, variant, onOpenInTab}: RichBlockBo
       </Tip>}
     </>}
   >
-    {context => result && <>
+    {context => edit.editing && context.mode === 'inline' ? edit.editor((draft, report) => <MermaidPreview source={draft} report={report}/>) : result && <>
       {!showCode && <SvgStage svg={result.svg} width={result.width} height={result.height} mode={context.mode} zoom={zoom} label={`${meta.type}: ${title}`}
         {...(context.openFullscreen ? {onActivate: context.openFullscreen} : {})}/>}
       {/* Always mounted: hidden only visually while the drawing shows, so Find in chat and screen readers still reach the source. */}

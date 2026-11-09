@@ -3,6 +3,10 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- **Edit any visual in the chat.** Diagrams, charts, HTML reports and pages the agent showed have an Edit button: the source sits beside a preview that redraws as you type, and source that doesn't parse shows its error while the last good drawing stays. Save keeps your edit as a new version (the original is one click away under Original); Cancel discards it. Edits are kept with the chat as canvases, and the agent sees your edited source on its next turn (#829).
+
 ## 0.3.17
 
 Muster uses far less memory with long chats, agents can make Word, Excel, PowerPoint and PDF files and show finished pages, dashboards and previews in the chat, replies typeset maths and draw diagrams and charts, and iOS Simulators and Android Emulators run beside your chats.

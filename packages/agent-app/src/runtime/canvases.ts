@@ -5,7 +5,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { CANVAS_KINDS, MAX_CANVAS_BYTES, MAX_CANVAS_TITLE, MAX_CANVAS_VERSIONS, type Canvas, type CanvasAuthor, type CanvasKind, type CanvasSummary, type CanvasVersion } from '../shared/domains/artifacts-protocol.ts';
+import { CANVAS_KINDS, CANVAS_VISUAL_KINDS, MAX_CANVAS_BYTES, MAX_CANVAS_TITLE, MAX_CANVAS_VERSIONS, type Canvas, type CanvasAuthor, type CanvasKind, type CanvasSummary, type CanvasVersion, type CanvasVisual, type CanvasVisualKind } from '../shared/domains/artifacts-protocol.ts';
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS canvases (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, kind TEXT NOT NULL, language TEXT, content TEXT NOT NULL, version INTEGER NOT NULL,
@@ -14,9 +14,12 @@ CREATE TABLE IF NOT EXISTS canvas_versions (
   canvas_id TEXT NOT NULL, version INTEGER NOT NULL, title TEXT NOT NULL, kind TEXT NOT NULL, language TEXT, content TEXT NOT NULL,
   author TEXT NOT NULL, note TEXT, restored_from INTEGER, created_at TEXT NOT NULL, PRIMARY KEY (canvas_id, version));
 CREATE INDEX IF NOT EXISTS canvases_chat ON canvases(chat_id, updated_at);`;
+/** #829: the visual a canvas edits. Added to tables made before it existed; one edit canvas per visual in a chat. */
+const VISUAL_COLUMNS = ['visual_kind', 'visual_key'] as const;
+const VISUAL_INDEX = 'CREATE UNIQUE INDEX IF NOT EXISTS canvases_visual ON canvases(chat_id, visual_key) WHERE visual_key IS NOT NULL;';
 export const MAX_CANVASES = 500;
 
-interface Row { id: string; title: string; kind: string; language: string | null; content: string; version: number; chat_id: string | null; folder_id: string | null; created_at: string; updated_at: string; updated_by: string }
+interface Row { id: string; title: string; kind: string; language: string | null; content: string; version: number; chat_id: string | null; folder_id: string | null; created_at: string; updated_at: string; updated_by: string; visual_kind?: string | null; visual_key?: string | null }
 interface VersionRow { canvas_id: string; version: number; title: string; kind: string; language: string | null; content: string; author: string; note: string | null; restored_from: number | null; created_at: string }
 
 const idOf = (value: unknown, label: string): string => {
@@ -50,12 +53,21 @@ const contentOf = (value: unknown): string => {
   if (Buffer.byteLength(value, 'utf8') > MAX_CANVAS_BYTES) throw new Error('This canvas is larger than 1 MB. Split it or save it as a file instead.');
   return value;
 };
+const visualOf = (value: unknown): CanvasVisual | null => {
+  if (value === undefined || value === null) return null;
+  const input = typeof value === 'object' ? value as Record<string, unknown> : {};
+  const kind = input.kind, key = input.key;
+  if (typeof kind !== 'string' || !(CANVAS_VISUAL_KINDS as readonly string[]).includes(kind)) throw new Error('Choose a diagram, chart, report or page visual.');
+  if (typeof key !== 'string' || !/^[a-z]+:[A-Za-z0-9_-]{1,64}$/.test(key)) throw new Error('That visual has no valid key.');
+  return { kind: kind as CanvasVisualKind, key };
+};
 const noteOf = (value: unknown): string | null => typeof value === 'string' && value.trim() ? value.replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, 200) : null;
 
 const toCanvas = (row: Row): Canvas => ({
   id: row.id, title: row.title, kind: row.kind as CanvasKind, ...(row.language ? { language: row.language } : {}), content: row.content, version: row.version,
   ...(row.chat_id ? { chatId: row.chat_id } : {}), ...(row.folder_id ? { folderId: row.folder_id } : {}),
   createdAt: row.created_at, updatedAt: row.updated_at, updatedBy: row.updated_by === 'agent' ? 'agent' : 'user',
+  ...(row.visual_kind && row.visual_key ? { visual: { kind: row.visual_kind as CanvasVisualKind, key: row.visual_key } } : {}),
 });
 export const summaryOf = (canvas: Canvas): CanvasSummary => { const { content, ...rest } = canvas; return { ...rest, size: Buffer.byteLength(content, 'utf8') }; };
 const toVersion = (row: VersionRow): CanvasVersion => ({
@@ -64,13 +76,23 @@ const toVersion = (row: VersionRow): CanvasVersion => ({
   size: Buffer.byteLength(row.content, 'utf8'), createdAt: row.created_at,
 });
 
-export interface CanvasCreate { title?: unknown; kind?: unknown; language?: unknown; content?: unknown; chatId?: unknown; folderId?: unknown }
+export interface CanvasCreate { title?: unknown; kind?: unknown; language?: unknown; content?: unknown; chatId?: unknown; folderId?: unknown; visual?: unknown; note?: unknown }
 export interface CanvasUpdate { content?: unknown; title?: unknown; kind?: unknown; language?: unknown; baseVersion?: unknown; note?: unknown }
 
 export class CanvasStore {
   private ready = false;
   constructor(private readonly database: () => DatabaseSync, private readonly now: () => Date = () => new Date()) {}
-  private db(): DatabaseSync { const db = this.database(); if (!this.ready) { db.exec(SCHEMA); this.ready = true; } return db; }
+  private db(): DatabaseSync {
+    const db = this.database();
+    if (!this.ready) {
+      db.exec(SCHEMA);
+      const columns = new Set((db.prepare('PRAGMA table_info(canvases)').all() as Array<{ name: string }>).map(column => column.name));
+      for (const column of VISUAL_COLUMNS) if (!columns.has(column)) db.exec(`ALTER TABLE canvases ADD COLUMN ${column} TEXT`);
+      db.exec(VISUAL_INDEX);
+      this.ready = true;
+    }
+    return db;
+  }
   private row(id: string): Row | undefined { return this.db().prepare('SELECT * FROM canvases WHERE id = ?').get(id) as Row | undefined; }
   private must(id: string): Row { const row = this.row(canvasId(id)); if (!row) throw new Error('This canvas no longer exists.'); return row; }
   private appendVersion(row: Row, author: CanvasAuthor, note: string | null, restoredFrom: number | null): void {
@@ -86,22 +108,30 @@ export class CanvasStore {
       : this.db().prepare('SELECT * FROM canvases WHERE chat_id = ? ORDER BY updated_at DESC').all(idOf(chatId, 'a chat'))) as unknown as Row[];
     return rows.map(row => summaryOf(toCanvas(row)));
   }
+  /** #829: a chat's edited visuals (a saved edit on top of the original), newest first. One indexed read of that chat's rows. */
+  visualEdits(chatId: string, limit: number): Canvas[] {
+    return (this.db().prepare('SELECT * FROM canvases WHERE chat_id = ? AND visual_key IS NOT NULL AND version > 1 ORDER BY updated_at DESC LIMIT ?')
+      .all(idOf(chatId, 'a chat'), limit) as unknown as Row[]).map(toCanvas);
+  }
   get(id: unknown): Canvas { return toCanvas(this.must(canvasId(id))); }
 
   create(input: CanvasCreate, author: CanvasAuthor): Canvas {
     const count = (this.db().prepare('SELECT COUNT(*) AS n FROM canvases').get() as { n: number }).n;
     if (count >= MAX_CANVASES) throw new Error(`There are already ${MAX_CANVASES} canvases. Delete some first.`);
     const kind = kindOf(input.kind, 'markdown');
+    const visual = visualOf(input.visual);
+    if (visual && input.chatId === undefined) throw new Error('An edited visual belongs to a chat.');
     const at = this.now().toISOString();
     const row: Row = {
       id: randomUUID(), title: titleOf(input.title, 'Untitled canvas'), kind, language: kind === 'code' ? languageOf(input.language) : null,
       content: input.content === undefined ? '' : contentOf(input.content), version: 1,
       chat_id: input.chatId === undefined ? null : idOf(input.chatId, 'a chat'), folder_id: input.folderId === undefined ? null : idOf(input.folderId, 'a folder'),
-      created_at: at, updated_at: at, updated_by: author,
+      created_at: at, updated_at: at, updated_by: author, visual_kind: visual?.kind ?? null, visual_key: visual?.key ?? null,
     };
-    this.db().prepare('INSERT INTO canvases (id, title, kind, language, content, version, chat_id, folder_id, created_at, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(row.id, row.title, row.kind, row.language, row.content, row.version, row.chat_id, row.folder_id, row.created_at, row.updated_at, row.updated_by);
-    this.appendVersion(row, author, 'Created', null);
+    if (visual && this.db().prepare('SELECT 1 FROM canvases WHERE chat_id = ? AND visual_key = ?').get(row.chat_id, visual.key)) throw new Error('This visual already has an edit. Update its canvas instead.');
+    this.db().prepare('INSERT INTO canvases (id, title, kind, language, content, version, chat_id, folder_id, created_at, updated_at, updated_by, visual_kind, visual_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(row.id, row.title, row.kind, row.language, row.content, row.version, row.chat_id, row.folder_id, row.created_at, row.updated_at, row.updated_by, row.visual_kind ?? null, row.visual_key ?? null);
+    this.appendVersion(row, author, noteOf(input.note) ?? 'Created', null);
     return toCanvas(row);
   }
 

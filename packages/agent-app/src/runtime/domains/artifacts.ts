@@ -5,7 +5,7 @@
 import { promises as fs } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Chat } from '../../shared/protocol.ts';
-import { MAX_SIDE_CHAT_EXCERPT, sideChatLabel, type Canvas, type PluginUiEntry, type SideChat, type SideChatBinding } from '../../shared/domains/artifacts-protocol.ts';
+import { MAX_SIDE_CHAT_EXCERPT, sideChatLabel, type Canvas, type CanvasVisualKind, type PluginUiEntry, type SideChat, type SideChatBinding } from '../../shared/domains/artifacts-protocol.ts';
 import { CanvasStore, summaryOf } from '../canvases.ts';
 import { ArtifactAccess } from '../artifact-access.ts';
 import { CANVAS_MCP, CANVAS_NOTE, CanvasToolHost } from '../canvas-agent-tools.ts';
@@ -55,9 +55,29 @@ export function sideChatBinding(value: unknown): SideChatBinding {
   }
 }
 
+/** A Markdown fence around `text` that no run of backticks inside it can close. */
+const fence = (text: string, language = '') => { const ticks = '`'.repeat(Math.max(3, ...[...text.matchAll(/`+/g)].map(match => match[0].length + 1))); return `${ticks}${language}\n${text}\n${ticks}`; };
+
+/** #829: the visuals the user edited in a chat, as the context its next turn carries. Bounded below the 8 KB a contribution may hold. */
+export const VISUAL_EDITS_LIMIT = 8;
+const VISUAL_EDITS_BUDGET = 7000;
+const VISUAL_FENCE: Record<CanvasVisualKind, string> = { diagram: 'mermaid', chart: 'chart', report: 'html-report', page: 'html' };
+const VISUAL_NOUN: Record<CanvasVisualKind, string> = { diagram: 'Diagram', chart: 'Chart', report: 'HTML report', page: 'Page (render_html)' };
+export function visualEditsContext(edits: readonly Canvas[]): string {
+  const lines = ['The user edited these visuals from earlier in this chat. Their current source is below: use it, not the version first shown, when you discuss or change them. Each is a canvas (canvas_read / canvas_update in agent mode).'];
+  let used = lines[0]!.length;
+  for (const canvas of edits) {
+    if (!canvas.visual) continue;
+    const head = `${VISUAL_NOUN[canvas.visual.kind]} "${canvas.title}" · canvas ${canvas.id} · version ${canvas.version}, edited by ${canvas.updatedBy === 'agent' ? 'the agent' : 'the user'}`;
+    const body = fence(canvas.content, VISUAL_FENCE[canvas.visual.kind]);
+    if (used + head.length + body.length + 2 > VISUAL_EDITS_BUDGET) { lines.push(`${head} (too long to include; canvas_read it)`); used += head.length + 40; continue; }
+    lines.push(head, body); used += head.length + body.length + 2;
+  }
+  return lines.join('\n');
+}
+
 /** The context block a side chat's turns carry: what it is about, and the exact text the user selected. */
 export function sideChatContext(binding: SideChatBinding, canvas?: Canvas): string {
-  const fence = (text: string) => { const ticks = '`'.repeat(Math.max(3, ...[...text.matchAll(/`+/g)].map(match => match[0].length + 1))); return `${ticks}\n${text}\n${ticks}`; };
   const lines = ['This is a side chat. Answer about the resource below; keep answers focused on it. The main conversation continues separately.'];
   switch (binding.kind) {
     case 'file': lines.push(`Resource: file ${binding.path}${binding.line ? ` (lines ${binding.line}${binding.endLine ? `-${binding.endLine}` : ''})` : ''} in the chat's folder.`); break;
@@ -124,6 +144,11 @@ export function createArtifactsDomain(context: DomainContext): DomainModule {
     let canvas: Canvas | undefined;
     if (side.binding.kind === 'canvas') try { canvas = canvases.get(side.binding.canvasId); } catch { /* deleted canvas: the binding still names it */ }
     return { label: 'side-chat', text: sideChatContext(side.binding, canvas) };
+  });
+  // #829: the next turn sees the user's edits of the chat's visuals. The context ledger sends an unchanged block once per thread.
+  const removeVisualEdits = context.hooks.addPromptContributor(async ({ chat: target }) => {
+    const edits = canvases.visualEdits(target.id, VISUAL_EDITS_LIMIT);
+    return edits.length ? { label: 'visual-edits', text: visualEditsContext(edits) } : null;
   });
 
   return {
@@ -202,6 +227,6 @@ export function createArtifactsDomain(context: DomainContext): DomainModule {
       'htmlRenders.allowNetwork': () => { throw new Error('Inline pages open in the Muster desktop app only.'); },
       'previews.open': () => { throw new Error('Previews open in the Muster desktop app only.'); },
     },
-    dispose() { removeRunOptions(); removePrompt(); host?.dispose(); },
+    dispose() { removeRunOptions(); removePrompt(); removeVisualEdits(); host?.dispose(); },
   };
 }

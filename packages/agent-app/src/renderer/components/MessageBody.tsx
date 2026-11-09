@@ -131,12 +131,15 @@ function InlineCode({node, className, children, ...props}: {node?: unknown; clas
 
 /** Whether this body may run an agent's ```html-report fences (in a sandbox). Only the surfaces that show an agent's or the user's own text opt in: a README, a teammate's comment or an installed skill never do. A context, not a prop on `pre`, so the renderer map stays stable while a reply streams. */
 const ReportsContext = React.createContext(false);
+/** #829: the chat a reply belongs to, so its drawn visuals offer Edit. Unset everywhere else (documents, comments, skills). */
+const VisualChatContext = React.createContext<string | undefined>(undefined);
 
 function Pre({ children, node }: { children?: React.ReactNode; node?: unknown }): React.ReactElement {
   const child = Array.isArray(children) ? children[0] : children;
   const [wrap, setWrap] = useState(false);
   const reports = React.useContext(ReportsContext);
   const math = React.useContext(MathContext);
+  const chatId = React.useContext(VisualChatContext);
   if (React.isValidElement<{ className?: string; children?: React.ReactNode }>(child)) {
     const lang = /language-([\w+-]+)/.exec(child.props.className ?? '')?.[1];
     // The fence's closing newline is not a code line (QA: a blank line trailed every block).
@@ -153,7 +156,7 @@ function Pre({ children, node }: { children?: React.ReactNode; node?: unknown })
       }
     }
     // Copying across a drawn fence gives back the fence as written (markdown-clipboard.ts).
-    if (rich && !open && (rich !== 'report' || reports)) return <div className="md-rich" data-markdown-rich="" data-markdown-copy={serializeCodeBlockToMarkdown(text, lang)}><RichFence kind={rich} source={text}/></div>;
+    if (rich && !open && (rich !== 'report' || reports)) return <div className="md-rich" data-markdown-rich="" data-markdown-copy={serializeCodeBlockToMarkdown(text, lang)}><RichFence kind={rich} source={text} {...(chatId ? {chatId} : {})}/></div>;
     return (
       <div className="md-code" data-language={lang ?? 'text'}>
         {rich && open && (rich !== 'report' || reports) && <RichPreload kind={rich}/>}
@@ -271,7 +274,7 @@ function ServerImage({src, alt}: {src: string; alt?: string}): React.ReactElemen
 import { localImagePath } from '../local-image-path';
 export { localImagePath };
 
-function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false, asDocument = false, reports = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean; asDocument?: boolean; reports?: boolean }): React.ReactElement {
+function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false, asDocument = false, reports = false, chatId }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean; asDocument?: boolean; reports?: boolean; /** #829: the reply's chat; its visuals offer Edit. */ chatId?: string }): React.ReactElement {
   // Replies link the files they mention (markdown-file-links.ts); documents and previews render as written.
   // Agent prose keeps its single line breaks (markdown-breaks.ts); a Markdown document keeps CommonMark soft
   // breaks, so a hard-wrapped README still reads as flowing paragraphs.
@@ -325,6 +328,7 @@ function MessageBodyContent({ text, resourceContext, animate = false, linkFiles 
   }, []);
   return (
     <ReportsContext.Provider value={reports}>
+    <VisualChatContext.Provider value={chatId}>
     <MathContext.Provider value={math}>
     <div className="md-body" ref={body} onCopy={onCopy}>
       <ReactMarkdown
@@ -339,6 +343,7 @@ function MessageBodyContent({ text, resourceContext, animate = false, linkFiles 
       <SelectionQuote container={body} />
     </div>
     </MathContext.Provider>
+    </VisualChatContext.Provider>
     </ReportsContext.Provider>
   );
 }
@@ -351,6 +356,7 @@ export const MessageBody = React.memo(MessageBodyContent, (previous, next) =>
   previous.linkFiles === next.linkFiles &&
   previous.asDocument === next.asDocument &&
   previous.reports === next.reports &&
+  previous.chatId === next.chatId &&
   previous.resourceContext?.folderId === next.resourceContext?.folderId &&
   previous.resourceContext?.path === next.resourceContext?.path,
 );

@@ -134,7 +134,7 @@ function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, edi
       if (plan) return <PlanCard item={item}/>;
       return (
         <div className="msg msg-assistant">
-          <MessageBody text={item.text} animate linkFiles reports />
+          <MessageBody text={item.text} animate linkFiles reports chatId={item.chatId} />
           {gallery&&<TurnGallery chatId={item.chatId} paths={gallery}/>}
           {meta&&<MessageMeta text={item.text} createdAt={item.createdAt} label="Copy response" actions={actions}/>}
         </div>
