@@ -25,6 +25,7 @@ import {AppGlyph} from './AppGlyph';
 import {openScreenshotTab} from './ComputerPip';
 import {ChatImage} from './ChatImage';
 import {GalleryCoverage,ImageGallery,type GalleryTarget} from './ImageGallery';
+import {OfficeLiveLine,useOfficeLive} from '../officeLive';
 
 /** #html-preview: render_html pages load their chunk (and their frame) only when a row has one. */
 const HtmlRenderCard = React.lazy(() => import('./rich/HtmlRenderCard'));
@@ -64,6 +65,29 @@ export function ToolShots({item}:{item:TimelineItem}) {
   const action=computerAction(item.data);
   const source:PipSource={chatId:item.chatId,target:action?.target??'computer',app:action?.app??'',label:action?.label||classifyTool(item.data).subject||'Screenshot',at:Date.parse(item.createdAt)||Date.now(),itemId:item.id,...(action?.url?{url:action.url}:{})};
   return <div className="tool-shots">{shots.map((shot,index)=><Shot key={shot.id??index} shot={shot} source={source} index={index}/>)}</div>;
+}
+
+/** #829: an office_render result's pages redraw when the file changes, while the row is on screen. */
+function OfficeRenderShots({item}:{item:TimelineItem}) {
+  const box=useRef<HTMLDivElement>(null);
+  const shots=toolShots(item.data),path=typeof item.data?.arguments==='object'&&item.data.arguments&&typeof (item.data.arguments as Record<string,unknown>).path==='string'?String((item.data.arguments as Record<string,unknown>).path):'';
+  const [pages,setPages]=useState<string[]|null>(null);
+  const id=`render:${item.id}`;
+  const status=useOfficeLive(box,id,{kind:'render',chatId:item.chatId,path,pages:shots.length},Date.parse(item.createdAt)||undefined,async()=>{
+    const result=await invoke('office.live.pages',{id});
+    if(result.pages.length)setPages(result.pages);
+  });
+  const action=computerAction(item.data);
+  const source:PipSource={chatId:item.chatId,target:action?.target??'computer',app:action?.app??'',label:classifyTool(item.data).subject||'Page',at:Date.parse(item.createdAt)||Date.now(),itemId:item.id};
+  return <div ref={box} className="office-live">
+    {pages?<div className="tool-shots">{pages.map((dataUrl,index)=><Shot key={`${index}:${dataUrl.length}:${dataUrl.slice(-24)}`} shot={{dataUrl}} source={source} index={index}/>)}</div>:<ToolShots item={item}/>}
+    <OfficeLiveLine status={status}/>
+  </div>;
+}
+const isOfficeRender=(item:TimelineItem)=>item.status==='completed'&&isOfficeTool(item.data)&&item.data?.tool==='office_render'&&!item.data?.error&&toolShots(item.data).length>0&&typeof (item.data?.arguments as Record<string,unknown>|undefined)?.path==='string';
+/** A tool result's pictures; an office_render result's stay current with its file. */
+function ResultShots({item}:{item:TimelineItem}) {
+  return isOfficeRender(item)?<OfficeRenderShots item={item}/>:<ToolShots item={item}/>;
 }
 
 function Metadata({item,plan}:{item:TimelineItem;plan:boolean}) {
@@ -229,7 +253,7 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
     {(live.length>0||excerpt.length>0)&&<pre className={`tool-row-excerpt${excerpt.length?' is-error':''}`} aria-label={excerpt.length?'Last error output':'Latest output'}>{(excerpt.length?excerpt:live).join('\n')}</pre>}
     {steps.length>0&&!open&&<PlanChecklist steps={steps}/>}
     {images.length>0&&<ImageThumbs item={item} paths={images}/>}
-    {!open&&<ToolShots item={item}/>}
+    {!open&&<ResultShots item={item}/>}
     {p.htmlRender?.id&&!failed&&<div className="tool-html-render"><Suspense fallback={null}><HtmlRenderCard renderId={p.htmlRender.id} title={p.htmlRender.title} chatId={item.chatId}/></Suspense></div>}
     <Collapsible.Panel className="activity-disclosure"><div className="tool-row-body" id={`tool-body-${item.id}`}>
       {edit&&<EditDiffs item={item}/>}
@@ -238,7 +262,7 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
         {p.kind==='command'&&<button type="button" className="tool-row-action" onClick={()=>{const chat=getState().snapshot?.chats.find(chat=>chat.id===item.chatId);openTerminalTab(item.chatId,chat?.title||'Conversation','agent');}}>Open in Terminal</button>}
       </div> : null}
       {steps.length>0&&<PlanChecklist steps={steps}/>}
-      <ToolShots item={item}/>
+      <ResultShots item={item}/>
       {p.planText&&!steps.length&&<PlanToolLink chatId={item.chatId} text={p.planText}/>}
       {(output||p.kind==='command')&&!steps.length&&!edit&&!p.planText&&<ToolOutput id={item.id} chatId={item.chatId} title={p.slash?'Expanded prompt':undefined} sourceTruncated={item.data?.outputTruncated===true} text={output || (running ? 'Waiting for output…' : 'No output')}/>}
       <Metadata item={item} plan={steps.length>0}/>

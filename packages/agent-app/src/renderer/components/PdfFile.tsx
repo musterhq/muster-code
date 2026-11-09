@@ -69,9 +69,14 @@ export function PdfFile({document,onLocation}:{document:DocumentPreview;onLocati
   const visible=usePageVisible();
   const lib=useRef<PdfLibrary|null>(null),surface=useRef<HTMLDivElement>(null),unlock=useRef<((password:string)=>void)|null>(null);
   const pages=useRef(new Map<number,HTMLDivElement>()),observer=useRef<IntersectionObserver|null>(null),position=useRef(0),frame=useRef(0);
+  // The loading task of the document on screen. A new revision (the file changed, #829) keeps it on screen at the
+  // same place until the new one is ready, then swaps; a new revision that fails to load leaves it with the error.
+  const shown=useRef<PDFDocumentLoadingTask|null>(null);
+  useEffect(()=>()=>{void shown.current?.destroy();shown.current=null;},[]);
   useEffect(()=>{
     let cancelled=false,task:PDFDocumentLoadingTask|undefined;
-    setPdf(null);setSizes([]);setError('');setBusy(true);setPage(1);setLocked(false);
+    if(!shown.current){setPdf(null);setSizes([]);setBusy(true);setPage(1);}
+    setError('');setLocked(false);
     void import('pdfjs-dist').then(async module=>{
       if(cancelled)return;lib.current=module;
       module.GlobalWorkerOptions.workerSrc=new URL('./pdf.worker.mjs',window.location.href).href;
@@ -83,11 +88,14 @@ export function PdfFile({document,onLocation}:{document:DocumentPreview;onLocati
       // Every page starts at the first page's size; each corrects itself when it paints.
       const first=(await loaded.getPage(1)).getViewport({scale:1});
       if(cancelled)return;
+      const previous=shown.current;shown.current=task??null;
       setSizes(Array.from({length:loaded.numPages},()=>[first.width,first.height] as const));
       setPdf(loaded);setLocked(false);setBusy(false);
+      // Pages let go of the old document when they re-render with the new one; destroy it after that commit.
+      if(previous)setTimeout(()=>void previous.destroy(),250);
     }).catch(e=>{if(!cancelled){setError(e instanceof Error?e.message:String(e));setBusy(false);}});
-    // Destroying the loading task destroys the document and terminates its pdf.js worker.
-    return()=>{cancelled=true;unlock.current=null;void task?.destroy();task=undefined;};
+    // Destroying the loading task destroys the document and terminates its pdf.js worker (the shown one on unmount).
+    return()=>{cancelled=true;unlock.current=null;if(task&&shown.current!==task)void task.destroy();task=undefined;};
   },[document.revision]);
   useEffect(()=>{
     const el=surface.current;if(!el || typeof ResizeObserver!=='function')return;

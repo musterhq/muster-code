@@ -275,3 +275,9 @@
 /* Edited-file and blame views of large files: same windowing as .virtual-file-source. */
 .virtual-row-source { min-height: 100%; outline: none; }
 .virtual-row-source .virtual-row-spacer td { padding: 0; border: 0; line-height: 0; }
+
+/* #829: the quiet line a live office preview shows after it redraws (or why it could not). */
+.office-live-status {margin:0;color:var(--text-faint);font-size:var(--fs-11);}
+.office-live-status[data-state=failed] {color:var(--text-dim);}
+.file-view .office-live-status {padding:4px 12px;}
+.native-preview-toolbar .office-live-status {padding:0;margin-left:auto;}

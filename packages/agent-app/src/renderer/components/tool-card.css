@@ -130,3 +130,7 @@
 /* #html-preview: a render_html page under its row, aligned with the row text (like screenshots). */
 .tool-html-render { margin: 2px 0 6px 28px; min-width: 0; }
 .tool-html-render > .rich-block { margin: 0; }
+
+/* #829: an office_render row's pages redraw when the file changes; a quiet line says so. */
+.office-live > .office-live-status {margin:-2px 0 6px 28px;color:var(--text-faint);font-size:var(--fs-11);}
+.office-live > .office-live-status[data-state=failed] {color:var(--text-dim);}

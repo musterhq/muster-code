@@ -126,6 +126,10 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-829J](21-visuals-and-artifacts.md#mus-spec-21-829j) | A completed update row reads "Updated <title>" (running: "Updating"), has no page of its own and groups with the tool activity around it, while the original page stays its own visual row. | [`an update reads as a compact Updated row and the page is not drawn twice`](../../../packages/agent-app/tests/visual-update-829.test.ts) |
 | [MUS-SPEC-21-829K](21-visuals-and-artifacts.md#mus-spec-21-829k) | A page card with versions shows "vN of N" with previous and next in its header, draws the newest version, steps back through a user edit (drawn from its text) to version 1 (the stored page), and jumps to the newest when the agent adds a version. | [`the page card keeps earlier versions behind a v2-of-3 switch and follows the agent's update`](../../../packages/agent-app/tests/visual-update-829-dom.tsx) |
 | [MUS-SPEC-21-829L](21-visuals-and-artifacts.md#mus-spec-21-829l) | The render_html tool description and Muster's visualize skill each mention `replaces`; the next turn does not send the agent its own update back as a user edit, but does carry a user edit made after it. | [`agents are told about replaces, and the next turn carries only the user's edits`](../../../packages/agent-app/tests/visual-update-829.test.ts) |
+| [MUS-SPEC-21-829M](21-visuals-and-artifacts.md#mus-spec-21-829m) | A watched office file refreshes once about 1 s after the last change; other files in its folder and writes that leave its content unchanged never refresh it; refreshes of one file never overlap (a change during one gives exactly one more); one watch per file, closed when its last preview leaves. | [`a file change settles into one refresh, one at a time, and an unchanged file never refreshes`](../../../packages/agent-app/tests/office-live-829.test.ts) |
+| [MUS-SPEC-21-829N](21-visuals-and-artifacts.md#mus-spec-21-829n) | office.live.watch on an office_render result re-renders the changed file with the LibreOffice already there into new page images; a failed render keeps the last pages and reports the error; with no LibreOffice it fails and downloads nothing; a file preview only reports the change. | [`an office_render preview re-renders a changed file with the installed LibreOffice and keeps the last pages when a render fails`](../../../packages/agent-app/tests/office-live-829.test.ts) |
+| [MUS-SPEC-21-829O](21-visuals-and-artifacts.md#mus-spec-21-829o) | An office_render tool row on screen watches its file, swaps in the new pages and says Updated just now; a failed refresh keeps the pages and shows the error; off screen or unmounted it stops watching. | [`an office_render row redraws its pages when the file changes, only while it is on screen`](../../../packages/agent-app/tests/office-live-829-dom.tsx) |
+| [MUS-SPEC-21-829P](21-visuals-and-artifacts.md#mus-spec-21-829p) | The file viewer's office preview re-reads a changed file in place and says Updated just now; a failed re-read keeps the last preview and shows the error; closing it stops watching. | [`the file viewer's office preview redraws in place when the file changes and keeps the last preview on a failure`](../../../packages/agent-app/tests/office-live-829-dom.tsx) |
 
 ### Side chats
 
@@ -1335,4 +1339,48 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/visual-update-829.test.ts::agents are told about replaces, and the next turn carries only the user's edits`
 - Environment: Node test runner with the real agent service, a recording fixture provider and the bundled skill file.
 - Known gaps: Whether a model follows the description is not tested.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829m"></a>
+#### MUS-SPEC-21-829M: A watched office file refreshes once, one refresh at a time
+
+- Precondition: A .docx in a folder with two previews watching it; the folder watch is a fake that reports file names on demand; the debounce is 40 ms in the test (1 s in the app).
+- Action: Rewrite the file and report it three times in quick succession plus a change to its `~$` lock file; rewrite it with the same bytes; rewrite it twice while a refresh is still running; delete it and write it back; remove both previews; add a preview with a `since` older than the file.
+- Expected result: One folder watch is opened for the two previews. The burst gives exactly one refresh naming both previews, and none before the debounce after the last report; the lock file and the same-bytes rewrite give none. A change during a running refresh gives exactly one more, after it, and never two at once. A missing file gives none; writing it back gives one. Removing the first preview keeps the watch; removing the last closes it and later reports do nothing. A preview whose file changed after its `since` refreshes at once. A third file beyond the cap is refused.
+- Test: `packages/agent-app/tests/office-live-829.test.ts::a file change settles into one refresh, one at a time, and an unchanged file never refreshes`
+- Environment: Node test runner; real files in a temporary folder; the folder watch is injected.
+- Known gaps: Real fs.watch event shapes of Word, Excel, Numbers and PowerPoint saves (temp file then rename) are checked by hand in the app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829n"></a>
+#### MUS-SPEC-21-829N: An office_render preview re-renders with the installed LibreOffice
+
+- Precondition: The office domain with a fake soffice executable as the installed LibreOffice, a network fake that records any download, injected conversion and rasterizer, a fake folder watch and a 30 ms debounce; a chat with a folder holding report.docx.
+- Action: Watch the office_render result of report.docx, change the file, read the pages; make the rasterizer fail and change it again; unwatch, change it, watch again with an older `since`; watch the file viewer preview of it and change it; watch from a domain with no LibreOffice and change the file.
+- Expected result: Each change gives a rendering then an updated event with a higher version, and office.live.pages returns the new page images (as many as the row showed). A failed render gives a failed event with the error while the pages stay the last good ones. Watching again after an unseen change re-renders at once. The file viewer preview gets an updated event with no render. With no LibreOffice the refresh fails with a message naming LibreOffice and nothing is downloaded. An unknown chat, a path outside the folder and an unsupported type are refused. Unwatching closes the folder watch; disposing the domain removes the refreshed pages.
+- Test: `packages/agent-app/tests/office-live-829.test.ts::an office_render preview re-renders a changed file with the installed LibreOffice and keeps the last pages when a render fails`
+- Environment: Node test runner with the real office domain and SQLite in memory; real files in a temporary folder; no LibreOffice runs.
+- Known gaps: LibreOffice itself is not run; a real conversion of a changed file is checked by hand in the app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829o"></a>
+#### MUS-SPEC-21-829O: An office_render row redraws its pages while it is on screen
+
+- Precondition: A completed muster_office office_render tool row with two page images, a stubbed bridge and a controllable IntersectionObserver.
+- Action: Mount the row on screen; send a rendering then an updated event; send a failed event; move the row off screen and back; unmount it.
+- Expected result: On screen the row asks office.live.watch for its file with its chat, path and page count. A rendering event says Updating; an updated event loads the new pages through office.live.pages, shows them in place of the old ones and says Updated just now. A failed event keeps those pages and shows the error. Off screen it calls office.live.unwatch and watches again when it comes back; unmounting unwatches. Events for another preview change nothing.
+- Test: `packages/agent-app/tests/office-live-829-dom.tsx::an office_render row redraws its pages when the file changes, only while it is on screen`
+- Environment: DOM suite (linkedom) with a stubbed bridge and a fake IntersectionObserver.
+- Known gaps: linkedom has no layout: the look of the status line is checked by hand in the app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829p"></a>
+#### MUS-SPEC-21-829P: The file viewer's office preview redraws in place
+
+- Precondition: The file viewer's reader showing an .xlsx (the workbook preview) with a stubbed bridge.
+- Action: Send an updated event for the file; make the next read fail and send another; unmount the viewer.
+- Expected result: Mounted, it watches the file as a file preview. The update re-reads the workbook without clearing it (no loading state) and shows the new cell with Updated just now. A failed re-read keeps the last workbook on screen and shows the error. Unmounting unwatches.
+- Test: `packages/agent-app/tests/office-live-829-dom.tsx::the file viewer's office preview redraws in place when the file changes and keeps the last preview on a failure`
+- Environment: DOM suite (linkedom) with a stubbed bridge.
+- Known gaps: The PDF reader (Word, PowerPoint and PDF files) uses pdf.js, which linkedom cannot run; it re-reads on the same path and is checked by hand in the app.
 - Evidence: UNVERIFIED

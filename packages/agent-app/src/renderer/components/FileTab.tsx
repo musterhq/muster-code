@@ -19,6 +19,7 @@ import './file-preview.css';
 import './markdown-document.css';
 import {OpenInMenu} from './OpenInMenu';
 import {NativeDocument} from './NativeDocument';
+import {OfficeLiveLine, useOfficeLive} from '../officeLive';
 import {PdfFile} from './PdfFile';
 import {WorkbookFile} from './WorkbookFile';
 import {FileAnnotations} from './FileAnnotations';
@@ -420,6 +421,10 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
       cause => notifyLoadFullFailed(friendlyFileError(cause)),
     ).finally(() => setLoadingFull(false));
   };
+  // #829: an office file (or PDF) in the reader redraws in place when it changes on disk, while it is on screen.
+  const officeFile = Boolean(ready && !ready.native && (ready.document || (ready.workbook && kind === 'workbook')) && tab.folderId && tab.path);
+  const liveSince = useMemo(() => Date.now(), [ready]);
+  const live = useOfficeLive(code, officeFile ? `file:${tab.folderId}:${tab.path}` : null, officeFile ? {kind: 'file', folderId: tab.folderId!, path: tab.path!} : null, liveSince, () => refreshFileBody(tab.folderId!, tab.path!, {keepOnError: true}));
   const canEdit = Boolean(ready) && !bypassesBody && !ready?.native && !ready?.document && !ready?.workbook && !ready?.asset;
   const revision = ready ? ready.document?.revision ?? ready.workbook?.revision ?? (delimited.workbook && !truncated ? textRevision : '') : '';
   // Notebooks and diagrams bound themselves (shared/notebook.ts, the diagram source limit).
@@ -443,6 +448,7 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
   } else {
     const {asset, document, workbook} = ready!;
     content = <>
+      {officeFile && <OfficeLiveLine status={live}/>}
       {kind === 'model' ? <ModelFilePane key={tab.id} folderId={tab.folderId!} path={tab.path!} revision={ready}/> : ready!.native ? <NativeDocument key={tab.id} folderId={tab.folderId!} path={tab.path!} revision={ready!} onToggleResourceMaximize={onToggleResourceMaximize} resourceMaximized={resourceMaximized}/> : document ? <PdfFile document={document} onLocation={setLocation}/> : workbook || (delimited.workbook && preview) ? <WorkbookFile key={`workbook:${tab.id}`} delimited={isDelimited} workbook={workbook ?? delimited.workbook!} onLocation={locateCell} onToggleFullPage={onToggleResourceMaximize} fullPage={resourceMaximized}/> : asset ? <ImageFile asset={asset} name={tab.title}/> : preview && delimited.error ? <div className="pane-error" role="alert"><p>Cannot preview this table: {delimited.error}</p><button onClick={() => setMode('source')}>View source</button></div> : preview && kind === 'html' ? <HtmlPreview html={text} name={tab.title}/> : preview && kind === 'notebook' ? <NotebookPreview text={text} name={tab.title} resourceContext={{folderId: tab.folderId!, path: tab.path!}}/> : preview && kind === 'mermaid' ? <MermaidFilePreview text={text} name={tab.title}/> : preview ? <div className="file-markdown" data-kind={kind} role="region" aria-label={`Preview of ${tab.path}`} tabIndex={0}>
         {kind === 'markdown' && text && <DocumentCopyButton text={text}/>}
         {kind === 'markdown' ? <MessageBody text={text} resourceContext={{folderId: tab.folderId!, path: tab.path!}} asDocument/> : <StructuredFile text={text} kind={kind as 'json'|'csv'|'tsv'}/>}

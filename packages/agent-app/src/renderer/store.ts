@@ -1397,13 +1397,15 @@ export async function openFile(folderId: string, path: string, line?: number, op
 
 /** Forces a re-read of an open file's body, bypassing the "already ready" cache short-circuit `openFile` uses.
  * Called after a save (files.write) so the cached preview reflects what is now on disk. */
-export async function refreshFileBody(folderId: string, path: string): Promise<void> {
+export async function refreshFileBody(folderId: string, path: string, options: {keepOnError?: boolean} = {}): Promise<void> {
   const id = `file:${folderId}:${path}`;
   if (!state.tabs.some(tab => tab.id === id)) return;
   try {
     const body = await readFileBody(folderId, path);
     if (state.tabs.some(tab => tab.id === id)) set({fileBodies: {...state.fileBodies, [id]: {phase: 'ready', value: body}}});
   } catch (cause) {
+    // #829: a live office preview keeps what it showed and reports the failure itself.
+    if (options.keepOnError) throw cause;
     if (state.tabs.some(tab => tab.id === id)) set({fileBodies: {...state.fileBodies, [id]: {phase: 'error', error: errorText(cause)}}});
   }
 }
@@ -1540,6 +1542,9 @@ export async function refreshResources(folderId: string): Promise<void> {
           if (state.tabs.some(tab=>tab.id===active.id)) set({diffs:{...state.diffs,[active.id]:{phase:'ready',value}}});
         }
       } catch(cause) {
+        // #829: an office document or PDF caught mid-save keeps its last preview; the settled save redraws it.
+        const shown = state.fileBodies[active.id]?.value;
+        if (active.kind === 'file' && (shown?.document || shown?.workbook)) continue;
         if (state.tabs.some(tab=>tab.id===active.id)) {
           const key = active.kind === 'file' ? 'fileBodies' : 'diffs';
           set({[key]:{...state[key],[active.id]:{phase:'error',error:errorText(cause)}}});
