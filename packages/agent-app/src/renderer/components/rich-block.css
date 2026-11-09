@@ -117,3 +117,23 @@
 /* Mermaid "Show code": the source in place of the drawing, highlighted. Inline it is capped like the drawing; full size it fills. */
 .rich-source.rich-code { max-height: 420px; margin: 8px; color: var(--text); }
 .rich-source.rich-code:not([data-mode='inline']) { max-height: none; overflow: auto; }
+
+/* #829: Edit in the block body. The source box reads like the block's own source view (.rich-source), the preview is the
+   block's renderer, and the bar reuses the network note's buttons. Narrow blocks stack the two. */
+.rich-edit { display: flex; flex-direction: column; min-width: 0; container-type: inline-size; }
+.rich-edit-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 220px; max-height: 480px; }
+.rich-edit-source { min-width: 0; min-height: 220px; resize: none; margin: 0; padding: 8px 10px; border: 0; border-right: 1px solid var(--hairline); outline: none; background: var(--bg-sunken); color: var(--text); font: var(--fs-12)/1.5 var(--mono); tab-size: 2; }
+.rich-edit-source:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.rich-edit-preview { position: relative; min-width: 0; min-height: 0; overflow: auto; }
+.rich-edit-preview .rich-report { height: 100%; min-height: 220px; }
+.rich-edit-preview > .resource-state { padding: 10px 12px; }
+.rich-edit-error { margin: 0; padding: 5px 10px; border-top: 1px solid var(--hairline); background: color-mix(in srgb, var(--danger) 8%, transparent); color: var(--text); font: var(--fs-12)/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 96px; overflow: auto; }
+.rich-edit-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--hairline); color: var(--text-faint); font-size: var(--fs-12); }
+.rich-edit-bar > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rich-edit-bar button { flex: none; height: 22px; padding: 0 8px; border: 1px solid var(--hairline); border-radius: var(--radius-6); background: var(--bg-raised); color: var(--text); font-size: var(--fs-12); cursor: pointer; }
+.rich-edit-bar button:hover:not(:disabled) { background: var(--bg-hover); }
+.rich-edit-bar button:disabled { opacity: .45; cursor: default; }
+.rich-edit-bar button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.rich-edit-bar button.is-primary { background: var(--text); border-color: transparent; color: var(--bg); }
+.rich-edit-bar button.is-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 88%, transparent); }
+@container (max-width: 520px) { .rich-edit-split { grid-template-columns: minmax(0, 1fr); max-height: none; } .rich-edit-source { border-right: 0; border-bottom: 1px solid var(--hairline); } }

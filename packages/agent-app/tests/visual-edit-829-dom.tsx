@@ -10,6 +10,8 @@ import {DatabaseSync} from 'node:sqlite';
 import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
+// React only listens for `input` when the document says it supports it.
+(window.document as any).oninput=null;
 Object.assign(globalThis,{window,document:window.document,HTMLElement:window.HTMLElement,Element:window.Element,Node:window.Node,MutationObserver:window.MutationObserver,requestAnimationFrame:(fn:any)=>setTimeout(fn,0),cancelAnimationFrame:clearTimeout,
   localStorage:{getItem:()=>null,setItem:()=>{}},ResizeObserver:class{observe(){}unobserve(){}disconnect(){}}});
 Object.defineProperty(globalThis,'navigator',{value:{userActivation:{isActive:true},platform:'MacIntel',userAgent:'node'},configurable:true});

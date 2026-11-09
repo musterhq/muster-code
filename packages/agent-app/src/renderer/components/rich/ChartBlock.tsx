@@ -14,18 +14,22 @@ import {ResourceState} from '../ResourceState';
 import {downloadBlob, downloadText} from './exports';
 import type {RichBlockBody} from '../RichFence';
 import type {ChartHandle, TooltipPayload} from './chartRender';
+import {useVisualEditing, type PreviewReport} from './VisualEdit';
+import {visualKey} from '../../visualEdits';
 
 const TABLE_ROWS = 500;
 /** The block header already names the chart: on screen the spec's own title would say it twice. Exports keep it. */
 const withoutTitle = (spec: Record<string, unknown>): Record<string, unknown> => { const {title: _title, ...rest} = spec; return rest; };
 
-function ChartCanvas({plan, mode, onFailure}: {plan: ChartPlan; mode: RichMode; onFailure(message: string): void}): React.ReactElement {
+function ChartCanvas({plan, mode, onFailure, onReady}: {plan: ChartPlan; mode: RichMode; onFailure(message: string): void; /** The view mounted (the editor's preview clears its error). */ onReady?(): void}): React.ReactElement {
   const signature = useRichThemeSignature();
   const host = useRef<HTMLDivElement>(null);
-  const [ready, setReady] = useState(false);
+  const [mounted, setReady] = useState(false);
   const [tooltip, setTooltip] = useState<TooltipPayload | null>(null);
   const failure = useRef(onFailure);
   failure.current = onFailure;
+  const ready = useRef(onReady);
+  ready.current = onReady;
 
   useEffect(() => {
     const element = host.current;
@@ -36,7 +40,7 @@ function ChartCanvas({plan, mode, onFailure}: {plan: ChartPlan; mode: RichMode; 
       const size = box();
       void mountChart({container: element, spec: withoutTitle(plan.spec), theme: readRichTheme(), width: size.width, height: size.height, onTooltip: setTooltip}).then(mounted => {
         if (!live) { mounted.dispose(); return; }
-        handle = mounted; setReady(true);
+        handle = mounted; setReady(true); ready.current?.();
         let last = size;
         observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(() => {
           clearTimeout(resizeTimer);
@@ -53,8 +57,8 @@ function ChartCanvas({plan, mode, onFailure}: {plan: ChartPlan; mode: RichMode; 
   }, [plan, signature]);
 
   return <>
-    <div ref={host} className="rich-chart-canvas" data-mode={mode} data-ready={ready} role="img" aria-label={plan.title || 'Chart'}/>
-    {!ready && <div className="rich-chart-loading"><ResourceState kind="loading" label="Drawing chart…" compact rows={2}/></div>}
+    <div ref={host} className="rich-chart-canvas" data-mode={mode} data-ready={mounted} role="img" aria-label={plan.title || 'Chart'}/>
+    {!mounted && <div className="rich-chart-loading"><ResourceState kind="loading" label="Drawing chart…" compact rows={2}/></div>}
     {tooltip && createPortal(<div className="rich-tooltip" role="presentation" style={{left: Math.min(tooltip.x + 14, window.innerWidth - 280), top: tooltip.y + 14}}>
       <dl>{tooltip.rows.map(([name, value], index) => <React.Fragment key={index}>{name && <dt>{name}</dt>}<dd>{value}</dd></React.Fragment>)}</dl>
     </div>, document.body)}
@@ -85,7 +89,23 @@ async function exportChart(plan: ChartPlan, kind: 'svg' | 'png'): Promise<{svg?:
   finally { handle.dispose(); holder.remove(); }
 }
 
-export default function ChartBlock({source, variant, onOpenInTab}: RichBlockBody): React.ReactElement {
+/** #829: the editor's preview. A draft that does not parse, or that the chart library refuses, reports its error and the last
+ *  chart that drew stays on screen (it is never torn down for a draft that cannot replace it). */
+function ChartPreview({source, report}: {source: string; report: PreviewReport}): React.ReactElement | null {
+  const parsed = useMemo(() => parseChartSource(source), [source]);
+  const good = useRef<ChartPlan | null>(null);
+  const [plan, setPlan] = useState<ChartPlan | null>(parsed.ok ? parsed.plan : null);
+  useEffect(() => { if (parsed.ok) setPlan(parsed.plan); else report(parsed.message); }, [parsed, report]);
+  if (!plan) return null;
+  return <div className="rich-chart" data-view="chart">
+    <ChartCanvas plan={plan} mode="inline" onReady={() => { good.current = plan; report(null); }} onFailure={message => { report(message); if (good.current && good.current !== plan) setPlan(good.current); }}/>
+  </div>;
+}
+
+export default function ChartBlock({source: original, variant, onOpenInTab, chatId}: RichBlockBody): React.ReactElement {
+  const originalTitle = useMemo(() => { const first = parseChartSource(original); return first.ok ? first.plan.title || chartKindLabel(first.plan.spec) : 'Chart'; }, [original]);
+  const edit = useVisualEditing({chatId, visual: {kind: 'chart', key: visualKey('chart', original)}, original, title: originalTitle, canvasKind: 'code', language: 'json', variant});
+  const source = edit.source ?? original;
   const parsed = useMemo(() => parseChartSource(source), [source]);
   const [failure, setFailure] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -96,7 +116,7 @@ export default function ChartBlock({source, variant, onOpenInTab}: RichBlockBody
   const title = plan?.title || kindName;
   const kindLabel = plan?.title ? kindName : 'Chart';
   const emptyData = !!plan && Array.isArray((plan.spec.data as {values?: unknown} | undefined)?.values) && plan.rows.length === 0;
-  const status = !parsed.ok || failure ? 'error' : emptyData ? 'empty' : 'ready';
+  const status = edit.editing ? 'ready' : !parsed.ok || failure ? 'error' : emptyData ? 'empty' : 'ready';
   const hasRows = !!plan && plan.rows.length > 0;
   const exports: RichExport[] = plan ? [
     {id: 'png', label: 'Download PNG', run: async () => downloadBlob((await exportChart(plan, 'png')).png!, exportFileName(title, 'png'))},
@@ -107,16 +127,20 @@ export default function ChartBlock({source, variant, onOpenInTab}: RichBlockBody
   const message = !parsed.ok ? parsed.message : failure ?? '';
   return <RichBlock
     kind="chart" kindLabel={kindLabel} title={title} status={status} source={source} variant={variant} exports={exports}
-    {...(status === 'error' ? {error: {message: 'Couldn’t render this chart', detail: message, ...(failure ? {onRetry: () => { setFailure(null); setAttempt(value => value + 1); }} : {})}} : {})}
+    {...(edit.editing ? {fullscreen: false} : {})}
+    {...(status === 'error' ? {error: {message: 'Couldn’t render this chart', detail: message, ...(failure ? {onRetry: () => { setFailure(null); setAttempt(value => value + 1); }} : {}), ...(edit.errorAction ? {actions: edit.errorAction} : {})}} : {})}
     emptyMessage="This chart has no data rows."
     {...(onOpenInTab ? {onOpenInTab} : {})}
     {...(description ? {description} : {})}
-    extras={hasRows ? <span className="rich-switch" role="radiogroup" aria-label="Show">
-      <button type="button" role="radio" aria-checked={view === 'chart'} onClick={() => setView('chart')}><ChartColumn size={12} aria-hidden="true"/>Chart</button>
-      <button type="button" role="radio" aria-checked={view === 'table'} onClick={() => setView('table')}><Table2 size={12} aria-hidden="true"/>Table</button>
-    </span> : undefined}
+    extras={context => <>
+      {edit.extras(context)}
+      {hasRows && !edit.editing && <span className="rich-switch" role="radiogroup" aria-label="Show">
+        <button type="button" role="radio" aria-checked={view === 'chart'} onClick={() => setView('chart')}><ChartColumn size={12} aria-hidden="true"/>Chart</button>
+        <button type="button" role="radio" aria-checked={view === 'table'} onClick={() => setView('table')}><Table2 size={12} aria-hidden="true"/>Table</button>
+      </span>}
+    </>}
   >
-    {context => plan && <div className="rich-chart" data-view={view}>
+    {context => edit.editing && context.mode === 'inline' ? edit.editor((draft, report) => <ChartPreview source={draft} report={report}/>) : plan && <div className="rich-chart" data-view={view}>
       {view === 'table' ? <DataTable plan={plan}/>
         : context.suspended ? <div className="rich-chart-canvas" data-mode={context.mode}/>
         : <ChartCanvas key={attempt} plan={plan} mode={context.mode} onFailure={setFailure}/>}

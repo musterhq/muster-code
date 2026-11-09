@@ -13,12 +13,18 @@ import {isWebHost} from '../../webHost';
 import {RichBlock, type RichExport} from '../RichBlock';
 import {SandboxedHtml} from '../SandboxedHtml';
 import {downloadText} from './exports';
-import {inlinePageHeight, openInCanvasExport, usePageZoom, usesThemeVariables} from './pageTools';
+import {HtmlEditPreview, inlinePageHeight, openInCanvasExport, usePageZoom, usesThemeVariables} from './pageTools';
 import type {RichBlockBody} from '../RichFence';
+import {useVisualEditing} from './VisualEdit';
+import {visualKey} from '../../visualEdits';
 
 const INLINE_MIN = 96, INLINE_MAX = 560;
 
-export default function ReportBlock({source, variant, onOpenInTab}: RichBlockBody): React.ReactElement {
+export default function ReportBlock({source: original, variant, onOpenInTab, chatId}: RichBlockBody): React.ReactElement {
+  const originalTitle = useMemo(() => reportTitle(original), [original]);
+  const visual = useMemo(() => ({kind: 'report' as const, key: visualKey('report', original)}), [original]);
+  const edit = useVisualEditing({chatId, visual, original, title: originalTitle, canvasKind: 'html', variant});
+  const source = edit.source ?? original;
   const title = useMemo(() => reportTitle(source), [source]);
   const themed = useMemo(() => usesThemeVariables(source), [source]);
   const key = useMemo(() => `report:${themed ? 'themed:' : ''}${richHash(source)}`, [source, themed]);
@@ -26,7 +32,7 @@ export default function ReportBlock({source, variant, onOpenInTab}: RichBlockBod
   const {zoom, extras} = usePageZoom();
   const tooLarge = source.length > MAX_RICH_SOURCE.report;
   const empty = !source.trim();
-  const status = tooLarge ? 'error' : empty ? 'empty' : 'ready';
+  const status = edit.editing ? 'ready' : tooLarge ? 'error' : empty ? 'empty' : 'ready';
   const exports: RichExport[] = [
     {id: 'html', label: 'Download HTML', run: () => downloadText(source, exportFileName(title, 'html'), 'text/html')},
     // Printing is done by the desktop shell; the web UI has none.
@@ -38,13 +44,14 @@ export default function ReportBlock({source, variant, onOpenInTab}: RichBlockBod
   ];
   const inlineHeight = inlinePageHeight(height, INLINE_MIN, INLINE_MAX);
   return <RichBlock
-    kind="report" title={title} status={status} source={source} variant={variant} exports={exports} extras={extras}
+    kind="report" title={title} status={status} source={source} variant={variant} exports={exports} extras={context => <>{edit.extras(context)}{extras(context)}</>}
+    {...(edit.editing ? {fullscreen: false} : {})}
     {...(tooLarge ? {error: {message: 'Couldn’t render this report', detail: `This report is ${(source.length / 1_000_000).toFixed(1)} MB; the limit is ${MAX_RICH_SOURCE.report / 1_000_000} MB.`}} : {})}
     emptyMessage="This report is empty."
     {...(onOpenInTab ? {onOpenInTab} : {})}
     description={`HTML report: ${title}`}
   >
-    {context => <div className="rich-report" data-mode={context.mode} data-themed={themed || undefined} style={context.mode === 'inline' && inlineHeight ? {['--rich-report-height' as string]: `${inlineHeight}px`} : undefined}>
+    {context => edit.editing && context.mode === 'inline' ? edit.editor(draft => <HtmlEditPreview html={draft} storeKey={`edit:${visual.key}`} title={title} themed={usesThemeVariables(draft)}/>) : <div className="rich-report" data-mode={context.mode} data-themed={themed || undefined} style={context.mode === 'inline' && inlineHeight ? {['--rich-report-height' as string]: `${inlineHeight}px`} : undefined}>
       {context.suspended ? null : <div className="rich-report-zoom" style={context.mode === 'fullscreen' && zoom !== 1 ? {zoom} : undefined}>
         <SandboxedHtml html={source} scripts themed={themed} lazy={context.mode === 'inline'} title={`${title} (report)`} storeKey={key} className="rich-report-sandbox" onHeight={setHeight} debounceMs={0}/>
       </div>}

@@ -7,7 +7,7 @@
  * Adapted in part from T3 Code's HtmlRenderFrame (MIT; see THIRD-PARTY-NOTICES.md): the frame fits the page's reported
  * height, the full-screen view has zoom, and a failed load says so in place.
  */
-import React, {useState} from 'react';
+import React, {useMemo, useState} from 'react';
 import {exportFileName} from '../../../shared/rich-block';
 import {htmlRenderTitle, type HtmlRenderView} from '../../../shared/html-render';
 import {invoke} from '../../bridge';
@@ -17,7 +17,9 @@ import {isWebHost} from '../../webHost';
 import {RichBlock, type RichExport} from '../RichBlock';
 import {SandboxedHtml} from '../SandboxedHtml';
 import {downloadText} from './exports';
-import {inlinePageHeight, openInCanvasExport, usePageZoom} from './pageTools';
+import {HtmlEditPreview, inlinePageHeight, openInCanvasExport, usePageZoom} from './pageTools';
+import {useVisualEditing} from './VisualEdit';
+import {pageVisualKey} from '../../visualEdits';
 import '../rich-block.css';
 
 const INLINE_MIN = 80, INLINE_MAX = 960;
@@ -37,7 +39,11 @@ export default function HtmlRenderCard({renderId, title: requestedTitle, chatId}
   const [allowing, setAllowing] = useState(false);
   const {zoom, extras} = usePageZoom();
   const title = page?.title ?? htmlRenderTitle(requestedTitle);
-  const source = page?.html;
+  const visual = useMemo(() => ({kind: 'page' as const, key: pageVisualKey(renderId)}), [renderId]);
+  const edit = useVisualEditing({chatId, visual, original: page?.html, title, canvasKind: 'html', variant: 'inline'});
+  // #829: a saved edit is drawn from its text like a report (themed, scripts-only); the original stays the stored page.
+  const source = edit.source ?? page?.html;
+  const showingEdit = edit.showingEdit && source !== undefined;
   const exports: RichExport[] = source === undefined ? [] : [
     {id: 'html', label: 'Download HTML', run: () => downloadText(source, exportFileName(title, 'html'), 'text/html')},
     ...(isWebHost() ? [] : [{id: 'pdf', label: 'Export PDF…', disabled: !token, run: async () => {
@@ -55,19 +61,21 @@ export default function HtmlRenderCard({renderId, title: requestedTitle, chatId}
   const inlineHeight = inlinePageHeight(height, INLINE_MIN, INLINE_MAX);
   const askNetwork = page?.networkRequested === true && !page.networkAllowed;
   return <RichBlock
-    kind="report" kindLabel="Page" title={title} status="ready" variant="inline" exports={exports} extras={extras}
+    kind="report" kindLabel="Page" title={title} status="ready" variant="inline" exports={exports} extras={context => <>{edit.extras(context)}{extras(context)}</>}
+    {...(edit.editing ? {fullscreen: false} : {})}
     {...(source !== undefined ? {source} : {})}
     {...(source !== undefined ? {onOpenInTab: () => openRichTab('report', source, title)} : {})}
     description={`Page from the agent: ${title}`}
   >
-    {context => <>
-      {askNetwork && context.mode === 'inline' && <div className="rich-network" role="note">
+    {context => edit.editing && context.mode === 'inline' ? edit.editor(draft => <HtmlEditPreview html={draft} storeKey={`edit:${visual.key}`} title={title} themed/>) : <>
+      {askNetwork && !showingEdit && context.mode === 'inline' && <div className="rich-network" role="note">
         <span>This page wants to load content from the internet (https only). It is shown without it.</span>
         <button type="button" disabled={allowing} onClick={() => void allow()}>Allow for this page</button>
       </div>}
       <div className="rich-report" data-mode={context.mode} data-themed="true" style={context.mode === 'inline' && inlineHeight ? {['--rich-report-height' as string]: `${inlineHeight}px`} : undefined}>
         {context.suspended ? null : <div className="rich-report-zoom" style={context.mode === 'fullscreen' && zoom !== 1 ? {zoom} : undefined}>
-          <SandboxedHtml html="" renderId={renderId} revision={revision} lazy={context.mode === 'inline'} title={`${title} (page)`} className="rich-report-sandbox" onHeight={setHeight} onToken={setToken} onPage={setPage} debounceMs={0}/>
+          {showingEdit ? <SandboxedHtml html={source} scripts themed lazy={context.mode === 'inline'} title={`${title} (page)`} storeKey={`shown:${visual.key}`} className="rich-report-sandbox" onHeight={setHeight} onToken={setToken} debounceMs={0}/>
+          : <SandboxedHtml html="" renderId={renderId} revision={revision} lazy={context.mode === 'inline'} title={`${title} (page)`} className="rich-report-sandbox" onHeight={setHeight} onToken={setToken} onPage={setPage} debounceMs={0}/>}
         </div>}
       </div>
     </>}

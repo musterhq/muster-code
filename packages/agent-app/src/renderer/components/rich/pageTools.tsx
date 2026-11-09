@@ -8,6 +8,7 @@ import {invoke} from '../../bridge';
 import {openCanvasTab} from '../../artifacts';
 import {getState, notifyError} from '../../store';
 import {Tip} from '../Tooltip';
+import {SandboxedHtml} from '../SandboxedHtml';
 import type {RichContext, RichExport} from '../RichBlock';
 
 export const ZOOM_MIN = 0.5, ZOOM_MAX = 2, ZOOM_STEP = 0.25;
@@ -27,6 +28,15 @@ export const usesThemeVariables = (html: string): boolean => /var\(\s*--(?:foreg
 /** Inline, a page grows to its content up to `max`, then scrolls inside; before it reports, a steady placeholder height. */
 export function inlinePageHeight(height: number | null, min: number, max: number): number | undefined {
   return height === null ? undefined : Math.max(min, Math.min(max, height));
+}
+
+/** #829: the editor's preview of a page: the same scripts-only sandbox the block draws in, one served document re-used across drafts. */
+export function HtmlEditPreview({html, storeKey, title, themed}: {html: string; storeKey: string; title: string; themed: boolean}): React.ReactElement {
+  const [height, setHeight] = useState<number | null>(null);
+  const shown = inlinePageHeight(height, 96, 560);
+  return <div className="rich-report" data-mode="inline" data-themed={themed || undefined} style={shown ? {['--rich-report-height' as string]: `${shown}px`} : undefined}>
+    <SandboxedHtml html={html} scripts themed={themed} title={`${title} (preview)`} storeKey={storeKey} className="rich-report-sandbox" onHeight={setHeight} debounceMs={0}/>
+  </div>;
 }
 
 /** The HTML as an editable Canvas page bound to the active chat (its agent can read and update it). */

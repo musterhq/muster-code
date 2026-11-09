@@ -150,7 +150,7 @@ const {THEME_FRAGMENT_KEY}=await import('../src/shared/html-render');
   await until(()=>!$('.rich-network'));
   await until(()=>calls.filter(([command])=>command==='htmlRenders.open').length>opens);
   const labels=$$('.rich-actions [aria-label]').map(el=>el.getAttribute('aria-label'));
-  assert.deepEqual(labels,['Copy source','Download','Open in tab','Full screen'],'the standard chrome');
+  assert.deepEqual(labels,['Edit','Copy source','Download','Open in tab','Full screen'],'the standard chrome, led by Edit (#829) since the card is in a chat');
   await click($('[aria-label="Full screen"]'),200);
   assert.ok($('.rich-full'),'full screen');
   assert.ok($('.rich-full [aria-label="Zoom in"]'),'full screen has zoom');

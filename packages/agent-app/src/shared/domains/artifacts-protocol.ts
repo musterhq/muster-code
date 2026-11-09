@@ -8,10 +8,17 @@ import type {HtmlRenderView} from '../html-render.ts';
 export type CanvasKind = 'markdown' | 'code' | 'html';
 export const CANVAS_KINDS: readonly CanvasKind[] = ['markdown', 'code', 'html'];
 export type CanvasAuthor = 'user' | 'agent';
+/** #829: which visual in a chat a canvas edits: a ```mermaid (diagram), ```chart or ```html-report (report) fence, or a page
+ *  the agent showed with render_html. `key` is `<kind>:<hash of the original fence>` or `page:<render id>`. */
+export type CanvasVisualKind = 'diagram' | 'chart' | 'report' | 'page';
+export const CANVAS_VISUAL_KINDS: readonly CanvasVisualKind[] = ['diagram', 'chart', 'report', 'page'];
+export interface CanvasVisual { kind: CanvasVisualKind; key: string }
 /** A co-edited artifact. `version` increases by one on every saved change (edit, agent update or restore). */
 export interface Canvas {
   id: string; title: string; kind: CanvasKind; language?: string; content: string; version: number;
   chatId?: string; folderId?: string; createdAt: string; updatedAt: string; updatedBy: CanvasAuthor;
+  /** #829: set when the canvas holds the user's edit of a visual in its chat; version 1 is the visual as the reply drew it. */
+  visual?: CanvasVisual;
 }
 export type CanvasSummary = Omit<Canvas, 'content'> & { size: number };
 /** One saved state. `restoredFrom` is set when the version was produced by restoring an older one. */
@@ -39,7 +46,8 @@ export interface PluginUiEntry { pluginId: string; app: string; title: string; r
 export interface ArtifactsCommands {
   'artifacts.canvas.list': { input: { chatId?: string }; output: { canvases: CanvasSummary[] } };
   'artifacts.canvas.get': { input: { id: string }; output: Canvas };
-  'artifacts.canvas.create': { input: { title?: string; kind?: CanvasKind; language?: string; content?: string; chatId?: string; folderId?: string }; output: Canvas };
+  /** With `visual` (needs `chatId`): the edit canvas of one visual in the chat, at most one per visual; `note` labels version 1. */
+  'artifacts.canvas.create': { input: { title?: string; kind?: CanvasKind; language?: string; content?: string; chatId?: string; folderId?: string; visual?: CanvasVisual; note?: string }; output: Canvas };
   /** Saves new content. `baseVersion` guards co-editing: a stale base is refused with `conflict` instead of overwriting. */
   'artifacts.canvas.update': { input: { id: string; content?: string; title?: string; kind?: CanvasKind; language?: string | null; baseVersion?: number; note?: string }; output: { conflict: boolean; canvas: Canvas } };
   'artifacts.canvas.versions': { input: { id: string }; output: { versions: CanvasVersion[] } };

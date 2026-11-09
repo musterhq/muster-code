@@ -19,6 +19,8 @@ export interface RichBlockBody {
   onOpenInTab?: () => void;
   /** Re-renders the fence after its chunk failed to load, so Retry imports it again. */
   onRetryLoad?: () => void;
+  /** #829: the chat the reply is in. With it, the block offers Edit and draws the user's saved edit. */
+  chatId?: string;
 }
 type BodyComponent = (props: RichBlockBody) => React.ReactElement;
 type Body = React.LazyExoticComponent<BodyComponent>;
@@ -65,7 +67,7 @@ export function RichPreload({kind}: {kind: RichKind}): null {
   return null;
 }
 
-export const RichFence = React.memo(function RichFence({kind, source, variant = 'inline'}: {kind: RichKind; source: string; variant?: 'inline' | 'tab'}): React.ReactElement {
+export const RichFence = React.memo(function RichFence({kind, source, variant = 'inline', chatId}: {kind: RichKind; source: string; variant?: 'inline' | 'tab'; chatId?: string}): React.ReactElement {
   const [, setGeneration] = React.useState(0);
   const retryLoad = React.useCallback(() => setGeneration(value => value + 1), []);
   const Body = bodyOf(kind);
@@ -74,7 +76,7 @@ export const RichFence = React.memo(function RichFence({kind, source, variant = 
   if (!Body) return <RichBlock kind={kind} title={title} status="error" variant={variant} source={source} error={{message: `This app cannot show a ${kind} yet`}}>{null}</RichBlock>;
   return <AreaBoundary area={`this ${kind}`} scope="item" resetKey={source}>
     <Suspense fallback={<RichBlock kind={kind} title={title} status="loading" variant={variant} source={source}>{null}</RichBlock>}>
-      <Body source={source} variant={variant} onRetryLoad={retryLoad} {...(open ? {onOpenInTab: open} : {})}/>
+      <Body source={source} variant={variant} onRetryLoad={retryLoad} {...(open ? {onOpenInTab: open} : {})} {...(chatId ? {chatId} : {})}/>
     </Suspense>
   </AreaBoundary>;
 });
