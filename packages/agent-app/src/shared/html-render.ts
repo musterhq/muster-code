@@ -55,6 +55,9 @@ export function htmlRenderIdOf(data: Record<string, unknown> | undefined): strin
   return HTML_RENDER_REF.exec(text)?.[1] ?? (typeof data?.output === 'string' ? HTML_RENDER_REF.exec(data.output)?.[1] : undefined);
 }
 
+/** #829 part 2 (stub): the page a render_html row updated in place. */
+export function htmlRenderUpdateOf(_data: Record<string, unknown> | undefined): string | undefined { return undefined; }
+
 // ---- theme ----------------------------------------------------------------------------------------------------------
 
 export type HtmlRenderAppearance = 'light' | 'dark';

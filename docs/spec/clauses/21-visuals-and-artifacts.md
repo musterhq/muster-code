@@ -121,6 +121,11 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-829E](21-visuals-and-artifacts.md#mus-spec-21-829e) | A render_html card's Edit shows the stored page's HTML; Save links an html canvas to that page; the card then shows the edit in the scripts-only, themed sandbox. | [`a render_html page edits with a live preview and the card shows the saved edit in its sandbox`](../../../packages/agent-app/tests/visual-edit-829-dom.tsx) |
 | [MUS-SPEC-21-829F](21-visuals-and-artifacts.md#mus-spec-21-829f) | artifacts.canvas.create with a visual link keeps the link, the original as version 1 and the edit as version 2; a second edit canvas for the same visual or one with no chat is refused; the link and both versions survive a service restart; an older canvases table gains the link column. | [`a saved visual edit is a canvas linked to its chat and visual, and it survives a restart`](../../../packages/agent-app/tests/visual-edit-829.test.ts) |
 | [MUS-SPEC-21-829G](21-visuals-and-artifacts.md#mus-spec-21-829g) | The next turn in the chat carries a visual-edits context block with the edited source in a fence of its kind; a visual with no edit and another chat's edits are left out. | [`the next turn carries the edited source of a visual, and only in its own chat`](../../../packages/agent-app/tests/visual-edit-829.test.ts) |
+| [MUS-SPEC-21-829H](21-visuals-and-artifacts.md#mus-spec-21-829h) | render_html with `replaces` naming an earlier page of the chat stores the new page and appends it as the next version of the canvas linked to the original page (version 1 the original, author agent); the answer marks an update, which no tool row draws as a second card; a later update through either reference reaches the same canvas, and a user edit in between keeps its place in the sequence. | [`the agent updates a page in place: one canvas holds every version, the user's edits included`](../../../packages/agent-app/tests/visual-update-829.test.ts) |
+| [MUS-SPEC-21-829I](21-visuals-and-artifacts.md#mus-spec-21-829i) | render_html with `replaces` naming another chat's page, an unknown page or a malformed reference is refused with a tool error that says what to do; nothing is stored and no canvas changes. | [`updating a page from another chat, or one that does not exist, is refused`](../../../packages/agent-app/tests/visual-update-829.test.ts) |
+| [MUS-SPEC-21-829J](21-visuals-and-artifacts.md#mus-spec-21-829j) | A completed update row reads "Updated <title>" (running: "Updating"), has no page of its own and groups with the tool activity around it, while the original page stays its own visual row. | [`an update reads as a compact Updated row and the page is not drawn twice`](../../../packages/agent-app/tests/visual-update-829.test.ts) |
+| [MUS-SPEC-21-829K](21-visuals-and-artifacts.md#mus-spec-21-829k) | A page card with versions shows "vN of N" with previous and next in its header, draws the newest version, steps back through a user edit (drawn from its text) to version 1 (the stored page), and jumps to the newest when the agent adds a version. | [`the page card keeps earlier versions behind a v2-of-3 switch and follows the agent's update`](../../../packages/agent-app/tests/visual-update-829-dom.tsx) |
+| [MUS-SPEC-21-829L](21-visuals-and-artifacts.md#mus-spec-21-829l) | The render_html tool description and Muster's visualize skill each mention `replaces`; the next turn does not send the agent its own update back as a user edit, but does carry a user edit made after it. | [`agents are told about replaces, and the next turn carries only the user's edits`](../../../packages/agent-app/tests/visual-update-829.test.ts) |
 
 ### Side chats
 
@@ -1275,4 +1280,59 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/visual-edit-829.test.ts::the next turn carries the edited source of a visual, and only in its own chat`
 - Environment: Node test runner with the real agent service and a recording fixture provider.
 - Known gaps: Whether a model then uses the edit is not tested; the block is resent only when the edit changes, per the context ledger.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829h"></a>
+#### MUS-SPEC-21-829H: The agent updates a page in place
+
+- Precondition: Two agent chats; the first holds a page the agent showed with render_html.
+- Action: Call render_html in the first chat with `replaces` set to the page's reference; save a user edit on the canvas; call render_html again with `replaces` set to the newer page's reference.
+- Expected result: The first update is stored as a new page and answers with an update reference (`muster-html-update:<original id>`), not a new page reference, so the transcript helpers find no new card for it and name the original page as the one updated. A canvas linked to the chat as `page:<original id>` holds version 1, the original page (author agent), and version 2, the new page (author agent, its note naming the new page, its title the new title). The user's edit is version 3, and the second update, made through the newer page's reference, is version 4 of the same canvas. Each change emits a canvas event.
+- Test: `packages/agent-app/tests/visual-update-829.test.ts::the agent updates a page in place: one canvas holds every version, the user's edits included`
+- Environment: Node test runner: the real browser bridge and page store in a temporary folder, wired to the real agent service (SQLite on disk) the way main wires them.
+- Known gaps: The model choosing to pass `replaces` is not tested; the tool description and skill tell it to (MUS-SPEC-21-829L).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829i"></a>
+#### MUS-SPEC-21-829I: Updating a page from another chat, or one that does not exist, is refused
+
+- Precondition: Two agent chats; the second holds a page the agent showed.
+- Action: Call render_html in the first chat with `replaces` set to the second chat's page, to a well-formed reference that was never stored, and to text that is not a reference.
+- Expected result: Each call is a tool error: another chat's page says it was shown in another chat and only this chat's pages can be updated; an unknown page says there is no such page and to call render_html without `replaces`; a malformed reference says what a reference looks like. No page is stored and no canvas is created or changed in either chat.
+- Test: `packages/agent-app/tests/visual-update-829.test.ts::updating a page from another chat, or one that does not exist, is refused`
+- Environment: Node test runner: the real browser bridge and page store wired to the real agent service.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829j"></a>
+#### MUS-SPEC-21-829J: An update reads as a compact row and the page is not drawn twice
+
+- Precondition: A turn with a render_html page, a command, and a later render_html call that updated the page.
+- Action: Present and group the rows the way the transcript does, while the update is running and after it completed.
+- Expected result: The running update reads "Updating <title>"; the completed one reads "Updated <title>" and has no page id, so the tool card draws no page. The original page is still its own visual row; the update row groups with the command beside it as ordinary tool activity, in both the transcript grouping and the live chat projection.
+- Test: `packages/agent-app/tests/visual-update-829.test.ts::an update reads as a compact Updated row and the page is not drawn twice`
+- Environment: Node test runner over the pure presentation and grouping modules the transcript uses.
+- Known gaps: The rendered row is not mounted here; ToolCard draws a page only when the presentation carries an id, which this checks.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829k"></a>
+#### MUS-SPEC-21-829K: The page card keeps earlier versions behind a switch
+
+- Precondition: A chat holds a page card whose canvas has three versions: the original page, a user edit and an agent update that names its stored page.
+- Action: Mount the card, step back twice, step forward, then add a fourth version from the agent while the card shows version 1.
+- Expected result: The header shows a Version control reading "v3 of 3" and the newest version is drawn from the agent's stored page (its title in the header). Previous shows "v2 of 3", the user's edit registered from its text in the themed, scripts-only sandbox; again shows "v1 of 3", the original stored page, with Previous disabled. When the agent adds a version the card reads "v4 of 4" and draws the new page.
+- Test: `packages/agent-app/tests/visual-update-829-dom.tsx::the page card keeps earlier versions behind a v2-of-3 switch and follows the agent's update`
+- Environment: DOM suite (linkedom) with a stubbed bridge (htmlRenders.open, reports.open and canvas events) backed by the real canvas store on an in-memory SQLite database.
+- Known gaps: linkedom has no layout: how the switch sits in the header in light and dark is checked in the app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-829l"></a>
+#### MUS-SPEC-21-829L: Agents are told, and the next turn carries only the user's edits
+
+- Precondition: An agent chat whose page the agent updated with `replaces`.
+- Action: Read the render_html tool description and the visualize skill; send a turn; save a user edit; send another turn.
+- Expected result: The tool description and the skill each mention `replaces` with the page's reference. The first turn has no visual-edits block: the agent wrote the newest version itself. After the user's edit the next turn carries a visual-edits block with the user's source.
+- Test: `packages/agent-app/tests/visual-update-829.test.ts::agents are told about replaces, and the next turn carries only the user's edits`
+- Environment: Node test runner with the real agent service, a recording fixture provider and the bundled skill file.
+- Known gaps: Whether a model follows the description is not tested.
 - Evidence: UNVERIFIED

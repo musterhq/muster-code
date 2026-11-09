@@ -156,6 +156,9 @@ export class CanvasStore {
     return { conflict: false, canvas: toCanvas(next) };
   }
 
+  /** #829 part 2 (stub). */
+  agentVisualVersion(_input: Record<string, unknown>): { canvas: Canvas; created: boolean } { throw new Error('Not implemented yet.'); }
+
   versions(id: unknown): CanvasVersion[] {
     const target = this.must(canvasId(id)).id;
     return (this.db().prepare('SELECT * FROM canvas_versions WHERE canvas_id = ? ORDER BY version DESC').all(target) as unknown as VersionRow[]).map(toVersion);
