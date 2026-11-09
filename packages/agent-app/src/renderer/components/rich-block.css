@@ -20,6 +20,10 @@
 .rich-switch button:hover { color: var(--text); background: var(--bg-hover); }
 .rich-switch button[aria-checked='true'] { color: var(--text); background: var(--bg-active); }
 .rich-switch button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+/* #829: a page's versions ("v2 of 3") step with the same chrome as the Original / Edited switch. */
+.rich-switch.rich-versions button { padding: 0 4px; }
+.rich-switch.rich-versions button:disabled { opacity: .4; cursor: default; background: none; }
+.rich-versions-label { display: inline-flex; align-items: center; padding: 0 2px; color: var(--text-faint); font-size: var(--fs-11); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rich-menu { min-width: 150px; }
 .rich-problem { margin: 0; padding: 5px 10px; border-bottom: 1px solid var(--hairline); background: color-mix(in srgb, var(--danger) 8%, transparent); color: var(--text); font-size: var(--fs-12); }
 

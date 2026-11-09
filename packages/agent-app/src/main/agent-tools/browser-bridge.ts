@@ -9,7 +9,8 @@ import {launcherFile, nodeLauncherScript} from '../../runtime/launcher-script.ts
 import {runBrowserTool, type AgentBrowserHost, type AgentPage} from './browser-actions.ts';
 import {BROWSER_TOOL_NAMES, PREVIEW_TOOL_NAMES, textResult, type McpToolResult} from './browser-tools.ts';
 import type {HtmlRenderStore} from './html-render-store.ts';
-import {htmlRenderRef, type HtmlRenderRecord} from '../../shared/html-render.ts';
+import {htmlRenderRef, htmlRenderRefId, htmlRenderUpdateRef, type HtmlRenderRecord} from '../../shared/html-render.ts';
+import type {ArtifactsCommands} from '../../shared/domains/artifacts-protocol.ts';
 import {previewFilePath, previewUrl, describeLoadError} from '../../shared/preview.ts';
 
 /** What the bridge needs from the browser workspace (BrowserWorkspaceController satisfies it). */
@@ -36,6 +37,9 @@ export interface BridgeOptions {
   renders?: HtmlRenderStore;
   /** #771: draws a stored page to a PNG (main: a hidden, sandboxed window); without it render_html(image) says pictures are not available. */
   capture?(page: HtmlRenderRecord): Promise<Buffer>;
+  /** #829: render_html(replaces) appends the new page as the next version of the original page's canvas (the runtime's
+   *  `artifacts.visual.agentUpdate`); without it an update says it is not available. */
+  updateVisual?(input: ArtifactsCommands['artifacts.visual.agentUpdate']['input']): Promise<ArtifactsCommands['artifacts.visual.agentUpdate']['output']>;
   /** Where those pictures are saved, one folder per chat (never the project folder). */
   imagesDir?: string;
   /** Reads an .html file for preview_open(file): absolute, already checked to be inside the chat's folder. */
@@ -214,21 +218,49 @@ export class BrowserBridge {
     return {owner, profileId, url: state.url};
   }
   /** render_html: stores the page and answers with its reference; the transcript card draws it from the tool row. A Full
-   *  access chat that asked for network gets it up front (Full access never prompts); otherwise the person decides on the card. */
+   *  access chat that asked for network gets it up front (Full access never prompts); otherwise the person decides on the card.
+   *  #829: with `replaces` (an earlier page of this chat) the page becomes the next version of that page's card instead. */
   private async renderHtml(chat: Snapshot['chats'][number], args: unknown): Promise<McpToolResult> {
     const store = this.options.renders;
     if (!store) return textResult('Inline pages are not available in this Muster window.', true);
     const input = args && typeof args === 'object' ? args as Record<string, unknown> : {};
+    let root: HtmlRenderRecord | undefined;
+    if (input.replaces !== undefined && input.replaces !== null && input.replaces !== '') {
+      const refused = this.replaceable(chat, input.replaces);
+      if (typeof refused === 'string') return textResult(refused, true);
+      root = refused;
+    }
     let page: HtmlRenderRecord;
     try {
       const full = chat.mode === 'agent' && chat.permissionMode === 'full';
-      page = store.create({chatId: chat.id, title: input.title, html: input.html, network: input.network, allowNetwork: full});
+      page = store.create({chatId: chat.id, title: input.title, html: input.html, network: input.network, allowNetwork: full, ...(root ? {replaces: root.id} : {})});
     } catch (error) { return textResult(error instanceof Error ? error.message : String(error), true); }
     const network = !page.networkRequested ? 'It has no network access.' : page.networkAllowed ? 'Network access (https only) is allowed for it.' : 'It asked for network access; the user is asked on the card and it shows without remote content until they allow it.';
-    const shown = `Shown to the user inline as “${page.title}” (${htmlRenderRef(page.id)}). ${network}`;
+    let shown = `Shown to the user inline as “${page.title}” (${htmlRenderRef(page.id)}). ${network}`;
+    if (root) {
+      try {
+        const {version} = await this.options.updateVisual!({chatId: chat.id, visual: {kind: 'page', key: `page:${root.id}`}, title: page.title, original: root.html, content: page.html, note: `Updated by the agent (${htmlRenderRef(page.id)})`});
+        shown = `Updated “${page.title}” in place (${htmlRenderUpdateRef(root.id)}): the card that showed it now shows this page as version ${version}, with the earlier versions behind its version switch. ${network} To change it again, pass replaces: "${htmlRenderRef(root.id)}".`;
+      } catch (error) { return textResult(`The page could not be updated: ${error instanceof Error ? error.message : String(error)}`, true); }
+    }
     const reply = 'Don\'t mention or describe the page; reply with only what it doesn\'t already say.';
     if (input.image !== true) return textResult(`${shown} ${reply}`);
     return textResult(`${shown} ${await this.pagePicture(page)} ${reply}`);
+  }
+  /** #829: the first page of the chain `replaces` names, or why it cannot be updated from this chat. */
+  private replaceable(chat: Snapshot['chats'][number], value: unknown): HtmlRenderRecord | string {
+    const store = this.options.renders!;
+    if (!this.options.updateVisual) return 'Updating a page in place is not available in this Muster window. Call render_html without replaces to show a new page.';
+    const id = htmlRenderRefId(value);
+    if (!id) return 'replaces takes the reference render_html answered with for the page, like muster-html:0123456789abcdef0123456789abcdef.';
+    const prior = store.get(id);
+    if (!prior) return `There is no page ${htmlRenderRef(id)} to update: it was never shown or is no longer kept. Call render_html without replaces to show a new page.`;
+    const foreign = `${htmlRenderRef(id)} was shown in another chat; you can only update pages shown in this chat. Call render_html without replaces to show a new page here.`;
+    if (prior.chatId !== chat.id) return foreign;
+    if (!prior.replaces) return prior;
+    const root = store.get(prior.replaces);
+    if (!root) return `The page ${htmlRenderRef(id)} updated is no longer kept, so it cannot be updated in place. Call render_html without replaces to show a new page.`;
+    return root.chatId === chat.id ? root : foreign;
   }
   /** #771: a PNG of a stored page, saved with the chat; the sentence the agent gets about it (never an error: the page is shown either way). */
   private async pagePicture(page: HtmlRenderRecord): Promise<string> {

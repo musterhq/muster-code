@@ -170,6 +170,13 @@ export function createArtifactsDomain(context: DomainContext): DomainModule {
       'artifacts.canvas.versions': input => ({ versions: canvases.versions(input.id) }),
       'artifacts.canvas.version': input => canvases.version(input.id, input.version),
       'artifacts.canvas.restore': input => { const canvas = canvases.restore(input.id, input.version, 'user'); changed(canvas); return canvas; },
+      'artifacts.visual.agentUpdate': input => {
+        const owner = chat(chatIdOf(input.chatId));
+        if (!owner) throw new Error('This chat no longer exists.');
+        const { canvas, created } = canvases.agentVisualVersion({ chatId: owner.id, visual: input.visual, title: input.title, original: input.original, content: input.content, note: input.note, ...(owner.folderId ? { folderId: owner.folderId } : {}) });
+        changed(canvas, created);
+        return { id: canvas.id, version: canvas.version };
+      },
       'artifacts.canvas.delete': input => { const id = canvases.get(input.id).id; canvases.delete(id); context.emit({ type: 'canvasDeleted', id }); },
 
       'artifacts.sideChat.create': async input => {

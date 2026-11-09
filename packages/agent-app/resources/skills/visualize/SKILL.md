@@ -53,6 +53,8 @@ Call `render_html` with `title` and `html` (one self-contained document, at most
 - No network by default: inline everything. Pass `network: true` only for a CDN library or remote images you truly
   need; the person is asked once on the card.
 - Draw charts with inline SVG or a small inline script. Keep scripts to the page itself.
+- To change a page you already showed, call `render_html` again with `replaces` set to its reference (`muster-html:<id>`):
+  its card shows the new version in place, and the earlier ones stay behind its version switch.
 
 ## A PNG to attach
 

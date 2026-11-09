@@ -18,6 +18,15 @@ export const HTML_RENDER_MAX_TITLE = 160;
 /** How the tool result names the stored page, so the transcript card finds it again after a restart. */
 export const HTML_RENDER_REF = /\bmuster-html:([a-f0-9]{32})\b/;
 export const htmlRenderRef = (id: string) => `muster-html:${id}`;
+/** #829: how an update in place (render_html with `replaces`) names the page it changed. Never read as a page of its own. */
+export const HTML_RENDER_UPDATE_REF = /\bmuster-html-update:([a-f0-9]{32})\b/;
+export const htmlRenderUpdateRef = (id: string) => `muster-html-update:${id}`;
+/** The page id in a `replaces` argument: `muster-html:<id>` (or the bare id); undefined for anything else. */
+export function htmlRenderRefId(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const text = value.trim();
+  return /^[a-f0-9]{32}$/.test(text) ? text : /^muster-html:([a-f0-9]{32})$/.exec(text)?.[1];
+}
 
 export interface HtmlRenderRecord {
   id: string;
@@ -29,6 +38,8 @@ export interface HtmlRenderRecord {
   /** Granted: by the person on the card, or up front in a Full access chat. Never by the page itself. */
   networkAllowed: boolean;
   createdAt: string;
+  /** #829: the first page of the chain this page updated in place (render_html `replaces`). */
+  replaces?: string;
 }
 /** What the renderer gets: everything but the chat binding. */
 export type HtmlRenderView = Omit<HtmlRenderRecord, 'chatId'>;
@@ -48,15 +59,23 @@ export function isHtmlRenderTool(data: Record<string, unknown> | undefined): boo
   if (tool === 'mcp__muster_browser__render_html' || tool === 'muster_browser_render_html') return true;
   return tool === HTML_RENDER_TOOL && (!server || /^muster[_-]browser$/i.test(server));
 }
-/** The stored page a render_html tool row points at: its id from the result text, never from model arguments alone. */
-export function htmlRenderIdOf(data: Record<string, unknown> | undefined): string | undefined {
+/** A render_html row's result text (Codex result object, or an output string). */
+function htmlRenderResultText(data: Record<string, unknown> | undefined): string {
   const result = data?.result;
   const text = typeof result === 'string' ? result : (() => { try { return JSON.stringify(result ?? ''); } catch { return ''; } })();
-  return HTML_RENDER_REF.exec(text)?.[1] ?? (typeof data?.output === 'string' ? HTML_RENDER_REF.exec(data.output)?.[1] : undefined);
+  return typeof data?.output === 'string' ? `${text}\n${data.output}` : text;
 }
-
-/** #829 part 2 (stub): the page a render_html row updated in place. */
-export function htmlRenderUpdateOf(_data: Record<string, unknown> | undefined): string | undefined { return undefined; }
+/** The stored page a render_html tool row points at: its id from the result text, never from model arguments alone. An
+ *  update in place (#829) has none: its page is drawn by the card it updated, never a second time. */
+export function htmlRenderIdOf(data: Record<string, unknown> | undefined): string | undefined {
+  const text = htmlRenderResultText(data);
+  if (HTML_RENDER_UPDATE_REF.test(text)) return undefined;
+  return HTML_RENDER_REF.exec(text)?.[1];
+}
+/** #829: the page a render_html row updated in place, from its result text. */
+export function htmlRenderUpdateOf(data: Record<string, unknown> | undefined): string | undefined {
+  return HTML_RENDER_UPDATE_REF.exec(htmlRenderResultText(data))?.[1];
+}
 
 // ---- theme ----------------------------------------------------------------------------------------------------------
 

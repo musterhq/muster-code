@@ -39,8 +39,8 @@ export function ensureArtifactSync(): void {
       if (event.type === 'sideChatsChanged') setSideChats(event.sideChats);
       else if (event.type === 'canvasChanged') {
         for (const listener of [...canvasListeners]) listener({type: 'changed', canvas: event.canvas, ...(event.created ? {created: true} : {})});
-        // An agent's new canvas opens beside the conversation that made it.
-        if (event.created && event.canvas.updatedBy === 'agent' && event.canvas.chatId && event.canvas.chatId === getState().activeChatId) openCanvasTab(event.canvas);
+        // An agent's new canvas opens beside the conversation that made it; a visual's versions stay on its card (#829).
+        if (event.created && event.canvas.updatedBy === 'agent' && !event.canvas.visual && event.canvas.chatId && event.canvas.chatId === getState().activeChatId) openCanvasTab(event.canvas);
       } else if (event.type === 'canvasDeleted') {
         for (const listener of [...canvasListeners]) listener({type: 'deleted', id: event.id});
         if (getState().tabs.some(tab => tab.id === `canvas:${event.id}`)) closeTab(`canvas:${event.id}`);

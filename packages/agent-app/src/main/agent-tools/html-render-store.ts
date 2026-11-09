@@ -15,14 +15,14 @@ export class HtmlRenderStore {
   constructor(private dir: string, private maxPages = MAX_PAGES) {}
   private file(id: string): string { return path.join(this.dir, `${id}.json`); }
 
-  create(input: {chatId: string; title: unknown; html: unknown; network?: unknown; allowNetwork?: boolean; maxBytes?: number}): HtmlRenderRecord {
+  create(input: {chatId: string; title: unknown; html: unknown; network?: unknown; allowNetwork?: boolean; maxBytes?: number; replaces?: string}): HtmlRenderRecord {
     if (typeof input.html !== 'string' || !input.html.trim()) throw new Error('render_html needs the page in `html`.');
     const bytes = Buffer.byteLength(input.html);
     const max = input.maxBytes ?? HTML_RENDER_MAX_BYTES;
     if (bytes > max) throw new Error(input.maxBytes ? `This file is ${(bytes / 1_000_000).toFixed(1)} MB; previews take at most ${max / 1_000_000} MB. Serve it with a dev server and preview its URL instead.` : `This page is ${(bytes / 1000).toFixed(0)} KB; render_html takes at most ${HTML_RENDER_MAX_BYTES / 1000} KB. Write it to a file and use preview_open instead.`);
     const networkRequested = input.network === true;
     const record: HtmlRenderRecord = {id: randomBytes(16).toString('hex'), chatId: input.chatId, title: htmlRenderTitle(input.title), html: input.html,
-      networkRequested, networkAllowed: networkRequested && input.allowNetwork === true, createdAt: new Date().toISOString()};
+      networkRequested, networkAllowed: networkRequested && input.allowNetwork === true, createdAt: new Date().toISOString(), ...(input.replaces && ID.test(input.replaces) ? {replaces: input.replaces} : {})};
     fs.mkdirSync(this.dir, {recursive: true, mode: 0o700});
     fs.writeFileSync(this.file(record.id), JSON.stringify(record), {mode: 0o600});
     this.prune();
