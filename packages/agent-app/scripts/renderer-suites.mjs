@@ -56,6 +56,7 @@ export const split = new Set([
   'devices-components',
   'visual-edit-829-dom',
   'visual-update-829-dom',
+  'mcp-apps-844-dom',
 ]);
 
 /** tests/*.tsx files that are deliberately not suites, with the reason. */

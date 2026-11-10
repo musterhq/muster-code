@@ -15,6 +15,7 @@ import { BACKGROUND_MCP } from '../background-agent-tools.ts';
 import type { Chat } from '../../shared/protocol.ts';
 import { assignConfigKeys, maskDetectedServer, parseTomlSections, redact, testHttp, testStdio } from '../mcp-client.ts';
 import { activeSecretStore } from '../secret-store.ts';
+import { createMcpAppsHost } from '../mcp-apps-host.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
 type Stored = Omit<McpServer, 'configKey' | 'healthy' | 'loadedBy' | 'auth'> & { auth: { kind: 'none' } | { kind: 'bearer' } | { kind: 'env'; name: string }; tools?: McpTool[] };
@@ -220,6 +221,18 @@ export function createMcpDomain(ctx: DomainContext): DomainModule {
     return work;
   };
 
+  // ---------------------------------------------------------------- #844 MCP Apps: Muster's own connection to a known server
+  const apps = createMcpAppsHost({ ctx, server: (chat, name) => {
+    const assigned = keys();
+    const entry = rows().filter(item => item.enabled && matches(item, chat)).sort((a, b) => Number(assigned.get(b.id) === name) - Number(assigned.get(a.id) === name)).find(item => assigned.get(item.id) === name || item.name === name);
+    if (!entry) return undefined;
+    const secret = token(entry.id);
+    return { id: entry.id, name: entry.name, target: entry.transport === 'http'
+      ? { transport: 'http', url: entry.url!, ...(entry.auth.kind === 'bearer' && secret ? { headers: { authorization: `Bearer ${secret}` } } : {}) }
+      : { transport: 'stdio', command: entry.command!, args: entry.args, env: { ...entry.env, ...(entry.auth.kind === 'env' && secret ? { [entry.auth.name]: secret } : {}) } } };
+  } });
+  const offApps = ctx.hooks.onProviderEvent(event => apps.observe(event));
+
   // ---------------------------------------------------------------- plugin hooks (review, then enable)
   const hookRows = () => new Map((db.prepare('SELECT * FROM mcp_hooks').all() as unknown as HookRow[]).map(entry => [entry.id, entry]));
   const declared = new Map<string, Promise<Declared[]>>();
@@ -324,6 +337,7 @@ export function createMcpDomain(ctx: DomainContext): DomainModule {
   });
 
   const handlers: DomainModule['handlers'] = {
+    ...apps.handlers,
     'mcp.servers.list': () => list(),
     'mcp.servers.detect': () => { syncDetected(); return list(); },
     'mcp.servers.add': async input => {
@@ -338,13 +352,14 @@ export function createMcpDomain(ctx: DomainContext): DomainModule {
       const entry = parse(input, prior);
       saveToken(entry, input, prior);
       write(entry); await writeLauncher(entry);
+      apps.forget(entry.id);
       return one(entry.id);
     },
     'mcp.servers.remove': async input => {
       const entry = row(input.id);
       db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(entry.id);
       activeSecretStore()?.clear(secretId(entry.id));
-      logs.delete(entry.id);
+      logs.delete(entry.id); apps.forget(entry.id);
       await fs.rm(launcher(entry.id), { force: true });
     },
     'mcp.servers.test': input => test(row(input.id).id),
@@ -373,5 +388,5 @@ export function createMcpDomain(ctx: DomainContext): DomainModule {
       return publicHooks();
     },
   };
-  return { handlers, dispose() { offOptions(); offPrompt(); offSettled(); } };
+  return { handlers, dispose() { offOptions(); offPrompt(); offSettled(); offApps(); apps.dispose(); } };
 }
