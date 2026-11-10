@@ -18,7 +18,7 @@ import { device } from '../../shared/device-noun.ts';
 /** Scheduler clock; tests shorten the tick and move `now`. */
 export const automationTiming = { tickMs: 30_000, firstTickMs: 1_000, now: () => Date.now(), graceMs: 150_000, watchCooldownMs: AUTOMATION_WATCH_COOLDOWN_MS, watchQuietMs: 5_000, repoPollMs: AUTOMATION_REPO_POLL_MS, repoMaxBackoffMs: AUTOMATION_REPO_MAX_BACKOFF_MS, /** The webhook listener's preferred loopback port (0: any free one; tests use 0). */ webhookPort: 47831, /** Tests only: a secret store override. */ secrets: undefined as (() => { secureStorage(): boolean; set(id: string, value: unknown): unknown; get(id: string): string | undefined; clear(id: string): unknown }) | undefined };
 const ACTIVE: readonly AutomationRunStatus[] = ['queued', 'awaiting', 'running'];
-const MODES = ['read-only', 'workspace', 'full'] as const;
+const MODES: readonly ChatPermissionMode[] = ['read-only', 'workspace', 'full'];
 const ID = /^[a-zA-Z0-9_-]{1,128}$/;
 
 interface AutomationRow { id: string; name: string; prompt: string; target: string; schedule: string; timezone: string; permission_mode: string; overlap: string; catch_up: string; paused: number; created_at: string; updated_at: string; version: number; anchor: number; cursor: number; full_access_version: number | null }

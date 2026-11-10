@@ -51,6 +51,8 @@ export interface AppSettings {
   'notifications.mutedUntil': string | null;
   /** CR-18 Integrated terminal shell for new terminals: 'system' (login shell), a named shell, or an absolute path. */
   'terminal.shell': TerminalShellPreference;
+  /** #841: command prefixes Auto access settles without asking (for example "make deploy-preview"), on top of the safe list. */
+  'approvals.autoAllow': string[];
 }
 /** CR-18: named shells resolve on this machine; any other value is a custom absolute path. */
 export const TERMINAL_SHELL_NAMES = ['zsh', 'bash', 'fish'] as const;
@@ -94,6 +96,7 @@ export const SETTING_DEFAULTS: AppSettings = {
   'notifications.attention': true,
   'notifications.mutedUntil': null,
   'terminal.shell': 'system',
+  'approvals.autoAllow': [],
 };
 export const TEXT_SIZES = [90, 100, 110, 120, 130] as const;
 export const SETTING_KEYS = Object.keys(SETTING_DEFAULTS) as SettingKey[];
@@ -132,6 +135,7 @@ const CHECKS: { [K in SettingKey]: { valid(value: unknown): value is AppSettings
   'notifications.attention': { valid: bool, expected: 'true or false' },
   'notifications.mutedUntil': { valid: (value): value is string | null => value === null || (typeof value === 'string' && value.length <= 40 && Number.isFinite(Date.parse(value))), expected: 'null or an ISO date-time' },
   'terminal.shell': { valid: isTerminalShellPreference, expected: '"system", "zsh", "bash", "fish" or an absolute path' },
+  'approvals.autoAllow': { valid: (value): value is string[] => Array.isArray(value) && value.length <= 200 && value.every(entry => typeof entry === 'string' && entry.trim().length > 0 && entry.length <= 512 && !/[\x00-\x1f]/.test(entry)), expected: 'a list of at most 200 command prefixes' },
   'chats.resumeAfterLimit': { valid: bool, expected: 'true or false' },
   'chats.resumeAfterRestart': { valid: bool, expected: 'true or false' },
   'chats.autoArchiveDays': { valid: (value): value is AutoArchiveDays => typeof value === 'number' && (AUTO_ARCHIVE_DAYS as readonly number[]).includes(value), expected: `one of ${AUTO_ARCHIVE_DAYS.join(', ')} (days; 0 = never)` },

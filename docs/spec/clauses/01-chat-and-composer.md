@@ -37,6 +37,17 @@ Boundaries:
 | [MUS-SPEC-01-403D](01-chat-and-composer.md#mus-spec-01-403d) | Duplicate chat names show distinct visible suffix hints, including same-folder chats; unique names stay plain. | [`duplicate sidebar chat names get distinct suffixes without renaming them`](../../../packages/agent-app/tests/sidebar-chrome-403-dom.tsx) |
 | [MUS-SPEC-01-792A](01-chat-and-composer.md#mus-spec-01-792a) | A chat with no folder and one plain reply renders no summary card, and `.center` has no `data-summary`, so the transcript and composer keep the full width. | [`a chat with nothing to summarise shows no summary card and reserves no room`](../../../packages/agent-app/tests/summary-card-empty-dom.tsx) |
 | [MUS-SPEC-01-792B](01-chat-and-composer.md#mus-spec-01-792b) | When the same chat edits a file, the summary card appears with a Sources section and `.center` gets its `data-summary` layout. | [`the summary card appears once the chat changes a file`](../../../packages/agent-app/tests/summary-card-empty-dom.tsx) |
+| [MUS-SPEC-01-840A](01-chat-and-composer.md#mus-spec-01-840a) | Clicking the mic shows the recording state; clicking it again sends the fake recording to `dictation.transcribe`, the words land in the composer, and Enter sends them with `chat.send`. | [`clicking the mic records, the transcript fills the composer, and Enter sends it`](../../../packages/agent-app/tests/composer-dictation-840-dom.tsx) |
+| [MUS-SPEC-01-840B](01-chat-and-composer.md#mus-spec-01-840b) | Esc while recording stops the microphone, makes no `dictation.transcribe` call and leaves the draft as it was. | [`Esc while recording cancels and keeps the draft unchanged`](../../../packages/agent-app/tests/composer-dictation-840-dom.tsx) |
+| [MUS-SPEC-01-840C](01-chat-and-composer.md#mus-spec-01-840c) | Holding ⌘⇧D records while held and transcribes on release; the words are inserted. | [`holding the dictation shortcut records until the key is released`](../../../packages/agent-app/tests/composer-dictation-840-dom.tsx) |
+| [MUS-SPEC-01-840D](01-chat-and-composer.md#mus-spec-01-840d) | When macOS microphone access is denied, the composer says how to turn it on and never opens the microphone. | [`a denied microphone shows how to allow it and records nothing`](../../../packages/agent-app/tests/composer-dictation-840-dom.tsx) |
+| [MUS-SPEC-01-840E](01-chat-and-composer.md#mus-spec-01-840e) | While the chat runs, dictated words fill the composer and Enter steers them with `chat.steer`. | [`dictation works in the steer composer while a chat runs`](../../../packages/agent-app/tests/composer-dictation-840-dom.tsx) |
+| [MUS-SPEC-01-840F](01-chat-and-composer.md#mus-spec-01-840f) | Settings › Chat shows Dictation; choosing Cloud and saving an endpoint, model and key calls `dictation.config.set`, and the key is not shown back. | [`Settings › Chat chooses the dictation service and saves a cloud key`](../../../packages/agent-app/tests/composer-dictation-840-dom.tsx) |
+| [MUS-SPEC-01-840G](01-chat-and-composer.md#mus-spec-01-840g) | The cloud backend posts the audio as a multipart file to `<endpoint>/audio/transcriptions` with the saved key and model, returns the text, and writes no audio to disk or logs. | [`the cloud backend sends the recording to the chosen endpoint and keeps nothing`](../../../packages/agent-app/tests/dictation-840.test.ts) |
+| [MUS-SPEC-01-840H](01-chat-and-composer.md#mus-spec-01-840h) | With dictation off or set to an on-device option that is not available, transcribing fails with a clear message and makes no network request. | [`audio never leaves the machine unless a cloud backend is chosen`](../../../packages/agent-app/tests/dictation-840.test.ts) |
+| [MUS-SPEC-01-840I](01-chat-and-composer.md#mus-spec-01-840i) | Cloud dictation through a saved OpenAI-compatible connection uses that connection's endpoint and stored key. | [`the cloud backend can use a saved provider connection and its key`](../../../packages/agent-app/tests/dictation-840.test.ts) |
+| [MUS-SPEC-01-840J](01-chat-and-composer.md#mus-spec-01-840j) | On macOS, microphone access asks the system once when undecided and returns a System Settings message when denied, without asking. | [`microphone access asks macOS when undecided and explains a denial`](../../../packages/agent-app/tests/microphone-840.test.ts) |
+| [MUS-SPEC-01-840K](01-chat-and-composer.md#mus-spec-01-840k) | The window allows a media request only for audio from the app's own page; video, other permissions and other pages are refused. | [`only the app page may open the microphone, and only for audio`](../../../packages/agent-app/tests/microphone-840.test.ts) |
 | [MUS-SPEC-01-401A](01-chat-and-composer.md#mus-spec-01-401a) | With the chat idle and the composer empty, the last turn's suggestion shows as ghost text in the composer (the textarea placeholder steps aside), and Tab puts exactly that text in the composer without sending. | [`the suggested follow-up shows as ghost text in an empty composer and Tab fills it`](../../../packages/agent-app/tests/follow-up-401-dom.tsx) |
 | [MUS-SPEC-01-401B](01-chat-and-composer.md#mus-spec-01-401b) | Clicking the suggestion fills the composer and sends nothing; a Cmd/Ctrl-click sends the suggestion as the next message. | [`clicking the suggestion fills the composer, and a modifier-click sends it`](../../../packages/agent-app/tests/follow-up-401-dom.tsx) |
 | [MUS-SPEC-01-401C](01-chat-and-composer.md#mus-spec-01-401c) | The suggestion is gone once anything is typed, and is not shown while a turn runs. | [`the suggestion hides once you type and while a turn runs`](../../../packages/agent-app/tests/follow-up-401-dom.tsx) |
@@ -301,6 +312,129 @@ Boundaries:
 - Environment: Real SummaryCard inside a `.center` element in a DOM suite (linkedom); fake app bridge; no network.
 - Known gaps: Covers the Sources section only; folders, processes, subagents and scheduled automations use the same visibility check but are not each tested here.
 - Evidence: local; node packages/agent-app/dist/tests/summary-card-empty-dom.mjs; exit 0; 2 passed, 0 failed, 0 skipped; commit 51d98019fafa5b2fe3842c1acb1a3e7c3cbe9d56
+
+### Dictation (#840)
+
+<a id="mus-spec-01-840a"></a>
+#### MUS-SPEC-01-840A: Clicking the mic records and the transcript fills the composer
+
+- Precondition: A chat is open with an empty draft. Dictation is set to Cloud and ready. The microphone is allowed. A fake MediaRecorder stands in for the microphone and a fake `dictation.transcribe` returns "ship the release notes".
+- Action: Click the mic, then click it again, then press Enter.
+- Expected result: While recording, the mic has `aria-pressed="true"` and the status line says Listening and that Esc cancels. After the second click the recording (as base64 webm) goes to `dictation.transcribe`, the status shows Transcribing, and then the composer holds "ship the release notes". The fake microphone track is stopped. Enter calls `chat.send` with that text.
+- Test: `packages/agent-app/tests/composer-dictation-840-dom.tsx::clicking the mic records, the transcript fills the composer, and Enter sends it`
+- Environment: Real Composer in a DOM suite (linkedom); fake MediaRecorder, fake getUserMedia and fake app bridge; no network, no real microphone.
+- Known gaps: A real MediaRecorder, real audio and the system microphone prompt are not exercised; that needs the packaged app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-840b"></a>
+#### MUS-SPEC-01-840B: Esc while recording cancels dictation
+
+- Precondition: A chat is open with the draft "keep me". Dictation is ready.
+- Action: Click the mic, then press Esc in the composer.
+- Expected result: Recording stops, the fake microphone track is stopped, `dictation.transcribe` is never called, the mic is no longer pressed, and the draft is still "keep me".
+- Test: `packages/agent-app/tests/composer-dictation-840-dom.tsx::Esc while recording cancels and keeps the draft unchanged`
+- Environment: Real Composer in a DOM suite (linkedom); fake MediaRecorder and app bridge; no network, no real microphone.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-840c"></a>
+#### MUS-SPEC-01-840C: Holding the dictation shortcut records until it is released
+
+- Precondition: A chat is open with an empty draft. Dictation is ready.
+- Action: In the composer press ⌘⇧D, hold it for longer than the hold threshold, then release D.
+- Expected result: Recording starts on the key press and stops on release; the recording is transcribed and the words are inserted into the composer.
+- Test: `packages/agent-app/tests/composer-dictation-840-dom.tsx::holding the dictation shortcut records until the key is released`
+- Environment: Real Composer in a DOM suite (linkedom); fake MediaRecorder and app bridge; no network, no real microphone.
+- Known gaps: A quick tap toggles recording on instead; that path is not asserted here. Key repeat timing of a real keyboard is not simulated.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-840d"></a>
+#### MUS-SPEC-01-840D: A denied microphone shows how to allow it
+
+- Precondition: Dictation is ready but `dictation.microphone` reports that macOS denied access.
+- Action: Click the mic.
+- Expected result: The composer shows a message that names System Settings › Privacy & Security › Microphone, getUserMedia is never called and the mic is not pressed.
+- Test: `packages/agent-app/tests/composer-dictation-840-dom.tsx::a denied microphone shows how to allow it and records nothing`
+- Environment: Real Composer in a DOM suite (linkedom); fake app bridge; no network, no real microphone.
+- Known gaps: The real macOS prompt and System Settings pane are not shown in tests.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-840e"></a>
+#### MUS-SPEC-01-840E: Dictation works in the steer composer
+
+- Precondition: The chat is running and Enter while running is set to Steer. Dictation is ready.
+- Action: Click the mic twice, then press Enter.
+- Expected result: The transcript fills the composer, and Enter calls `chat.steer` with it (not `chat.send`).
+- Test: `packages/agent-app/tests/composer-dictation-840-dom.tsx::dictation works in the steer composer while a chat runs`
+- Environment: Real Composer in a DOM suite (linkedom); fake MediaRecorder and app bridge; no network, no real microphone.
+- Known gaps: The new-chat screen uses the same dictation hook but is not driven here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-840f"></a>
+#### MUS-SPEC-01-840F: Settings › Chat chooses the dictation service
+
+- Precondition: Settings is open on Chat. Dictation is Off.
+- Action: Choose Cloud, enter an endpoint, a model and an API key, and press Save.
+- Expected result: `dictation.config.set` is called with backend `cloud`, the endpoint, the model and the key; after saving, the key field is empty and the row says a key is saved. The description says audio leaves the computer only for a cloud service.
+- Test: `packages/agent-app/tests/composer-dictation-840-dom.tsx::Settings › Chat chooses the dictation service and saves a cloud key`
+- Environment: Real PreferencesScreen in a DOM suite (linkedom); fake app bridge; no network.
+- Known gaps: Keychain encryption of the key is covered by the secret store's own tests, not here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-840g"></a>
+#### MUS-SPEC-01-840G: The cloud backend sends the recording and keeps nothing
+
+- Precondition: Dictation is set to Cloud with endpoint host `speech.example` (path `/v1`), model `whisper-1` and a saved key, in a temp data folder. A fake fetch answers `{"text":"hello there"}`.
+- Action: Call `dictation.transcribe` with a base64 webm recording.
+- Expected result: One POST goes to that endpoint's `/v1/audio/transcriptions` with `Authorization: Bearer <key>` and a multipart body holding the audio file and the model; the result is "hello there". No file in the data folder holds the audio bytes, and nothing logged to the console holds them.
+- Test: `packages/agent-app/tests/dictation-840.test.ts::the cloud backend sends the recording to the chosen endpoint and keeps nothing`
+- Environment: Runtime dictation domain with real files in a temp folder; fake fetch and an in-memory secret box; no network.
+- Known gaps: A real transcription service is not called; its answer shape is the OpenAI-compatible `{text}`.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-840h"></a>
+#### MUS-SPEC-01-840H: Audio stays on the machine unless a cloud backend is chosen
+
+- Precondition: Dictation is Off; then it is set to macOS on-device, which this build does not ship.
+- Action: Call `dictation.transcribe` in each state.
+- Expected result: Each call fails with a message that says how to choose a dictation service, and the fake fetch is never called.
+- Test: `packages/agent-app/tests/dictation-840.test.ts::audio never leaves the machine unless a cloud backend is chosen`
+- Environment: Runtime dictation domain with a temp folder; fake fetch; no network.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-840i"></a>
+#### MUS-SPEC-01-840I: Cloud dictation can use a saved provider connection
+
+- Precondition: A saved OpenAI-compatible connection has endpoint host `router.example` (path `/v1`) and a key in the secret store. Dictation is set to Cloud through that connection.
+- Action: Call `dictation.transcribe`.
+- Expected result: The POST goes to `/v1/audio/transcriptions` on `router.example` with that connection's key.
+- Test: `packages/agent-app/tests/dictation-840.test.ts::the cloud backend can use a saved provider connection and its key`
+- Environment: Runtime dictation domain with a temp folder; fake connection list, fake fetch and in-memory secret box; no network.
+- Known gaps: Whether a given router supports transcription is only known when it answers; a 404 is reported as unsupported.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-840j"></a>
+#### MUS-SPEC-01-840J: Microphone access asks macOS when undecided
+
+- Precondition: On macOS, microphone access is first not determined, then denied.
+- Action: Call the main process microphone check in each state.
+- Expected result: Not determined: `askForMediaAccess('microphone')` is called and its answer is returned. Denied: it is not called, and the message names System Settings › Privacy & Security › Microphone.
+- Test: `packages/agent-app/tests/microphone-840.test.ts::microphone access asks macOS when undecided and explains a denial`
+- Environment: Main-process helper with a fake systemPreferences; no Electron, no real microphone.
+- Known gaps: The Info.plist usage string and the audio-input entitlement are only checked in a packaged build.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-840k"></a>
+#### MUS-SPEC-01-840K: Only the app page may open the microphone
+
+- Precondition: The main window's permission handler is set.
+- Action: Ask for media with audio only from the app page, with video, with another permission, and from another page.
+- Expected result: Only the audio-only request from the app's own page in its window is allowed.
+- Test: `packages/agent-app/tests/microphone-840.test.ts::only the app page may open the microphone, and only for audio`
+- Environment: Main-process helper with plain inputs; no Electron.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
 
 ### Suggested follow-up and model markers (#401)
 

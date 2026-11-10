@@ -31,6 +31,7 @@ import {COMPUTER_MCP_LAUNCHER_ENV,writeComputerLauncher} from './agent-tools/com
 import {TERMINAL_MCP_LAUNCHER_ENV,TERMINAL_READ_MAX_BYTES,TerminalToolHost} from '../runtime/terminal-agent-tools.ts';
 import {BACKGROUND_MCP_LAUNCHER_ENV,BackgroundToolHost} from '../runtime/background-agent-tools.ts';
 import {accessibilityText,captureSource,captureSources,computerPermissions} from './computer-capture.ts';
+import {allowMediaPermission,microphoneAccess} from './microphone.ts';
 import {NativePreviewController} from './native-preview.ts';
 import { buildMenuTemplate } from './menu.ts';
 import {AppUpdater,bundlePathOf,detectInstallMethod,plistString} from './app-updater.ts';
@@ -542,7 +543,10 @@ async function main(): Promise<void> {
   // Subframes may only load a registered plugin UI origin (EXT-10); everything else, and every main-frame navigation, is refused.
   window.webContents.on('will-frame-navigate', (event) => { if (!event.isMainFrame && (pluginUi.allows(event.url) || reports.allows(event.url) || event.url === 'about:srcdoc')) return; event.preventDefault(); });
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
-  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  // #840: dictation may open the microphone (audio only, from the app page in this window); everything else is refused.
+  session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => callback(allowMediaPermission({
+    permission, mediaTypes: (details as { mediaTypes?: string[] }).mediaTypes, requestingUrl: details.requestingUrl,
+    fromAppWindow: window !== null && !window.isDestroyed() && wc === window.webContents, rendererURL })));
 
   // --- IPC: single validated entry point -----------------------------------
   // --- Self-update (src/main/app-updater.ts) --------------------------------
@@ -668,6 +672,7 @@ async function main(): Promise<void> {
         break;
       }
       case 'computer.permissions': return computerPermissions(systemPreferences);
+      case 'dictation.microphone': return microphoneAccess(systemPreferences);
       case 'computer.captureSources': return captureSources(desktopCapturer,window?.getMediaSourceId());
       case 'computer.captureSource': return captureSource(desktopCapturer,(input as Commands['computer.captureSource']['input'])?.id);
       case 'computer.accessibilityText': return accessibilityText((input as Commands['computer.accessibilityText']['input'])?.id,systemPreferences,(file,args)=>new Promise((resolve,reject)=>execFile(file,args,{timeout:8000,maxBuffer:1024*1024},(error,stdout,stderr)=>error?reject(new Error(String(stderr||error.message))):resolve(String(stdout)))));

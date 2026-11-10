@@ -4,6 +4,8 @@ import {createPortal} from 'react-dom';
 import {Activity,ArrowLeft,ShieldCheck,Boxes,Link2,Brain,CalendarClock,Cpu,Download,HardDrive,Keyboard,MessageSquare,Palette,Puzzle,RotateCcw,Search,Server,SlidersHorizontal,Upload,X} from 'lucide-react';
 import {AUTO_ARCHIVE_DAYS,CHAT_TEXT_SIZES,TERMINAL_SHELL_NAMES,TEXT_SIZES,type AccessibilityOverride,type ChatTextSize,type AppSettings,type SettingKey,type TerminalShellOption} from '../../shared/domains/settings-protocol';
 import type {MemoryAutoRetain,MemoryConfigView} from '../../shared/domains/memory-protocol';
+import type {DictationConfigInput,DictationConfigView} from '../../shared/domains/dictation-protocol';
+import {DICTATION_SHORTCUT_LABEL} from '../dictation';
 import {invoke} from '../bridge';
 import {activeChat,closeSettings,notifyError,notifySuccess,openMemoryScreen,resetSettings,setFollowUpMode,setPluginView,setSetting,setSettingsSection,setSummaryHidden,type SettingsSection} from '../store';
 import {setTerminalDock,subscribeTerminalDock,terminalDock} from '../processSummary';
@@ -270,6 +272,47 @@ function MemorySection():React.ReactElement {
   </div>;
 }
 
+/** #840 Dictation: which service turns the composer's recordings into text. Only a cloud choice sends audio anywhere. */
+function DictationSection():React.ReactElement {
+  const [config,setConfig]=useState<DictationConfigView>();
+  const [endpoint,setEndpoint]=useState('');
+  const [model,setModel]=useState('');
+  const [key,setKey]=useState('');
+  const [busy,setBusy]=useState(false);
+  const providers=useStoreSelector(state=>state.providers);
+  const connections=(('value' in providers?providers.value:undefined)??[]).filter(provider=>provider.custom&&provider.endpoint);
+  const adopt=(view:DictationConfigView)=>{setConfig(view);setEndpoint(view.cloud.endpoint);setModel(view.cloud.model);};
+  useEffect(()=>{let live=true;void invoke('dictation.config.get',{}).then(view=>{if(live&&view)adopt(view);},()=>{});return()=>{live=false;};},[]);
+  const save=async(input:DictationConfigInput):Promise<boolean>=>{
+    setBusy(true);
+    try{adopt(await invoke('dictation.config.set',input));return true;}catch(cause){notifyError(cause);return false;}finally{setBusy(false);}
+  };
+  if(!config)return <Row title="Dictation" scope={device().title+" · every composer"} description="Loading…"/>;
+  const available=config.backends.filter(entry=>entry.available),later=config.backends.filter(entry=>!entry.available);
+  const ownEndpoint=!config.cloud.connectionId;
+  return <>
+    <Row title="Dictation" scope={device().title+" · every composer"} description={<>Speak a message into the composer: click the mic, or hold {DICTATION_SHORTCUT_LABEL()} to talk and release to transcribe. Esc cancels. Audio leaves this computer only when you choose a cloud service, and nothing is kept after the words are in the composer.{later.length?` ${later.map(entry=>entry.reason).join(' ')}`:''}</>}>
+      <Segmented label="Dictation" value={available.some(entry=>entry.id===config.backend)?config.backend:'off'} options={available.map(entry=>({value:entry.id,label:entry.label}))} onChange={value=>void save({backend:value})}/>
+    </Row>
+    {config.backend==='cloud'&&<Row title="Transcription service" scope={device().title+" · sent only while transcribing"} description={config.ready?'An OpenAI-compatible speech-to-text endpoint (/audio/transcriptions) with your own key.':config.reason}>
+      <span className="dictation-settings">
+        <select aria-label="Transcription service" value={config.cloud.connectionId??''} disabled={busy} onChange={event=>void save({connectionId:event.target.value||null})}>
+          <option value="">Endpoint and key below</option>
+          {connections.map(provider=><option key={provider.id} value={provider.id}>{provider.name} ({provider.endpoint})</option>)}
+        </select>
+        {ownEndpoint&&<input type="url" aria-label="Transcription endpoint" placeholder="https://…/v1" spellCheck={false} value={endpoint} disabled={busy} onChange={event=>setEndpoint(event.target.value)}/>}
+        <input type="text" aria-label="Transcription model" placeholder="whisper-1" spellCheck={false} value={model} disabled={busy} onChange={event=>setModel(event.target.value)}/>
+        {ownEndpoint&&<input aria-label="Transcription API key" type="password" autoComplete="off" spellCheck={false} placeholder={config.cloud.keyStored?'Paste a new key to replace the saved one':'API key'} value={key} disabled={busy} onChange={event=>setKey(event.target.value)}/>}
+        <span className="dictation-settings-actions">
+          <button type="button" className="settings-button" disabled={busy} onClick={()=>void save({model:model.trim(),...(ownEndpoint?{endpoint:endpoint.trim(),...(key.trim()?{apiKey:key.trim()}:{})}:{})}).then(ok=>{if(ok)setKey('');})}>Save</button>
+          {ownEndpoint&&config.cloud.keyStored&&<button type="button" className="settings-button secondary" disabled={busy} onClick={()=>void save({apiKey:null})}>Remove key</button>}
+          {ownEndpoint&&<span className="settings-muted">{config.cloud.keyStored?'Key saved, encrypted on this computer':config.cloud.secureStorage?'No key saved':'Secure storage is unavailable, so a key cannot be saved'}</span>}
+        </span>
+      </span>
+    </Row>}
+  </>;
+}
+
 function ShortcutsSection():React.ReactElement {
   return <table className="settings-table shortcuts-table">
     <thead><tr><th scope="col">Action</th><th scope="col">Menu</th><th scope="col" className="numeric">Shortcut</th></tr></thead>
@@ -365,6 +408,7 @@ export function PreferencesScreen():React.ReactElement {
               <Row setting="chats.autoArchiveDays" title="Archive idle chats" scope="All chats · off by default" description="Archive chats with no activity for this long. Pinned, snoozed, unread and working chats, and chats waiting for your input, are never archived. Archived chats stay searchable and can be restored.">
                 <Segmented label="Archive idle chats after" value={settings['chats.autoArchiveDays']} options={AUTO_ARCHIVE_DAYS.map(days=>({value:days,label:days===0?'Never':`${days} days`}))} onChange={value=>set('chats.autoArchiveDays',value)}/>
               </Row>
+              <DictationSection/>
               <Row title="Full access confirmation" scope={device().title+" · per folder"} description="Folders where you chose “Don’t ask again” skip the Turn on Full Access? confirmation. Ask again restores it.">
                 <FullAccessSkips folders={state.snapshot?.folders??[]}/>
               </Row>

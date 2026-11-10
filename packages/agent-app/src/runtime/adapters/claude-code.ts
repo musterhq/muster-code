@@ -15,13 +15,14 @@ export type Spawn = (command: string, args: string[], options: {cwd: string; env
 /** Claude Code's default and family aliases only; the versioned list comes from claude-models.ts. */
 export const CLAUDE_CODE_MODELS = [CLAUDE_CODE_DEFAULT, ...CLAUDE_CODE_ALIASES];
 
-/** read-only (and every Ask/Plan chat) → plan; workspace → acceptEdits; full → bypassPermissions. */
-export const claudePermissionMode = (mode: AdapterRunInput['permissionMode']) => mode === 'full' ? 'bypassPermissions' : mode === 'workspace' ? 'acceptEdits' : 'plan';
+/** read-only (and every Ask/Plan chat) → plan; workspace → acceptEdits; auto → default (every edit and command reaches Muster's
+ *  Auto rules, so each one is recorded); full → bypassPermissions. */
+export const claudePermissionMode = (mode: AdapterRunInput['permissionMode']) => mode === 'full' ? 'bypassPermissions' : mode === 'workspace' ? 'acceptEdits' : mode === 'auto' ? 'default' : 'plan';
 
 /** #382: in Workspace access Claude Code asks the host (this adapter) before a tool it does not allow on its own, such as a shell
  *  command. The ask arrives as a `can_use_tool` control request on stdout and is answered on stdin through Muster's approval cards.
  *  Full access bypasses permissions and plan mode asks nothing, so neither gets the flag. */
-export const claudePromptsHost = (mode: AdapterRunInput['permissionMode']) => mode === 'workspace';
+export const claudePromptsHost = (mode: AdapterRunInput['permissionMode']) => mode === 'workspace' || mode === 'auto';
 
 /** #427: the sub-agent tools (Task, and Agent in newer builds) are allowed in every permission mode, so a print-mode run
  *  (which cannot ask) never denies a sub-agent. A sub-agent still works under the chat's permission mode. */

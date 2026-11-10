@@ -23,7 +23,8 @@ export interface AdapterRunInput {
   browserTools?: boolean;
   /** Extra environment for the run's process: the agent's git identity and the secrets lent to it. */
   env?: Record<string, string>;
-  permissionMode: 'read-only' | 'workspace' | 'full';
+  /** #841: 'auto' reaches only routes Muster answers approvals for (autoApprovalSupported); any other route gets 'workspace'. */
+  permissionMode: 'read-only' | 'workspace' | 'auto' | 'full';
   /** #653: the chat runs in the sandbox. permissionMode is then read-only, and routes that receive the sandbox tools also
    *  deny their own host shell and edit tools (Claude Code --disallowedTools, the OpenCode plan agent, Grok's rejections). */
   sandboxed?: boolean;

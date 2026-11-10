@@ -16,7 +16,7 @@ execFileSync('ditto',[path.resolve(electron,'../../..'),app]);
 const plist=path.join(app,'Contents/Info.plist');
 const plistBuddy=(command,{optional=false}={})=>{try{execFileSync('/usr/libexec/PlistBuddy',['-c',command,plist],{stdio:'pipe'});}catch(error){if(!optional)throw error;}};
 // Identity: a unique bundle id keeps preview builds from colliding with Electron's own defaults or a future release channel.
-for(const [key,value] of Object.entries({CFBundleIdentifier:'dev.themuster.agent.preview',CFBundleName:'Muster Agent',CFBundleDisplayName:'Muster Agent',CFBundleShortVersionString:version,CFBundleVersion:version})){plistBuddy(`Delete :${key}`,{optional:true});plistBuddy(`Add :${key} string ${value}`);}
+for(const [key,value] of Object.entries({CFBundleIdentifier:'dev.themuster.agent.preview',CFBundleName:'Muster Agent',CFBundleDisplayName:'Muster Agent',CFBundleShortVersionString:version,CFBundleVersion:version,NSMicrophoneUsageDescription:'Muster uses the microphone only while you dictate a message.'})){plistBuddy(`Delete :${key}`,{optional:true});plistBuddy(`Add :${key} string ${value}`);}
 // Never ship Electron's permissive App Transport Security exception; the app loads only local files.
 plistBuddy('Delete :NSAppTransportSecurity',{optional:true});
 for(const command of [

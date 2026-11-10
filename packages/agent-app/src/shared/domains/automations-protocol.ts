@@ -108,7 +108,7 @@ export const AUTOMATION_WATCH_COOLDOWN_MS = 60_000;
 /** Repository triggers poll GitHub this often, backing off to the maximum on errors and rate limits. */
 export const AUTOMATION_REPO_POLL_MS = 60_000;
 export const AUTOMATION_REPO_MAX_BACKOFF_MS = 15 * 60_000;
-export const PERMISSION_RANK: Record<ChatPermissionMode, number> = { 'read-only': 0, workspace: 1, full: 2 };
+export const PERMISSION_RANK: Record<ChatPermissionMode, number> = { 'read-only': 0, workspace: 1, auto: 2, full: 3 };
 export const AUTOMATION_AWAKE_NOTE = 'Runs only while '+device().lower+' is awake and Muster is open. Missed runs follow the catch-up setting.';
 
 export interface AutomationsCommands {

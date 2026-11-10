@@ -17,7 +17,8 @@ import {ChipMirror} from './ComposerTokens';
 import {seedChatEffort,useMentionEntries} from './Composer';
 import {CaptureSourcePicker,type CaptureResult} from './CaptureSourcePicker';
 import {accessibilityAttachment} from '../captureRegion';
-import {ACCESS_OPTIONS,FullAccessConfirm} from './FullAccessConfirm';
+import {accessOptions,FullAccessConfirm} from './FullAccessConfirm';
+import {autoApprovalSupported} from '../../shared/provider-lanes';
 import {attachmentKey,attachmentName,imageBlindModel,imageBlindWarning,chipPayload,chipToken,skillToken,COMPOSER_COMMANDS,EFFORT_LABELS,findTokenRanges,formatBytes,insertToken,MAX_ATTACHMENT_BYTES,MAX_ATTACHMENTS,readFolderAccess,readMentionQuery,readSlashQuery,saveFolderAccess,scoreItem,setFullAccessSkip,skipsFullAccessConfirm,SKILL_RECORDER_PROMPT,type ComposerAccess,type ComposerChip,type ComposerCommandId} from './composerMenus';
 import {ModelPicker} from './ModelPicker';
 import {ProviderUsageWarning} from './ProviderUsage';
@@ -32,15 +33,10 @@ import {ConnectModelPrompt,useNoProvider} from './SetupGuide';
 import {Tip} from './Tooltip';
 import {MenuPopup} from './AppMenu';
 import {firstReadyModel} from '../../shared/domains/settings-protocol';
+import {DICTATION_SHORTCUT_LABEL,useDictation} from '../dictation';
 
 const KIND_ICON={none:MessageCircle,folder:FolderOpen,project:Layers} as const;
 /** Same access options (and Full-access confirmation) an in-chat Composer uses, so the toolbars match. */
-const ACCESS=ACCESS_OPTIONS;
-/** Minimal Web Speech dictation, same shape Composer uses; kept local since Composer's type is not exported. */
-type Recognition={continuous:boolean;interimResults:boolean;lang:string;start():void;stop():void;abort():void;
-  onresult:((event:{resultIndex:number;results:ArrayLike<ArrayLike<{transcript:string}>&{isFinal:boolean}>})=>void)|null;onerror:((event:{error:string})=>void)|null;onend:(()=>void)|null};
-// CMP-14: no speech service inside Electron; hide the mic rather than show a control that always fails.
-const speechRecognition=():(new()=>Recognition)|undefined=>typeof window==='undefined'||/\bElectron\//.test(navigator.userAgent??'')?undefined:(window as unknown as Record<string,new()=>Recognition>).SpeechRecognition??(window as unknown as Record<string,new()=>Recognition>).webkitSpeechRecognition;
 const MENU_LIMIT=8;
 /** Last-resort mirror of runtime/provider.ts's MODEL/providerId, used only until (or if) `chat.defaults` answers. */
 /** The `/` commands that make sense before a chat exists (mirrors Composer's COMMAND_ICONS, not exported there). */
@@ -101,8 +97,6 @@ export function NewChatScreen():React.ReactElement {
   const [attachments,setAttachments]=useState<ComposerAttachment[]>([]);
   const [starting,setStarting]=useState(false);
   const [startError,setStartError]=useState('');
-  const [listening,setListening]=useState(false);
-  const recognition=useRef<Recognition|null>(null);
   // Same features an in-chat composer has: Plan mode and a Goal are deferred (applied right after the chat is
   // created, before the first send); a Sketch attaches immediately, same as any other file.
   const [planMode,setPlanMode]=useState(false);
@@ -137,8 +131,10 @@ export function NewChatScreen():React.ReactElement {
   const modelName=displayModel?.name??(state.providers.phase==='loading'?'Loading…':(createdModel.providerId?createdModel.id.split('/').pop()||'No model':'Connect a model'));
   const modelEfforts=displayModel?.efforts??[];
   const defaultEffort:ReasoningEffort=(!chosenModel&&resolvedDefault?.effort)||displayModel?.defaultEffort||'medium';
-  const accessOption=ACCESS.find(option=>option.id===access)!;
-  const Speech=speechRecognition();
+  // #841: a route whose approvals Muster cannot answer runs Auto as Workspace; the Auto row says so.
+  const routeDriver=providers.find(provider=>provider.id===createdModel.providerId)?.driver;
+  const accessRows=accessOptions(routeDriver===undefined||autoApprovalSupported(routeDriver));
+  const accessOption=accessRows.find(option=>option.id===access)!;
   const hasExtras=access!=='workspace'||Boolean(chosenModel)||Boolean(effort)||attachments.length>0||planMode||Boolean(goalText.trim())||chips.length>0;
 
   const skills=state.skills.value??[];
@@ -199,7 +195,6 @@ export function NewChatScreen():React.ReactElement {
     document.addEventListener('pointerdown',onPointer);document.addEventListener('keydown',onKey);
     return ()=>{document.removeEventListener('pointerdown',onPointer);document.removeEventListener('keydown',onKey);};
   },[toolMenu]);
-  useEffect(()=>()=>{recognition.current?.abort();recognition.current=null;},[]);
   useEffect(()=>{setPopoverActive(0);},[slash?.query,slash?.start,mention?.query,mention?.start]);
 
   const addFiles=(files:File[])=>{
@@ -232,26 +227,23 @@ export function NewChatScreen():React.ReactElement {
     if(id==='full'&&!skipsFullAccessConfirm(folderId)){setToolMenu(null);setFullConfirm(true);return;}
     setAccessState(id);setToolMenu(null);
   };
-  const toggleDictation=()=>{
-    if(recognition.current){recognition.current.stop();return;}
-    if(!Speech)return;
-    let engine:Recognition;
-    try{engine=new Speech();}catch(cause){notifyError(cause);return;}
-    engine.continuous=true;engine.interimResults=true;engine.lang=navigator.language||'en-US';
-    engine.onresult=event=>{
-      let final='';
-      for(let index=event.resultIndex;index<event.results.length;index++){const result=event.results[index];if(result.isFinal)final+=result[0].transcript;}
-      if(final.trim()){
-        const text=getNewChatDraft().text;
-        const lead=text&&!/\s$/.test(text)?' ':'';
-        setNewChatText(`${text}${lead}${final.trim()}`);
-      }
-    };
-    engine.onerror=event=>{if(event.error!=='aborted')notifyError(`Dictation stopped (${event.error})`);};
-    engine.onend=()=>{if(recognition.current===engine){recognition.current=null;setListening(false);}};
-    recognition.current=engine;
-    try{engine.start();setListening(true);}catch(cause){recognition.current=null;notifyError(cause);}
-  };
+  /** #840: the same dictation as an in-chat composer; final words join the end of the draft. Enter while dictating sends once they are in. */
+  const [dictationNote,setDictationNote]=useState('');
+  const noteTimer=useRef<number|undefined>(undefined);
+  const sendAfterDictation=useRef(false);
+  const [dictatedSend,setDictatedSend]=useState(0);
+  const dictation=useDictation({
+    onText:words=>{
+      const current=getNewChatDraft().text;
+      const lead=current&&!/\s$/.test(current)?' ':'';
+      setNewChatText(`${current}${lead}${words.trim()}`);
+      if(sendAfterDictation.current){sendAfterDictation.current=false;setDictatedSend(value=>value+1);}
+    },
+    flash:message=>{window.clearTimeout(noteTimer.current);setDictationNote(message);noteTimer.current=window.setTimeout(()=>setDictationNote(''),3500);},
+    onIdle:()=>{sendAfterDictation.current=false;},
+  });
+  const listening=dictation.state.phase==='recording'||dictation.state.phase==='starting',transcribing=dictation.state.phase==='transcribing';
+  useEffect(()=>()=>window.clearTimeout(noteTimer.current),[]);
 
   /* / and @ chip mechanics — same shape as Composer's (insertToken replaces the query, a chip is remembered). */
   const replaceRange=(start:number,end:number,insert:string,caretAfter=start+insert.length)=>{
@@ -448,7 +440,10 @@ export function NewChatScreen():React.ReactElement {
     reset();
     focusComposer();
   };
+  useEffect(()=>{if(dictatedSend)void handleSubmit();},[dictatedSend]);
   const onKeyDown=(event:React.KeyboardEvent<HTMLTextAreaElement>)=>{
+    if(!event.nativeEvent.isComposing&&dictation.supported&&dictation.onKeyDown(event))return;
+    if(!event.nativeEvent.isComposing&&dictation.active&&event.key==='Enter'&&!event.shiftKey&&!event.altKey){event.preventDefault();if(!event.repeat){sendAfterDictation.current=true;dictation.finish();}return;}
     if(event.key==='Escape'&&draft.open&&!draft.text&&!slash&&!mention){event.preventDefault();closeNewChat();return;}
     if(caretRows.length&&(slash||mention)){
       if(event.key==='Escape'){event.preventDefault();setDismissed(text);return;}
@@ -478,7 +473,7 @@ export function NewChatScreen():React.ReactElement {
       <div className={`composer-field${tokenRanges.length?' has-chips':''}`}>
         {tokenRanges.length>0&&<ChipMirror text={text} ranges={tokenRanges} selected={selection} plugins={plugins} mirror={mirror}/>}
         <textarea ref={input} autoFocus className="composer-input" aria-label="Message" rows={1} value={draft.text} readOnly={busy}
-          aria-keyshortcuts={modEnter?'Meta+Enter':'Enter'} placeholder={listening?'Listening…':planMode?'Describe your task to generate a plan…':'Do anything'}
+          aria-keyshortcuts={modEnter?'Meta+Enter':'Enter'} placeholder={listening?(dictation.state.interim||'Listening…'):transcribing?'Transcribing…':planMode?'Describe your task to generate a plan…':'Do anything'}
           aria-controls={slash||mention?caretPopoverId:undefined} aria-expanded={slash||mention?true:undefined}
           onChange={event=>{setCaret(event.target.selectionStart);setSelection({start:event.target.selectionStart,end:event.target.selectionEnd});setDismissed(null);setNewChatText(event.target.value);}}
           onSelect={event=>{const {selectionStart:start,selectionEnd:end}=event.currentTarget;setCaret(start===end?start:-1);setSelection({start,end});}}
@@ -517,7 +512,7 @@ export function NewChatScreen():React.ReactElement {
           <Menu.Root open={toolMenu==='access'} onOpenChange={open=>setToolMenu(current=>open?'access':current==='access'?null:current)}>
             <Menu.Trigger className={`composer-access is-${access}`} aria-label={`Access: ${accessOption.label}`} title="Change permissions" disabled={busy}><accessOption.Icon size={14} aria-hidden="true"/><span className="composer-access-label">{accessOption.label}</span></Menu.Trigger>
             <MenuPopup side="top" align="start" sideOffset={6} className="composer-access-menu" aria-label="Permissions">
-              <Menu.RadioGroup value={access}>{ACCESS.map(option=><Menu.RadioItem key={option.id} value={option.id} render={<button type="button"/>} nativeButton closeOnClick className={`is-${option.id}`} onClick={()=>chooseAccess(option.id)}>
+              <Menu.RadioGroup value={access}>{accessRows.map(option=><Menu.RadioItem key={option.id} value={option.id} render={<button type="button"/>} nativeButton closeOnClick className={`is-${option.id}`} onClick={()=>chooseAccess(option.id)}>
                 <option.Icon size={15} aria-hidden="true"/><span><strong>{option.label}</strong><small>{option.description}</small></span>{access===option.id&&<Check size={13} aria-hidden="true"/>}
               </Menu.RadioItem>)}</Menu.RadioGroup>
             </MenuPopup>
@@ -532,12 +527,14 @@ export function NewChatScreen():React.ReactElement {
               <span className="composer-model">{modelName}</span>{modelEfforts.length>0&&<span className="composer-effort-label">{EFFORT_LABELS[effort??defaultEffort]}</span>}<ChevronDown size={12} aria-hidden="true"/>
             </button>
           </div>
-          {Speech&&<Tip label={listening?'Stop dictation':'Dictate'}><button type="button" className={`composer-mic${listening?' is-listening':''}`} aria-label={listening?'Stop dictation':'Dictate'} aria-pressed={listening} disabled={busy} onClick={toggleDictation}><Mic size={15}/></button></Tip>}
+          {dictation.supported&&<Tip label={listening?'Stop and transcribe (Esc cancels)':transcribing?'Transcribing…':`Dictate (hold ${DICTATION_SHORTCUT_LABEL()} to talk)`}><button type="button" data-testid="composer-mic" className={`composer-mic${listening?' is-listening':''}${transcribing?' is-transcribing':''}`} aria-label={listening?'Stop dictation':transcribing?'Transcribing':'Dictate'} aria-pressed={listening} aria-keyshortcuts="Meta+Shift+D Control+Shift+D" disabled={busy||transcribing} onClick={dictation.toggle}>{transcribing?<LoaderCircle size={15} className="composer-spin"/>:<Mic size={15}/>}</button></Tip>}
           <Tip label={busy?'Starting chat…':modEnter?'Start chat (⌘Enter) · Start in background and stay here (⌥Enter)':'Start chat (Enter) · Start in background and stay here (⌥Enter)'}><button type="button" className="composer-send" aria-label={busy?'Starting chat':modEnter?'Send (⌘Enter)':'Send (Enter)'} disabled={!canSend} onClick={()=>void handleSubmit()}>
             {busy?<LoaderCircle size={15} className="composer-spin"/>:<ArrowUp size={15} strokeWidth={2.25}/>}
           </button></Tip>
         </div>
       </div>
+      {dictationNote?<span className="composer-status" role="status" aria-live="polite">{dictationNote}</span>
+        :dictation.active?<span className={`composer-status is-dictation${listening?' is-recording':''}`} role="status" aria-live="polite">{transcribing?'Transcribing…':`Listening…${dictation.state.interim?` ${dictation.state.interim}`:''} · Esc to cancel`}</span>:null}
       {(draft.error||startError)&&<div className="composer-error" role="alert">Chat could not start: {draft.error||startError} Your message is kept.</div>}
     </div>
     <SketchPad open={sketchOpen} initial={sketchEditing?sketches.current.get(sketchEditing):undefined} onClose={()=>{setSketchOpen(false);requestAnimationFrame(()=>input.current?.focus());}}

@@ -125,13 +125,14 @@ export function providerAccessPolicy(chat: Pick<Chat, 'mode' | 'permissionMode'>
   approvalPolicy: 'never' | 'on-request' | 'untrusted';
   networkAccess: boolean;
 } {
-  if (chat.permissionMode !== undefined && !['read-only', 'workspace', 'full'].includes(chat.permissionMode)) throw new Error('Invalid chat access policy.');
+  if (chat.permissionMode !== undefined && !['read-only', 'workspace', 'auto', 'full'].includes(chat.permissionMode)) throw new Error('Invalid chat access policy.');
   const permissionMode = chat.mode === 'agent' ? chat.permissionMode ?? 'workspace' : 'read-only';
   return {
     permissionMode,
-    sandbox: permissionMode === 'full' ? 'danger-full-access' : permissionMode === 'workspace' ? 'workspace-write' : 'read-only',
+    sandbox: permissionMode === 'full' ? 'danger-full-access' : permissionMode === 'workspace' || permissionMode === 'auto' ? 'workspace-write' : 'read-only',
     // R5: Full still asks (and Muster auto-accepts) so a command that would stop the user's own processes can be held for approval.
-    approvalPolicy: permissionMode === 'workspace' ? 'on-request' : permissionMode === 'full' ? 'untrusted' : 'never',
+    // #841: Auto asks about every untrusted command too, so Muster's rules settle the routine ones and show a card for the rest.
+    approvalPolicy: permissionMode === 'workspace' ? 'on-request' : permissionMode === 'full' || permissionMode === 'auto' ? 'untrusted' : 'never',
     networkAccess: permissionMode === 'full',
   };
 }

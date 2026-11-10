@@ -27,7 +27,7 @@ const errorText = (cause: unknown) => cause instanceof Error ? cause.message : S
 const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const TIME_ZONES: string[] = (() => { try { return (Intl as unknown as { supportedValuesOf(key: string): string[] }).supportedValuesOf('timeZone'); } catch { return [LOCAL_TZ]; } })();
 const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'], DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const ACCESS: Record<ChatPermissionMode, string> = { 'read-only': 'Read only', workspace: 'Workspace', full: 'Full access' };
+const ACCESS: Record<ChatPermissionMode, string> = { 'read-only': 'Read only', workspace: 'Workspace', auto: 'Auto', full: 'Full access' };
 const STATUS: Record<AutomationRun['status'], string> = { queued: 'Queued', awaiting: 'Waiting for approval', running: 'Running', completed: 'Completed', failed: 'Failed', interrupted: 'Stopped', skipped: 'Skipped', missed: 'Missed' };
 const TRIGGER: Record<AutomationRun['trigger'], string> = { schedule: 'Scheduled', manual: 'Run now', 'catch-up': 'Catch-up', watch: 'Files changed', repo: 'Repository event', webhook: 'Webhook' };
 type Repeat = 'interval' | 'daily' | 'cron' | 'watch' | 'repo';
@@ -207,7 +207,7 @@ function Editor({ editing, onDone, projectId }: { editing: AutomationView | null
       <fieldset>
         <legend>Rules</legend>
         <div className="automation-row">
-          <label>Access<select value={draft.permissionMode} onChange={event => patch({ permissionMode: event.target.value as ChatPermissionMode, acknowledged: false })}>{(Object.keys(ACCESS) as ChatPermissionMode[]).map(mode => <option key={mode} value={mode}>{ACCESS[mode]}</option>)}</select></label>
+          <label>Access<select value={draft.permissionMode} onChange={event => patch({ permissionMode: event.target.value as ChatPermissionMode, acknowledged: false })}>{(Object.keys(ACCESS) as ChatPermissionMode[]).filter(mode => mode !== 'auto').map(mode => <option key={mode} value={mode}>{ACCESS[mode]}</option>)}</select></label>
           <label>If still running<select value={draft.overlap} onChange={event => patch({ overlap: event.target.value as AutomationOverlap })}><option value="skip">Skip that run</option><option value="queue">Run after it finishes</option></select></label>
           <label>After sleep<select value={draft.catchUp} onChange={event => patch({ catchUp: event.target.value as AutomationCatchUp })}><option value="one">Run once to catch up</option><option value="none">Skip missed runs</option></select></label>
         </div>
