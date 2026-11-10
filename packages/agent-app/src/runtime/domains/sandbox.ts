@@ -179,7 +179,7 @@ export function createSandboxDomain(ctx: DomainContext): DomainModule {
         if (env === 'sandbox' && mode === 'mount') throw new Error(MOUNT_UNSUPPORTED);
         // #653: leaving to raise access names the level to switch to (the user confirmed that commands then run on the host).
         const raise = input.permissionMode;
-        if (raise !== undefined && (env !== 'host' || (raise !== 'workspace' && raise !== 'full'))) throw new Error('Invalid access policy.');
+        if (raise !== undefined && (env !== 'host' || (raise !== 'workspace' && raise !== 'auto' && raise !== 'full'))) throw new Error('Invalid access policy.');
         if (raise === 'full' && input.acknowledgeFullAccess !== true) throw new Error('Confirm unrestricted filesystem, command execution and network access before selecting Full access.');
         const current = row(chat.id);
         if (env === 'sandbox') {

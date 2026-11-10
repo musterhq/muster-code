@@ -18,7 +18,7 @@ import type { DomainContext, DomainHandler } from './types.ts';
 const ID = /^[a-zA-Z0-9_-]{1,128}$/;
 const id = (value: unknown, field = 'id'): string => { if (typeof value !== 'string' || !ID.test(value)) throw new Error(`Invalid ${field}.`); return value; };
 const MODES: readonly ChatPermissionMode[] = ['read-only', 'workspace', 'full'];
-const MODE_LABEL: Record<ChatPermissionMode, string> = { 'read-only': 'Read-only', workspace: 'Workspace', full: 'Full access' };
+const MODE_LABEL: Record<ChatPermissionMode, string> = { 'read-only': 'Read-only', workspace: 'Workspace', auto: 'Auto', full: 'Full access' };
 const CATEGORY_IDS = new Set(ACTIVITY_CATEGORIES.map(c => c.id));
 const WINDOWS: readonly ActivityWindow[] = ['any', '24h', '7d', '30d'];
 const ACTIVE = new Set(['running', 'stopping']);

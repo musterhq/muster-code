@@ -108,7 +108,16 @@ export function menuIndex(index:number,length:number,direction:'next'|'previous'
   if(index<0)return direction==='next'?0:length-1;
   return (index+(direction==='next'?1:-1)+length)%length;
 }
-export type ComposerAccess='read-only'|'workspace'|'full';
+export type ComposerAccess='read-only'|'workspace'|'auto'|'full';
+/** The access picker's rows, in order. #841: on a route without Auto the Auto row says it runs as Ask for approval. */
+export function accessOptionsFor(autoSupported:boolean):{id:ComposerAccess;label:string;description:string}[] {
+  return [
+    {id:'read-only',label:'Read only',description:'Read files and answer; never edits'},
+    {id:'workspace',label:'Ask for approval',description:'Always ask to edit external files and use the internet'},
+    {id:'auto',label:'Auto',description:autoSupported?'Reads, edits in this folder and safe commands go ahead; asks for the rest':'This model’s route runs Auto as Ask for approval'},
+    {id:'full',label:'Full access',description:'Unrestricted access to the internet and any file on your computer'},
+  ];
+}
 export function configuredAccess(chat:{mode:'agent'|'ask'|'plan';permissionMode?:ComposerAccess}):ComposerAccess {
   return chat.permissionMode??(chat.mode==='agent'?'workspace':'read-only');
 }
@@ -124,7 +133,7 @@ function readFolderAccessMap():Record<string,ComposerAccess>{
 export function readFolderAccess(folderId:string|undefined):ComposerAccess|undefined{
   if(!folderId)return undefined;
   const value=readFolderAccessMap()[folderId];
-  return value==='read-only'||value==='workspace'||value==='full'?value:undefined;
+  return value==='read-only'||value==='workspace'||value==='auto'||value==='full'?value:undefined;
 }
 export function saveFolderAccess(folderId:string|undefined,access:ComposerAccess):void{
   if(!folderId)return;
