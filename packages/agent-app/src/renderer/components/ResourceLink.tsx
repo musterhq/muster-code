@@ -1,9 +1,10 @@
 import React,{useEffect,useState} from 'react';
 import {PreviewCard} from '@base-ui/react/preview-card';
 import {Menu} from '@base-ui/react/menu';
-import {Braces, Copy, Eye, ExternalLink, FileCode2, FileImage, FileSpreadsheet, FileText, FolderOpen, FolderPlus, Settings2, SquareTerminal} from 'lucide-react';
+import {Braces, Copy, Eye, ExternalLink, FileCode2, FileImage, FileSpreadsheet, FileText, FolderOpen, FolderPlus, Presentation, Settings2, SquareTerminal} from 'lucide-react';
 import {ArtifactViewer} from './ArtifactViewer';
 import type {ExternalFileInfo, OpenWithApp} from '../../shared/domains/files-protocol';
+import type {Folder} from '../../shared/protocol';
 import {notifyError, notifySuccess} from '../store';
 import './resource-link.css';
 import {activeChat,openFile,openBrowserTab} from '../store';
@@ -20,7 +21,7 @@ export function ResourceLink({href,children,context,auto=false}:{href?:string;ch
  const ids=project?.folderIds??(chat?.folderId?[chat.folderId]:[]);
  const folders=(state.snapshot?.folders??[]).filter(f=>context ? f.id===context.folderId : ids.includes(f.id));
  // A path the reply mentioned (markdown-file-links.ts): a link only once it resolves to one real file here.
- if(auto&&href)return <AutoFileLink href={href} folders={folders}>{children}</AutoFileLink>;
+ if(auto&&href)return <AutoFileLink href={href} folders={folders} chatId={chat?.id}>{children}</AutoFileLink>;
  const fragment=href?.startsWith('#') ? markdownFragmentId(href) : null;
  if(fragment && context)return <a className="md-resource-link" href={`#${fragment}`} onClick={event=>{
   event.preventDefault();
@@ -101,7 +102,8 @@ const FILE_KINDS:Array<[RegExp,React.ComponentType<{size?:number}>,string]>=[
  [/\.(jsonc?|lock)$/i,Braces,'yellow'],
  [/\.(ya?ml|toml|ini|cfg|conf|env|tf|tfvars|hcl|plist|xml)$/i,Settings2,'red'],
  [/(^|\/)(Dockerfile|Makefile|Procfile|Gemfile|Rakefile|Justfile|Caddyfile|Brewfile)$/,Settings2,'blue'],
- [/\.(csv|tsv|xlsx)$/i,FileSpreadsheet,'green'],
+ [/\.(csv|tsv|xlsx?|xlsm|ods)$/i,FileSpreadsheet,'green'],
+ [/\.(pptx?|odp)$/i,Presentation,'red'],
  [/\.(png|jpe?g|gif|svg)$/i,FileImage,'purple'],
 ];
 export function FileGlyph({path}:{path:string}):React.ReactElement{
@@ -129,18 +131,39 @@ function resolveMention(folderId:string,path:string):Promise<string|null>{
  }
  return pending;
 }
-/** A path the reply mentioned. It reads as plain text until it resolves to a single real file in this
- *  conversation's folders; a guess that matches nothing never turns into a dead link. */
-function AutoFileLink({href,folders,children}:{href:string;folders:{id:string;path:string}[];children?:React.ReactNode}){
- const match=/^(.*?)(?::(\d+))?$/.exec(href),path=match?.[1]??href,line=match?.[2]?Number(match[2]):undefined;
- const [found,setFound]=useState<{folderId:string;path:string;absolute:string}|null>(null);
+/** #837: an absolute or ~/ mention, checked with the host once per path; only an existing file links. */
+const externalChecked=new Map<string,Promise<string|null>>();
+function existingFile(path:string):Promise<string|null>{
+ let pending=externalChecked.get(path);
+ if(!pending){
+  pending=invoke('files.external.inspect',{path}).then(info=>info.exists&&info.kind==='file'?info.path:null,()=>null);
+  externalChecked.set(path,pending);
+ }
+ return pending;
+}
+type AutoTarget={folderId:string;path:string;absolute:string}|{external:string};
+/** A path the reply mentioned. It reads as plain text until it resolves to a real file: a relative one to a single
+ *  file in this conversation's folders, an absolute or ~/ one to an existing file, opened in the folder that holds it
+ *  or, outside them, as the outside-file link. A guess that matches nothing never turns into a dead link. */
+function AutoFileLink({href,folders,chatId,children}:{href:string;folders:Folder[];chatId?:string;children?:React.ReactNode}){
+ let raw=href;try{raw=decodeURIComponent(href);}catch{/* keep the href as written */}
+ const match=/^(.*?)(?::(\d+))?$/.exec(raw),path=match?.[1]??raw,line=match?.[2]?Number(match[2]):undefined;
+ const [found,setFound]=useState<AutoTarget|null>(null);
  const key=folders.map(f=>f.id).join(',');
  useEffect(()=>{
   let live=true;setFound(null);
-  void (async()=>{for(const folder of folders){const hit=await resolveMention(folder.id,path);if(hit){if(live)setFound({folderId:folder.id,path:hit,absolute:`${folder.path}/${hit}`});return;}}})();
+  void (async()=>{
+   if(path.startsWith('/')||path.startsWith('~/')){
+    const real=await existingFile(path);if(!real||!live)return;
+    const inside=resourceReference(real,folders);
+    setFound(inside?{folderId:inside.folderId,path:inside.path,absolute:inside.absolute}:{external:real});
+    return;
+   }
+   for(const folder of folders){const hit=await resolveMention(folder.id,path);if(hit){if(live)setFound({folderId:folder.id,path:hit,absolute:`${folder.path}/${hit}`});return;}}
+  })();
   return()=>{live=false;};
  },[path,key]);
  if(!found)return <>{children}</>;
+ if('external' in found)return <ExternalFileReference path={found.external} line={line} chatId={chatId}>{children}</ExternalFileReference>;
  return <FileReference reference={{...found,...(line?{line}:{})}}>{children}</FileReference>;
 }
-
