@@ -33,6 +33,7 @@ const leadItems=[
   started('n3','ui','Audit UI','finished','Audit UI finished'),
   {id:'copy',chatId:'lead',kind:'approval',text:'rm -rf build',status:'pending',createdAt:at,data:{method:'item/commandExecution/requestApproval',kind:'command',command:'rm -rf build',delegated:{chatId:'api',itemId:'own',title:'Audit API'}}},
 ];
+leadItems.push({id:'rep',chatId:'lead',kind:'user',text:'Muster: a chat you delegated finished. This is its report, not a message from the user.\nui "Audit UI" on Beta One: finished\nFinal reply:\nThe UI is clean.',createdAt:at,data:{kind:'delegation-report',childChatId:'ui',title:'Audit UI',state:'finished',summary:'The UI is clean.'}} as any,{id:'a9',chatId:'lead',kind:'assistant',text:'Good, the UI is done.',createdAt:at} as any);
 const childItems=[{id:'f1',chatId:'api',kind:'notice',text:'Started by Lead',status:'completed',createdAt:at,data:{kind:'delegated-from',parentChatId:'lead',parentTitle:'Lead'}},{id:'cu',chatId:'api',kind:'user',text:'Audit API for bugs.',createdAt:at}];
 const calls:{command:string;input:any}[]=[];
 window.muster={subscribe(){return()=>{};},async invoke(command:string,input:any){
@@ -55,7 +56,7 @@ const click=(element:any)=>{const event=new window.Event('click',{bubbles:true,c
 const since=()=>{const from=calls.length;return ()=>calls.slice(from);};
 
 // Spec: MUS-SPEC-14-44K (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-44k)
-await check('#44 started chats show as compact linked rows in both transcripts, in the sub-agents pane, on the parent\'s approval copy, and Stop asks about them',async()=>{
+await check('#44 started chats show as compact linked rows in both transcripts, in the sub-agents pane and on the parent\'s approval copy',async()=>{
   root.render(<Timeline chatId="lead" items={leadItems as any} running/>);await delay(120);
   const rows=[...document.querySelectorAll('[data-testid="delegated-task"]')];
   assert.deepEqual(rows.map(row=>row.textContent),['Started Audit API on Beta One','Started Audit UI on Beta One','Audit UI finished']);
@@ -84,15 +85,43 @@ await check('#44 started chats show as compact linked rows in both transcripts, 
   click(cards[1]!.querySelector('button'));await delay(40);
   assert.equal(store.getState().activeChatId,'ui','a card opens that chat');
 
-  // Stop: OK stops the working children too; Cancel stops only this chat.
-  const asked:string[]=[];
-  (window as any).confirm=(text:string)=>{asked.push(text);return true;};
-  seen=since();await store.stopChat('lead');
-  assert.deepEqual(seen().filter(call=>call.command!=='delegation.children').map(call=>call.command),['chat.stop','delegation.stopChildren']);
-  assert.match(asked[0]!,/This chat started a chat that is still working: “Audit API”\.\n\nStop it too\? Cancel stops only this chat\./);
-  (window as any).confirm=()=>false;
-  seen=since();await store.stopChat('lead');
-  assert.deepEqual(seen().filter(call=>call.command!=='delegation.children').map(call=>call.command),['chat.stop']);
+  assert.deepEqual(errors,[]);
+});
+
+// Spec: MUS-SPEC-14-44L (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-44l)
+await check('#44 Stop on a chat with working children offers Stop all, Stop this chat only and Cancel; Cancel and Esc stop nothing',async()=>{
+  const {StopChildrenHost}=await import('../src/renderer/components/StopChildrenSheet');
+  root.render(<StopChildrenHost/>);await delay(40);
+  (window as any).confirm=()=>{throw new Error('window.confirm must not be used');};
+  const sheet=()=>document.querySelector('[data-testid="stop-children-confirm"]');
+  const press=async(label:string)=>{const button=[...sheet()!.querySelectorAll('button')].find(b=>b.textContent===label)!;click(button);await delay(30);};
+  const stopping=async(action:()=>Promise<void>)=>{const seen=since();const done=store.stopChat('lead');await delay(60);await action();await done;return seen().filter(call=>call.command!=='delegation.children').map(call=>call.command);};
+  assert.deepEqual(await stopping(async()=>{
+    assert.ok(sheet(),'the dialog opens');
+    assert.match(sheet()!.textContent!,/“Lead” started a chat that is still working: “Audit API”\./);
+    assert.deepEqual([...sheet()!.querySelectorAll('button')].map(b=>b.textContent),['Cancel','Stop this chat only','Stop all']);
+    await press('Stop all');
+  }),['chat.stop','delegation.stopChildren'],'Stop all stops the chat and the chats it started');
+  assert.equal(sheet(),null);
+  assert.deepEqual(await stopping(()=>press('Stop this chat only')),['chat.stop']);
+  assert.deepEqual(await stopping(()=>press('Cancel')),[],'Cancel stops nothing');
+  assert.deepEqual(await stopping(async()=>{const event=new window.Event('keydown',{bubbles:true,cancelable:true});Object.assign(event,{key:'Escape'});document.dispatchEvent(event);await delay(30);}),[],'Esc stops nothing');
+  assert.equal(sheet(),null);
+  assert.deepEqual(errors,[]);
+});
+
+// Spec: MUS-SPEC-14-44M (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-44m)
+await check('#44 a wake-up report shows as a compact notice row with the child\'s first line and Open, never as a user bubble',async()=>{
+  root.render(<Timeline chatId="lead" items={leadItems as any} running={false}/>);await delay(120);
+  const row=document.querySelector('[data-testid="delegation-report"]')!;
+  assert.ok(row,'the report is a notice row');
+  assert.equal(row.textContent,'Audit UI finished · The UI is clean. · Open');
+  assert.ok(row.classList.contains('delegation-row'));
+  const bubbles=[...document.querySelectorAll('.msg-user, .user-message-row')].map(node=>node.textContent??'');
+  assert.ok(bubbles.length>=1,'the user\'s own message is still a bubble');
+  assert.ok(!bubbles.some(text=>text.trim().startsWith('Muster: a chat you delegated')),'no user bubble starts with the report');
+  click([...row.querySelectorAll('button')].find(button=>button.textContent==='Open'));await delay(40);
+  assert.equal(store.getState().activeChatId,'ui','Open opens the child chat');
   assert.deepEqual(errors,[]);
 });
 root.unmount();

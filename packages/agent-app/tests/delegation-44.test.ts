@@ -401,3 +401,28 @@ test('stopping a parent\'s children stops every working chat below it',async t=>
   assert.deepEqual(await service.invoke('delegation.stopChildren',{chatId:parent.id}),{stopped:2});
   await until(async()=>{for(const id of ids)if((await chatOf(service,id))?.status!=='interrupted')return false;return true;},'children stopped');
 });
+
+// Spec: MUS-SPEC-14-44N (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-44n)
+test('the wake-up report is marked as a delegation report in the parent\'s transcript, not as the user\'s message',async t=>{
+  const {service,fake,chat}=await setup(t);
+  const parent=await chat('Lead');
+  let childId='';const gate=deferred();
+  fake.script=async(input,tools)=>{
+    if(input.chat.id===parent.id&&/Start/.test(input.prompt)){childId=idIn((await tools.call('delegate_task',{prompt:'Check the links.',title:'Link check'})).text);return 'Started.';}
+    if(/Check the links/.test(input.prompt)){await gate.promise;return 'All 12 links work.\nNothing to fix.';}
+    return 'Noted.';
+  };
+  await send(service,parent.id,'Start the link check.');
+  await until(()=>!!childId&&idle(service,parent.id),'parent idle');
+  gate.resolve();
+  await until(()=>fake.turns(parent.id).length===2,'the parent wakes');
+  assert.match(fake.turns(parent.id)[1]!.prompt,/All 12 links work\./,'the provider still gets the report as the turn\'s message');
+  await until(()=>idle(service,parent.id),'wake turn done');
+  const users=(await timeline(service,parent.id)).filter(item=>item.kind==='user');
+  assert.equal(users.length,2);
+  const report=users[1]!;
+  assert.equal(report.data?.kind,'delegation-report');
+  assert.equal(report.data?.childChatId,childId);assert.equal(report.data?.title,'Link check');assert.equal(report.data?.state,'finished');
+  assert.equal(report.data?.summary,'All 12 links work.');
+  assert.equal(users[0]!.data?.kind,undefined,'the user\'s own message is not marked');
+});

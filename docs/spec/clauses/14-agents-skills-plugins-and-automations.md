@@ -90,7 +90,10 @@ Boundaries:
 | [MUS-SPEC-14-44H](14-agents-skills-plugins-and-automations.md#mus-spec-14-44h) | A sibling chat's read_task, message_task, wait_task and interrupt_task on the child are refused with "is not a chat you started"; the child cannot interrupt its parent; nothing was steered or stopped; the sibling lists no tasks; the root may read its grandchild. | [`only a parent or its ancestors may control a child; a sibling or the child itself is refused`](../../../packages/agent-app/tests/delegation-44.test.ts) |
 | [MUS-SPEC-14-44I](14-agents-skills-plugins-and-automations.md#mus-spec-14-44i) | After a restart delegation.children still returns the child; the parent's list_tasks shows it finished and read_task returns "42 files."; another chat is still refused; the child still reads "Started by Lead". | [`links survive a restart: the parent still lists, reads and controls its child, and others still cannot`](../../../packages/agent-app/tests/delegation-44.test.ts) |
 | [MUS-SPEC-14-44J](14-agents-skills-plugins-and-automations.md#mus-spec-14-44j) | delegation.children lists both working children with title, status, model and depth; delegation.stopChildren answers {stopped: 2}; both read interrupted. | [`stopping a parent's children stops every working chat below it`](../../../packages/agent-app/tests/delegation-44.test.ts) |
-| [MUS-SPEC-14-44K](14-agents-skills-plugins-and-automations.md#mus-spec-14-44k) | The parent's transcript shows "Started Audit API on Beta One", "Started Audit UI on Beta One" and "Audit UI finished", each opening its chat; the child shows "Started by Lead", opening the parent; the sub-agents pane lists both chats as Working and Done with a count of 2 and opens them; the parent's approval copy reads "From Audit API, a chat this one started" and Approve answers the copy; Stop asks to stop "Audit API" too: OK stops the children, Cancel only the chat. | [`#44 started chats show as compact linked rows in both transcripts, in the sub-agents pane, on the parent's approval copy, and Stop asks about them`](../../../packages/agent-app/tests/delegation-44-dom.tsx) |
+| [MUS-SPEC-14-44K](14-agents-skills-plugins-and-automations.md#mus-spec-14-44k) | The parent's transcript shows "Started Audit API on Beta One", "Started Audit UI on Beta One" and "Audit UI finished", each opening its chat; the child shows "Started by Lead", opening the parent; the sub-agents pane lists both chats as Working and Done with a count of 2 and opens them; the parent's approval copy reads "From Audit API, a chat this one started" and Approve answers the copy. | [`#44 started chats show as compact linked rows in both transcripts, in the sub-agents pane and on the parent's approval copy`](../../../packages/agent-app/tests/delegation-44-dom.tsx) |
+| [MUS-SPEC-14-44L](14-agents-skills-plugins-and-automations.md#mus-spec-14-44l) | Stop on Lead (Audit API still working) opens the app's dialog naming "Audit API" with Cancel, Stop this chat only and Stop all; Stop all stops Lead then its children; Stop this chat only stops Lead; Cancel and Esc stop nothing; window.confirm is never used. | [`#44 Stop on a chat with working children offers Stop all, Stop this chat only and Cancel; Cancel and Esc stop nothing`](../../../packages/agent-app/tests/delegation-44-dom.tsx) |
+| [MUS-SPEC-14-44M](14-agents-skills-plugins-and-automations.md#mus-spec-14-44m) | The report's row is a delegation-row notice "Audit UI finished · The UI is clean. · Open" whose Open opens the child; no user bubble starts with "Muster: a chat you delegated"; the user's own message stays a bubble. | [`#44 a wake-up report shows as a compact notice row with the child's first line and Open, never as a user bubble`](../../../packages/agent-app/tests/delegation-44-dom.tsx) |
+| [MUS-SPEC-14-44N](14-agents-skills-plugins-and-automations.md#mus-spec-14-44n) | The provider still gets the report as the wake turn's message; the transcript row carries kind delegation-report with the child id, title, state finished and the first line of the reply; the user's own message is not marked. | [`the wake-up report is marked as a delegation report in the parent's transcript, not as the user's message`](../../../packages/agent-app/tests/delegation-44.test.ts) |
 
 ### Claude Code background sub-agents
 
@@ -931,12 +934,45 @@ An agent can hand a task to a child chat on any provider and model the user has 
 - Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 10 passed, 0 failed, 0 skipped; commit 7662754086388ccd540e6a1b29e66c71a5504fac
 
 <a id="mus-spec-14-44k"></a>
-#### MUS-SPEC-14-44K: Started chats are visible and reachable from both sides, and Stop asks about them
+#### MUS-SPEC-14-44K: Started chats are visible and reachable from both sides
 
 - Precondition: Chat "Lead" is working; it started "Audit API" (working) and "Audit UI" (finished) on Beta One; "Audit API" asked to run `rm -rf build`.
-- Action: Look at Lead's transcript and click its rows; look at Audit API's transcript and click "Started by"; open Lead's sub-agents pane and click a card; approve the copied card; press Stop on Lead and choose OK, then Cancel.
-- Expected result: Lead's transcript has one compact row per event: "Started Audit API on Beta One", "Started Audit UI on Beta One", "Audit UI finished"; each names the chat and opens it. The child's transcript starts with "Started by Lead", which opens Lead. The existing sub-agents pane lists the started chats next to provider sub-agents (Audit API Working, Audit UI Done; count 2) and a card opens its chat. Lead's copy of the approval says "From Audit API, a chat this one started" and Approve answers it. Stop on a chat with working children asks "Stop it too? Cancel stops only this chat.": OK stops the chat and then its children, Cancel stops only the chat.
-- Test: `packages/agent-app/tests/delegation-44-dom.tsx::#44 started chats show as compact linked rows in both transcripts, in the sub-agents pane, on the parent's approval copy, and Stop asks about them`
+- Action: Look at Lead's transcript and click its rows; look at Audit API's transcript and click "Started by"; open Lead's sub-agents pane and click a card; approve the copied card.
+- Expected result: Lead's transcript has one compact row per event: "Started Audit API on Beta One", "Started Audit UI on Beta One", "Audit UI finished"; each names the chat and opens it. The child's transcript starts with "Started by Lead", which opens Lead. The existing sub-agents pane lists the started chats next to provider sub-agents (Audit API Working, Audit UI Done; count 2) and a card opens its chat. Lead's copy of the approval says "From Audit API, a chat this one started" and Approve answers it. (Stop is MUS-SPEC-14-44L.)
+- Test: `packages/agent-app/tests/delegation-44-dom.tsx::#44 started chats show as compact linked rows in both transcripts, in the sub-agents pane and on the parent's approval copy`
 - Environment: Renderer DOM suite (linkedom); stubbed bridge; the real Timeline, SubagentsTab, ApprovalCard and store.
-- Known gaps: Not a screenshot of the real app. The Stop question is the system confirm dialog, stubbed here. The summary card's Subagents row also counts started chats; that is not asserted here.
-- Evidence: local; ~/.muster-work/review/44/green-dom.log; exit 0; 1 passed, 0 failed, 0 skipped; commit 7662754086388ccd540e6a1b29e66c71a5504fac
+- Known gaps: Not a screenshot of the real app. The summary card's Subagents row also counts started chats; that is not asserted here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-44l"></a>
+#### MUS-SPEC-14-44L: Stop on a chat with working children asks with three explicit choices
+
+- Precondition: Chat "Lead" is working and started "Audit API", which is still working.
+- Action: Press Stop on Lead and choose Stop all; again and choose Stop this chat only; again and choose Cancel; again and press Esc.
+- Expected result: Stop opens the app's own confirmation sheet (not the system confirm), saying "“Lead” started a chat that is still working: “Audit API”." with three buttons: Cancel, Stop this chat only and Stop all (the default). Stop all stops Lead and then every working chat below it. Stop this chat only stops Lead and leaves its children working. Cancel, Esc and a click outside stop nothing. A chat with no working children stops at once, without asking, and a second press while a chat is already stopping never asks.
+- Test: `packages/agent-app/tests/delegation-44-dom.tsx::#44 Stop on a chat with working children offers Stop all, Stop this chat only and Cancel; Cancel and Esc stop nothing`
+- Environment: Renderer DOM suite (linkedom); stubbed bridge; the real store, ConfirmSheet and host.
+- Known gaps: Not a screenshot of the real app. A window with no mounted host (none today) stops only the chat without asking.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-44m"></a>
+#### MUS-SPEC-14-44M: A wake-up report shows as a notice, not as the user's message
+
+- Precondition: Chat "Lead" started a child that finishes while Lead is idle (or the report arrives after Lead's turn).
+- Action: Let the child finish so the report wakes Lead; look at Lead's transcript.
+- Expected result: The provider still receives the report as the wake turn's message. In the transcript that row carries `kind: 'delegation-report'` with the child's id, title, state and the first line of its reply, and is shown as a compact notice in the delegation-row style: "<title> finished · <first line of its reply> · Open", where Open opens the child chat. No user bubble starts with "Muster: a chat you delegated". The user's own messages are unchanged.
+- Test: `packages/agent-app/tests/delegation-44-dom.tsx::#44 a wake-up report shows as a compact notice row with the child's first line and Open, never as a user bubble`
+- Environment: Renderer DOM suite (linkedom); stubbed bridge; the real Timeline. The runtime marking is MUS-SPEC-14-44N.
+- Known gaps: While it waits in the composer's queue (a busy parent), the report still reads as its text in the queue list.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-44n"></a>
+#### MUS-SPEC-14-44N: The runtime marks the wake-up report's transcript row as a delegation report
+
+- Precondition: Chat "Lead" started "Link check", which finishes with "All 12 links work." while Lead is idle.
+- Action: Let the report wake Lead; read Lead's transcript.
+- Expected result: The provider receives the report as the wake turn's message (so routes that need a user-role message still get one). The transcript row of that message carries `kind: 'delegation-report'`, the child's id, its title, state `finished` and the first line of its reply as `summary`. The user's own message carries no such mark.
+- Test: `packages/agent-app/tests/delegation-44.test.ts::the wake-up report is marked as a delegation report in the parent's transcript, not as the user's message`
+- Environment: Node test runner; the real service and queue; a fake provider; the real tool host.
+- Known gaps: How the row looks is MUS-SPEC-14-44M.
+- Evidence: UNVERIFIED
