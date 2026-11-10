@@ -19,7 +19,15 @@ export interface RemoteHost {
   port?: number;
   /** The fingerprint the user confirmed in Muster (null when the key was already in their own known_hosts, or not trusted yet). */
   trusted: { type: string; fingerprint: string; at: string } | null;
+  /**
+   * #147 phase 2: how an agent CLI on this host signs in to its model provider. `host` (the default, also when unset): the
+   * host's own login and config; Muster sends no key. `muster`: Muster passes the key it holds for the route
+   * (ANTHROPIC_API_KEY for Claude Code, OPENAI_API_KEY for Codex) to that one process as an environment variable over the
+   * ssh connection; it is never written on the host.
+   */
+  agentCredentials?: RemoteAgentCredentials;
 }
+export type RemoteAgentCredentials = 'host' | 'muster';
 export interface RemoteHostInput { id?: string; name?: string; source: RemoteHostSource; host: string; user?: string; port?: number }
 /** An entry of ~/.ssh/config that can be added (wildcard patterns are left out). */
 export interface SshConfigEntry { alias: string; hostName?: string; user?: string; port?: number; added: boolean }
@@ -58,9 +66,11 @@ export interface RemoteCommands {
   'remote.forward.open': { input: { folderId: string; port: number }; output: RemoteForward };
   'remote.forward.close': { input: { folderId: string; port: number }; output: { closed: boolean } };
   'remote.forward.list': { input: { folderId?: string }; output: { forwards: RemoteForward[] } };
+  /** #147 phase 2: how agent CLIs on this host sign in (see RemoteHost.agentCredentials). */
+  'remote.hosts.agentCredentials': { input: { id: string; credentials: RemoteAgentCredentials }; output: RemoteHost };
 }
 export const REMOTE_COMMANDS = { 'remote.hosts.list': true, 'remote.hosts.config': true, 'remote.hosts.save': true, 'remote.hosts.remove': true, 'remote.hosts.connect': true, 'remote.hosts.disconnect': true,
-  'remote.hosts.trust': true, 'remote.folder.add': true, 'remote.terminal.launch': true, 'remote.forward.open': true, 'remote.forward.close': true, 'remote.forward.list': true } as const satisfies Record<keyof RemoteCommands, true>;
+  'remote.hosts.trust': true, 'remote.folder.add': true, 'remote.terminal.launch': true, 'remote.forward.open': true, 'remote.forward.close': true, 'remote.forward.list': true, 'remote.hosts.agentCredentials': true } as const satisfies Record<keyof RemoteCommands, true>;
 export type RemoteEvent = { type: 'remoteChanged'; hostId?: string; status?: RemoteStatus };
 
 /** `ssh://<authority>/<absolute path>`: the authority is a config alias or `[user@]host[:port]`. */

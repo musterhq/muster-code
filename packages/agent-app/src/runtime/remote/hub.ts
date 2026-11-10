@@ -23,6 +23,8 @@ export class RemoteHub {
   private status = new Map<string, RemoteStatus>();
   private resolved = new Map<string, { at: number; value: Resolved }>();
   private forwards = new Map<string, RemoteForward>();
+  /** #147 phase 2: one reverse forward per host to Muster's tool relay: host 127.0.0.1:<remotePort> → 127.0.0.1:<localPort> here. */
+  private reverses = new Map<string, { localPort: number; remotePort: number }>();
   private retries = new Map<string, { timer: ReturnType<typeof setTimeout>; attempt: number }>();
   private connecting = new Map<string, Promise<RemoteStatus>>();
   private disposed = false;
@@ -67,9 +69,16 @@ export class RemoteHub {
     const existing = input.id ? this.host(input.id) : undefined;
     const name = (typeof input.name === 'string' && input.name.trim() ? input.name.trim() : remoteAuthority(next)).slice(0, 80);
     if (this.hosts.some(h => h.id !== existing?.id && remoteAuthority(h) === remoteAuthority(next))) throw new Error(`${remoteAuthority(next)} is already in your SSH hosts.`);
-    const saved: RemoteHost = { id: existing?.id ?? randomUUID(), name, ...next, trusted: existing && remoteAuthority(existing) === remoteAuthority(next) ? existing.trusted : null };
+    const saved: RemoteHost = { id: existing?.id ?? randomUUID(), name, ...next, trusted: existing && remoteAuthority(existing) === remoteAuthority(next) ? existing.trusted : null, ...(existing?.agentCredentials ? { agentCredentials: existing.agentCredentials } : {}) };
     this.hosts = existing ? this.hosts.map(h => h.id === saved.id ? saved : h) : [...this.hosts, saved];
     this.resolved.delete(saved.id); this.save(); return saved;
+  }
+  /** #147 phase 2: how agent CLIs on the host sign in. */
+  setAgentCredentials(id: string, credentials: unknown): RemoteHost {
+    const h = this.host(id);
+    if (credentials !== 'host' && credentials !== 'muster') throw new Error('Choose the host’s own sign-in or your key.');
+    const next: RemoteHost = { ...h, agentCredentials: credentials };
+    this.hosts = this.hosts.map(x => x.id === h.id ? next : x); this.save(); return next;
   }
   async removeHost(id: string) { const h = this.host(id); await this.disconnect(h.id).catch(() => undefined); this.hosts = this.hosts.filter(x => x.id !== h.id); this.status.delete(h.id); this.save(); }
 
@@ -81,6 +90,8 @@ export class RemoteHub {
     const r = await this.resolve(h);
     return [...baseOptions([...r.knownHostsFiles, this.knownHostsFile], forControl), ...extra, ...destination(h)];
   }
+  /** The ssh arguments for a session on the host (options, extra flags, destination); the remote command follows. */
+  sessionArgs(h: RemoteHost, extra: string[] = []): Promise<string[]> { return this.args(h, extra); }
   /** The ssh command line for an interactive shell in `dir` on the host (a terminal). */
   async terminal(h: RemoteHost, dir: string): Promise<{ file: string; args: string[] }> {
     return { file: sshBinary(), args: [...await this.args(h, ['-t']), `cd ${shq(dir)} && exec $SHELL -l`] };
@@ -107,6 +118,7 @@ export class RemoteHub {
     this.cancelRetry(h.id);
     const status = this.set(h.id, 'connected', `Connected to ${h.name}.`, extra);
     if (wasDown) for (const f of this.forwards.values()) if (f.hostId === h.id) void this.forward(h, f.remotePort, f.localPort).catch(() => undefined);
+    if (wasDown) { const r = this.reverses.get(h.id); if (r) void this.reverseOn(h, r.localPort, r.remotePort).catch(() => undefined); }
     return status;
   }
   private scheduleRetry(id: string, attempt: number) {
@@ -157,6 +169,7 @@ export class RemoteHub {
   async disconnect(id: string): Promise<RemoteStatus> {
     const h = this.host(id); this.cancelRetry(h.id);
     for (const [k, f] of this.forwards) if (f.hostId === h.id) this.forwards.delete(k);
+    this.reverses.delete(h.id);
     await runSsh(['-O', 'exit', ...await this.args(h, [], true)], { timeoutMs: 5_000 }).catch(() => undefined);
     return this.set(h.id, 'idle', 'Disconnected.');
   }
@@ -182,6 +195,28 @@ export class RemoteHub {
     this.forwards.delete(`${h.id}:${f.remotePort}`);
     await runSsh(['-O', 'cancel', '-L', `127.0.0.1:${f.localPort}:127.0.0.1:${f.remotePort}`, ...await this.args(h, [], true)], { timeoutMs: 10_000 });
     return true;
+  }
+  /**
+   * #147 phase 2: makes 127.0.0.1:<port> on the host reach 127.0.0.1:<localPort> here (Muster's tool relay), through the
+   * master connection. The host picks the port the first time; a reconnect asks for the same one again. Binds the host's
+   * loopback only: other machines can never reach it, and the relay still wants a run's token.
+   */
+  async reverseForward(h: RemoteHost, localPort: number): Promise<number> {
+    await this.ensure(h);
+    const known = this.reverses.get(h.id);
+    if (known && known.localPort === localPort) { if (await this.reverseOn(h, localPort, known.remotePort).then(() => true, () => false)) return known.remotePort; }
+    const remotePort = await this.reverseOn(h, localPort, 0);
+    this.reverses.set(h.id, { localPort, remotePort }); return remotePort;
+  }
+  private async reverseOn(h: RemoteHost, localPort: number, remotePort: number): Promise<number> {
+    const spec = `127.0.0.1:${remotePort}:127.0.0.1:${localPort}`;
+    const r = await runSsh(['-O', 'forward', '-R', spec, ...await this.args(h, [], true)], { timeoutMs: 10_000 });
+    // A forward that is already in place answers with an error naming it; that is the one we want.
+    if (r.code !== 0 && !(remotePort && /already|exists/i.test(r.stderr))) throw new Error(`Could not open the tool connection to ${h.name}: ${r.stderr.trim().split('\n').pop() || `exit ${r.code}`}`);
+    if (remotePort) return remotePort;
+    const port = Number(/(\d{1,5})\s*$/.exec(r.stdout.toString('utf8').trim())?.[1]);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`${h.name} did not say which port it opened for Muster’s tools.`);
+    return port;
   }
   listForwards(hostId?: string) { return [...this.forwards.values()].filter(f => !hostId || f.hostId === hostId); }
 

@@ -15,6 +15,7 @@ import type { Chat, ChatPermissionMode, ProviderInfo } from '../shared/protocol.
 import {NativeUnavailableError} from './codex-native.ts';
 import {splitSecretOverrides} from './thread-config.ts';
 import {CODEX_LAUNCHER, envFromOverrides, mcpServersFromOverrides} from './adapters/shared.ts';
+import type {RemoteRun} from './adapters/types.ts';
 import { device } from '../shared/device-noun.ts';
 import { RICH_CONTENT_GUIDANCE } from '../shared/rich-block.ts';
 import {codexSubagentOverrides,subagentSupport} from './subagent-routes.ts';
@@ -51,6 +52,8 @@ function beforeDispatch<T>(check: () => T): T {
 }
 export interface ProviderInput {
   chat: Chat; cwd: string; prompt: string;
+  /** #147 phase 2: the CLI runs on this SSH host, in `remote.root` there (Claude Code, Codex and ACP routes only). */
+  remote?: RemoteRun;
   budgets?: ProviderBudgets;
   /** Absolute local image paths; the core sends each as a localImage input. */
   images?: string[];
@@ -275,7 +278,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     const instructions = native?.context ? [browser.instructions, native.context].filter(Boolean).join('\n\n') : browser.instructions;
     try {
       const result = await adapter.run({
-        chat: input.chat, cwd: input.cwd, prompt: native ? native.text : lane?.seed?.trim() ? `${lane.seed.trim()}\n\nCurrent user request:\n${input.prompt}` : input.prompt, model, permissionMode: access.permissionMode === 'auto' && !autoApprovalSupported(lane?.driver ?? route.info.driver) ? 'workspace' : access.permissionMode, signal: owned.controller.signal,
+        chat: input.chat, cwd: input.remote?.root ?? input.cwd, ...(input.remote ? {remote: input.remote} : {}), prompt: native ? native.text : lane?.seed?.trim() ? `${lane.seed.trim()}\n\nCurrent user request:\n${input.prompt}` : input.prompt, model, permissionMode: access.permissionMode === 'auto' && !autoApprovalSupported(lane?.driver ?? route.info.driver) ? 'workspace' : access.permissionMode, signal: owned.controller.signal,
         contextWindow: input.contextWindow ?? route.info.models.find(entry => entry.id === model)?.contextWindow,
         ...(sandboxedRun(input.configOverrides) ? {sandboxed: true} : {}),
         ...(input.images?.length ? {images: input.images} : {}), ...(route.info.models.find(entry => entry.id === model)?.images === true ? {vision: true} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),
@@ -368,7 +371,8 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       const bindingId=route.info.bindingId??route.info.id;
       if (input.chat.providerBindingId && input.chat.providerBindingId!==bindingId) throw new ProviderPreDispatchError('The selected provider account or profile changed. Select it again before running.');
       // #688: this turn runs over the router's Messages API instead of the Codex client (see claude-lane.ts for the rules).
-      const laneModel = claudeLaneModel(route, input);
+      // #147: a run on an SSH host is the route's own CLI there; the router's lanes are this computer's.
+      const laneModel = input.remote ? undefined : claudeLaneModel(route, input);
       // Only a turn that may use the lane waits (for the router's answer about a combo); every other turn dispatches in the same tick.
       const useLane = laneModel !== undefined && await route.claudeLane!.isClaude(laneModel.model);
       const laneDriver = useLane ? (laneModel!.code ? CLAUDE_CODE_LANE_DRIVER : CLAUDE_LANE_DRIVER) : undefined;
@@ -432,8 +436,9 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       // changed choice changes the signature, so a warm session restarts on this turn.
       const ownHome = route.env.MUSTER_CODEX_SOURCE_HOME && route.env.CODEX_HOME ? {source: route.env.MUSTER_CODEX_SOURCE_HOME, home: route.env.CODEX_HOME} : undefined;
       let pluginKey: string | undefined, prepareError: unknown;
-      if (ownHome) try { pluginKey = prepareChatCodexHome(ownHome.source, ownHome.home, {dataDir: providerDataDir(), musterSkills: musterSkillsDir()}).key; } catch (error) { prepareError = error; }
-      const signature = JSON.stringify([access, model0, input.reasoningEffort ?? 'medium', input.configOverrides ?? {}, featureOverrides, windowOverrides, input.cwd, route.command, route.info.id, route.env, pluginKey ?? null]);
+      // #147: Codex on an SSH host uses the host's own ~/.codex; Muster's local Codex home is not touched for it.
+      if (ownHome && !input.remote) try { pluginKey = prepareChatCodexHome(ownHome.source, ownHome.home, {dataDir: providerDataDir(), musterSkills: musterSkillsDir()}).key; } catch (error) { prepareError = error; }
+      const signature = JSON.stringify([access, model0, input.reasoningEffort ?? 'medium', input.configOverrides ?? {}, featureOverrides, windowOverrides, input.cwd, input.remote?.command ?? route.command, route.info.id, route.env, pluginKey ?? null]);
       if (previous && ((previous.signature !== undefined && previous.signature !== signature) || previous.stale) && !busyWithBackground(previous)) close(previous);
       if (!previous && sessions.size >= 64) {
         // Bound retained observers without evicting known background work.
@@ -475,9 +480,9 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         const extraOverrides = Object.entries(split.args).filter(([name]) => /^[A-Za-z0-9_.-]{1,128}$/.test(name) && !/^(sandbox|approval_policy)/.test(name)).map(([name, value]) => `${name}=${JSON.stringify(value)}`);
         // #720: link the person's shared configuration into Muster's own home, and bring over a thread from before.
         if (prepareError) throw prepareError;
-        if (ownHome) adoptCodexThread(ownHome.source, ownHome.home, resumeThread);
+        if (ownHome && !input.remote) adoptCodexThread(ownHome.source, ownHome.home, resumeThread);
         const launch = {
-          cwd: input.cwd, command: route.command, model, reasoning,
+          cwd: input.remote?.root ?? input.cwd, command: input.remote?.command ?? route.command, model, reasoning,
           env: { MUSTER_PROVIDER_NODE: node.node, ...node.env, ...route.env }, transportOwner: session.owner, cacheKey: session.key,
           sandbox: access.sandbox, networkAccess: access.networkAccess, approvalPolicy: access.approvalPolicy, developerInstructions,
           ...(split.threadConfig ? { threadConfig: split.threadConfig } : {}),
