@@ -697,7 +697,7 @@ function silentSocket(relayUrl: string, path: string): Promise<{closed: Promise<
     sock.on('error', () => undefined);
     const closed = new Promise<void>(done => sock.on('close', () => done()));
     sock.once('connect', () => sock.write(`GET ${path} HTTP/1.1\r\nHost: ${hostname}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`));
-    sock.once('data', chunk => { if (String(chunk).startsWith('HTTP/1.1 101')) { sock.pause(); resolve({closed}); } else reject(new Error(String(chunk))); });
+    sock.once('data', chunk => { if (String(chunk).startsWith('HTTP/1.1 101')) { sock.on('data', () => undefined); resolve({closed}); } else reject(new Error(String(chunk))); });
   });
 }
 
@@ -709,8 +709,10 @@ test('the relay closes unregistered and silent sockets and refuses oversized mes
   const idle = rawDesktop(relay);
   await idle.challenge;
   assert.equal(await idle.closed, 4408);
-  // A peer that stops answering pings.
-  const silent = await silentSocket(relay.url, '/v1/desktop');
+  // A peer that stops answering pings (on a relay that would wait a minute for registration).
+  const patient = await startRelay({test: true, registerTimeoutMs: 60_000, keepAlive: {intervalMs: 100, timeoutMs: 100}});
+  t.after(() => patient.close());
+  const silent = await silentSocket(patient.url, '/v1/desktop');
   await Promise.race([silent.closed, delay(3000).then(() => assert.fail('the silent socket was not closed'))]);
   // A phone message over one Noise message's base64 length is refused and never forwarded.
   const d = await desktop(t, quick().provider);

@@ -17,8 +17,9 @@
  */
 import {createHash, createPublicKey, randomBytes, verify} from 'node:crypto';
 import http from 'node:http';
+import https from 'node:https';
 import type {AddressInfo} from 'node:net';
-import {acceptUpgrade, type WsConnection} from '../../server/src/net/ws.ts';
+import {acceptUpgrade, keepAlive, type WsConnection} from '../../server/src/net/ws.ts';
 
 export interface RelayFrame { from: 'phone' | 'desktop'; route: string; conn: number; data: string }
 export type RelayIntercept = (frame: RelayFrame) => string | string[] | null;
@@ -42,10 +43,30 @@ function verified(key: unknown, sig: unknown, nonce: string): Buffer | null {
   } catch { return null; }
 }
 const ROUTE = /^[a-f0-9]{32}$/;
-const DATA = /^[A-Za-z0-9+/=_-]{1,22000000}$/;
+/** One Noise message (65,535 bytes, plus the handshake's mode byte) as base64: nothing larger is ever forwarded. */
+export const MAX_DATA_CHARS = 87_384;
+const DATA = new RegExp(`^[A-Za-z0-9+/=_-]{1,${MAX_DATA_CHARS}}$`);
+/** A desktop message: the JSON envelope around one payload. */
+const MAX_DESKTOP_MESSAGE = MAX_DATA_CHARS + 256;
 const MAX_RECORDED = 20_000;
+export const REGISTER_TIMEOUT_MS = 10_000;
+const isLoopback = (host: string) => host === 'localhost' || host === '::1' || /^127\./.test(host);
 
-export async function startRelay(options: {host?: string; port?: number; log?: (line: string) => void; /** Record frames and allow intercept (tests only). */ test?: boolean} = {}): Promise<DevRelay> {
+export interface RelayOptions {
+  host?: string; port?: number; log?: (line: string) => void;
+  /** Serve wss:// with this PEM certificate and key. Without it the relay listens on loopback only (put a TLS tunnel or
+   *  proxy in front), unless it is a test relay. */
+  tls?: {cert: string; key: string};
+  /** Record frames and allow intercept; also allows plain ws:// off loopback (tests only). */
+  test?: boolean;
+  /** Test seams: how long a desktop has to register, and the ping interval and pong timeout for every socket. */
+  registerTimeoutMs?: number;
+  keepAlive?: {intervalMs: number; timeoutMs: number};
+}
+
+export async function startRelay(options: RelayOptions = {}): Promise<DevRelay> {
+  const host = options.host ?? '127.0.0.1';
+  if (!options.tls && !options.test && !isLoopback(host)) throw new Error(`Refusing to serve plain ws:// on ${host}: phones and desktops need TLS (wss://) off this computer. Pass a TLS certificate (MUSTER_RELAY_TLS_CERT and MUSTER_RELAY_TLS_KEY), or listen on 127.0.0.1 behind a TLS tunnel such as cloudflared.`);
   const desktops = new Map<string, {socket: WsConnection; phones: Map<number, WsConnection>}>();
   const all = new Set<WsConnection>();
   let nextConn = 1;
@@ -59,7 +80,8 @@ export async function startRelay(options: {host?: string; port?: number; log?: (
     }
   };
 
-  const server = http.createServer((_req, res) => { res.writeHead(404).end(); });
+  const notFound = (_req: http.IncomingMessage, res: http.ServerResponse) => { res.writeHead(404).end(); };
+  const server = options.tls ? https.createServer({cert: options.tls.cert, key: options.tls.key}, notFound) : http.createServer(notFound);
   server.on('upgrade', (req, socket, head) => {
     const path = new URL(req.url ?? '/', 'http://relay').pathname;
     const phone = /^\/v1\/phone\/([a-f0-9]{32})$/.exec(path);
@@ -68,6 +90,8 @@ export async function startRelay(options: {host?: string; port?: number; log?: (
     if (!ws) return;
     all.add(ws); ws.on('close', () => all.delete(ws));
     ws.on('error', () => undefined);
+    // A half-open peer (a phone that lost its network, a sleeping laptop) is found by a missed pong and dropped.
+    keepAlive(ws, options.keepAlive?.intervalMs, options.keepAlive?.timeoutMs);
     if (phone) return attachPhone(ws, phone[1]!);
     attachDesktop(ws);
   });
@@ -76,13 +100,18 @@ export async function startRelay(options: {host?: string; port?: number; log?: (
     let route: string | null = null;
     const nonce = randomBytes(32).toString('base64');
     ws.send(JSON.stringify({t: 'challenge', nonce}));
+    const registerTimer = setTimeout(() => { if (!route) ws.close(4408, 'register timeout'); }, options.registerTimeoutMs ?? REGISTER_TIMEOUT_MS);
+    registerTimer.unref();
+    ws.on('close', () => clearTimeout(registerTimer));
     ws.on('message', (text: string) => {
+      if (text.length > MAX_DESKTOP_MESSAGE) { ws.close(1009, 'message too big'); return; }
       let message: {t?: string; key?: unknown; sig?: unknown; c?: unknown; d?: unknown; code?: unknown; reason?: unknown};
       try { message = JSON.parse(text); } catch { ws.close(1003, 'bad message'); return; }
       if (message.t === 'register') {
         const key = route ? null : verified((message as {key?: unknown}).key, (message as {sig?: unknown}).sig, nonce);
         if (!key) { ws.close(4401, 'bad signature'); return; }
         route = routeFor(key);
+        clearTimeout(registerTimer);
         // A newer registration for the same route replaces the old link; its phones are dropped.
         const old = desktops.get(route);
         if (old && old.socket !== ws) { for (const p of old.phones.values()) p.close(4404, 'offline'); old.socket.close(4409, 'replaced'); }
@@ -118,6 +147,7 @@ export async function startRelay(options: {host?: string; port?: number; log?: (
     entry.phones.set(conn, ws);
     entry.socket.send(JSON.stringify({t: 'open', c: conn}));
     ws.on('message', (text: string) => {
+      if (text.length > MAX_DATA_CHARS) { ws.close(1009, 'message too big'); return; }
       if (!DATA.test(text)) { ws.close(1003, 'bad frame'); return; }
       const live = desktops.get(route);
       if (live !== entry) return;
@@ -130,9 +160,9 @@ export async function startRelay(options: {host?: string; port?: number; log?: (
     });
   }
 
-  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(options.port ?? 0, options.host ?? '127.0.0.1', () => resolve()); });
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(options.port ?? 0, host, () => resolve()); });
   const address = server.address() as AddressInfo;
-  relay.url = `ws://${address.address.includes(':') ? `[${address.address}]` : address.address}:${address.port}`;
+  relay.url = `${options.tls ? 'wss' : 'ws'}://${address.address.includes(':') ? `[${address.address}]` : address.address}:${address.port}`;
 
   async function close(): Promise<void> {
     for (const ws of all) ws.terminate();
