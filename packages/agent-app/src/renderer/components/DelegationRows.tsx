@@ -2,7 +2,7 @@
 import React from 'react';
 import {GitBranch} from 'lucide-react';
 import type {Chat, TimelineItem} from '../../shared/protocol';
-import type {DelegatedAttention, DelegatedFromNotice, DelegatedTaskNotice} from '../../shared/domains/delegation-protocol';
+import type {DelegatedAttention, DelegatedFromNotice, DelegatedTaskNotice, DelegationReportData} from '../../shared/domains/delegation-protocol';
 import {selectChat} from '../store';
 import {useStoreSelector} from '../useStore';
 import './delegation.css';
@@ -26,6 +26,16 @@ export function DelegationRow({item}: {item: TimelineItem}): React.ReactElement 
   const link = <ChatLink id={data.childChatId} title={data.title}/>;
   return <div className="timeline-notice delegation-row" role="note" data-testid="delegated-task" data-state={data.state}><GitBranch size={12} aria-hidden="true"/>
     {data.state === 'started' ? <>Started {link} on {data.model}</> : data.state === 'finished' ? <>{link} finished</> : data.state === 'stopped' ? <>{link} was stopped</> : <>{link} failed</>}
+  </div>;
+}
+
+/** The message a child's finish sent its parent: "<title> finished · <first line of its reply> · Open". */
+export function DelegationReportRow({item}: {item: TimelineItem}): React.ReactElement {
+  const data = item.data as unknown as DelegationReportData;
+  const chat = useChat(data.childChatId);
+  return <div className="timeline-notice delegation-row delegation-report" role="note" data-testid="delegation-report" title={item.text}><GitBranch size={12} aria-hidden="true"/>
+    <span className="delegation-report-text">{chat?.title || data.title} {data.state === 'failed' ? 'failed' : 'finished'}{data.summary ? <> · {data.summary}</> : null}</span>
+    {chat ? <> · <button type="button" onClick={() => void selectChat(data.childChatId)} aria-label={`Open “${chat.title || data.title}”`}>Open</button></> : null}
   </div>;
 }
 

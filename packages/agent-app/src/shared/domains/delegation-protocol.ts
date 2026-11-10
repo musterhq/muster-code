@@ -16,6 +16,8 @@ export interface DelegatedTask {
 }
 /** `data` of the transcript rows delegation writes. 'delegated-task' rides in the parent, 'delegated-from' in the child. */
 export interface DelegatedTaskNotice { kind: 'delegated-task'; childChatId: string; title: string; model: string; providerId?: string; state: 'started' | 'finished' | 'failed' | 'stopped' }
+/** `data` of a parent's message row that is a child's report (the provider gets it as the turn's message). */
+export interface DelegationReportData { kind: 'delegation-report'; childChatId: string; title: string; state: 'finished' | 'failed'; summary?: string }
 export interface DelegatedFromNotice { kind: 'delegated-from'; parentChatId: string; parentTitle: string }
 /** On a parent's copy of a child's approval or question card: the card it answers. */
 export interface DelegatedAttention { chatId: string; itemId: string; title: string }

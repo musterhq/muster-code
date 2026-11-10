@@ -36,6 +36,7 @@ export function createDomainHooks() {
   let automated: AutomatedWorktreeResolver | undefined;
   let contextWindow: ((providerId: string, model: string) => number | undefined) | undefined;
   let historyBrief: TaskHistoryBriefResolver | undefined;
+  let sendData: ((chatId: string, requestId: string) => Record<string, unknown> | undefined) | undefined;
   const add = <T>(set: Set<T>, fn: T) => { set.add(fn); return () => { set.delete(fn); }; };
   const hooks: DomainHooks = {
     addPromptContributor: fn => add(prompts, fn),
@@ -58,6 +59,7 @@ export function createDomainHooks() {
     onCommand: fn => add(commands, fn),
     onChatRemoval: fn => add(removals, fn),
     onAttention: fn => add(attentionObservers, fn),
+    setSendData(fn) { sendData = fn; },
   };
   return {
     hooks,
@@ -108,6 +110,10 @@ export function createDomainHooks() {
     },
     runSettled(run: RunSettled): void {
       for (const fn of settled) void bounded(() => fn(run), 60_000);
+    },
+    /** #44: extra data for a sent message's transcript row; a resolver that throws adds nothing. */
+    sendData(chatId: string, requestId: string): Record<string, unknown> {
+      try { return sendData?.(chatId, requestId) ?? {}; } catch { return {}; }
     },
     /** #44: synchronous fan-out of approval and question cards opening and closing; an observer that throws is skipped. */
     attention(event: AttentionChange): void {

@@ -5,3 +5,5 @@
 .delegation-row button:focus-visible, .delegation-ask button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-2); }
 .delegation-gone { color: var(--text-faint); }
 .delegation-ask { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; color: var(--text-faint); font-size: var(--fs-12); }
+.delegation-report-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.delegation-report-turn { display: flex; flex-direction: column; gap: 4px; }

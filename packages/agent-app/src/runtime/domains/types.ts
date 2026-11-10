@@ -71,6 +71,9 @@ export interface DomainHooks {
   onChatRemoval?(fn: (event: ChatRemoval) => Promise<void> | void): () => void;
   /** #44: approval and question cards opening and closing (a delegating chat mirrors its children's). Optional so bare test contexts need not provide it. */
   onAttention?(fn: (event: AttentionChange) => void): () => void;
+  /** #44: replaces the single resolver of extra data a sent message's transcript row carries, by request id (a delegation
+   *  report is shown as a notice, not as the user's words). Optional so bare test contexts need not provide it. */
+  setSendData?(fn: ((chatId: string, requestId: string) => Record<string, unknown> | undefined) | undefined): void;
 }
 
 export interface DomainContext {

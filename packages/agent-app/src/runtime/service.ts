@@ -740,7 +740,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     // #401: what this turn runs with, for the transcript's "Switched to …" marker (the effort the composer chose, else the model's default).
     const ranEffort = effort ?? selectedProvider.models.find(entry => entry.id === chat.model)?.defaultEffort;
     const ranWith = {providerId: selectedProvider.id, model: chat.model, ...(ranEffort ? {effort: ranEffort} : {})};
-    const userData = {...(invoked.userData ?? {}), ranWith, ...(files.length ? {attachments: files.map(({path: _path, ...ref}) => ({...ref, state: 'sent'}))} : {})};
+    const userData = {...(invoked.userData ?? {}), ...domainHooks.sendData(chatId, requestId), ranWith, ...(files.length ? {attachments: files.map(({path: _path, ...ref}) => ({...ref, state: 'sent'}))} : {})};
     const accepted = store.recordSend(chatId, requestId, prompt, fingerprint, {...(Object.keys(userData).length ? {userData} : {}), ...(files.length || queued ? {within: () => { if (files.length) attachments.markSent(attachmentIds); if (queued) queue.consume(chatId, queued); }} : {}), ...(invoked.reuseUserItemId ? {reuseUserItemId: invoked.reuseUserItemId} : {})});
     if (accepted.replay) return {runId: accepted.runId};
     if (!digest) store.clearDigest(chatId);

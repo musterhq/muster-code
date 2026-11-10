@@ -18,7 +18,7 @@ import { join, relative, isAbsolute } from 'node:path';
 import type { Chat, ChatStatus, Folder, ProviderInfo, TimelineItem } from '../../shared/protocol.ts';
 import {
   DELEGATION_DEFAULT_WAIT_MS, DELEGATION_MAX_ACTIVE, DELEGATION_MAX_DEPTH, DELEGATION_MAX_WAIT_MS,
-  type DelegatedAttention, type DelegatedFromNotice, type DelegatedTask, type DelegatedTaskNotice,
+  type DelegatedAttention, type DelegatedFromNotice, type DelegationReportData, type DelegatedTask, type DelegatedTaskNotice,
 } from '../../shared/domains/delegation-protocol.ts';
 import { ToolHost, toolText, type ToolSpec } from '../governance/tool-host.ts';
 import type { McpToolResult } from '../sandbox-registry.ts';
@@ -336,6 +336,13 @@ export function createDelegation(ctx: DomainContext, deps: DelegationDeps = {}) 
   });
   const offSettled = ctx.hooks.onRunSettled(run => settled(run.chat, run.status));
   const offAttention = ctx.hooks.onAttention?.(event => attention(event.chatId, event.itemId, event.state));
+  // The report a child's finish queued for its parent is shown as a notice in the parent, not as the user's words.
+  ctx.hooks.setSendData?.((chatId, requestId) => {
+    const match = /^delegation-([a-zA-Z0-9_-]+)-(\d+)$/.exec(requestId), r = match ? row(match[1]!) : undefined;
+    if (!r || r.parent_chat_id !== chatId) return undefined;
+    const summary = clip(oneLine(replies(r.child_chat_id, 1)[0]?.split('\n').find(line => line.trim()) ?? ''), 160);
+    return { kind: 'delegation-report', childChatId: r.child_chat_id, title: r.title, state: r.last_status === 'completed' ? 'finished' : 'failed', ...(summary ? { summary } : {}) } satisfies DelegationReportData;
+  });
 
   const toTask = (r: Row): DelegatedTask => {
     const chat = ctx.store.chat(r.child_chat_id);
@@ -348,7 +355,7 @@ export function createDelegation(ctx: DomainContext, deps: DelegationDeps = {}) 
       'delegation.stopChildren': async input => ({ stopped: await stopTree(descendants(chatIdOf(input))) }),
     },
     dispose() {
-      offOptions(); offSettled(); offAttention?.(); host?.dispose(); host = undefined;
+      offOptions(); offSettled(); offAttention?.(); ctx.hooks.setSendData?.(undefined); host?.dispose(); host = undefined;
       for (const set of waiters.values()) for (const waiter of [...set]) waiter.done(false);
       waiters.clear();
     },
