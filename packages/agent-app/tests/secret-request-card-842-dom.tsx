@@ -28,7 +28,7 @@ await check('the secret card takes a masked value, sends it once and clears the 
   root.render(<PendingQuestion item={card('pending')}/>);await delay(40);
   assert.match(text(),/Fixture agent/);assert.match(text(),/DEPLOY_TOKEN/);assert.match(text(),/Push the release to staging/);
   const field=document.querySelector('input[aria-label="Value for DEPLOY_TOKEN"]') as any;
-  assert.ok(field,'a value field');assert.equal(field.getAttribute('type'),'password','the value is masked');assert.equal(field.getAttribute('autocomplete'),'off');
+  assert.ok(field,'a value field');assert.equal(field.getAttribute('type'),'password','the value is masked');assert.equal(field.getAttribute('autocomplete')??field.getAttribute('autoComplete'),'off','autocomplete is off (linkedom keeps the React attribute case)');
   const remember=[...document.querySelectorAll('label')].find(l=>/Remember for this folder/.test(l.textContent??''))?.querySelector('input') as any;
   assert.ok(remember,'Remember is offered');assert.equal(remember.checked,false,'one-time is the default');
   assert.equal((button(/Send privately/) as any).disabled,true,'nothing to send yet');
