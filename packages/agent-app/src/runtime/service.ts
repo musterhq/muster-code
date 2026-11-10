@@ -37,7 +37,8 @@ import {readWorkbook} from './workbook-preview.ts';
 import {FileAnnotations} from './file-annotations.ts';
 import {resolveInside} from './paths.ts';
 import { AgentModeReviewHost } from './review.ts';
-import {dirtyFileCount, gitStatus, mutateGit, pushGit, listPullRequests, compareUrl} from './git-local.ts';
+import {dirtyFileCount, gitStatus, mutateGit, pushGit} from './git-local.ts';
+import {forgeFor} from './forge/index.ts';
 import {createEntry, moveFile} from './file-operations.ts';
 import { isElicitationRequest, elicitationPolicy, elicitationResult, elicitationText, elicitationServer } from '../shared/computer-use.ts';
 import { isCompactCommand } from '../shared/compact-command.ts';
@@ -2423,8 +2424,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const result = await pushGit(folder.path, text(p.revision,'revision',64));
         emit({type:'workspaceChanged',folderId:folder.id}); return result;
       }
-      case 'git.pullRequests': return listPullRequests(folderFor(p.folderId).path);
-      case 'git.compareUrl': return compareUrl(folderFor(p.folderId).path);
+      case 'git.pullRequests': { const path = folderFor(p.folderId).path; return (await forgeFor(path)).list(path); }
+      case 'git.compareUrl': { const path = folderFor(p.folderId).path; return (await forgeFor(path)).compareUrl(path); }
       case 'git.diff': { const root = folderFor(p.folderId).path; const result = await new AgentModeReviewHost(() => root).readChange(text(p.path,'path')); if (result.error) throw new Error(result.error); return {path: result.path, before: result.before, after: result.after, truncated: result.truncated}; }
       case 'providers.save': return customProviders.save({id:p.id,name:p.name,endpoint:p.endpoint,apiKeyEnv:p.apiKeyEnv});
       case 'providers.cancelCheck': customProviders.cancel(id(p.id)); return;

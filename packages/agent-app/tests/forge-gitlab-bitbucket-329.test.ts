@@ -128,7 +128,7 @@ test('GitLab with a token from Settings: list, create (pushing first), view and 
   assert.deepEqual(list.items, [{number: 5, title: 'Add widget', url: 'https://gitlab.com/group/sub/app/-/merge_requests/5', state: 'OPEN', headRefName: 'feature/widget', isDraft: true}]);
 
   const draft = await call('github.pr.draft', {folderId: folder.id});
-  assert.equal(draft.available, true, draft.reason);
+  assert.equal(draft.available, true, draft.reason ?? '');
   assert.deepEqual([draft.head, draft.base, draft.bases, draft.title, draft.needsPush], ['feature/widget', 'main', ['main', 'release'], 'Add widget', true]);
   assert.equal(draft.compareUrl, 'https://gitlab.com/group/sub/app/-/merge_requests/new?merge_request%5Bsource_branch%5D=feature%2Fwidget');
 
@@ -168,7 +168,7 @@ test('GitLab pipelines: the head pipelineâ€™s jobs are the checks, a failed jobâ
     {id: 305, name: 'build', stage: 'build', status: 'running', started_at: '2026-11-02T00:00:00Z', web_url: 'https://gitlab.com/group/sub/app/-/jobs/305'},
   ]});
   forge.on('GET', glAt('/jobs/302$'), {json: {id: 302, name: 'unit', stage: 'test', status: 'failed', web_url: 'https://gitlab.com/group/sub/app/-/jobs/302'}});
-  forge.on('GET', glAt('/jobs/302/trace$'), {text: 'section_start:1700000000:step_script\r\x1b[0K\x1b[32;1m$ npm test\x1b[0;m\nok 1 adds\nnot ok 2 subtracts\nError: expected 1 to equal 2 (token glpat-LEAKEDLEAKED12345)\nsection_end:1700000001:step_script\r\x1b[0K\nERROR: Job failed: exit code 1\n'});
+  forge.on('GET', glAt('/jobs/302/trace$'), {text: 'section_start:1700000000:step_script\r\x1b[0K\x1b[32;1m$ npm test\x1b[0;m\nok 1 adds\nnot ok 2 subtracts\nError: expected 1 to equal 2 (token glpat-LEAKEDLEAKEDLEAKED12345)\nsection_end:1700000001:step_script\r\x1b[0K\nERROR: Job failed: exit code 1\n'});
 
   const checks = await call('github.pr.checks', {folderId: folder.id, number: 5});
   assert.equal(checks.headSha, 'abc123def');
@@ -185,7 +185,7 @@ test('GitLab pipelines: the head pipelineâ€™s jobs are the checks, a failed jobâ
   assert.equal(log.source, 'job-log'); assert.equal(log.name, 'test / unit'); assert.equal(log.conclusion, 'failure');
   assert.match(log.excerpt, /not ok 2 subtracts/); assert.match(log.excerpt, /Job failed: exit code 1/);
   assert.doesNotMatch(log.excerpt, /section_start|section_end|\x1b/, 'GitLab section markers and colour codes are stripped');
-  assert.doesNotMatch(log.excerpt, /glpat-LEAKEDLEAKED12345/, 'tokens printed in a job log are redacted');
+  assert.doesNotMatch(log.excerpt, /glpat-LEAKEDLEAKEDLEAKED12345/, 'tokens printed in a job log are redacted');
   await assert.rejects(call('ci.checkLog', {folderId: folder.id, number: 5, checkId: 'check:302'}), /Choose a job/);
 });
 
@@ -249,7 +249,7 @@ const bbPr = (extra: Record<string, unknown> = {}) => ({id: 12, title: 'Add widg
 // Spec: MUS-SPEC-08-329F (docs/spec/clauses/08-git-changes-and-review.md#mus-spec-08-329f)
 test('Bitbucket Cloud with an app password: list, create, view, comment and merge a pull request; build statuses are its checks', async t => {
   const {call} = await app(t);
-  useFakeApis();
+  useFakeApis(); setGlabCommand(NO_GLAB);
   await call('forge.account.save', {kind: 'bitbucket', host: 'bitbucket.org', username: 'ada', token: 'ATBBappPassword123'});
   const dir = await repo('git@bitbucket.org:acme/widgets.git');
   await featureBranch(dir, 'feature/widget');
@@ -314,16 +314,16 @@ test('GitHub-only review features say so on GitLab and Bitbucket, and send nothi
   const lab = await call('folder.add', {path: await repo('git@gitlab.com:group/sub/app.git')});
   const bucket = await call('folder.add', {path: await repo('git@bitbucket.org:acme/widgets.git')});
   for (const [folder, name, noun] of [[lab, 'GitLab', 'merge request'], [bucket, 'Bitbucket', 'pull request']] as const) {
-    const attempts: [string, Promise<unknown>][] = [
-      ['threads', call('github.pr.threads', {folderId: folder.id, number: 5})],
-      ['review', call('github.pr.review', {folderId: folder.id, number: 5, event: 'APPROVE'})],
-      ['reviewers', call('github.pr.requestReview', {folderId: folder.id, number: 5, reviewers: ['rev']})],
-      ['ready', call('github.pr.ready', {folderId: folder.id, number: 5})],
-      ['line comment', call('github.pr.reviewComment', {folderId: folder.id, number: 5, path: 'a.txt', line: 1, side: 'RIGHT', body: 'x'})],
-      ['reply', call('github.pr.reply', {folderId: folder.id, number: 5, threadId: 't', body: 'x'})],
-      ['resolve', call('github.pr.resolve', {folderId: folder.id, number: 5, threadId: 't', resolved: true})],
+    const attempts: [string, () => Promise<unknown>][] = [
+      ['threads', () => call('github.pr.threads', {folderId: folder.id, number: 5})],
+      ['review', () => call('github.pr.review', {folderId: folder.id, number: 5, event: 'APPROVE'})],
+      ['reviewers', () => call('github.pr.requestReview', {folderId: folder.id, number: 5, reviewers: ['rev']})],
+      ['ready', () => call('github.pr.ready', {folderId: folder.id, number: 5})],
+      ['line comment', () => call('github.pr.reviewComment', {folderId: folder.id, number: 5, path: 'a.txt', line: 1, side: 'RIGHT', body: 'x'})],
+      ['reply', () => call('github.pr.reply', {folderId: folder.id, number: 5, threadId: 't', body: 'x'})],
+      ['resolve', () => call('github.pr.resolve', {folderId: folder.id, number: 5, threadId: 't', resolved: true})],
     ];
-    for (const [label, attempt] of attempts) await assert.rejects(attempt, (error: Error) => error.message.includes('GitHub-only') && error.message.includes(name) && error.message.includes(noun), `${name} ${label}`);
+    for (const [label, attempt] of attempts) await assert.rejects(attempt(), (error: Error) => error.message.includes('GitHub-only') && error.message.includes(name) && error.message.includes(noun), `${name} ${label}`);
   }
   assert.equal(forge.calls.length, 0, 'nothing was sent to either service');
 });
