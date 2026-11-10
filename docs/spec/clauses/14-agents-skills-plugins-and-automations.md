@@ -75,6 +75,12 @@ Boundaries:
 | [MUS-SPEC-14-776D](14-agents-skills-plugins-and-automations.md#mus-spec-14-776d) | Old whole-folder links get the defaults; the person's own skills are never removed | [`old whole-folder links get the defaults and a person's own unrelated skill is never removed`](../../../packages/agent-app/tests/plugin-choice-776.test.ts) |
 | [MUS-SPEC-14-776E](14-agents-skills-plugins-and-automations.md#mus-spec-14-776e) | Computer use follows the choice too | [`choosing installed or off for computer use leaves Muster's computer-use server out of the turn`](../../../packages/agent-app/tests/plugin-choice-776.test.ts) |
 | [MUS-SPEC-14-776F](14-agents-skills-plugins-and-automations.md#mus-spec-14-776f) | Each plugin row in Skills & plugins has a version picker | [`#776 each plugin row picks Muster's version, an installed one or off`](../../../packages/agent-app/tests/plugin-choice-776-components.tsx) |
+| [MUS-SPEC-14-845A](14-agents-skills-plugins-and-automations.md#mus-spec-14-845a) | Nothing runs before the set time; one run at 3:00 PM New York (19:00 UTC); days later still one run, kept and marked done with no next run, its chat linked; renaming it does not run it again. | [`a once automation runs at its local date and time, then shows as done with its run linked`](../../../packages/agent-app/tests/automations-once-845.test.ts) |
+| [MUS-SPEC-14-845B](14-agents-skills-plugins-and-automations.md#mus-spec-14-845b) | Create and move-to-past are refused with a message to choose a future time; impossible or malformed dates are refused; the preview shows no run and says the time has passed. | [`a once time that has already passed is refused at save, and the preview says so`](../../../packages/agent-app/tests/automations-once-845.test.ts) |
+| [MUS-SPEC-14-845C](14-agents-skills-plugins-and-automations.md#mus-spec-14-845c) | After a restart past the time, catch-up on runs once with trigger catch-up and a "Ran late. It was due …" reason; catch-up off records one missed entry and sends nothing; both read done. | [`closed at the set time: it runs once at the next start and says it ran late, or records one missed entry when catch-up is off`](../../../packages/agent-app/tests/automations-once-845.test.ts) |
+| [MUS-SPEC-14-845D](14-agents-skills-plugins-and-automations.md#mus-spec-14-845d) | Editing the target from chat A to chat B keeps the set time; at that time the run goes to chat B only and chat A gets nothing. | [`a scheduled once automation moved to another chat before its time runs in the new chat only, at the same time`](../../../packages/agent-app/tests/automations-once-845.test.ts) |
+| [MUS-SPEC-14-845E](14-agents-skills-plugins-and-automations.md#mus-spec-14-845e) | Kolkata, New York summer and winter, a DST-skipped 02:30 (runs 03:30) and a repeated 01:30 (runs the first) all resolve; nothing after the time; summaries name the zone; malformed and impossible dates are refused. | [`once times are wall-clock times in their zone, DST included, and malformed ones are refused`](../../../packages/agent-app/tests/automations-once-845.test.ts) |
+| [MUS-SPEC-14-845F](14-agents-skills-plugins-and-automations.md#mus-spec-14-845f) | Repeat lists "Once at a date and time"; picking it shows a date and time control (9:00 tomorrow) and the time zone; the preview says "Runs at"; a refused past time shows in the editor; the save sends the once schedule; a run once automation reads Done with its chat linked. | [`#845 the editor schedules a once run with a date and time in a named zone, and a run once automation reads Done with its chat linked`](../../../packages/agent-app/tests/automations-once-845-dom.tsx) |
 
 ### Claude Code background sub-agents
 
@@ -739,4 +745,74 @@ For each plugin Muster ships (documents, spreadsheets, presentations, PDF, visua
 - Test: `packages/agent-app/tests/plugin-choice-776-components.tsx::#776 each plugin row picks Muster's version, an installed one or off`
 - Environment: Renderer DOM suite (linkedom); stubbed bridge.
 - Known gaps: Not a screenshot of the real app.
+- Evidence: UNVERIFIED
+
+### Run once at a set time (#845)
+
+An automation can run once at a date and time instead of repeating. The time is a wall-clock time in the automation's time zone, shown with the zone. Once it has run (or been missed) it stays in the list as done, with its run linked.
+
+<a id="mus-spec-14-845a"></a>
+#### MUS-SPEC-14-845A: A once automation runs at its local date and time, then shows as done
+
+- Precondition: An automation set to "Once at" 3:00 PM on 18 Sep 2026 in America/New_York, created at 10:00 UTC that day, opening a new chat.
+- Action: Move the clock to one minute before, then just after, the set time; then three days on; then rename it.
+- Expected result: Nothing runs before 19:00 UTC. One scheduled run starts at the set time in a new chat and completes. Days later it has still run exactly once. The automation is kept, reads as done with no next run, and its last run links the chat. Its summary reads "Once on Fri, Sep 18, 2026 at 3:00 PM (America/New_York)". Renaming it is allowed and does not run it again.
+- Test: `packages/agent-app/tests/automations-once-845.test.ts::a once automation runs at its local date and time, then shows as done with its run linked`
+- Environment: Node test runner; the real service with its scheduler clock (automationTiming.now) moved by the test; a fake provider.
+- Known gaps: Runs only while Muster is open, like every automation.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-845b"></a>
+#### MUS-SPEC-14-845B: A once time that has already passed is refused at save
+
+- Precondition: Clock at 10:00 UTC on 18 Sep 2026; the automation time zone is America/New_York.
+- Action: Save a once automation for 05:59 local (one minute ago), for 30 Feb, and for free text; preview a past and a future time; move a pending one into the past.
+- Expected result: Saving a past time is refused: "That time has already passed. Choose a time in the future." An impossible or malformed date is refused with a request for a date and time. The preview lists no next run and warns that the time has passed; a future time previews its one run and no warning. Moving a pending one into the past is refused and it keeps its time.
+- Test: `packages/agent-app/tests/automations-once-845.test.ts::a once time that has already passed is refused at save, and the preview says so`
+- Environment: Node test runner; the real service; the scheduler clock moved by the test.
+- Known gaps: A time a few seconds ahead can still pass before the first tick; it then runs on that tick as a normal on-time run.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-845c"></a>
+#### MUS-SPEC-14-845C: Closed at the set time: it runs once at the next start and says it ran late
+
+- Precondition: Two once automations for 3:00 PM New York on 18 Sep 2026, one with "After sleep: Run once to catch up" (the default) and one with "Skip missed runs". Muster closes before the time.
+- Action: Start Muster again at 22:30 UTC, three and a half hours late, and let it run until the next morning.
+- Expected result: The catch-up one runs once, as a catch-up run for 19:00 UTC, with the reason "Ran late. It was due Fri, Sep 18, 2026 at 3:00 PM (America/New_York) …". The other gets one missed entry saying it did not run, and sends no prompt. Neither runs again; both read as done. This is the same missed-run rule every other schedule follows.
+- Test: `packages/agent-app/tests/automations-once-845.test.ts::closed at the set time: it runs once at the next start and says it ran late, or records one missed entry when catch-up is off`
+- Environment: Node test runner; two real service instances on one data folder; the scheduler clock moved by the test; a fake provider.
+- Known gaps: A run is "late" after the scheduler grace (150 seconds); a run within the grace counts as on time.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-845d"></a>
+#### MUS-SPEC-14-845D: A scheduled once automation can be moved to another chat before it runs
+
+- Precondition: A once automation for 3:00 PM New York that continues chat A, and another chat B.
+- Action: Before the time, edit the automation to continue chat B instead; then let the time pass.
+- Expected result: The edit keeps the next run at 19:00 UTC. At that time one run starts in chat B, which gets the run notice and the prompt; chat A gets nothing.
+- Test: `packages/agent-app/tests/automations-once-845.test.ts::a scheduled once automation moved to another chat before its time runs in the new chat only, at the same time`
+- Environment: Node test runner; the real service; the scheduler clock moved by the test; a fake provider.
+- Known gaps: Moving uses the existing Edit form; there is no drag between chats. The same applies to every automation, not only once.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-845e"></a>
+#### MUS-SPEC-14-845E: Once times are wall-clock times in their time zone
+
+- Precondition: Once schedules in Asia/Kolkata, America/New_York and UTC, including the 2026 DST changes.
+- Action: Ask the schedule math for the run time and the summary, and validate malformed values.
+- Expected result: 09:00 in Kolkata is 03:30 UTC; 09:00 New York is 14:00 UTC in December; 02:30 on 8 Mar 2026 in New York (skipped by DST) runs at 03:30 EDT, and 01:30 on 1 Nov 2026 (repeated) runs at the first one, as daily schedules do. There is nothing after the time. The summary is "Once on Mon, Sep 21, 2026 at 9:05 AM (Asia/Kolkata)". A date without a time, 24:00, month 13, 29 Feb in a non-leap year, empty and padded values are refused.
+- Test: `packages/agent-app/tests/automations-once-845.test.ts::once times are wall-clock times in their zone, DST included, and malformed ones are refused`
+- Environment: Node test runner; pure schedule functions.
+- Known gaps: None.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-14-845f"></a>
+#### MUS-SPEC-14-845F: The editor offers Once in its Repeat picker, and a run once automation reads Done
+
+- Precondition: The Automations list with one once automation that already ran in "Release notes chat".
+- Action: Read its row and open it; then start a new automation, pick Once, set 1 Dec 2026 9:00, save while the runtime refuses, then save again.
+- Expected result: The row is kept, reads Done, and its summary names the time and zone; opened, its history links "Release notes chat". The existing Repeat picker offers "Once at a date and time"; picking it shows an "On" date and time field defaulting to 9:00 tomorrow and the Time zone field with this computer's zone. The preview asks for the once schedule and reads "Runs at". No repeating preset reads as picked. A refused save shows the message in the editor; the next save sends {kind: once, at: 2026-12-01T09:00} with the zone.
+- Test: `packages/agent-app/tests/automations-once-845-dom.tsx::#845 the editor schedules a once run with a date and time in a named zone, and a run once automation reads Done with its chat linked`
+- Environment: Renderer DOM suite (linkedom); stubbed bridge.
+- Known gaps: Not a screenshot of the real app; the native date and time picker is not opened.
 - Evidence: UNVERIFIED
