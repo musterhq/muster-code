@@ -24,7 +24,7 @@ export function browserToolStyle(driver: string | undefined): BrowserToolStyle {
     case undefined: case 'codex-app-server': return 'codex';
     case 'claude-code-cli': return 'claude';
     case 'opencode-cli': return 'opencode';
-    case 'grok-acp': return 'acp';
+    case 'grok-acp': case 'acp-agent': return 'acp';
     case 'openai-chat-completions': case CLAUDE_LANE_DRIVER: return 'native';
     default: return 'none';
   }

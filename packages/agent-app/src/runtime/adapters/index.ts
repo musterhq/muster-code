@@ -20,10 +20,13 @@ import {cursorAdapter, cursorCapabilities, CURSOR_ENV} from './cursor-cli.ts';
 import {geminiAdapter, geminiCapabilities, geminiSignIn} from './gemini-cli.ts';
 import {grokAdapter, grokCapabilities} from './grok-cli.ts';
 import type {AgentSpawn} from './cli-common.ts';
+import {acpAdapter} from './acp.ts';
+import {activeAcpAgents, type AcpAgents} from '../acp-agents.ts';
+import {ACP_DRIVER, isAcpProviderId} from '../../shared/acp-agents.ts';
 
 export type {RunnableAdapter} from './types.ts';
 /** Provider ids served by these adapters; their runs never leave remote work behind. */
-export const isAdapterProvider = (id: string) => id === 'claude-code' || id === 'opencode' || id === 'cursor-agent' || id === 'gemini-cli' || id === 'grok-cli' || id === 'antigravity' || id.startsWith('env-') || id.startsWith('local-') || id.startsWith('custom_');
+export const isAdapterProvider = (id: string) => id === 'claude-code' || id === 'opencode' || id === 'cursor-agent' || id === 'gemini-cli' || id === 'grok-cli' || id === 'antigravity' || id.startsWith('env-') || id.startsWith('local-') || id.startsWith('custom_') || isAcpProviderId(id);
 const hash = (...parts: unknown[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 const OPENAI_CHAT = /^(?:gpt-|chatgpt-|o[1-9])/, OPENAI_EXCLUDE = /(?:audio|realtime|tts|transcribe|image|search|embedding|instruct|moderation|dall-e|codex)/;
 
@@ -41,6 +44,8 @@ export interface AdapterCatalogOptions {
   localProbes?: boolean;
   /** Cursor CLI, Gemini CLI, Grok Build and Antigravity. Default true outside tests. */
   cliAgents?: boolean;
+  /** #160: ACP agents added in Settings; defaults to the runtime's open store. */
+  acpAgents?: () => AcpAgents | undefined;
 }
 export interface AdapterCatalog { instances(): ProviderInstance[]; ready(): Promise<void> }
 
@@ -175,6 +180,14 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
           detail: `${WITH_TOOLS}. Local OpenAI-compatible server; models from its own /models list.`},
           adapter(`${server.id}:${bindingId}`, () => openAICompatibleAdapter({endpoint: server.endpoint, apiKey: () => server.keyEnv ? env()[server.keyEnv] : undefined, label: server.name, fetch: request, memory: memory(server.id)}))));
       }
+    }
+    // #160: checked ACP agents run as routes; unchecked or failing ones are listed by the store itself.
+    const acp = (options.acpAgents ?? activeAcpAgents)();
+    acp?.claim();
+    for (const record of acp?.agents() ?? []) {
+      if (!acp!.ready(record)) continue;
+      const spec = acp!.spec(record), bindingId = hash(record.id, record.command, record.args);
+      rows.push(route({...acp!.info(record), bindingId, driver: ACP_DRIVER}, adapter(`acp:${bindingId}`, () => acpAdapter({agent: spec, env: e, home, spawn: agentSpawn}))));
     }
     const store = options.customs ? undefined : activeCustomProviders();
     store?.claim();

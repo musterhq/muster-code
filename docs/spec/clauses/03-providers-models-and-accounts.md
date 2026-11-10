@@ -901,7 +901,7 @@ Any agent that speaks the Agent Client Protocol (JSON-RPC over stdio) can be add
 - Expected result: The card says Agent Client Protocol. The sheet lists presets plus "Other command"; the preset fills name, command and arguments and shows "Muster does not install it" with the install command, without running anything. A failed check shows the plain error. A passing check says how many models it found. Both tests update the same draft with the command, arguments, variables and preset; Save closes the sheet and keeps the agent.
 - Test: `packages/agent-app/tests/add-acp-agent-160-dom.tsx::Add ACP agent: a preset fills the command and shows how to install it; Test starts it, Save keeps it`
 - Environment: DOM suite (linkedom) rendering the real ProvidersScreen; fake bridge.
-- Known gaps: Screenshots of the sheet are in the PR, not checked here.
+- Known gaps: Layout is not checked; the sheet reuses the existing provider sheet styles and no screenshot of the running app was taken.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-03-160l"></a>

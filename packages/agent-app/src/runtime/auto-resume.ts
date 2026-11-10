@@ -53,7 +53,7 @@ const CLI_SESSIONS = new Set(['claude-code', 'opencode', 'cursor-agent', 'gemini
 export function hasNativeSession(chat: Pick<Chat, 'providerThreadId' | 'providerThreadProviderId' | 'providerId'>): boolean {
   if (!chat.providerThreadId) return false;
   const id = chat.providerThreadProviderId ?? chat.providerId ?? '';
-  return !isAdapterProvider(id) || CLI_SESSIONS.has(id);
+  return !isAdapterProvider(id) || CLI_SESSIONS.has(id) || id.startsWith('acp_');
 }
 
 const UNITS: Record<string, number> = { s: 1_000, sec: 1_000, second: 1_000, m: 60_000, min: 60_000, minute: 60_000, h: 3_600_000, hr: 3_600_000, hour: 3_600_000, d: 86_400_000, day: 86_400_000 };
