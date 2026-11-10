@@ -25,7 +25,7 @@ import {ASK_USER_METHOD, ASK_USER_RULE} from './ask-user.ts';
 import {DEVICE_MCP, DEVICE_NOTE} from '../shared/device-protocol.ts';
 import type {McpServerSpec} from './adapters/types.ts';
 import type {RunnableAdapter} from './adapters/types.ts';
-import {CLAUDE_CODE_LANE_DRIVER, CLAUDE_LANE_DRIVER} from '../shared/provider-lanes.ts';
+import {autoApprovalSupported, CLAUDE_CODE_LANE_DRIVER, CLAUDE_LANE_DRIVER} from '../shared/provider-lanes.ts';
 import {adoptCodexThread, prepareChatCodexHome} from './codex-home.ts';
 import {musterSkillsDir} from './office-skills.ts';
 import {claudeLaneAllowed, LANE_DROPPED_SERVERS, withoutUnavailableToolNotes} from './claude-lane.ts';
@@ -272,7 +272,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     const instructions = native?.context ? [browser.instructions, native.context].filter(Boolean).join('\n\n') : browser.instructions;
     try {
       const result = await adapter.run({
-        chat: input.chat, cwd: input.cwd, prompt: native ? native.text : lane?.seed?.trim() ? `${lane.seed.trim()}\n\nCurrent user request:\n${input.prompt}` : input.prompt, model, permissionMode: access.permissionMode, signal: owned.controller.signal,
+        chat: input.chat, cwd: input.cwd, prompt: native ? native.text : lane?.seed?.trim() ? `${lane.seed.trim()}\n\nCurrent user request:\n${input.prompt}` : input.prompt, model, permissionMode: access.permissionMode === 'auto' && !autoApprovalSupported(lane?.driver ?? route.info.driver) ? 'workspace' : access.permissionMode, signal: owned.controller.signal,
         contextWindow: input.contextWindow ?? route.info.models.find(entry => entry.id === model)?.contextWindow,
         ...(sandboxedRun(input.configOverrides) ? {sandboxed: true} : {}),
         ...(input.images?.length ? {images: input.images} : {}), ...(route.info.models.find(entry => entry.id === model)?.images === true ? {vision: true} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),

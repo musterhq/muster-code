@@ -211,7 +211,7 @@ modelChoices.find(button=>button.title.startsWith('OpenAI Direct'))!.click();awa
 assert.ok(calls.some(call=>call.command==='chat.selectProvider'&&call.input.providerId==='openai-direct'&&call.input.model==='shared-model'));
 // Access: three levels; Full needs confirmation and turns the label orange.
 await click('[data-testid="composer-access"]');
-assert.equal(document.querySelectorAll('[role="menuitemradio"]').length,3);
+assert.equal(document.querySelectorAll('[role="menuitemradio"]').length,4,'Read only, Ask for approval, Auto (#841), Full access');
 (Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')).find(button=>button.textContent?.includes('Full access'))!).click();await delay(65);
 assert.deepEqual(errors,[]);
 assert.equal(document.querySelector('[role="menu"]'),null,'choosing Full access closes the menu for confirmation');

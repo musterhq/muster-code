@@ -79,6 +79,9 @@ export const APPROVAL_WAIT_LABEL='Waiting for approval';
 export function awaitingApproval(item:{status?:string;data?:Record<string,unknown>}):boolean {return item.status==='running'&&typeof item.data?.awaitingApproval==='string';}
 /** #580: the user denied the card, a tool rule refused it, or the card timed out. It never ran, whatever status the provider closed it with. */
 export const executionDenied=(data:Record<string,unknown>|undefined):boolean=>data?.executionDenied===true;
+/** #841: the rule Auto access settled this tool with (runtime sets `autoApproved`), or undefined when a person approved it or none was needed. */
+export function autoApprovedRule(data:Record<string,unknown>|undefined):string|undefined {const auto=data?.autoApproved;return auto&&typeof auto==='object'&&typeof (auto as {rule?:unknown}).rule==='string'?(auto as {rule:string}).rule:undefined;}
+export const autoApprovedText=(rule:string)=>`Approved automatically · ${rule}`;
 /** Terminal verbs must not imply that a refused tool executed. */
 export function toolState(item:{status?:string;data?:Record<string,unknown>},presentation:ToolPresentation,failed=false):string {
  if(awaitingApproval(item))return APPROVAL_WAIT_LABEL;

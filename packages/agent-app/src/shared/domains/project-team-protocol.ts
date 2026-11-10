@@ -87,7 +87,7 @@ export interface AccessPolicy { permissionMode: ChatPermissionMode; folderIds: s
 export const LOCAL_OWNER_ID = 'local';
 export const DEFAULT_AGENT_ID = 'agent';
 
-const RANK: Record<ChatPermissionMode, number> = { 'read-only': 0, workspace: 1, full: 2 };
+const RANK: Record<ChatPermissionMode, number> = { 'read-only': 0, workspace: 1, auto: 2, full: 3 };
 const lowest = (modes: (ChatPermissionMode | null | undefined)[]): ChatPermissionMode | null => {
   let out: ChatPermissionMode | null = null;
   for (const mode of modes) { if (mode === null) return null; if (mode && (out === null || RANK[mode] < RANK[out])) out = mode; }

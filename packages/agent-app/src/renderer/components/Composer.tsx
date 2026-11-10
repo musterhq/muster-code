@@ -32,7 +32,8 @@ import { ProjectPicker } from './ProjectPicker';
 import { RecordSkill, type SkillDraft } from './RecordSkill';
 import { SKETCH_FILE_NAME, SketchPad, type SketchStroke } from './SketchPad';
 import { ConfirmSheet } from './ConfirmSheet';
-import { ACCESS_OPTIONS, FullAccessConfirm } from './FullAccessConfirm';
+import { accessOptions, FullAccessConfirm } from './FullAccessConfirm';
+import { autoApprovalSupported } from '../../shared/provider-lanes';
 import { COMPOSER_COMMANDS, EFFORT_LABELS, SKILL_RECORDER_PROMPT, followUpAction, skillDraft, terminalText, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, attachmentKey, attachmentName, imageBlindModel, imageBlindWarning, toolBlindModel, toolCapableAlternative, TOOLS_BLIND_NOTICE, chipPayload, chipToken, skillToken, classifyPaste, configuredAccess, effectiveAccess, findChipRanges, findTokenRanges, formatBytes, insertToken, nextEffort, previewLimit, rankSections, readMentionQuery, readSlashQuery, saveFolderAccess, scoreItem, scoreQueryMatch, INIT_PROMPT, reviewPrompt, pendingQuestionItem, questionDigit, pluginPromptHint, terminalsPillLabel, skipsFullAccessConfirm, setFullAccessSkip, type ChipRange, type ComposerAccess, type ComposerChip, type ComposerCommandId, type TokenVocabulary } from './composerMenus';
 import { QueuedMessages } from './QueuedMessages';
 import { CheckoutQueueBanner, isCheckoutQueued, sendWithCheckoutGuard } from './ParallelRunGuard';
@@ -47,7 +48,6 @@ import { device } from '../../shared/device-noun.ts';
 import { sandboxRouteSupported } from '../../shared/sandbox-routes.ts';
 import { sandboxRouteWarning, useChatEnvironment } from './EnvironmentFooter';
 
-const ACCESS = ACCESS_OPTIONS;
 const COMMAND_ICONS: Record<ComposerCommandId, LucideIcon> = {plan:Lightbulb,goal:Goal,project:FolderKanban,sketch:PenLine,terminal:SquareTerminal,model:Cpu,reasoning:Brain,access:CircleAlert,new:SquarePen,browser:Globe,stop:Square,compact:Shrink,fork:GitBranch,rename:Pencil,status:Gauge,mcp:Server,init:FilePlus,review:GitCompare};
 /** A terminal whose recent output can be attached: an owned command, or an interactive shell read through its replay ring. */
 interface TerminalSource { key: string; label: string; read(): Promise<string> }
@@ -255,7 +255,10 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const actualAccess = effectiveAccess(chat);
   const planMode = chat.mode === 'plan';
   const shownAccess = planMode ? selectedAccess : actualAccess;
-  const accessOption = ACCESS.find(option => option.id === shownAccess)!;
+  // #841: a route whose approvals Muster cannot answer runs Auto as Workspace; the Auto row says so.
+  const routeDriver = (state.providers.value ?? []).find(row => row.id === chat.providerId)?.driver;
+  const accessRows = useMemo(() => accessOptions(routeDriver === undefined || autoApprovalSupported(routeDriver)), [routeDriver]);
+  const accessOption = accessRows.find(option => option.id === shownAccess)!;
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const attachmentsRef = useRef(attachments); attachmentsRef.current = attachments;
   const [dragging, setDragging] = useState(false);
@@ -1207,7 +1210,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
         <Menu.Trigger ref={accessTrigger} data-testid="composer-access" className={`composer-access is-${shownAccess}${planMode ? ' is-muted' : ''}`} aria-label={`Access: ${accessOption.label}`} aria-haspopup="menu" aria-expanded={menu === 'access'} disabled={settingsBlocked}
             title={planMode ? 'Plan mode runs read-only' : running ? 'Change permissions · applies to the next turn' : 'Change permissions'}><accessOption.Icon size={14} aria-hidden="true" /><span className="composer-access-label">{accessOption.label}</span></Menu.Trigger>
         <MenuPopup ref={accessMenu} data-testid="composer-popover" side="top" align="start" sideOffset={6} className="composer-access-menu" aria-label="Permissions" finalFocus={accessTrigger}>
-        <Menu.RadioGroup value={selectedAccess}>{ACCESS.map(option => <Menu.RadioItem key={option.id} value={option.id} render={<button type="button" />} nativeButton className={`is-${option.id}`} disabled={settingsBlocked} onClick={() => void chooseAccess(option.id)}>
+        <Menu.RadioGroup value={selectedAccess}>{accessRows.map(option => <Menu.RadioItem key={option.id} value={option.id} render={<button type="button" />} nativeButton className={`is-${option.id}`} disabled={settingsBlocked} onClick={() => void chooseAccess(option.id)}>
           <option.Icon size={15} aria-hidden="true" /><span><strong>{option.label}</strong><small>{option.description}</small></span>{selectedAccess === option.id && <Check size={13} aria-hidden="true" />}</Menu.RadioItem>)}</Menu.RadioGroup>
         {running && <p className="composer-access-note">Applies to the next turn</p>}
         </MenuPopup>

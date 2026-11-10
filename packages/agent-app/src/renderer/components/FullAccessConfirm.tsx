@@ -1,15 +1,13 @@
-import { CircleAlert, FolderOpen, Globe, Hand, LockKeyhole, SquareTerminal } from 'lucide-react';
+import { CircleAlert, FolderOpen, Globe, Hand, LockKeyhole, ShieldCheck, SquareTerminal } from 'lucide-react';
 import { Dialog } from '@base-ui/react/dialog';
 import React, { useEffect, useState } from 'react';
-import { FULL_ACCESS_SKIP_EVENT, fullAccessSkipFolders, setFullAccessSkip, type ComposerAccess } from './composerMenus';
+import { accessOptionsFor, FULL_ACCESS_SKIP_EVENT, fullAccessSkipFolders, setFullAccessSkip, type ComposerAccess } from './composerMenus';
 import './composer-s3a.css';
 
-/** The three access levels, shared by the in-chat Composer and the New-chat draft so both toolbars match. */
-export const ACCESS_OPTIONS = [
-  {id:'read-only',label:'Read only',description:'Read files and answer; never edits',Icon:LockKeyhole},
-  {id:'workspace',label:'Ask for approval',description:'Always ask to edit external files and use the internet',Icon:Hand},
-  {id:'full',label:'Full access',description:'Unrestricted access to the internet and any file on your computer',Icon:CircleAlert},
-] as const satisfies readonly {id:ComposerAccess;label:string;description:string;Icon:typeof LockKeyhole}[];
+/** The access levels, shared by the in-chat Composer and the New-chat draft so both toolbars match. */
+const ACCESS_ICONS = {'read-only':LockKeyhole,workspace:Hand,auto:ShieldCheck,full:CircleAlert} as const satisfies Record<ComposerAccess,typeof LockKeyhole>;
+export const accessOptions = (autoSupported = true) => accessOptionsFor(autoSupported).map(option => ({...option, Icon: ACCESS_ICONS[option.id]}));
+export const ACCESS_OPTIONS = accessOptions();
 
 const FULL_ACCESS_ROWS = [
   {Icon:FolderOpen,title:'Files and folders',text:'Read, create, modify, upload, or delete files anywhere on this computer'},
