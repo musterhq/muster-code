@@ -34,6 +34,7 @@ Boundaries:
 | [MUS-SPEC-05-841C](05-access-modes-and-approvals.md#mus-spec-05-841c) | A command on the `approvals.autoAllow` setting is accepted in Auto access and its row names the allowlist; a command not on it still asks. | [`Auto access: a command on the person's allowlist settles itself and names the allowlist`](../../../packages/agent-app/tests/auto-approvals-841.test.ts) |
 | [MUS-SPEC-05-841D](05-access-modes-and-approvals.md#mus-spec-05-841d) | A Claude Code chat in Auto access sends its permission prompts to Muster in default mode; a safe git command is allowed at once and git push waits for the card. | [`Auto access on Claude Code: prompts reach Muster, a safe command is allowed at once and git push still asks`](../../../packages/agent-app/tests/auto-approvals-841.test.ts) |
 | [MUS-SPEC-05-841E](05-access-modes-and-approvals.md#mus-spec-05-841e) | Codex runs Auto with a workspace sandbox and asks Muster about every untrusted command; Full access still never prompts; an OpenCode route runs as Workspace; the picker lists Auto and says when it runs as Ask for approval. | [`Auto access: Codex asks Muster about every untrusted command; other routes run as Workspace and the picker says so`](../../../packages/agent-app/tests/auto-approvals-841.test.ts) |
+| [MUS-SPEC-05-841F](05-access-modes-and-approvals.md#mus-spec-05-841f) | Environment prefixes, rg preprocessors, git config and output options, writing or executing sed scripts, sort helpers and tools that write output still ask in Auto; project code (tests, scripts, linters) settles only inside Codex's workspace sandbox; edits inside `.git` ask. | [`Auto access: read-only commands that can run programs or write files still ask`](../../../packages/agent-app/tests/auto-approvals-841.test.ts) |
 
 ### Confined writes and policy-only requests
 
@@ -233,3 +234,14 @@ Boundaries:
 - Environment: Node test runner; fake routes; no network.
 - Known gaps: The picker check is on the option list the Composer and New chat screen render, not a rendered menu.
 - Evidence: local; ~/.muster-work/review/841/green.txt; exit 0; 5 passed, 0 failed, 0 skipped; commit d489fd8a9daa9d263fc7f44e1cf2925f7ad16191
+
+<a id="mus-spec-05-841f"></a>
+#### MUS-SPEC-05-841F: Read-only commands that can run programs or write files still ask
+
+- Precondition: Auto access. The chat's folder is a temp folder. One request set is judged as on Codex (inside Muster's workspace sandbox), another as on Claude Code (no OS sandbox).
+- Action: Ask to run commands that look read-only but run a program or write a file: an environment assignment before any command (`GIT_EXTERNAL_DIFF=…`, `DYLD_INSERT_LIBRARIES=…`), `rg --pre`, git with `-c`, `--config-env`, `--exec-path`, `--git-dir`/`--work-tree`/`-C` outside the folder, `--output`, `--ext-diff`, `--textconv`, `git grep -O`, `git cat-file --filters`; sed scripts with `w`, `W`, `e`, the `w`/`e` flags of `s`, `-f` or in-place; `sort --compress-program` or `-o`; `tree -o`; `eslint --fix`/`-o`; `prettier` without `--check`; `tsc` without `--noEmit`; `uniq` with an output file; `file -C`; `cd` outside the folder. Then ask for project-code commands (npm test, package scripts, node --test, pytest, go/cargo, make, vitest, eslint, tsc, prettier) on each route; and for edits inside `.git`. On the Claude Code route, Claude Code asks to run `npm test`.
+- Expected result: Every listed command asks (no rule matches). The same tools used read-only (`git diff`, `git -C . log`, `rg -n`, `sed -n "1,20p"`, `sort -u`, `tree -L 2`, `prettier --check`, `tsc --noEmit`, `uniq -c`, `cd src && ls`) settle. Project-code commands settle on Codex and ask on Claude Code unless they are on the allowlist; plain reads settle on both. Edits inside `.git` ask. On Claude Code, `npm test` shows a card and gets no answer until the user decides.
+- Test: `packages/agent-app/tests/auto-approvals-841.test.ts::Auto access: read-only commands that can run programs or write files still ask`
+- Environment: Node test runner; the Auto classifier and a fake Claude Code process; temp folder; no network.
+- Known gaps: A conservative list, not a shell interpreter: forms it does not recognise ask. A program on PATH that was itself replaced is outside this check.
+- Evidence: UNVERIFIED

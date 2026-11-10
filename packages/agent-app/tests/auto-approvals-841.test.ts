@@ -15,6 +15,7 @@ import {claudeArgs, claudeCodeAdapter, type Spawn} from '../src/runtime/adapters
 import type {AdapterRunInput, RunnableAdapter} from '../src/runtime/adapters/types.ts';
 import {autoApprovalSupported} from '../src/shared/provider-lanes.ts';
 import {accessOptionsFor} from '../src/renderer/components/composerMenus.ts';
+import {autoApprove} from '../src/runtime/auto-approval.ts';
 
 const info: ProviderAdapter['info'] = () => [{id: 'codex', name: 'Codex', driver: 'codex-app-server', available: true, identityMasked: 'Hidden', models: []}];
 const tick = () => new Promise<void>(resolve => setTimeout(resolve, 5));
@@ -162,4 +163,52 @@ test('Auto access: Codex asks Muster about every untrusted command; other routes
   assert.deepEqual(supported.map(option => option.id), ['read-only', 'workspace', 'auto', 'full']);
   assert.match(fallback.find(option => option.id === 'auto')!.description, /Ask for approval/);
   assert.doesNotMatch(supported.find(option => option.id === 'auto')!.description, /Ask for approval/);
+});
+
+// Spec: MUS-SPEC-05-841F (docs/spec/clauses/05-access-modes-and-approvals.md#mus-spec-05-841f)
+test('Auto access: read-only commands that can run programs or write files still ask', async t => {
+  const cwd = await mkdtemp(join(tmpdir(), 'muster-841-f-'));
+  t.after(() => rm(cwd, {recursive: true, force: true}));
+  const run = (text: string, sandboxed = true) => autoApprove('item/commandExecution/requestApproval', {command: text}, undefined, {cwd, sandboxed});
+  const asks = [
+    // 1. any environment assignment in front of a command
+    'GIT_EXTERNAL_DIFF=/tmp/x git diff', 'GIT_PAGER=/tmp/x git log', 'DYLD_INSERT_LIBRARIES=/tmp/x.dylib ls', 'LD_PRELOAD=/tmp/x.so cat a', 'FOO=1 rg x',
+    // 2. rg preprocessors run programs
+    'rg --pre /tmp/x foo', 'rg --pre=/tmp/x foo', 'rg --pre-glob "*.txt" --pre cat foo',
+    // 3. git options that run programs, write files or leave the folder
+    'git -c core.pager=/tmp/x log', 'git -c diff.external=/tmp/x diff', 'git --config-env=core.pager=X log', 'git --exec-path=/tmp diff', 'git --git-dir=/tmp/other/.git log', 'git --work-tree=/tmp status', 'git -C /tmp status',
+    'git diff --output=/tmp/out.patch', 'git log -p --output /tmp/out', 'git diff --ext-diff', 'git log -p --textconv', 'git grep -O/tmp/x foo', 'git grep --open-files-in-pager=vim foo', 'git cat-file --filters HEAD:a',
+    // 4. sed scripts that write or execute
+    'sed -n "w /tmp/out" a.txt', 'sed "s/a/b/w /tmp/out" a.txt', 'sed "s/a/b/e" a.txt', 'sed "1e id" a.txt', 'sed -f /tmp/script.sed a.txt', 'sed "W /tmp/out" a.txt', 'sed --in-place "s/a/b/" a.txt', 'sed -i.bak "s/a/b/" a.txt',
+    // 5. sort helpers
+    'sort --compress-program=/tmp/x big.txt', 'sort -o /tmp/out a.txt',
+    // 6. tools that write their output
+    'tree -o /tmp/out', 'tree --output=/tmp/out', 'eslint --fix src', 'eslint -o /tmp/out src', 'eslint --output-file /tmp/out src', 'prettier --write src', 'prettier -w src', 'prettier src', 'tsc', 'tsc -p .', 'tsc --outDir /tmp/out', 'uniq a.txt /tmp/out', 'file -C -m /tmp/magic',
+    // leaving the folder first
+    'cd /tmp && git status',
+  ];
+  for (const text of asks) assert.equal(run(text), null, `${text} asks`);
+  // The same tools stay automatic when used read-only.
+  for (const text of ['git diff', 'git -C . log --oneline', 'git --no-pager log -5', 'rg -n foo src', 'sed -n "1,20p" a.txt', 'sed -E "s/a/b/g" a.txt', 'sort -u a.txt', 'tree -L 2', 'prettier --check src', 'eslint src', 'tsc --noEmit', 'uniq -c a.txt', 'cd src && ls'])
+    assert.ok(run(text), `${text} settles itself`);
+  // 7. Commands that run the project's own code settle only inside Muster's workspace sandbox (Codex), never on Claude Code.
+  for (const text of ['npm test', 'pnpm -s typecheck', 'npm run build', 'node --test', 'python3 -m pytest', 'go test ./...', 'cargo check', 'make test', 'vitest run', 'pytest -q', 'eslint src', 'tsc --noEmit', 'prettier --check src']) {
+    assert.ok(run(text, true), `${text} settles in the sandbox`);
+    assert.equal(run(text, false), null, `${text} asks without the sandbox`);
+  }
+  assert.ok(autoApprove('item/commandExecution/requestApproval', {command: 'npm test'}, undefined, {cwd, sandboxed: false, allowlist: ['npm test']}), 'the allowlist still settles it');
+  assert.ok(run('git status', false), 'plain reads still settle without the sandbox');
+  // An edit inside the folder's .git can make later git commands run programs: it asks.
+  assert.equal(autoApprove('item/fileChange/requestApproval', {}, [{path: join(cwd, '.git', 'config'), kind: 'update'}], {cwd, sandboxed: true}), null);
+  assert.equal(autoApprove('item/fileChange/requestApproval', {}, [{path: '.git/hooks/pre-commit', kind: 'add'}], {cwd, sandboxed: true}), null);
+  // On the Claude Code route a test run shows a card.
+  const r = await claudeRig(t);
+  r.emit({type: 'system', subtype: 'init', session_id: 's1'}, bashAsk('t', 'npm test'));
+  await until(async () => (await r.items()).some(item => item.kind === 'approval' && item.status === 'pending'), 'a card for npm test on Claude Code');
+  assert.equal(r.responses().length, 0);
+  const card = (await r.items()).find(item => item.kind === 'approval')!;
+  await r.service.invoke('approval.respond', {id: card.id, approved: false, decision: 'decline'});
+  await until(() => r.responses().length === 1, 'the refusal');
+  r.emit({type: 'result', subtype: 'success', is_error: false, result: 'Done.'}); r.close(0);
+  await until(async () => (await r.service.invoke('chat.select', {id: r.chat.id})).some(item => item.kind === 'assistant' && /Done/.test(item.text)), 'the finished turn');
 });
