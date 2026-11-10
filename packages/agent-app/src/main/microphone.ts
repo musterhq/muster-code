@@ -1,13 +1,14 @@
 /** #840: microphone access for dictation. macOS asks once per app (Info.plist NSMicrophoneUsageDescription); the
  *  window's permission handler lets only the app's own page open the microphone, and only for audio. */
 import { MICROPHONE_SETTINGS_HINT, type MicrophoneAccess, type MicrophoneStatus } from '../shared/domains/dictation-protocol.ts';
+import { device } from '../shared/device-noun.ts';
 
 export interface MediaAccessProbe {
   getMediaAccessStatus(type: 'microphone'): string;
   askForMediaAccess?(type: 'microphone'): Promise<boolean>;
 }
 const DENIED = `Microphone access is off for Muster. ${MICROPHONE_SETTINGS_HINT}`;
-const RESTRICTED = 'Microphone access is blocked on this Mac (a device profile or Screen Time restriction).';
+const RESTRICTED = `Microphone access is blocked on ${device().lower} (a device profile or Screen Time restriction).`;
 
 export async function microphoneAccess(probe: MediaAccessProbe, platform: string = process.platform): Promise<MicrophoneAccess> {
   // Windows and Linux: Chromium's own getUserMedia prompt and the system privacy settings decide.
