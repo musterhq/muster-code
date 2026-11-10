@@ -73,6 +73,7 @@ test('physical Android: adb devices -l lists USB phones by model with a generic 
     if (args.includes('avd')) return 'Pixel_9\nOK\n';
     if (args.includes('ro.build.version.release')) return args[1] === 'R5CX10ABCDE' ? '15\n' : '16\n';
     if (args.includes('ro.product.manufacturer')) return 'samsung\n';
+    if (args.includes('ro.product.model')) return 'SM-S921B\n';
     if (args.includes('sys.boot_completed')) return '1\n';
     if (args.includes('size')) return 'Physical size: 1080x2340\n';
     return '';
@@ -310,7 +311,7 @@ test('physical Android: opens without booting, streams through the helper, refus
   let installOutput = 'Performing Streamed Install\nSuccess\n';
   const runs: string[][] = [], fetched: string[] = [], spawned: {env: NodeJS.ProcessEnv}[] = [];
   FakeSocket.all = [];
-  const {manager} = managerFixture({userData: dir, exists: file => !file.startsWith('/nowhere'),
+  const {manager} = managerFixture({userData: dir, env: {ANDROID_HOME: path.join(dir, 'sdk')}, exists: file => !file.startsWith('/nowhere'),
     run: async (file, args) => {
       runs.push([file, ...args]);
       if (args[0] === '--version') return 'v24.0.0';
@@ -319,6 +320,8 @@ test('physical Android: opens without booting, streams through the helper, refus
       if (args.includes('sys.boot_completed')) return '1\n';
       if (args.includes('ro.build.version.release')) return '15\n';
       if (args.includes('ro.product.manufacturer')) return 'samsung\n';
+      if (args.includes('ro.product.model')) return 'SM-S921B\n';
+    if (args.includes('ro.product.model')) return 'SM-S921B\n';
       if (args[2] === 'install') { if (/Failure/.test(installOutput)) throw new Error(installOutput); return installOutput; }
       return '';
     },

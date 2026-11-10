@@ -142,7 +142,7 @@ export function DeviceView({session, visible}: {session: DeviceSession; visible:
           <RailButton label="Home" icon={<NavGlyph kind="home"/>} onClick={() => press('home')} disabled={!session.inputReady}/>
           {/* Watches, TVs and car displays have no Recents and do not rotate. */}
           {handheld && <RailButton label="Recents" icon={<NavGlyph kind="recents"/>} onClick={() => press('appSwitcher')} disabled={!session.inputReady}/>}
-          {handheld && <RailButton label="Rotate" icon={<RotateCw size={15}/>} onClick={() => void deviceAction(() => invoke('devices.rotate', {id: session.deviceId}))}/>}
+          {handheld && !session.physical && <RailButton label="Rotate" icon={<RotateCw size={15}/>} onClick={() => void deviceAction(() => invoke('devices.rotate', {id: session.deviceId}))}/>}
           {frame.form !== 'automotive' && <RailButton label="Power" icon={<Power size={15}/>} onClick={() => press('power')}/>}
         </>}
         <span className="device-rail-gap"/>

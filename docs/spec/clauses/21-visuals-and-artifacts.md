@@ -882,7 +882,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Expected result: The Samsung opens without any boot request, and its stream and input go through the helper's serve-emu socket for its serial (the pinned scrcpy-server path). Shut down and rotate are refused with a reason and no adb command. The unauthorized phone is refused with the USB debugging fix. Install runs exactly `adb -s <serial> install -r <file>` and reports success. A file that is not an existing .apk is refused with no adb call, and adb's Failure line is reported.
 - Test: `packages/agent-app/tests/devices.test.ts::physical Android: opens without booting, streams through the helper, refuses shutdown, and Install APK runs adb install -r`
 - Environment: Node test with fakes for adb, the helper process and its sockets; no phone, emulator or network.
-- Known gaps: The file chooser is Electron's and is not opened here; the renderer's Install APK button is covered by the DOM suite only through its command.
+- Known gaps: Electron's file chooser and the Devices tab's Install APK button are not driven here; a real Samsung over USB is checked by hand.
 - Evidence: UNVERIFIED
 
 ### Maths in replies

@@ -73,7 +73,7 @@ function DevicePicker(): React.ReactElement {
   const devices = ui.list?.devices ?? [];
   const groups: {label: string; check: PlatformCheck; items: DeviceInfo[]; hidden?: string}[] = [
     {label: 'iOS Simulators', check: setup.ios, items: devices.filter(item => item.platform === 'ios'), ...(setup.host !== 'darwin' ? {hidden: `iOS Simulators need a Mac with Xcode, so they are not available on ${hostDevice().lower}.`} : {})},
-    {label: 'Android Emulators', check: setup.android, items: devices.filter(item => item.platform === 'android')},
+    {label: 'Android Emulators and phones', check: setup.android, items: devices.filter(item => item.platform === 'android')},
   ];
   return <div className="device-picker">
     <header className="device-picker-head">
@@ -86,15 +86,17 @@ function DevicePicker(): React.ReactElement {
       <h4>{group.label}</h4>
       {group.hidden ? <p className="device-group-note">{group.hidden}</p>
         : !group.check.available ? <div className="device-group-note is-missing"><FixSteps check={group.check}/></div>
-        : !group.items.length ? <p className="device-group-note">{group.label.startsWith('iOS') ? 'No simulators yet. Add one in Xcode › Window › Devices and Simulators.' : 'No virtual devices yet. Create one in Android Studio › Device Manager.'}</p>
+        : !group.items.length ? <p className="device-group-note">{group.label.startsWith('iOS') ? 'No simulators yet. Add one in Xcode › Window › Devices and Simulators.' : 'No virtual devices yet. Create one in Android Studio › Device Manager, or connect a phone over USB with USB debugging on.'}</p>
         : <ul className="device-list">{group.items.map(device => {
           const live = ui.sessions.some(session => session.deviceId === device.id), working = busy[device.id];
           const Icon = device.formFactor === 'tablet' ? Tablet : Smartphone;
-          return <li key={device.id} className="device-row" data-state={device.state}>
+          const status = working ?? (live ? 'Live' : device.state === 'unauthorized' ? 'Allow USB debugging on the phone' : device.state === 'booted' ? (device.physical ? 'Connected over USB' : 'Running') : device.state === 'booting' ? 'Starting…' : device.state === 'shutting-down' ? 'Shutting down…' : 'Off');
+          return <li key={device.id} className="device-row" data-state={device.state} {...(device.physical ? {'data-physical': 'true'} : {})}>
             <Icon size={15} aria-hidden="true"/>
-            <span className="device-row-copy"><strong>{deviceTitle(device)}</strong><span>{device.osVersion} · {working ?? (live ? 'Live' : device.state === 'booted' ? 'Running' : device.state === 'booting' ? 'Starting…' : device.state === 'shutting-down' ? 'Shutting down…' : 'Off')}</span></span>
-            {device.state === 'booted' && !live && <button type="button" className="pip-action" disabled={!!working} onClick={() => void act(device, 'Shutting down…', () => invoke('devices.shutdown', {id: device.id}))}>Shut down</button>}
-            <button type="button" className="pip-action is-primary" disabled={!!working || device.state === 'booting' || device.state === 'shutting-down'} onClick={() => live ? openDeviceTab(device) : void open(device)}>{live ? 'Show' : device.state === 'booted' ? 'Open' : 'Start'}</button>
+            <span className="device-row-copy"><strong>{deviceTitle(device)}</strong><span>{device.osVersion} · {status}</span>{device.fix && <span className="device-row-fix">{device.fix}</span>}</span>
+            {device.state === 'booted' && !live && !device.physical && <button type="button" className="pip-action" disabled={!!working} onClick={() => void act(device, 'Shutting down…', () => invoke('devices.shutdown', {id: device.id}))}>Shut down</button>}
+            {device.physical && device.state === 'booted' && <button type="button" className="pip-action" disabled={!!working} onClick={() => void act(device, 'Installing…', () => invoke('devices.installApk', {id: device.id}))}>Install APK…</button>}
+            {device.state !== 'unauthorized' && <button type="button" className="pip-action is-primary" disabled={!!working || device.state === 'booting' || device.state === 'shutting-down'} onClick={() => live ? openDeviceTab(device) : void open(device)}>{live ? 'Show' : device.state === 'booted' ? 'Open' : 'Start'}</button>}
           </li>;
         })}</ul>}
     </section>)}
