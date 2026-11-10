@@ -1,3 +1,4 @@
+import type { McpAppView, McpCallToolResult } from '../mcp-apps.ts';
 /** Mcp domain contract: user-added MCP servers (stdio and Streamable HTTP), handshake tests, tool inspection, health, revocation and plugin hook review. */
 export type McpTransport = 'stdio' | 'http';
 export type McpScope = 'user' | 'folder' | 'project';
@@ -57,9 +58,16 @@ export interface McpCommands {
   'mcp.revoke': { input: { id: string; stopChats?: boolean }; output: McpRevokeResult };
   'mcp.hooks.list': { input: undefined; output: McpHook[] };
   'mcp.hooks.set': { input: { id: string; enabled?: boolean; timeoutSec?: number; maxOutputKb?: number }; output: McpHook[] };
+  /** #844: the app of a finished MCP tool row: its `ui://` resource read from the row's own server, with the call's input and result. */
+  'mcp.apps.open': { input: { chatId: string; itemId: string }; output: McpAppView };
+  /** #844: the person allowed the app's declared https domains for this row (Allow for this page). */
+  'mcp.apps.allowNetwork': { input: { chatId: string; itemId: string }; output: { networkAllowed: boolean } };
+  /** #844: a tools/call from the app: always the row's own server, a tool the app may call, under the chat's access and approvals. */
+  'mcp.apps.callTool': { input: { chatId: string; itemId: string; name: string; arguments?: Record<string, unknown> }; output: McpCallToolResult };
 }
 export type McpEvent = never;
 export const MCP_COMMANDS = {
   'mcp.servers.list': true, 'mcp.servers.detect': true, 'mcp.servers.add': true, 'mcp.servers.update': true, 'mcp.servers.remove': true, 'mcp.servers.test': true,
   'mcp.servers.tools': true, 'mcp.servers.logs': true, 'mcp.revoke': true, 'mcp.hooks.list': true, 'mcp.hooks.set': true,
+  'mcp.apps.open': true, 'mcp.apps.allowNetwork': true, 'mcp.apps.callTool': true,
 } as const satisfies Record<keyof McpCommands, true>;
