@@ -840,7 +840,7 @@ An agent can hand a task to a child chat on any provider and model the user has 
 - Test: `packages/agent-app/tests/delegation-44.test.ts::delegate_task with wait starts a child chat on another provider in the parent's folder and returns its final reply`
 - Environment: Node test runner; the real service; a fake provider with two routes whose turns call the real muster_delegation loopback host with the run's chat token.
 - Known gaps: A real provider's own MCP timeout is not exercised; the bound is 10 minutes and the provider is told 11.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 10 passed, 0 failed, 0 skipped; commit 7662754086388ccd540e6a1b29e66c71a5504fac
 
 <a id="mus-spec-14-44b"></a>
 #### MUS-SPEC-14-44B: An idle parent wakes with the child's result; a busy parent gets it after its turn
@@ -851,7 +851,7 @@ An agent can hand a task to a child chat on any provider and model the user has 
 - Test: `packages/agent-app/tests/delegation-44.test.ts::an idle parent wakes with the child's result when an async child finishes; a busy parent gets it after its turn`
 - Environment: Node test runner; the real service and queue; a fake provider; the real tool host.
 - Known gaps: Only a completed or failed child turn reports back; a stopped one does not (MUS-SPEC-14-44D).
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 10 passed, 0 failed, 0 skipped; commit 7662754086388ccd540e6a1b29e66c71a5504fac
 
 <a id="mus-spec-14-44c"></a>
 #### MUS-SPEC-14-44C: Message_task steers a working child and gives an idle child a new turn
@@ -862,7 +862,7 @@ An agent can hand a task to a child chat on any provider and model the user has 
 - Test: `packages/agent-app/tests/delegation-44.test.ts::message_task steers a working child, and gives an idle child a new turn`
 - Environment: Node test runner; the real service; a fake provider that accepts steers while a turn runs.
 - Known gaps: A route that refuses steering mid-turn falls back to the child's queue; that branch is not driven here.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 10 passed, 0 failed, 0 skipped; commit 7662754086388ccd540e6a1b29e66c71a5504fac
 
 <a id="mus-spec-14-44d"></a>
 #### MUS-SPEC-14-44D: Interrupt_task stops a child and the chats it started; a stop does not wake the parent
@@ -873,7 +873,7 @@ An agent can hand a task to a child chat on any provider and model the user has 
 - Test: `packages/agent-app/tests/delegation-44.test.ts::interrupt_task stops a child and the chat it started, and a stop does not wake the parent`
 - Environment: Node test runner; the real service; a fake provider whose stop ends the running turn as cancelled.
 - Known gaps: None known.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 10 passed, 0 failed, 0 skipped; commit 7662754086388ccd540e6a1b29e66c71a5504fac
 
 <a id="mus-spec-14-44e"></a>
 #### MUS-SPEC-14-44E: Read_task returns status, the final reply and changed files; reading first withdraws the queued report
@@ -884,7 +884,7 @@ An agent can hand a task to a child chat on any provider and model the user has 
 - Test: `packages/agent-app/tests/delegation-44.test.ts::read_task returns status, the final reply and changed files, and reading a result first withdraws its queued report`
 - Environment: Node test runner; the real service; a fake provider that reports a fileChange item.
 - Known gaps: Changed files come from the child's own edit rows; a file a command changed without an edit row is not listed.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 10 passed, 0 failed, 0 skipped; commit 7662754086388ccd540e6a1b29e66c71a5504fac
 
 <a id="mus-spec-14-44f"></a>
 #### MUS-SPEC-14-44F: Children never get more access than the parent; read-only gets no tools; depth, concurrency and models are bounded
@@ -895,7 +895,7 @@ An agent can hand a task to a child chat on any provider and model the user has 
 - Test: `packages/agent-app/tests/delegation-44.test.ts::children get the parent's access and never more; read-only chats get no tools; depth, concurrency and unconfigured models are refused`
 - Environment: Node test runner; the real service; a fake provider; the real tool host and chat-token binding.
 - Known gaps: The 403 shows the host refusing a call without the run's token; the per-chat token itself is covered by tests/agent-tool-chat-binding.test.ts.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 10 passed, 0 failed, 0 skipped; commit 7662754086388ccd540e6a1b29e66c71a5504fac
 
 <a id="mus-spec-14-44h"></a>
 #### MUS-SPEC-14-44H: Only a parent or its ancestors may control a child
@@ -906,7 +906,7 @@ An agent can hand a task to a child chat on any provider and model the user has 
 - Test: `packages/agent-app/tests/delegation-44.test.ts::only a parent or its ancestors may control a child; a sibling or the child itself is refused`
 - Environment: Node test runner; the real service; a fake provider; the real tool host.
 - Known gaps: None known.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 10 passed, 0 failed, 0 skipped; commit 7662754086388ccd540e6a1b29e66c71a5504fac
 
 <a id="mus-spec-14-44i"></a>
 #### MUS-SPEC-14-44I: Links survive a restart
@@ -917,7 +917,7 @@ An agent can hand a task to a child chat on any provider and model the user has 
 - Test: `packages/agent-app/tests/delegation-44.test.ts::links survive a restart: the parent still lists, reads and controls its child, and others still cannot`
 - Environment: Node test runner; two real service instances on one data folder; a fake provider.
 - Known gaps: A child that was working when Muster closed follows the usual restart rules (#449); its report is not re-sent after the restart.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 10 passed, 0 failed, 0 skipped; commit 7662754086388ccd540e6a1b29e66c71a5504fac
 
 <a id="mus-spec-14-44j"></a>
 #### MUS-SPEC-14-44J: Stopping a parent's children stops every working chat below it
@@ -928,7 +928,7 @@ An agent can hand a task to a child chat on any provider and model the user has 
 - Test: `packages/agent-app/tests/delegation-44.test.ts::stopping a parent's children stops every working chat below it`
 - Environment: Node test runner; the real service; a fake provider.
 - Known gaps: The Stop dialog itself is covered by MUS-SPEC-14-44K.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 10 passed, 0 failed, 0 skipped; commit 7662754086388ccd540e6a1b29e66c71a5504fac
 
 <a id="mus-spec-14-44k"></a>
 #### MUS-SPEC-14-44K: Started chats are visible and reachable from both sides, and Stop asks about them
@@ -939,4 +939,4 @@ An agent can hand a task to a child chat on any provider and model the user has 
 - Test: `packages/agent-app/tests/delegation-44-dom.tsx::#44 started chats show as compact linked rows in both transcripts, in the sub-agents pane, on the parent's approval copy, and Stop asks about them`
 - Environment: Renderer DOM suite (linkedom); stubbed bridge; the real Timeline, SubagentsTab, ApprovalCard and store.
 - Known gaps: Not a screenshot of the real app. The Stop question is the system confirm dialog, stubbed here. The summary card's Subagents row also counts started chats; that is not asserted here.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/44/green-dom.log; exit 0; 1 passed, 0 failed, 0 skipped; commit 7662754086388ccd540e6a1b29e66c71a5504fac
