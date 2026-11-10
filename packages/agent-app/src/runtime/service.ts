@@ -720,6 +720,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     // #841: Auto settles routine requests only on routes whose approvals Muster answers; any other route runs it as Workspace.
     // The route's own driver decides (the Messages lanes run only in Full access, so a saved lane never applies here).
     const autoOn = access.permissionMode === 'auto' && autoApprovalSupported(selectedProvider.driver);
+    // Only Codex runs commands inside Muster's workspace sandbox; Claude Code runs them on the host.
+    const autoSandboxed = selectedProvider.driver === 'codex-app-server';
     // A fork (or a replaced turn) starts a fresh provider conversation: carry the visible history once, bounded.
     const digest = store.needsDigest(chatId) ? transcriptDigest(store.timeline(chatId), cwd) : '';
     const files = attachments.resolve(chatId, attachmentIds);
@@ -1099,7 +1101,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             const change = typeof params.itemId === 'string' && toolIds.has(params.itemId) ? store.item(toolIds.get(params.itemId)!)?.data?.changes : params.changes;
             // #841: Auto settles a routine request (a read, an edit inside the folder, a safe or allowlisted command) and says so on its row.
             if (autoOn && !threat && toolPolicy?.effect !== 'ask') {
-              const settled = autoApprove(method, params, change ?? params.changes, {cwd: run.cwd, allowlist: autoAllowlist()});
+              const settled = autoApprove(method, params, change ?? params.changes, {cwd: run.cwd, allowlist: autoAllowlist(), sandboxed: autoSandboxed});
               if (settled) {
                 const rowId = typeof params.itemId === 'string' ? toolIds.get(params.itemId) : undefined, row = rowId ? store.item(rowId) : undefined;
                 if (row) { store.updateItem(row.id, row.text, row.status, {...row.data, autoApproved: settled}); timeline(chatId); }
