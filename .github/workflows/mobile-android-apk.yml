@@ -74,8 +74,11 @@ jobs:
 
       - name: Name the APK
         id: apk
+        env:
+          # On a pull request GITHUB_SHA is the temporary merge commit; name the APK after the branch's own head.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          short="${GITHUB_SHA::12}"
+          short="${HEAD_SHA::12}"
           src="$(ls android/app/build/outputs/apk/release/*.apk | head -1)"
           mkdir -p dist-apk
           cp "$src" "dist-apk/muster-${short}.apk"
