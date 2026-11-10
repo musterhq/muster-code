@@ -347,7 +347,7 @@ test('Claude Code gets Muster\'s own tool servers (in-app browser, terminal…) 
 test('Claude Code takes a steer mid-turn: the message joins the run, stdin closes after the last result, a late steer is refused',async()=>{
   const fake=fakeChild();let ended=false;fake.child.stdin.on('finish',()=>{ended=true;});
   const adapter=claudeCodeAdapter({binary:'/bin/claude',spawn:(()=>fake.child as unknown as ChildProcess) as Spawn});
-  let send:((text:string)=>boolean)|undefined;
+  let send:((text:string)=>boolean|{refused:string})|undefined;
   const {input}=capture({onSteerable:fn=>{send=fn;}});
   const running=adapter.run(input);
   await new Promise(resolve=>setImmediate(resolve));

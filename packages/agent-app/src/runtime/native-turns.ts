@@ -37,6 +37,9 @@ export function createNativeTurnObserver(host: NativeTurnHost) {
   /** Events of a native turn that began while Muster's own run was still settling; replayed by drain(). */
   const pending = new Map<string, Array<[string, Record<string, unknown>]>>();
   const MAX_PENDING = 4096;
+  /** #839: messages Muster steered into an adopted turn. The service already wrote them to the transcript, so the
+   *  app-server's echo (a userMessage item of that turn) is not added a second time. */
+  const echoes = new Map<string, string[]>();
   const seal = (chatId: string) => {
     const entry = adopted.get(chatId);
     if (entry?.segment) { host.store.updateItem(entry.segment.id, entry.segment.text, 'completed'); entry.segment = undefined; }
@@ -54,7 +57,7 @@ export function createNativeTurnObserver(host: NativeTurnHost) {
     const entry = adopted.get(chatId);
     if (!entry) return;
     seal(chatId);
-    adopted.delete(chatId);
+    adopted.delete(chatId); echoes.delete(chatId);
     if (host.runs.get(chatId) === entry.run) host.runs.delete(chatId);
     const final = entry.run.stopped && status !== 'failed' ? 'interrupted' : status;
     const chat = host.store.updateChat(chatId, { status: final, error: final === 'failed' ? error ?? 'The provider turn failed.' : null, recovery: null });
@@ -101,6 +104,8 @@ export function createNativeTurnObserver(host: NativeTurnHost) {
       if (!item) return;
       if (method === 'item/started' && item.type === 'userMessage') {
         const message = userText(item);
+        const expected = echoes.get(chatId), echo = expected?.indexOf(message) ?? -1;
+        if (expected && echo >= 0) { expected.splice(echo, 1); if (!expected.length) echoes.delete(chatId); return; }
         if (message) { seal(chatId); host.store.appendItem(chatId, 'user', message, 'completed', { native: true }); host.timeline(chatId); }
         return;
       }
@@ -123,10 +128,19 @@ export function createNativeTurnObserver(host: NativeTurnHost) {
     },
     /** A native turn started while Muster's run was settling and waits for drain(). */
     pendingTurn(chatId: string): boolean { return pending.has(chatId); },
+    /** A steer into the adopted turn is on its way: its echo from the app-server (which may arrive before the steer
+     *  call returns) is skipped once. The returned function withdraws it when the steer was not accepted. */
+    steering(chatId: string, message: string): () => void {
+      if (!adopted.has(chatId)) return () => {};
+      const expected = echoes.get(chatId) ?? [];
+      if (expected.length >= 64) return () => {};
+      expected.push(message); echoes.set(chatId, expected);
+      return () => { const list = echoes.get(chatId), at = list?.indexOf(message) ?? -1; if (list && at >= 0) { list.splice(at, 1); if (!list.length) echoes.delete(chatId); } };
+    },
     /** True when the chat's active run is a turn the app-server started itself. */
     adopted(chatId: string): boolean { return adopted.has(chatId); },
     /** After a stop request: settles the adopted run when the provider no longer holds a live session. */
     stopped(chatId: string, sessionAlive: boolean): void { if (adopted.has(chatId) && !sessionAlive) finish(chatId, 'interrupted'); },
-    dispose(): void { adopted.clear(); pending.clear(); },
+    dispose(): void { adopted.clear(); pending.clear(); echoes.clear(); },
   };
 }

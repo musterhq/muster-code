@@ -1494,8 +1494,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const chatId = chat.id, run = runs.get(chatId);
     if (!run || run.stopped || !provider.steer) return {steered:false};
     const instructions = await chipInstructions(chat, chips, message);
-    const outcome = await provider.steer(chatId, instructions ? `${instructions}\n\nCurrent user request:\n${message}` : message);
-    if (outcome !== true) return typeof outcome === 'object' ? {steered:false, reason:outcome.refused} : {steered:false};
+    const sent = instructions ? `${instructions}\n\nCurrent user request:\n${message}` : message;
+    // #839: a turn the app-server started itself echoes the steer back as its user message; the row below is the one copy.
+    const withdraw = nativeTurns.steering(chatId, sent);
+    const outcome = await provider.steer(chatId, sent);
+    if (outcome !== true) { withdraw(); return typeof outcome === 'object' ? {steered:false, reason:outcome.refused} : {steered:false}; }
     // Effort cannot change inside a live turn; it applies from the next one.
     if (chips.effort) efforts.set(chatId, chips.effort);
     if (steered.size >= 256) steered.delete(steered.keys().next().value!);

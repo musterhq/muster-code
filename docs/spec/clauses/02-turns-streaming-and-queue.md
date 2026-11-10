@@ -79,6 +79,11 @@ Boundaries:
 | [MUS-SPEC-02-608C](02-turns-streaming-and-queue.md#mus-spec-02-608c) | A failed web request to a model gives a plain cause for a proxy, DNS, certificate or refused connection, marks the turn as not sent, and never shows the user name or password in the address. | [`HTTP fetch failures explain nested proxy, DNS, TLS and refused causes without credentials`](../../../packages/agent-app/tests/network-reconnect.test.ts) |
 | [MUS-SPEC-02-608D](02-turns-streaming-and-queue.md#mus-spec-02-608d) | The failure banner for a network error shows Retry even with an empty draft, runs the turn retry once per click with a busy state, and never sends the text in the composer instead. | [`a failed network turn offers Retry, which re-runs the turn and never sends the draft in its place`](../../../packages/agent-app/tests/recovery-notice.tsx) |
 | [MUS-SPEC-02-579A](02-turns-streaming-and-queue.md#mus-spec-02-579a) | After a crash, Continue anyway and then Steer on a queued message send it once; the app-server's saved copy is deleted, so it does not send it again when the thread goes idle. | [`a message queued before a crash is sent once after Continue anyway and Steer`](../../../packages/agent-app/tests/queue-after-crash-579.test.ts) |
+| [MUS-SPEC-02-839A](02-turns-streaming-and-queue.md#mus-spec-02-839a) | The provider gets a second turn on the same thread with the message as its prompt; the chat runs, the sub-agent still counts as active work, and the transcript has the message once. | [`Codex: with only a sub-agent running, a message starts a new turn on the same thread at once`](../../../packages/agent-app/tests/background-steer-839.test.ts) |
+| [MUS-SPEC-02-839B](02-turns-streaming-and-queue.md#mus-spec-02-839b) | The steer is accepted and sent as `turn/steer` naming the app-server’s turn; the transcript shows it once although the app-server echoes it back; no extra turn is dispatched. | [`Codex: while the app-server runs a parent turn on its own (a sub-agent reporting back), a steer joins that turn`](../../../packages/agent-app/tests/background-steer-839.test.ts) |
+| [MUS-SPEC-02-839C](02-turns-streaming-and-queue.md#mus-spec-02-839c) | Queue Steer reports steered, the queue is empty, one `turn/steer` is sent, and after the turn ends no turn is dispatched for the message; the transcript has it once. | [`Codex: Steer on a queued message during that turn sends it once and empties the queue`](../../../packages/agent-app/tests/background-steer-839.test.ts) |
+| [MUS-SPEC-02-839D](02-turns-streaming-and-queue.md#mus-spec-02-839d) | After the turn’s result stdin stays open while the CLI lists a background task; the steer is written as a user message; stdin closes once the list is empty and the run completes. | [`Claude Code: after the turn ends with a background shell running, a steer still reaches the open session`](../../../packages/agent-app/tests/background-steer-839.test.ts) |
+| [MUS-SPEC-02-839E](02-turns-streaming-and-queue.md#mus-spec-02-839e) | The steer returns a refusal whose reason names the background command, so the composer shows why it queued. | [`Claude Code: when the session can no longer take a message during a background shell, the steer says why`](../../../packages/agent-app/tests/background-steer-839.test.ts) |
 | [MUS-SPEC-02-800A](02-turns-streaming-and-queue.md#mus-spec-02-800a) | With the window inactive, newly streamed words show at full opacity instead of being held at the start of their fade; a focused window still fades them in. | [`streamed words are fully visible while the window is inactive`](../../../packages/agent-app/tests/stream-fade-inactive-800.test.ts) |
 
 ### Tool rows when a turn ends
@@ -690,6 +695,63 @@ Boundaries:
 - Test: `packages/agent-app/tests/queue-after-crash-579.test.ts::a message queued before a crash is sent once after Continue anyway and Steer`
 - Environment: Node test runner; the agent service with a fake Codex-style provider that keeps its saved queue across a relaunch and sends it when the thread goes idle; no network.
 - Known gaps: The fake app-server models the real one's queue persistence and idle send from its documented methods, not from a live Codex. A provider that keeps no queue of its own never double-sends, and Continue anyway then Steer on it already sent once.
+- Evidence: UNVERIFIED
+
+### Messages while only background work runs
+
+<a id="mus-spec-02-839a"></a>
+#### MUS-SPEC-02-839A: A message during background-only work starts a new turn on the same thread at once
+
+- Precondition: A Codex chat whose turn ended after starting a sub-agent; the sub-agent is still running, so the chat has background work but no turn.
+- Action: Send a message.
+- Expected result: A new turn starts at once on the same provider thread with the message as its prompt, the chat shows running, and the sub-agent still counts as active work. When the turn ends the transcript has the message once.
+- Test: `packages/agent-app/tests/background-steer-839.test.ts::Codex: with only a sub-agent running, a message starts a new turn on the same thread at once`
+- Environment: Node test runner; the real agent service and provider adapter with a fake Codex app-server core; no network.
+- Known gaps: The fake core reports the sub-agent turn; a real app-server is not started.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-839b"></a>
+#### MUS-SPEC-02-839B: A steer during a parent turn the app-server started itself joins that turn
+
+- Precondition: A Codex chat whose own turn ended with a sub-agent still running. The sub-agent reports back and the app-server starts a parent turn by itself, which the chat shows as running.
+- Action: Send a message ("also update the changelog") while that turn runs.
+- Expected result: The message is accepted as a steer of the app-server’s turn: `turn/steer` names that turn. The app-server echoes it as a user message of the turn, and the transcript still has it once. No second turn is dispatched for it.
+- Test: `packages/agent-app/tests/background-steer-839.test.ts::Codex: while the app-server runs a parent turn on its own (a sub-agent reporting back), a steer joins that turn`
+- Environment: Node test runner; the real agent service and provider adapter with a fake Codex app-server core; no network.
+- Known gaps: The echo is modelled on the userMessage item Codex records for a steer; a live app-server is not used.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-839c"></a>
+#### MUS-SPEC-02-839C: Steer on a queued message during that parent turn sends it once
+
+- Precondition: As 839B: the app-server runs a parent turn on its own, and a message was queued during it.
+- Action: Click Steer on the queued message, then let the turn end.
+- Expected result: The message is steered into the running turn, removed from the queue, and not sent again as a new turn when the turn ends. The transcript has it once.
+- Test: `packages/agent-app/tests/background-steer-839.test.ts::Codex: Steer on a queued message during that turn sends it once and empties the queue`
+- Environment: Node test runner; the real agent service and provider adapter with a fake Codex app-server core; no network.
+- Known gaps: Same as 839B.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-839d"></a>
+#### MUS-SPEC-02-839D: Claude Code keeps the session open for messages while a background shell runs
+
+- Precondition: A Claude Code run started a background shell (`npm run dev`), the CLI lists it as a background task, and the turn’s result has arrived.
+- Action: Send a message after the result, let its result arrive, then the CLI reports no background tasks left.
+- Expected result: The message is written to the open session as the next user message (with the carry-on note) and accepted. The session stays open while the shell is listed and closes once no background task is left; the run then completes.
+- Test: `packages/agent-app/tests/background-steer-839.test.ts::Claude Code: after the turn ends with a background shell running, a steer still reaches the open session`
+- Environment: Node test runner; the real Claude Code adapter with a fake process; no network.
+- Known gaps: A fake process stands in for the CLI; the `background_tasks_changed` event shape comes from a recorded CLI run of a background agent, not of a shell.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-839e"></a>
+#### MUS-SPEC-02-839E: When Claude Code can no longer take a message during a background shell, the steer says why
+
+- Precondition: A Claude Code run started a background shell, the CLI did not list it as a background task, and stdin closed after the turn’s result while the shell keeps the process alive.
+- Action: Send a message.
+- Expected result: The steer is refused with a reason that names the background command, so the composer queues the message and says why instead of the generic note.
+- Test: `packages/agent-app/tests/background-steer-839.test.ts::Claude Code: when the session can no longer take a message during a background shell, the steer says why`
+- Environment: Node test runner; the real Claude Code adapter with a fake process; no network.
+- Known gaps: The queued message still waits for the shell to end on such a CLI.
 - Evidence: UNVERIFIED
 
 ### Mid-turn recovery and live plans
