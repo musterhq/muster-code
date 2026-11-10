@@ -1,6 +1,6 @@
 # Muster mobile app: design
 
-Status: phase 1 in progress (issue #326). This document is the plan of record for the phone app: how a phone reaches the
+Status: phase 1 built (issue #326); later phases planned below. This document is the plan of record for the phone app: how a phone reaches the
 person's desktop Muster from anywhere, how the traffic is protected, which stack the app uses, the screens, the phases and the
 threat model. The acceptance cases live in [docs/spec/clauses/23-mobile.md](../spec/clauses/23-mobile.md).
 
@@ -59,6 +59,8 @@ Non-goals for now:
 - **Muster Server is still a path.** A phone signed in to a Muster Server through the existing web UI keeps working. When a
   server is in the desktop's list (#808), it can also *host the relay* (`/relay/v1/...`), which is how a team avoids a third
   party (phase 3).
+- **Not on a shared server yet.** On Muster Server the `mobile.*` commands are desktop-only for every role (MUS-SPEC-23-3C):
+  a phone paired with the shared runtime would bypass per-person project access. Per-person pairing on a server is phase 3.
 - **The desktop is the source of truth.** The phone holds no chat database: it caches the last chat list and the open chat
   for display while offline, and the desktop's runtime decides every command.
 
