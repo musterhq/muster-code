@@ -7,6 +7,8 @@ import {check} from './dom-check.ts';
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 (globalThis as any).require=require;
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
+// React only listens for input events when the document says it has them.
+window.document.oninput=null;
 const style={getPropertyValue:()=>'',display:'block',visibility:'visible',position:'static',overflow:'visible',animationName:'none',animationDuration:'0s',animationDelay:'0s',transitionDuration:'0s',transitionDelay:'0s'};
 window.getComputedStyle=()=>style;
 window.HTMLElement.prototype.getBoundingClientRect=()=>({height:200,width:600,top:0,left:0,right:600,bottom:200,x:0,y:0});
@@ -36,6 +38,8 @@ await store.boot();root.render(<AutomationsPanel header={button=><div className=
 const setValue=async(element:HTMLInputElement|HTMLTextAreaElement,value:string)=>{let proto=Object.getPrototypeOf(element),descriptor;while(proto&&!(descriptor=Object.getOwnPropertyDescriptor(proto,'value')))proto=Object.getPrototypeOf(proto);descriptor?.set?descriptor.set.call(element,value):((element as any).value=value);element.dispatchEvent(new window.Event('input',{bubbles:true}));element.dispatchEvent(new window.Event('change',{bubbles:true}));await delay(30);};
 // linkedom's select.value has no setter: pick the option the way a click on it does.
 const pick=async(select:HTMLSelectElement,value:string)=>{for(const option of Array.from(select.querySelectorAll('option')))option.toggleAttribute('selected',option.getAttribute('value')===value);select.dispatchEvent(new window.Event('change',{bubbles:true}));await delay(30);};
+// linkedom does not turn a submit button click into a form submit: send the event the click would.
+const submit=async()=>{const button=document.querySelector('.automation-editor button[type="submit"]') as HTMLButtonElement;assert.equal(button.disabled,false,'the form is ready to save');document.querySelector('.automation-editor')!.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));await delay(60);};
 const labelled=(text:RegExp)=>Array.from(document.querySelectorAll('.automation-editor label')).find(label=>text.test(label.childNodes[0]?.textContent??''));
 
 // Spec: MUS-SPEC-14-845F (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-845f)
@@ -67,10 +71,10 @@ await check('#845 the editor schedules a once run with a date and time in a name
   assert.equal(document.querySelectorAll('.automation-presets [aria-pressed="true"]').length,0,'no repeating preset reads as picked');
 
   refuse='That time has already passed. Choose a time in the future.';
-  (document.querySelector('.automation-editor button[type="submit"]') as HTMLButtonElement).click();await delay(60);
+  await submit();
   assert.equal(document.querySelector('.automation-editor [role="alert"]')!.textContent,refuse,'a refused past time is shown in the editor');
   refuse='';
-  (document.querySelector('.automation-editor button[type="submit"]') as HTMLButtonElement).click();await delay(60);
+  await submit();
   const created=calls.filter(call=>call.command==='automations.create').at(-1)!.input;
   assert.deepEqual(created.schedule,{kind:'once',at:'2026-12-01T09:00'});assert.equal(created.timezone,TZ);
   assert.equal(document.querySelector('.automation-editor'),null,'the editor closes on save');

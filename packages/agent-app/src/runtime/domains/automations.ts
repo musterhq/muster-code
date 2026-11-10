@@ -8,7 +8,7 @@ import { WEBHOOK_LIMITS, WebhookListener, newWebhookSecret } from '../automation
 import { pruneRuns } from '../automations/prune.ts';
 import { activityFingerprint } from '../automations/activity.ts';
 import { lastAssistantText } from '../work/agent-run.ts';
-import { describeSchedule, dueBetween, nextOccurrence, upcoming, validTimeZone, validateSchedule } from '../automation-schedule.ts';
+import { describeSchedule, dueBetween, nextOccurrence, onceLabel, upcoming, validTimeZone, validateSchedule } from '../automation-schedule.ts';
 import { WorkspaceWatchService } from '../workspace-watch.ts';
 import { readRepoSnapshot, RepoPoller, repoWatchKey, type RepoEvent, type RepoWatch } from '../repo-triggers.ts';
 import type { DomainContext, DomainModule } from './types.ts';
@@ -19,6 +19,7 @@ import { device } from '../../shared/device-noun.ts';
 export const automationTiming = { tickMs: 30_000, firstTickMs: 1_000, now: () => Date.now(), graceMs: 150_000, watchCooldownMs: AUTOMATION_WATCH_COOLDOWN_MS, watchQuietMs: 5_000, repoPollMs: AUTOMATION_REPO_POLL_MS, repoMaxBackoffMs: AUTOMATION_REPO_MAX_BACKOFF_MS, /** The webhook listener's preferred loopback port (0: any free one; tests use 0). */ webhookPort: 47831, /** Tests only: a secret store override. */ secrets: undefined as (() => { secureStorage(): boolean; set(id: string, value: unknown): unknown; get(id: string): string | undefined; clear(id: string): unknown }) | undefined };
 const ACTIVE: readonly AutomationRunStatus[] = ['queued', 'awaiting', 'running'];
 const MODES: readonly ChatPermissionMode[] = ['read-only', 'workspace', 'full'];
+const PASSED = 'That time has already passed. Choose a time in the future.';
 const ID = /^[a-zA-Z0-9_-]{1,128}$/;
 
 interface AutomationRow { id: string; name: string; prompt: string; target: string; schedule: string; timezone: string; permission_mode: string; overlap: string; catch_up: string; paused: number; created_at: string; updated_at: string; version: number; anchor: number; cursor: number; full_access_version: number | null }
@@ -35,6 +36,7 @@ function scheduleOf(value: unknown): AutomationSchedule {
   const schedule: AutomationSchedule | null = input.kind === 'interval' ? { kind: 'interval', minutes: Number(input.minutes) }
     : input.kind === 'daily' ? { kind: 'daily', time: String(input.time ?? ''), days: Array.isArray(input.days) ? input.days.map(Number) : [] }
     : input.kind === 'cron' ? { kind: 'cron', expr: String(input.expr ?? '').trim().replace(/\s+/g, ' ') }
+    : input.kind === 'once' ? { kind: 'once', at: String(input.at ?? '') }
     : input.kind === 'watch' ? { kind: 'watch', folderId: idOf(input.folderId, 'folder') }
     : input.kind === 'repo' ? { kind: 'repo', folderId: idOf(input.folderId, 'folder'), events: Array.isArray(input.events) ? input.events.map(String) as RepoTriggerEvent[] : [], ...(typeof input.branch === 'string' && input.branch.trim() ? { branch: input.branch.trim() } : {}) } : null;
   if (!schedule) throw new Error('Choose a schedule.');
@@ -206,7 +208,7 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
       const value = toAutomation(a), projectId = value.target.kind === 'task' || value.target.kind === 'new' ? value.target.projectId ?? null : null;
       let variables: Record<string, string> = {}; try { variables = JSON.parse(g.vars) as Record<string, string>; } catch { variables = {}; }
       const shown = Object.entries(variables).filter(([k]) => !['date', 'time', 'automation'].includes(k)).map(([k, v]) => `${k}: ${v.slice(0, 60)}`).join(' · ');
-      out.push({ id: g.id, automationId: a.id, automationName: value.name, projectId, projectName: projectId ? ctx.store.project(projectId)?.name ?? null : null, trigger: g.trigger as AutomationTrigger, summary: `${TRIGGER_WORDS[g.trigger] ?? g.trigger} · ${describeSchedule(value.schedule)}${shown ? ` · ${shown}` : ''}. Approve it to start the run.`, variables, createdAt: g.created_at });
+      out.push({ id: g.id, automationId: a.id, automationName: value.name, projectId, projectName: projectId ? ctx.store.project(projectId)?.name ?? null : null, trigger: g.trigger as AutomationTrigger, summary: `${TRIGGER_WORDS[g.trigger] ?? g.trigger} · ${describeSchedule(value.schedule, value.timezone)}${shown ? ` · ${shown}` : ''}. Approve it to start the run.`, variables, createdAt: g.created_at });
     }
     return out;
   }
@@ -298,7 +300,10 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
     let issues: string[] = [];
     try { issues = issuesFor(value.target, value.permissionMode, value.schedule); } catch { issues = []; }
     const ext = extFor(automation.id), awaiting = Number((db.prepare(`SELECT COUNT(*) AS n FROM automation_runs WHERE automation_id = ? AND status = 'awaiting'`).get(automation.id) as { n: number }).n);
-    return { ...value, ext, awaiting, summary: describeSchedule(value.schedule), issues, ...(next !== null ? { nextRunAt: iso(next) } : {}), ...(last ? { lastRun: runView(last) } : {}), ...(active ? { activeRun: runView(active) } : {}),
+    // #845: once the scheduler has passed a once time (it ran, or was recorded as missed) the automation is done, not gone.
+    let done = false;
+    if (value.schedule.kind === 'once' && !active) try { done = nextOccurrence(value.schedule, value.timezone, automation.cursor) === null; } catch { done = false; }
+    return { ...value, ext, awaiting, summary: describeSchedule(value.schedule, value.timezone), issues, ...(done ? { done } : {}), ...(next !== null ? { nextRunAt: iso(next) } : {}), ...(last ? { lastRun: runView(last) } : {}), ...(active ? { activeRun: runView(active) } : {}),
       ...(ext.webhook ? { webhook: { url: webhookUrl(automation.id), hasSecret: Boolean(extRow(automation.id)?.has_secret) } } : {}) };
   }
   const list = () => rows().map(view);
@@ -467,8 +472,10 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
           const current = { ...automation, cursor: due.latest };
           // Sleep, a closed app or a long block: the due runs coalesce into one catch-up run, or one "missed" entry.
           const late = now - due.latest > automationTiming.graceMs, missed = due.count > 1 || late;
-          if (missed && automation.catch_up === 'none') insertRun(current, due.latest, 'schedule', 'missed', `${plural(due.count, 'run')} missed while ${device().lower} was asleep or Muster was closed.`);
-          else void fireRun(current, due.latest, missed ? 'catch-up' : 'schedule', missed ? `Covers ${plural(due.count, 'missed run')}.` : undefined).catch(() => undefined);
+          // #845: a once run follows the same rule, and says when it was due.
+          const due1 = schedule.kind === 'once' ? `${onceLabel(schedule.at)} (${automation.timezone})` : '';
+          if (missed && automation.catch_up === 'none') insertRun(current, due.latest, 'schedule', 'missed', due1 ? `It did not run: it was due ${due1} while ${device().lower} was asleep or Muster was closed, and catch-up is off.` : `${plural(due.count, 'run')} missed while ${device().lower} was asleep or Muster was closed.`);
+          else void fireRun(current, due.latest, missed ? 'catch-up' : 'schedule', missed ? (due1 ? `Ran late. It was due ${due1}, while ${device().lower} was asleep or Muster was closed.` : `Covers ${plural(due.count, 'missed run')}.`) : undefined).catch(() => undefined);
           broadcast();
         }
       }
@@ -585,7 +592,7 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
     watchesSynced = false; ensureWatches(); broadcast();
   }
   /** A chat target is capped at the access the chat has when the automation is saved (never raised by the automation). */
-  function checkedInput(raw: Record<string, unknown>): AutomationInput {
+  function checkedInput(raw: Record<string, unknown>, current?: AutomationRow): AutomationInput {
     const input = inputOf(raw);
     if (input.target.kind === 'chat') {
       const chat = ctx.store.chat(input.target.chatId);
@@ -600,7 +607,10 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
     }
     if (input.schedule.kind === 'watch' && !ctx.store.folder(input.schedule.folderId)) throw new Error('Choose a folder from the sidebar to watch.');
     if (input.schedule.kind === 'repo' && !ctx.store.folder(input.schedule.folderId)) throw new Error('Choose a folder from the sidebar whose repository to watch.');
-    if (input.schedule.kind !== 'watch' && input.schedule.kind !== 'repo' && nextOccurrence(input.schedule, input.timezone, automationTiming.now(), automationTiming.now()) === null) throw new Error('This schedule never runs.');
+    // #845: a once time must be ahead, except when an edit leaves it as it was (renaming or moving a done one).
+    const unchanged = current !== undefined && current.schedule === JSON.stringify(input.schedule) && current.timezone === input.timezone;
+    if (input.schedule.kind === 'once') { if (!unchanged && nextOccurrence(input.schedule, input.timezone, automationTiming.now()) === null) throw new Error(PASSED); }
+    else if (input.schedule.kind !== 'watch' && input.schedule.kind !== 'repo' && nextOccurrence(input.schedule, input.timezone, automationTiming.now(), automationTiming.now()) === null) throw new Error('This schedule never runs.');
     return input;
   }
 
@@ -616,7 +626,7 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
         return view(row(id)!);
       },
       'automations.update': raw => {
-        const current = existing(raw.id), input = checkedInput(raw), now = automationTiming.now();
+        const current = existing(raw.id), input = checkedInput(raw, current), now = automationTiming.now();
         // A new schedule starts counting from now: no backfill of occurrences the old one would have had.
         const rescheduled = current.schedule !== JSON.stringify(input.schedule) || current.timezone !== input.timezone;
         save({ ...current, ...(rescheduled ? { anchor: now, cursor: now } : {}) }, input, raw.acknowledgeFullAccess === true, current.version + 1);
@@ -645,7 +655,9 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
       },
       'automations.resume': raw => {
         const current = existing(raw.id), now = automationTiming.now();
-        // Resuming never replays what came due while paused.
+        // Resuming never replays what came due while paused. A once time that passed meanwhile is recorded as missed, so it reads done.
+        const schedule = toAutomation(current).schedule;
+        if (schedule.kind === 'once') { const due = dueBetween(schedule, current.timezone, current.cursor, now); if (due.latest !== null) insertRun(current, due.latest, 'schedule', 'missed', `It did not run: it was due ${onceLabel(schedule.at)} (${current.timezone}) while the automation was paused.`); }
         db.prepare('UPDATE automations SET paused = 0, cursor = ?, updated_at = ? WHERE id = ?').run(Math.max(current.cursor, now), iso(now), current.id);
         watchesSynced = false; ensureWatches(); broadcast();
         return view(row(current.id)!);
@@ -680,8 +692,8 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
         const permission = MODES.includes(raw.permissionMode as ChatPermissionMode) ? raw.permissionMode as ChatPermissionMode : 'workspace';
         let issues: string[] = [];
         if (raw.target !== undefined) { try { issues = issuesFor(targetOf(raw.target), permission, schedule); } catch (error) { issues = [error instanceof Error ? error.message : String(error)]; } }
-        if (schedule.kind !== 'watch' && schedule.kind !== 'repo' && !next.length) issues.push('This schedule never runs.');
-        return { next, summary: describeSchedule(schedule), issues } satisfies AutomationPreview;
+        if (schedule.kind !== 'watch' && schedule.kind !== 'repo' && !next.length) issues.push(schedule.kind === 'once' ? PASSED : 'This schedule never runs.');
+        return { next, summary: describeSchedule(schedule, timezone), issues } satisfies AutomationPreview;
       },
       'automations.runs': raw => {
         const current = existing(raw.id), limit = typeof raw.limit === 'number' && Number.isInteger(raw.limit) ? Math.min(Math.max(raw.limit, 1), AUTOMATION_HISTORY) : 50;
