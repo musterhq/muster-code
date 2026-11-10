@@ -23,6 +23,7 @@ const time = (iso: string, now = Date.now()) => {
 export function scheduledDetail(automation: AutomationView, now = Date.now()): string {
   if (automation.activeRun) return 'Running';
   if (automation.paused) return 'Paused';
+  if (automation.done) return 'Done';
   if (automation.issues.length) return 'Needs attention';
   if (automation.nextRunAt) return `Next ${time(automation.nextRunAt, now)}`;
   return automation.schedule.kind === 'watch' ? 'On file changes' : automation.schedule.kind === 'repo' ? 'On repository events' : automation.summary;

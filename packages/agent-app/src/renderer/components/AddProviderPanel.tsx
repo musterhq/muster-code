@@ -7,6 +7,7 @@ import { fieldRules, nameFromEndpoint, plainError, PROVIDER_CATALOG, secretStora
 import { invoke } from '../bridge';
 import { loadProviders, notifySuccess } from '../store';
 import { ProviderLogo } from './ProviderLogo';
+import { AcpAgentSheet } from './AcpAgentSheet';
 
 export interface KeyFieldProps { value: string; onChange(value: string): void; label: string; autoFocus?: boolean }
 interface PanelProps {
@@ -35,7 +36,8 @@ export function AddProviderPanel(props: PanelProps) {
         <span className={`provider-chip is-${status}`}>{STATUS_LABEL[status]}</span>
       </button></li>;
     })}</ul>
-    {chosen && <ProviderSheet key={chosen.id} entry={chosen} {...props} onBack={() => setChosen(undefined)}/>}
+    {chosen?.authKind === 'acp' ? <AcpAgentSheet key={chosen.id} onClose={props.onClose} onBack={() => setChosen(undefined)}/>
+      : chosen && <ProviderSheet key={chosen.id} entry={chosen} {...props} onBack={() => setChosen(undefined)}/>}
   </section>;
 }
 

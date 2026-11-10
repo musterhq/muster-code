@@ -77,6 +77,18 @@ Boundaries:
 | [MUS-SPEC-03-384F](03-providers-models-and-accounts.md#mus-spec-03-384f) | The model receives mailbox data and project rules without instructions for unavailable canvas, desktop, background, sandbox or mailbox tools. | [`an HTTP request keeps mailbox data but only describes tools the route can execute`](../../../packages/agent-app/tests/http-router-384.test.ts) |
 | [MUS-SPEC-03-384G](03-providers-models-and-accounts.md#mus-spec-03-384g) | A long follow-up fits 85% of the declared window on the first request, with an earlier-history summary, recent messages and the current question. | [`an HTTP follow-up fits the declared window while retaining a summary and recent messages`](../../../packages/agent-app/tests/http-router-384.test.ts) |
 | [MUS-SPEC-03-384H](03-providers-models-and-accounts.md#mus-spec-03-384h) | A later round refused for context overflow retries with shorter output, keeps the result head and tail and paired tool call, and completes without running the tool again. | [`an HTTP context overflow in a later tool round shrinks old output and continues without repeating the tool`](../../../packages/agent-app/tests/http-router-384.test.ts) |
+| [MUS-SPEC-03-160A](03-providers-models-and-accounts.md#mus-spec-03-160a) | Thoughts, the plan, tool rows and the answer appear; the session runs in the folder with the chosen model. | [`ACP: thoughts, the plan, tool calls and the answer stream into the chat, with the chosen model`](../../../packages/agent-app/tests/acp-route-160.test.ts) |
+| [MUS-SPEC-03-160B](03-providers-models-and-accounts.md#mus-spec-03-160b) | The card, the allow answer, the written file and the diff on the row. | [`ACP in Workspace: an edit waits for the approval card, shows its diff and is written inside the folder once approved`](../../../packages/agent-app/tests/acp-route-160.test.ts) |
+| [MUS-SPEC-03-160C](03-providers-models-and-accounts.md#mus-spec-03-160c) | The reject answer, no write and a completed turn. | [`ACP in Workspace: a declined edit is refused to the agent, the file is unchanged and the turn completes`](../../../packages/agent-app/tests/acp-route-160.test.ts) |
+| [MUS-SPEC-03-160D](03-providers-models-and-accounts.md#mus-spec-03-160d) | Auto settles the routine edit, asks for the install; Full access never asks. | [`ACP in Auto: an edit inside the folder settles itself, an install still asks; Full access never asks`](../../../packages/agent-app/tests/acp-route-160.test.ts) |
+| [MUS-SPEC-03-160E](03-providers-models-and-accounts.md#mus-spec-03-160e) | Outside writes refused in Workspace, all writes refused in Read only, outside writes allowed in Full access. | [`ACP file access follows the access level: Workspace writes stay in the folder, Read only writes nothing and refuses edits`](../../../packages/agent-app/tests/acp-route-160.test.ts) |
+| [MUS-SPEC-03-160F](03-providers-models-and-accounts.md#mus-spec-03-160f) | session/cancel sent, turn stopped, process gone. | [`ACP Stop sends session/cancel, ends the turn as stopped and leaves no agent process`](../../../packages/agent-app/tests/acp-route-160.test.ts) |
+| [MUS-SPEC-03-160G](03-providers-models-and-accounts.md#mus-spec-03-160g) | load, resume and the summary fallback. | [`ACP follow-ups continue the saved session: session/load (replay not shown again), session/resume, or a summary when neither`](../../../packages/agent-app/tests/acp-route-160.test.ts) |
+| [MUS-SPEC-03-160H](03-providers-models-and-accounts.md#mus-spec-03-160h) | Three plain messages, none of them a stack trace. | [`ACP errors are plain: a missing command, a command that is not an ACP agent, and an agent that needs a sign-in`](../../../packages/agent-app/tests/acp-route-160.test.ts) |
+| [MUS-SPEC-03-160I](03-providers-models-and-accounts.md#mus-spec-03-160i) | Presets, the check, the catalog row and secret storage. | [`ACP agents in Settings: presets are commands only, a check reads models and modes, variables stay in the secret store`](../../../packages/agent-app/tests/acp-route-160.test.ts) |
+| [MUS-SPEC-03-160J](03-providers-models-and-accounts.md#mus-spec-03-160j) | Cancel, then the steer in the same session, then a completed turn. | [`ACP steering: a message sent mid-turn cancels the turn and goes to the agent next, in the same session`](../../../packages/agent-app/tests/acp-route-160.test.ts) |
+| [MUS-SPEC-03-160K](03-providers-models-and-accounts.md#mus-spec-03-160k) | Preset fill, install hint, plain error, model count and the saved draft. | [`Add ACP agent: a preset fills the command and shows how to install it; Test starts it, Save keeps it`](../../../packages/agent-app/tests/add-acp-agent-160-dom.tsx) |
+| [MUS-SPEC-03-160L](03-providers-models-and-accounts.md#mus-spec-03-160l) | Arguments split correctly and only the draft is removed. | [`Add ACP agent: cancelling an untested draft removes only that draft`](../../../packages/agent-app/tests/add-acp-agent-160-dom.tsx) |
 
 ### Configured routers
 
@@ -764,5 +776,141 @@ Boundaries:
 - Expected result: The install fails with "nothing changed" and a reason naming the checksum; the version folder is removed and `MUSTER_CODEX_COMMAND` is unchanged.
 - Test: `packages/agent-app/tests/cli-maintenance.test.ts::MUS-SPEC-03-721I: a download that fails its checksum installs nothing`
 - Environment: As 721H.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### ACP agents (#160)
+
+Any agent that speaks the Agent Client Protocol (JSON-RPC over stdio) can be added in Settings › Providers and runs as a route: Muster streams its updates into the chat, answers its permission requests through the approval flow, and serves its file reads and writes inside the chat folder.
+
+<a id="mus-spec-03-160a"></a>
+#### MUS-SPEC-03-160A: Streaming from an ACP agent: reasoning, plan, tool rows and the answer
+
+- Precondition: An ACP agent route whose fake agent reports a model option (fast, smart) and modes; a Workspace chat in a folder with the model "smart" selected.
+- Action: Send "STREAM". The agent sends a thought chunk, a plan, a read tool call that completes, and two message chunks.
+- Expected result: The thought is a reasoning row, the plan a Plan row with its steps and statuses, the read a completed file-read row with its output, and the reply reads "Hello from ACP.". Muster sends `initialize` with protocol version 1 offering file reads and writes but no terminals, opens the session in the chat folder, chooses "smart" through `session/set_config_option`, and saves the ACP session id as the chat's thread.
+- Test: `packages/agent-app/tests/acp-route-160.test.ts::ACP: thoughts, the plan, tool calls and the answer stream into the chat, with the chosen model`
+- Environment: Node test runner; the agent service with a real child process (a fake ACP agent script); no network.
+- Known gaps: A fake agent, not a real one; image and audio prompt content and agent-reported token usage are covered only by the shapes the fake sends.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-160b"></a>
+#### MUS-SPEC-03-160B: An ACP edit waits for the approval card and is written inside the folder
+
+- Precondition: A Workspace chat on the fake ACP agent; list.txt in the folder holds one, two, three.
+- Action: Send "EDIT <list.txt>". The agent reports an edit tool call with a diff and asks `session/request_permission`; approve the card.
+- Expected result: A file-change approval card is shown and the file is unchanged until it is answered. After approval the agent gets the allow option, writes through `fs/write_text_file`, and the file reads one, TWO, three. The tool row is completed and holds a unified diff (`@@ -1,3 +1,3 @@`, ` one`, `-two`, `+TWO`).
+- Test: `packages/agent-app/tests/acp-route-160.test.ts::ACP in Workspace: an edit waits for the approval card, shows its diff and is written inside the folder once approved`
+- Environment: Node test runner; agent service; real fake-agent process; temporary folders.
+- Known gaps: The card is answered through the service command, not by clicking the rendered card.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-160c"></a>
+#### MUS-SPEC-03-160C: A declined ACP edit is refused and the turn still completes
+
+- Precondition: As 160B.
+- Action: Send "EDIT <list.txt>" and decline the card.
+- Expected result: The agent gets the reject option, never calls `fs/write_text_file`, the file is unchanged, the agent's reply ("Declined (reject).") shows and the chat ends completed.
+- Test: `packages/agent-app/tests/acp-route-160.test.ts::ACP in Workspace: a declined edit is refused to the agent, the file is unchanged and the turn completes`
+- Environment: As 160B.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-160d"></a>
+#### MUS-SPEC-03-160D: Auto and Full access on an ACP agent
+
+- Precondition: An Auto chat and a Full access chat on the fake ACP agent.
+- Action: In Auto, send an edit of a file inside the folder, then "RUN npm install left-pad" and decline its card. In Full access, send "RUN npm install left-pad".
+- Expected result: In Auto the edit is approved without a card and its row records the Auto rule (inside the chat's folder); the install still shows a command card with its command. In Full access the command runs with no card.
+- Test: `packages/agent-app/tests/acp-route-160.test.ts::ACP in Auto: an edit inside the folder settles itself, an install still asks; Full access never asks`
+- Environment: As 160B.
+- Known gaps: Auto's rules themselves are clause 05 (#841); this checks that ACP requests reach them.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-160e"></a>
+#### MUS-SPEC-03-160E: ACP file reads and writes follow the access level
+
+- Precondition: Workspace, Read only and Full access chats on the fake ACP agent; a folder beside the chat folder.
+- Action: Ask the agent to write a file outside the folder and inside it, and to read a line range; in Read only, to write and to edit; in Full access, to write outside the folder.
+- Expected result: Workspace refuses the outside write (the agent gets an error naming the working folder and no file appears), writes the inside file, and returns line 2 of a file for `line: 2, limit: 1`. Read only refuses the write (error says read-only), rejects the edit's permission request without a card, leaves the file unchanged and switches the agent to its plan mode. Full access writes outside the folder.
+- Test: `packages/agent-app/tests/acp-route-160.test.ts::ACP file access follows the access level: Workspace writes stay in the folder, Read only writes nothing and refuses edits`
+- Environment: As 160B.
+- Known gaps: Links inside the folder are refused by the same check as the HTTP tools (MUS-SPEC-03-384E) and are not exercised again here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-160f"></a>
+#### MUS-SPEC-03-160F: Stop cancels an ACP turn and leaves no process
+
+- Precondition: A Full access chat whose agent is running a long tool call.
+- Action: Press Stop (`chat.stop`).
+- Expected result: The agent receives `session/cancel`; the chat does not end completed; the open tool row is no longer running; the agent process has exited.
+- Test: `packages/agent-app/tests/acp-route-160.test.ts::ACP Stop sends session/cancel, ends the turn as stopped and leaves no agent process`
+- Environment: As 160B.
+- Known gaps: An agent that ignores `session/cancel` is ended by SIGTERM then SIGKILL after the grace period; that path is not exercised here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-160g"></a>
+#### MUS-SPEC-03-160G: ACP follow-ups continue the same session
+
+- Precondition: Three chats: an agent that advertises `loadSession`, one that advertises `sessionCapabilities.resume`, and one with neither.
+- Action: Send two messages in each chat.
+- Expected result: With `loadSession` the second turn sends `session/load` with the first turn's session id, no second `session/new`, and the replayed messages are not added to the transcript. With resume it sends `session/resume` and no `session/load`. With neither it starts a new session whose first prompt carries a summary of the earlier messages before the new one.
+- Test: `packages/agent-app/tests/acp-route-160.test.ts::ACP follow-ups continue the saved session: session/load (replay not shown again), session/resume, or a summary when neither`
+- Environment: As 160B.
+- Known gaps: Each turn starts the agent process again; a long-lived process per chat is not kept.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-160h"></a>
+#### MUS-SPEC-03-160H: Plain errors for a missing command, a non-ACP command and a sign-in
+
+- Precondition: The ACP route with a command that does not exist, a command that prints text and exits, and an agent that answers `session/new` with `auth_required`.
+- Action: Run one turn on each.
+- Expected result: The missing command fails before dispatch with "`<command>` was not found" and the install hint; the non-ACP command fails before dispatch saying it did not answer as an Agent Client Protocol agent; the sign-in case says the agent needs you to sign in first.
+- Test: `packages/agent-app/tests/acp-route-160.test.ts::ACP errors are plain: a missing command, a command that is not an ACP agent, and an agent that needs a sign-in`
+- Environment: Node test runner; the adapter with a real child process.
+- Known gaps: Agents that offer `authenticate` methods are not signed in from Muster; the person signs in with the agent's own CLI.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-160i"></a>
+#### MUS-SPEC-03-160I: Saving and checking an ACP agent in Settings
+
+- Precondition: An empty data folder with an encrypting secret store.
+- Action: Save an agent (command, arguments, one variable), check it, list it through the provider catalog, save and check a non-ACP command, then remove the first.
+- Expected result: Every preset has a command, an install hint and a link, and none runs a package downloader. The saved agent is not offered until checked; the variable's value is not in acp-agents.json but reaches a run. The check reads the agent's models (current first) and names its modes; the catalog runs it as an `acp-agent` route and the store stops listing it twice. The non-ACP command is listed with an error. Removing the agent clears its stored variables.
+- Test: `packages/agent-app/tests/acp-route-160.test.ts::ACP agents in Settings: presets are commands only, a check reads models and modes, variables stay in the secret store`
+- Environment: Node test runner; the store and catalog with a real fake-agent process; temporary folders.
+- Known gaps: The secret store uses a stand-in encryption box, not the system keychain.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-160j"></a>
+#### MUS-SPEC-03-160J: Steering an ACP turn
+
+- Precondition: A Full access chat whose agent is running a long tool call.
+- Action: Send a steer ("actually just say hi") while it runs.
+- Expected result: The steer is accepted; the agent receives `session/cancel`, then a second `session/prompt` with the steer text in the same session; its answer shows and the chat ends completed. A steer while an approval card is open is refused with a reason (not exercised here).
+- Test: `packages/agent-app/tests/acp-route-160.test.ts::ACP steering: a message sent mid-turn cancels the turn and goes to the agent next, in the same session`
+- Environment: As 160B.
+- Known gaps: ACP has no way to add a message to a running turn, so the running turn is cancelled first; the refusal during an open approval is covered only by reading the code.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-160k"></a>
+#### MUS-SPEC-03-160K: Adding an ACP agent from a preset in Settings
+
+- Precondition: Settings › Accounts & providers with a fake bridge.
+- Action: Open Add provider, choose the ACP agent card, pick the Gemini CLI preset, enter a variable, Test (first failing, then passing), then Save.
+- Expected result: The card says Agent Client Protocol. The sheet lists presets plus "Other command"; the preset fills name, command and arguments and shows "Muster does not install it" with the install command, without running anything. A failed check shows the plain error. A passing check says how many models it found. Both tests update the same draft with the command, arguments, variables and preset; Save closes the sheet and keeps the agent.
+- Test: `packages/agent-app/tests/add-acp-agent-160-dom.tsx::Add ACP agent: a preset fills the command and shows how to install it; Test starts it, Save keeps it`
+- Environment: DOM suite (linkedom) rendering the real ProvidersScreen; fake bridge.
+- Known gaps: Layout is not checked; the sheet reuses the existing provider sheet styles and no screenshot of the running app was taken.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-160l"></a>
+#### MUS-SPEC-03-160L: Cancelling an untested ACP agent
+
+- Precondition: As 160K.
+- Action: Enter a command path and arguments with a quoted value, Test (it fails), then Cancel.
+- Expected result: The arguments are split like a shell (`--label "two words"` is one argument) and only the draft this sheet saved is removed.
+- Test: `packages/agent-app/tests/add-acp-agent-160-dom.tsx::Add ACP agent: cancelling an untested draft removes only that draft`
+- Environment: As 160K.
 - Known gaps: None known.
 - Evidence: UNVERIFIED

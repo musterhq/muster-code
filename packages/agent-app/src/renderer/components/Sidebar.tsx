@@ -1,4 +1,5 @@
 import { openHub, useHubRoute, useInboxBadge, useInboxDismissals, useWorkspace, type HubPage } from '../hubStore';
+import {CompareRowAction} from './CompareChip';
 import {imeComposing} from '../ime';
 import { OrgSidebar } from './OrgSidebar';
 import { badgeCount, buildActivity } from '../inboxModel';
@@ -222,6 +223,7 @@ function ChatRowImpl({ chat, titleHint, now, tabbable, onFocusRow, selected, sel
           {snoozed
             ? <Tip label={`${wakes} · Wake now`}><button type="button" className="icon-button" tabIndex={tab} aria-label={`Wake ${chat.title} now`} onClick={()=>void wakeChat(chat.id)}><AlarmClockOff size={14}/></button></Tip>
             : <Tip label={chat.pinned?'Unpin':'Pin'}><button type="button" className="icon-button" tabIndex={tab} aria-label={chat.pinned?`Unpin ${chat.title}`:`Pin ${chat.title}`} onClick={togglePin}>{chat.pinned?<PinOff size={14}/>:<Pin size={14}/>}</button></Tip>}
+          <CompareRowAction chatId={chat.id} title={chat.title} tabIndex={tab}/>
           <Tip label={chat.archived?'Unarchive':'Archive'}><button type="button" className="icon-button" tabIndex={tab} aria-label={chat.archived?`Unarchive ${chat.title}`:`Archive ${chat.title}`} onClick={toggleArchive}>{chat.archived?<ArchiveRestore size={14}/>:<Archive size={14}/>}</button></Tip>
           <Tip label="More actions"><button type="button" className="icon-button" tabIndex={tab} aria-label={`Actions for ${chat.title}`} onClick={openNativeMenuAtPointer}><MoreHorizontal size={15}/></button></Tip>
         </span>
