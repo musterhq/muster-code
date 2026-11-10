@@ -31,6 +31,7 @@ Boundaries:
 | [MUS-SPEC-23-2E](23-mobile.md#mus-spec-23-2e) | needs.list returns pending approvals and questions across chats with the chat title, and empties when they are answered. | [`the needs-you feed lists pending approvals and questions across chats`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-3A](23-mobile.md#mus-spec-23-3a) | No frame the relay forwards contains chat text, a chat title, a command or JSON. | [`the relay forwards only ciphertext: no chat text, title or command in any frame`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-3B](23-mobile.md#mus-spec-23-3b) | Changing one byte of a frame, or sending an old frame again, fails decryption and closes the session without running the command. | [`a tampered or replayed frame is rejected and closes the session`](../../../packages/agent-app/tests/mobile-326.test.ts) |
+| [MUS-SPEC-23-3C](23-mobile.md#mus-spec-23-3c) | Every mobile.* command is desktop only on Muster Server, for every role. | [`phone pairing commands are desktop only on Muster Server, even for the owner`](../../../packages/server/tests/policy.test.ts) |
 | [MUS-SPEC-23-4A](23-mobile.md#mus-spec-23-4a) | Pairing and a session between the phone's noble crypto and the desktop's Node crypto succeed both ways. | [`the phone crypto pairs and talks with the desktop crypto`](../../../packages/mobile/tests/crypto-interop.test.ts) |
 | [MUS-SPEC-23-4B](23-mobile.md#mus-spec-23-4b) | A pasted pairing link pairs and stores the record; a malformed link shows an error and stores nothing. | [`pairs from a pasted link and rejects a malformed one`](../../../packages/mobile/tests/pair-screen.test.tsx) |
 | [MUS-SPEC-23-4C](23-mobile.md#mus-spec-23-4c) | Rows show the title, place and status; a chat waiting on the person shows a needs-you badge; a chats event updates the list. | [`lists chats with status and needs-you, and updates live`](../../../packages/mobile/tests/chats-screen.test.tsx) |
@@ -175,6 +176,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/mobile-326.test.ts::a tampered or replayed frame is rejected and closes the session`
 - Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and a Node phone built from the same MobileClient and Noise code the app uses, with Node crypto.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-3c"></a>
+#### MUS-SPEC-23-3C: Muster Server does not pair phones yet
+
+- Precondition: Muster Server's command policy.
+- Action: Classify and authorize each mobile.* command as owner, admin, member and viewer.
+- Expected result: Each is classed desktop and refused as desktop-only for every role, so no server member can pair a phone with the shared runtime and bypass per-person project access.
+- Test: `packages/server/tests/policy.test.ts::phone pairing commands are desktop only on Muster Server, even for the owner`
+- Environment: Node test runner on the server policy module.
+- Known gaps: Pairing phones per person on a server is phase 3 of the design.
 - Evidence: UNVERIFIED
 
 ### The phone app
