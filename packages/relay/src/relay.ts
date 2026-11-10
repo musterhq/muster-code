@@ -3,15 +3,19 @@
  * desktop it asks for, and nothing else: no accounts, no storage, no keys. Development and tests only; where the production
  * relay runs is a later decision.
  *
- *   desktop:  GET /v1/desktop          then {t:'register', secret} → {t:'registered', route}; route = hex(sha256(secret))[0:32]
+ *   desktop:  GET /v1/desktop          relay → {t:'challenge', nonce}; desktop → {t:'register', key, sig} where key is its raw
+ *                                      Ed25519 route public key and sig signs "muster-relay/1 register <nonce>";
+ *                                      relay verifies, then → {t:'registered', route}; route = hex(sha256(key))[0:32].
+ *                                      The relay never learns anything that would let it (or a ws:// observer) register the
+ *                                      route itself; a live registration is replaced only by another valid signature.
  *             relay → desktop          {t:'open', c} · {t:'data', c, d} · {t:'closed', c}
  *             desktop → relay          {t:'data', c, d} · {t:'close', c, code, reason}
  *   phone:    GET /v1/phone/<route>    text frames are the base64 strings, both ways; 4404 when the desktop is offline
  *
- * Every forwarded payload is recorded in `frames` (tests prove they are ciphertext). `intercept` lets a test change, drop or
- * duplicate a payload in flight.
+ * Test-only, and off unless started with `{test: true}`: every forwarded payload is recorded in `frames` (tests prove they
+ * are ciphertext), and `intercept` lets a test change, drop or duplicate a payload in flight.
  */
-import {createHash} from 'node:crypto';
+import {createHash, createPublicKey, randomBytes, verify} from 'node:crypto';
 import http from 'node:http';
 import type {AddressInfo} from 'node:net';
 import {acceptUpgrade, type WsConnection} from '../../server/src/net/ws.ts';
@@ -24,21 +28,33 @@ export interface DevRelay {
   intercept: RelayIntercept | undefined;
   close(): Promise<void>;
 }
-export const routeFor = (secret: string): string => createHash('sha256').update(secret).digest('hex').slice(0, 32);
+/** The route of a desktop: the first 16 bytes of sha256(its raw Ed25519 route public key), hex. */
+export const routeFor = (publicKey: Uint8Array): string => createHash('sha256').update(publicKey).digest('hex').slice(0, 32);
+const ED_SPKI = Buffer.from('302a300506032b6570032100', 'hex');
+const registration = (nonce: string) => Buffer.from(`muster-relay/1 register ${nonce}`, 'utf8');
+function verified(key: unknown, sig: unknown, nonce: string): Buffer | null {
+  if (typeof key !== 'string' || typeof sig !== 'string' || key.length > 64 || sig.length > 128) return null;
+  try {
+    const raw = Buffer.from(key, 'base64');
+    if (raw.length !== 32) return null;
+    const ok = verify(null, registration(nonce), createPublicKey({key: Buffer.concat([ED_SPKI, raw]), format: 'der', type: 'spki'}), Buffer.from(sig, 'base64'));
+    return ok ? raw : null;
+  } catch { return null; }
+}
 const ROUTE = /^[a-f0-9]{32}$/;
 const DATA = /^[A-Za-z0-9+/=_-]{1,22000000}$/;
 const MAX_RECORDED = 20_000;
 
-export async function startRelay(options: {host?: string; port?: number; log?: (line: string) => void} = {}): Promise<DevRelay> {
+export async function startRelay(options: {host?: string; port?: number; log?: (line: string) => void; /** Record frames and allow intercept (tests only). */ test?: boolean} = {}): Promise<DevRelay> {
   const desktops = new Map<string, {socket: WsConnection; phones: Map<number, WsConnection>}>();
   const all = new Set<WsConnection>();
   let nextConn = 1;
   const relay: DevRelay = {url: '', frames: [], intercept: undefined, close};
   const log = options.log ?? (() => undefined);
   const forward = (frame: RelayFrame, deliver: (data: string) => void) => {
-    const out = relay.intercept ? relay.intercept(frame) : frame.data;
+    const out = options.test && relay.intercept ? relay.intercept(frame) : frame.data;
     for (const data of out === null ? [] : Array.isArray(out) ? out : [out]) {
-      if (relay.frames.length < MAX_RECORDED) relay.frames.push({...frame, data});
+      if (options.test && relay.frames.length < MAX_RECORDED) relay.frames.push({...frame, data});
       deliver(data);
     }
   };
@@ -58,12 +74,15 @@ export async function startRelay(options: {host?: string; port?: number; log?: (
 
   function attachDesktop(ws: WsConnection) {
     let route: string | null = null;
+    const nonce = randomBytes(32).toString('base64');
+    ws.send(JSON.stringify({t: 'challenge', nonce}));
     ws.on('message', (text: string) => {
-      let message: {t?: string; secret?: unknown; c?: unknown; d?: unknown; code?: unknown; reason?: unknown};
+      let message: {t?: string; key?: unknown; sig?: unknown; c?: unknown; d?: unknown; code?: unknown; reason?: unknown};
       try { message = JSON.parse(text); } catch { ws.close(1003, 'bad message'); return; }
       if (message.t === 'register') {
-        if (typeof message.secret !== 'string' || message.secret.length < 32 || message.secret.length > 256) { ws.close(1008, 'bad secret'); return; }
-        route = routeFor(message.secret);
+        const key = route ? null : verified((message as {key?: unknown}).key, (message as {sig?: unknown}).sig, nonce);
+        if (!key) { ws.close(4401, 'bad signature'); return; }
+        route = routeFor(key);
         // A newer registration for the same route replaces the old link; its phones are dropped.
         const old = desktops.get(route);
         if (old && old.socket !== ws) { for (const p of old.phones.values()) p.close(4404, 'offline'); old.socket.close(4409, 'replaced'); }

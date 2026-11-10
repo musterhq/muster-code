@@ -1,6 +1,6 @@
 /**
  * The desktop's one outbound WebSocket to the phone relay (#326, docs/mobile/DESIGN.md §2). It registers this computer's
- * route with the route secret, then carries each phone connection's base64 frames. It reconnects with backoff while running.
+ * route by signing the relay's one-time challenge with the route key (never sending anything reusable), then carries each phone connection's base64 frames. It reconnects with backoff while running.
  * It never sees plaintext: sessions are encrypted end to end above it.
  */
 export type RelayLinkState = 'connecting' | 'online' | 'offline';
@@ -25,7 +25,8 @@ export class RelayLink {
   private attempt = 0;
   private retry: ReturnType<typeof setTimeout> | undefined;
   private waiters: Array<{resolve: () => void; reject: (error: Error) => void}> = [];
-  constructor(private readonly url: string, private readonly secret: string, private readonly handlers: RelayLinkHandlers) { this.connect(); }
+  /** `register(nonce)` returns the registration message for that nonce: the route public key and a signature over it. */
+  constructor(private readonly url: string, private readonly register: (nonce: string) => {key: string; sig: string}, private readonly handlers: RelayLinkHandlers) { this.connect(); }
 
   private setState(state: RelayLinkState, error: string | null) {
     this.state = state; this.error = error;
@@ -40,12 +41,12 @@ export class RelayLink {
     try { socket = new Ctor(`${this.url.replace(/\/+$/, '')}/v1/desktop`); } catch (error) { this.setState('offline', (error as Error).message); this.schedule(); return; }
     this.socket = socket;
     this.setState('connecting', null);
-    socket.onopen = () => socket.send(JSON.stringify({t: 'register', secret: this.secret}));
     socket.onerror = () => undefined;
     socket.onmessage = event => {
       if (typeof event.data !== 'string') return;
       let message: {t?: string; c?: unknown; d?: unknown};
       try { message = JSON.parse(event.data); } catch { return; }
+      if (message.t === 'challenge' && typeof (message as {nonce?: unknown}).nonce === 'string') { socket.send(JSON.stringify({t: 'register', ...this.register((message as {nonce: string}).nonce)})); return; }
       if (message.t === 'registered') { this.attempt = 0; this.setState('online', null); return; }
       if (typeof message.c !== 'number') return;
       if (message.t === 'open') this.handlers.open(message.c);

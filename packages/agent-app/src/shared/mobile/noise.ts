@@ -155,6 +155,7 @@ export class Handshake {
 
   readMessage(message: Uint8Array): Uint8Array {
     if (this.finished || (this.step === 0) === this.o.initiator) throw new Error('Noise handshake out of order.');
+    if (message.length > NOISE_MAX_MESSAGE) throw new Error('Noise message too large.');
     let at = 0;
     const take = (length: number) => { if (at + length > message.length) throw new Error('Noise message too short.'); const out = message.subarray(at, at + length); at += length; return out; };
     for (const token of MESSAGES[this.o.pattern][this.step]!) {

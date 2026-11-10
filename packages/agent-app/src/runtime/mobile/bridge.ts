@@ -28,14 +28,23 @@ export function mobileChats(snapshot: Snapshot): MobileChat[] {
 }
 
 const cap = (text: string) => text.length > MAX_ITEM_TEXT ? `${text.slice(0, MAX_ITEM_TEXT)}\n[truncated]` : text;
+const baseName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
+/** The phone gets names, never full paths (DESIGN §8.2): the folder's name, and files relative to it (else their base name). */
+function phonePath(path: string, cwd: string | undefined): string {
+  const absolute = /^(?:[A-Za-z]:)?[\\/]/.test(path) || path.startsWith('~');
+  if (!absolute) return path;
+  const root = cwd?.replace(/[\\/]+$/, '');
+  if (root && (path.startsWith(`${root}/`) || path.startsWith(`${root}\\`))) return path.slice(root.length + 1);
+  return baseName(path);
+}
 function approvalOf(data: Record<string, unknown> | undefined): MobileApproval | undefined {
   const d = data as Partial<ApprovalData> | undefined;
   if (!d || (d.kind !== 'command' && d.kind !== 'fileChange' && d.kind !== 'mcp')) return undefined;
   const out: MobileApproval = {kind: d.kind};
   if (d.command) out.command = cap(String(d.command));
-  if (d.cwd) out.cwd = String(d.cwd);
+  if (d.cwd) out.cwd = baseName(String(d.cwd));
   if (d.reason) out.reason = String(d.reason).slice(0, 2000);
-  if (Array.isArray(d.diff)) out.files = d.diff.map(entry => String(entry.path)).slice(0, 100);
+  if (Array.isArray(d.diff)) out.files = d.diff.map(entry => phonePath(String(entry.path), d.cwd ? String(d.cwd) : undefined)).slice(0, 100);
   if (d.server) out.server = String(d.server);
   if (d.tool) out.tool = String(d.tool);
   return out;
@@ -64,6 +73,8 @@ export interface BridgeContext {
   invoke: DomainContext['invoke'];
   snapshot(): Promise<Snapshot>;
   access(): MobileAccess;
+  /** False once the session closed or the phone was revoked. */
+  alive(): boolean;
   desktopName: string;
   deviceId: string;
   /** Streams this chat's item events to the session (null stops). */
@@ -103,6 +114,12 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
     if (!chat) throw new MobileError('not-found', 'That chat is not on this computer any more.');
     return chat;
   };
+  /** Right before a runtime command runs: the session must still be open and allowed to act (it may have changed while
+   *  this request awaited a read). */
+  const recheck = () => {
+    if (!ctx.alive()) throw new MobileError('closed', 'This phone’s session has ended.');
+    if (ACTING_METHODS.has(m) && ctx.access() !== 'act') throw new MobileError('read-only', readOnlyMessage());
+  };
   try {
     switch (m) {
       case 'hello': return {desktopName: ctx.desktopName, deviceId: ctx.deviceId, access: ctx.access(), protocol: MOBILE_PROTOCOL_VERSION} satisfies MobileMethods['hello']['result'];
@@ -118,17 +135,22 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
       case 'chat.close': ctx.watch(null); return {};
       case 'chat.send': {
         const chatId = id(p.id); await chatOf(chatId);
-        const result = await ctx.invoke('chat.send', {id: chatId, text: text(p.text, 'message'), requestId: id(p.requestId, 'requestId')});
+        const message = text(p.text, 'message'), requestId = id(p.requestId, 'requestId');
+        recheck();
+        const result = await ctx.invoke('chat.send', {id: chatId, text: message, requestId});
         return {runId: result.runId} satisfies MobileMethods['chat.send']['result'];
       }
       case 'chat.steer': {
         const chatId = id(p.id); await chatOf(chatId);
-        const result = await ctx.invoke('chat.steer', {id: chatId, text: text(p.text, 'message'), requestId: id(p.requestId, 'requestId')});
+        const message = text(p.text, 'message'), requestId = id(p.requestId, 'requestId');
+        recheck();
+        const result = await ctx.invoke('chat.steer', {id: chatId, text: message, requestId});
         return {steered: result.steered, ...(result.reason ? {reason: result.reason} : {})} satisfies MobileMethods['chat.steer']['result'];
       }
       case 'approval.respond': {
         const itemId = id(p.itemId, 'itemId');
         if (p.decision !== 'accept' && p.decision !== 'decline') throw new MobileError('refused', `Approving for the whole session can only be done on ${device().your}. From the phone, approve or decline this one request.`);
+        recheck();
         await ctx.invoke('approval.respond', {id: itemId, approved: p.decision === 'accept', decision: p.decision});
         return {};
       }
@@ -141,6 +163,7 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
           if (!Array.isArray(values) || values.length > 20 || !values.every(value => typeof value === 'string' && value.length <= 10_000)) throw new MobileError('bad-request', 'Invalid answers.');
           shaped[id(question, 'question id')] = {answers: values as string[]};
         }
+        recheck();
         await ctx.invoke('question.respond', {id: itemId, answers: shaped});
         return {};
       }

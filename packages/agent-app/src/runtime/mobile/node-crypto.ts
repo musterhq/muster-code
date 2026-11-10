@@ -1,5 +1,5 @@
 /** Noise primitives from Node's built-in crypto (#326): X25519, ChaCha20-Poly1305, SHA-256. No new dependency. */
-import {createCipheriv, createDecipheriv, createHash, createHmac, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, randomBytes} from 'node:crypto';
+import {createCipheriv, createDecipheriv, createHash, createHmac, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, randomBytes, sign} from 'node:crypto';
 import type {KeyPair, NoiseCrypto} from '../../shared/mobile/noise.ts';
 
 // DER wrappers for raw 32-byte X25519 keys (RFC 8410).
@@ -40,4 +40,15 @@ export function nodeNoiseCrypto(): NoiseCrypto {
     hmacSha256: (key, data) => bytes(createHmac('sha256', key).update(data).digest()),
     randomBytes: length => bytes(randomBytes(length)),
   };
+}
+
+// Ed25519 for the relay route key (#326 security review): the relay sends a nonce and the desktop signs it.
+const ED_PKCS8 = Buffer.from('302e020100300506032b657004220420', 'hex');
+export interface RouteKey { publicKey: Uint8Array; privateKey: Uint8Array }
+export function generateRouteKey(): RouteKey {
+  const pair = generateKeyPairSync('ed25519');
+  return {privateKey: bytes(pair.privateKey.export({format: 'der', type: 'pkcs8'}).subarray(ED_PKCS8.length)), publicKey: bytes(pair.publicKey.export({format: 'der', type: 'spki'}).subarray(12))};
+}
+export function signWithRouteKey(key: RouteKey, data: Uint8Array): Uint8Array {
+  return bytes(sign(null, data, createPrivateKey({key: Buffer.concat([ED_PKCS8, key.privateKey]), format: 'der', type: 'pkcs8'})));
 }
