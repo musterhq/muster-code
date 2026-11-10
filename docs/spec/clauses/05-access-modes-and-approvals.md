@@ -189,7 +189,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/auto-approvals-841.test.ts::Auto access: safe commands, reads and edits inside the folder settle themselves and say so on the tool row`
 - Environment: Node test runner; fake provider; temp data folder; no network.
 - Known gaps: A fake provider, not a live Codex app-server; the shell classifier is checked on these commands, not on every shell form.
-- Evidence: local; ~/.muster-work/review/841/green.txt; exit 0; 5 passed, 0 failed, 0 skipped; commit d489fd8a9daa9d263fc7f44e1cf2925f7ad16191
+- Evidence: local; ~/.muster-work/review/841/green.txt; exit 0; 6 passed, 0 failed, 0 skipped; commit 3c30a000465f4b482ef8f7eaf07e101fb31fab0c
 
 <a id="mus-spec-05-841b"></a>
 #### MUS-SPEC-05-841B: Risky requests still ask in Auto
@@ -200,7 +200,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/auto-approvals-841.test.ts::Auto access: installs, pushes, sudo, deletes and writes outside the folder still ask`
 - Environment: Node test runner; fake provider; temp data folder; no network.
 - Known gaps: Project tool rules run before Auto (deny, allow and ask behave as in Workspace); that order is covered by the existing tool-rule cases, not re-tested here.
-- Evidence: local; ~/.muster-work/review/841/green.txt; exit 0; 5 passed, 0 failed, 0 skipped; commit d489fd8a9daa9d263fc7f44e1cf2925f7ad16191
+- Evidence: local; ~/.muster-work/review/841/green.txt; exit 0; 6 passed, 0 failed, 0 skipped; commit 3c30a000465f4b482ef8f7eaf07e101fb31fab0c
 
 <a id="mus-spec-05-841c"></a>
 #### MUS-SPEC-05-841C: The person's allowlist settles a command in Auto
@@ -211,7 +211,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/auto-approvals-841.test.ts::Auto access: a command on the person's allowlist settles itself and names the allowlist`
 - Environment: Node test runner; fake provider; temp data folder.
 - Known gaps: The allowlist is a setting (import, export, settings file); this change adds no new screen to edit it.
-- Evidence: local; ~/.muster-work/review/841/green.txt; exit 0; 5 passed, 0 failed, 0 skipped; commit d489fd8a9daa9d263fc7f44e1cf2925f7ad16191
+- Evidence: local; ~/.muster-work/review/841/green.txt; exit 0; 6 passed, 0 failed, 0 skipped; commit 3c30a000465f4b482ef8f7eaf07e101fb31fab0c
 
 <a id="mus-spec-05-841d"></a>
 #### MUS-SPEC-05-841D: Auto on Claude Code
@@ -222,7 +222,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/auto-approvals-841.test.ts::Auto access on Claude Code: prompts reach Muster, a safe command is allowed at once and git push still asks`
 - Environment: Node test runner; a fake Claude Code process speaking the stream-json permission protocol; no network.
 - Known gaps: Uses the protocol as seen in Claude Code 2.1.x, not a live Claude Code run.
-- Evidence: local; ~/.muster-work/review/841/green.txt; exit 0; 5 passed, 0 failed, 0 skipped; commit d489fd8a9daa9d263fc7f44e1cf2925f7ad16191
+- Evidence: local; ~/.muster-work/review/841/green.txt; exit 0; 6 passed, 0 failed, 0 skipped; commit 3c30a000465f4b482ef8f7eaf07e101fb31fab0c
 
 <a id="mus-spec-05-841e"></a>
 #### MUS-SPEC-05-841E: Auto on Codex, fallback on other routes, and the picker
@@ -233,7 +233,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/auto-approvals-841.test.ts::Auto access: Codex asks Muster about every untrusted command; other routes run as Workspace and the picker says so`
 - Environment: Node test runner; fake routes; no network.
 - Known gaps: The picker check is on the option list the Composer and New chat screen render, not a rendered menu.
-- Evidence: local; ~/.muster-work/review/841/green.txt; exit 0; 5 passed, 0 failed, 0 skipped; commit d489fd8a9daa9d263fc7f44e1cf2925f7ad16191
+- Evidence: local; ~/.muster-work/review/841/green.txt; exit 0; 6 passed, 0 failed, 0 skipped; commit 3c30a000465f4b482ef8f7eaf07e101fb31fab0c
 
 <a id="mus-spec-05-841f"></a>
 #### MUS-SPEC-05-841F: Read-only commands that can run programs or write files still ask
@@ -244,4 +244,4 @@ Boundaries:
 - Test: `packages/agent-app/tests/auto-approvals-841.test.ts::Auto access: read-only commands that can run programs or write files still ask`
 - Environment: Node test runner; the Auto classifier and a fake Claude Code process; temp folder; no network.
 - Known gaps: A conservative list, not a shell interpreter: forms it does not recognise ask. A program on PATH that was itself replaced is outside this check.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/841/green.txt; exit 0; 6 passed, 0 failed, 0 skipped; commit 3c30a000465f4b482ef8f7eaf07e101fb31fab0c
