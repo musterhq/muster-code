@@ -5,10 +5,12 @@ Muster shows what changed in a chat's folder and helps the user review, commit a
 What the user can do:
 - see changed files per turn and for the whole chat, with inline and side-by-side diffs;
 - pick what to compare against, discard changes (untracked files go to Trash after a confirm), resolve conflicts and see blame and history;
+- act on a commit in the history graph: copy it, check it out, branch from it, cherry-pick or revert it;
 - create branches and worktrees, commit, push, open a pull request and follow its CI checks.
 
 Boundaries:
 - Nothing is discarded, reset or force-pushed without a confirm.
+- Checking out, cherry-picking or reverting a commit from history confirms first and never runs over uncommitted changes.
 - Large comparisons say when they are cut short; exactly at the limit is not cut short.
 - CI checks that share a name across workflows are listed separately.
 
@@ -41,6 +43,19 @@ Boundaries:
 | [MUS-SPEC-08-781K](08-git-changes-and-review.md#mus-spec-08-781k) | A file renamed twice after an edit is read under its final name; unnamed files and other chats stay refused. | [`the first edit of a file renamed twice afterwards reads the file under its final name, and only that`](../../../packages/agent-app/tests/full-inline-diff-781.test.ts) |
 | [MUS-SPEC-08-781L](08-git-changes-and-review.md#mus-spec-08-781l) | The same real-transcript workflow in a chat with a folder reads through the folder and opens every edit whole. | [`a folder chat: every edit of a file edited again in a later turn opens as the whole file in the transcript`](../../../packages/agent-app/tests/inline-diff-transcript-781-dom.tsx) |
 | [MUS-SPEC-08-781M](08-git-changes-and-review.md#mus-spec-08-781m) | The Changes popover opens the latest turn's file as the whole file, using the same later-edit history as the transcript. | [`the Changes popover opens the latest turn’s file as the whole file too`](../../../packages/agent-app/tests/inline-diff-transcript-781-dom.tsx) |
+| [MUS-SPEC-08-409A](08-git-changes-and-review.md#mus-spec-08-409a) | Checking out an older commit leaves HEAD detached at it and `main` still on its tip. | [`checking out a commit detaches HEAD at it and leaves the branch where it was`](../../../packages/agent-app/tests/git-commit-actions-409.test.ts) |
+| [MUS-SPEC-08-409B](08-git-changes-and-review.md#mus-spec-08-409b) | A branch made at an older commit points at it with HEAD unchanged; with “switch” HEAD is on it; an existing name is refused. | [`create branch here makes the branch at that commit and switches only when asked`](../../../packages/agent-app/tests/git-commit-actions-409.test.ts) |
+| [MUS-SPEC-08-409C](08-git-changes-and-review.md#mus-spec-08-409c) | Picking a `topic` commit adds one commit on `main` with its change; picking a `main` commit is refused; nothing is left mid-pick. | [`cherry-pick copies a commit from another branch onto the current branch and refuses one that is already there`](../../../packages/agent-app/tests/git-commit-actions-409.test.ts) |
+| [MUS-SPEC-08-409D](08-git-changes-and-review.md#mus-spec-08-409d) | Reverting a commit adds a “Revert …” commit and restores the file; a commit only on another branch is refused. | [`revert adds a commit that undoes the chosen commit and refuses one that is not on the branch`](../../../packages/agent-app/tests/git-commit-actions-409.test.ts) |
+| [MUS-SPEC-08-409E](08-git-changes-and-review.md#mus-spec-08-409e) | Each HEAD-changing action is refused naming the changed file; the file’s content and HEAD are unchanged. | [`uncommitted changes block checkout, cherry-pick and revert, and nothing is touched`](../../../packages/agent-app/tests/git-commit-actions-409.test.ts) |
+| [MUS-SPEC-08-409F](08-git-changes-and-review.md#mus-spec-08-409f) | The result lists `a.txt` as conflicted and the conflict state reports a cherry-pick (then a revert) in progress with that file. | [`a conflicting cherry-pick or revert stops in git’s normal conflict state and reports the files`](../../../packages/agent-app/tests/git-commit-actions-409.test.ts) |
+| [MUS-SPEC-08-409G](08-git-changes-and-review.md#mus-spec-08-409g) | With a running chat, checkout is refused with “running”; with the confirmation flag it runs; branch creation without switching is never blocked; each action announces a workspace change. | [`a running chat in the folder blocks HEAD changes unless the person confirmed the warning`](../../../packages/agent-app/tests/git-commit-actions-409.test.ts) |
+| [MUS-SPEC-08-409H](08-git-changes-and-review.md#mus-spec-08-409h) | Right-click and Shift+F10 on a commit row open a menu with Copy SHA, Copy message, Check out, Create branch, Cherry-pick and Revert; Copy SHA writes the full SHA. | [`a commit row opens its action menu on right-click and on Shift+F10, and Copy SHA copies the full SHA`](../../../packages/agent-app/tests/git-commit-actions-409-dom.tsx) |
+| [MUS-SPEC-08-409I](08-git-changes-and-review.md#mus-spec-08-409i) | The checkout dialog names the commit and “detached”; nothing runs until confirm; confirm sends the status revision; the list and Changes reload. | [`checkout and revert confirm first, naming what happens, then refresh history and changes`](../../../packages/agent-app/tests/git-commit-actions-409-dom.tsx) |
+| [MUS-SPEC-08-409J](08-git-changes-and-review.md#mus-spec-08-409j) | The dialog lists the changed files, says to commit or stash first, and the confirm button is disabled. | [`with uncommitted changes the dialog names them and offers no way to run the action`](../../../packages/agent-app/tests/git-commit-actions-409-dom.tsx) |
+| [MUS-SPEC-08-409K](08-git-changes-and-review.md#mus-spec-08-409k) | The dialog names the running chat and its confirm reads “… anyway”; confirming sends `allowRunning`. | [`a running chat in the same folder is named before HEAD changes and the confirm says anyway`](../../../packages/agent-app/tests/git-commit-actions-409-dom.tsx) |
+| [MUS-SPEC-08-409L](08-git-changes-and-review.md#mus-spec-08-409l) | After the action reports conflicts, the Changes tab and a conflict tab for the first file are open. | [`a conflicting cherry-pick opens changes and the conflict view for the first file`](../../../packages/agent-app/tests/git-commit-actions-409-dom.tsx) |
+| [MUS-SPEC-08-409M](08-git-changes-and-review.md#mus-spec-08-409m) | The dialog has a name field and a “Switch to it” option; submit sends the name, the commit and the switch choice. | [`create branch here asks for a name and whether to switch to it`](../../../packages/agent-app/tests/git-commit-actions-409-dom.tsx) |
 
 ### Refs, dash-named files and submodules
 
@@ -321,4 +336,149 @@ Boundaries:
 - Test: `packages/agent-app/tests/router-patch-tool-777.test.ts::#777 router models the catalog does not list run with the native apply_patch tool, so their edits show as inline diffs`
 - Environment: Node test runner; a stand-in Codex records the catalog it is given; the listing is a fake fetch.
 - Known gaps: Checks the catalog Codex receives. A manual probe with Codex 0.163 against a local fake server showed `intelligent-planner` offered `apply_patch` only with the merged catalog. Routes with no catalog file still use Codex's fallback metadata.
+- Evidence: UNVERIFIED
+
+### Commit actions in the history graph (#409)
+
+<a id="mus-spec-08-409a"></a>
+#### MUS-SPEC-08-409A: Checking out a commit detaches HEAD and leaves the branch alone
+
+- Precondition: A clean repository on `main` with three commits.
+- Action: Run the history graph’s “Check out this commit” on the middle commit with the current status revision.
+- Expected result: HEAD is detached at the middle commit, `main` still points at its old tip, the working files match the middle commit, and a stale status revision is refused without moving HEAD.
+- Test: `packages/agent-app/tests/git-commit-actions-409.test.ts::checking out a commit detaches HEAD at it and leaves the branch where it was`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: Calls the runtime helper directly; the menu and dialog are covered by MUS-SPEC-08-409H to 409K.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-409b"></a>
+#### MUS-SPEC-08-409B: Create branch here makes a branch at the commit, and switches only when asked
+
+- Precondition: A clean repository on `main` with two commits.
+- Action: Create `fix` at the first commit without switching, then `fix2` with switching, then `fix` again.
+- Expected result: `fix` points at the first commit and HEAD stays on `main`; `fix2` is created and checked out; reusing `fix` is refused with “already exists”.
+- Test: `packages/agent-app/tests/git-commit-actions-409.test.ts::create branch here makes the branch at that commit and switches only when asked`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: Branch name rules are git’s own (`check-ref-format`), covered by the branch picker cases.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-409c"></a>
+#### MUS-SPEC-08-409C: Cherry-pick copies a commit from another branch onto the current one
+
+- Precondition: A clean repository on `main` and a `topic` branch with a commit `main` does not have.
+- Action: Cherry-pick the `topic` commit onto `main`, then try to cherry-pick a commit that is already on `main`.
+- Expected result: A new commit on `main` carries the change and the original subject; the second pick is refused with “already on main” and no cherry-pick is in progress afterwards.
+- Test: `packages/agent-app/tests/git-commit-actions-409.test.ts::cherry-pick copies a commit from another branch onto the current branch and refuses one that is already there`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: Merge commits are picked against their first parent; that path has no separate case.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-409d"></a>
+#### MUS-SPEC-08-409D: Revert adds a commit that undoes the chosen one
+
+- Precondition: A clean repository on `main` whose last two commits change `a.txt`, and a `topic` branch with its own commit.
+- Action: Revert the older of the two commits, then try to revert the `topic` commit.
+- Expected result: A new commit titled `Revert "…"` undoes that commit’s change and the original stays in history; reverting the `topic` commit is refused with “not on main”.
+- Test: `packages/agent-app/tests/git-commit-actions-409.test.ts::revert adds a commit that undoes the chosen commit and refuses one that is not on the branch`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: Uses git’s default revert message; there is no message editor.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-409e"></a>
+#### MUS-SPEC-08-409E: Uncommitted changes block checkout, cherry-pick and revert
+
+- Precondition: A repository on `main` with an unstaged edit to `a.txt`, and a `topic` commit to pick.
+- Action: Try to check out an older commit, cherry-pick the `topic` commit, revert the last commit, and create a branch with switching.
+- Expected result: All four are refused with a message naming `a.txt` and saying to commit or stash first; `a.txt` still has the edit and HEAD has not moved. Creating a branch without switching still works.
+- Test: `packages/agent-app/tests/git-commit-actions-409.test.ts::uncommitted changes block checkout, cherry-pick and revert, and nothing is touched`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: Untracked files do not block; git itself refuses to overwrite one.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-409f"></a>
+#### MUS-SPEC-08-409F: A conflicting cherry-pick or revert stops in git’s conflict state
+
+- Precondition: A clean repository where `main` and `topic` both changed the same line of `a.txt`.
+- Action: Cherry-pick the `topic` commit onto `main`; abort; then revert a commit whose change a later commit overwrote.
+- Expected result: Each action returns `conflicts: ["a.txt"]`, leaves CHERRY_PICK_HEAD or REVERT_HEAD, and the conflict state names the operation and the file so the existing conflict view can resolve, continue or abort.
+- Test: `packages/agent-app/tests/git-commit-actions-409.test.ts::a conflicting cherry-pick or revert stops in git’s normal conflict state and reports the files`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: Resolution itself is covered by the conflict resolver cases.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-409g"></a>
+#### MUS-SPEC-08-409G: A chat running in the folder blocks HEAD changes until the person confirms
+
+- Precondition: A clean repository added as a folder, and a chat in that folder whose status is running.
+- Action: Call the domain’s commit action for checkout without and with `allowRunning`, and create a branch without switching.
+- Expected result: The first checkout is refused naming the running chat; the confirmed one detaches HEAD; branch creation succeeds; every successful action emits `workspaceChanged` for the folder.
+- Test: `packages/agent-app/tests/git-commit-actions-409.test.ts::a running chat in the folder blocks HEAD changes unless the person confirmed the warning`
+- Environment: Node test runner; git on PATH; the git domain with a stub store.
+- Known gaps: The warning text is checked in MUS-SPEC-08-409K.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-409h"></a>
+#### MUS-SPEC-08-409H: A commit’s menu opens by right-click and from the keyboard
+
+- Precondition: The History tab of a repository on `main`, showing commits.
+- Action: Right-click a commit row; close the menu; focus the row and press Shift+F10; choose Copy SHA; reopen and choose Copy message.
+- Expected result: The menu lists the six actions in that order and the browser menu is suppressed; the keyboard opens the same menu; the clipboard receives the 40-character SHA, then the full message.
+- Test: `packages/agent-app/tests/git-commit-actions-409-dom.tsx::a commit row opens its action menu on right-click and on Shift+F10, and Copy SHA copies the full SHA`
+- Environment: linkedom DOM; stubbed bridge; no Electron.
+- Known gaps: Menu position and focus ring need the real app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-409i"></a>
+#### MUS-SPEC-08-409I: Checkout and revert confirm first and refresh History and Changes
+
+- Precondition: The History tab with a clean repository.
+- Action: Choose “Check out this commit…”, read the dialog, confirm; then choose “Revert this commit…” and confirm.
+- Expected result: Each dialog names the commit’s short SHA and subject and what happens (detached HEAD; a new commit undoing it on main); `git.commitAction` is called only after confirm with the revision from `git.status`; afterwards `git.log` and `git.changes` are requested again.
+- Test: `packages/agent-app/tests/git-commit-actions-409-dom.tsx::checkout and revert confirm first, naming what happens, then refresh history and changes`
+- Environment: linkedom DOM; stubbed bridge; no Electron.
+- Known gaps: The real git work is covered by MUS-SPEC-08-409A and 409D.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-409j"></a>
+#### MUS-SPEC-08-409J: Uncommitted changes are named in the dialog and the action is disabled
+
+- Precondition: The History tab; `git.status` reports two modified files.
+- Action: Choose “Cherry-pick…” on a commit.
+- Expected result: The dialog names both files and says to commit or stash them first; the confirm button is disabled and `git.commitAction` is never called.
+- Test: `packages/agent-app/tests/git-commit-actions-409-dom.tsx::with uncommitted changes the dialog names them and offers no way to run the action`
+- Environment: linkedom DOM; stubbed bridge; no Electron.
+- Known gaps: The runtime refuses the same case on its own (MUS-SPEC-08-409E).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-409k"></a>
+#### MUS-SPEC-08-409K: A running chat in the folder is named before HEAD changes
+
+- Precondition: The History tab; a chat “Refactor parser” is running in the same folder.
+- Action: Choose “Check out this commit…” and confirm.
+- Expected result: The dialog warns that “Refactor parser” is running in this folder, the confirm button reads “Check out anyway”, and `git.commitAction` receives `allowRunning: true`.
+- Test: `packages/agent-app/tests/git-commit-actions-409-dom.tsx::a running chat in the same folder is named before HEAD changes and the confirm says anyway`
+- Environment: linkedom DOM; stubbed bridge; no Electron.
+- Known gaps: Does not stop the chat; the person decides.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-409l"></a>
+#### MUS-SPEC-08-409L: A conflicting cherry-pick opens the conflict view
+
+- Precondition: The History tab; `git.commitAction` returns `conflicts: ["src/app.ts"]`.
+- Action: Cherry-pick a commit and confirm.
+- Expected result: A Changes tab and a conflict tab for `src/app.ts` open, and a notice says the cherry-pick stopped on 1 conflicting file.
+- Test: `packages/agent-app/tests/git-commit-actions-409-dom.tsx::a conflicting cherry-pick opens changes and the conflict view for the first file`
+- Environment: linkedom DOM; stubbed bridge; no Electron.
+- Known gaps: The conflict banner’s Continue and Abort are covered by the existing conflict cases.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-409m"></a>
+#### MUS-SPEC-08-409M: Create branch here asks for a name and whether to switch
+
+- Precondition: The History tab with a clean repository.
+- Action: Choose “Create branch here…”, type `hotfix`, tick “Switch to it”, submit.
+- Expected result: `git.commitAction` receives action `branch`, branch `hotfix`, the commit SHA and `checkout: true`; the dialog closes and a notice names the branch.
+- Test: `packages/agent-app/tests/git-commit-actions-409-dom.tsx::create branch here asks for a name and whether to switch to it`
+- Environment: linkedom DOM; stubbed bridge; no Electron.
+- Known gaps: Name validation is git’s own and is reported by the runtime.
 - Evidence: UNVERIFIED

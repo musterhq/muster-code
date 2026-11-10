@@ -1,3 +1,4 @@
+import {SUGGESTION_INSTRUCTIONS, SUGGESTION_MAX_TOKENS, withSuggestion} from './follow-up.ts';
 import {networkFailure} from '../network-failure.ts';
 import {redactSecrets} from '../secret-redaction.ts';
 import {randomUUID} from 'node:crypto';
@@ -69,6 +70,8 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
   const extra: Array<{role: string; content?: string | unknown[] | null; tool_calls?: unknown; tool_call_id?: string}> = [];
   const pictures = new Set<object>();
   const visionNote = {told: false};
+  // #842: one environment object for the whole turn, so a secret the person gives reaches the commands that follow.
+  const runEnv = input.requestSecret ? {...(input.env ?? {})} : input.env;
   const usages: Array<{inputTokens?: number; outputTokens?: number; totalTokens?: number}> = [];
   const deadline = Date.now() + TURN_DEADLINE_MS;
   const used: string[] = [];
@@ -140,7 +143,7 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
       for (const message of extra) if (pictures.delete(message)) message.content = '[an earlier image was shown here and has been omitted to save space]';
       const seen: Array<{role: string; content: unknown[]}> = [];
       for (const call of calls) {
-        const result = await executeTool(call, {chatId: input.chat.id, ...(browserOffered(input.browserTools) ? {browser: true} : {}), cwd: input.cwd, access: input.permissionMode, ...(input.vision ? {vision: true} : {}), visionNote, signal: input.signal, emit: input.onEvent, threadId, turnId, ...(input.authorize ? {authorize: input.authorize} : {}), ...(input.askUser ? {askUser: input.askUser} : {}), ...(input.env ? {env: input.env} : {}), deadline});
+        const result = await executeTool(call, {chatId: input.chat.id, ...(browserOffered(input.browserTools) ? {browser: true} : {}), cwd: input.cwd, access: input.permissionMode, ...(input.vision ? {vision: true} : {}), visionNote, signal: input.signal, emit: input.onEvent, threadId, turnId, ...(input.authorize ? {authorize: input.authorize} : {}), ...(input.askUser ? {askUser: input.askUser} : {}), ...(input.requestSecret ? {requestSecret: input.requestSecret} : {}), ...(runEnv ? {env: runEnv} : {}), deadline});
         used.push(`${call.name}${result.ok ? '' : ' (failed)'}`);
         toolTrace.push(redactSecrets(`${call.name}(${headAndTail(call.arguments, 2048)}) — ${result.ok ? 'completed' : 'failed'}\n${headAndTail(result.content, 8192)}`));
         // Bound memory while a long turn is still running, as well as the text ultimately saved.
@@ -185,16 +188,26 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
 export function openAICompatibleAdapter(options: HttpOptions & {tools?: boolean}): RunnableAdapter {
   const memory = options.memory ?? new ConversationMemory();
   const request = options.fetch ?? fetch;
-  return {kind: 'http', run: input => turn(input, memory, options.label, async (history, rawExtra, tools) => {
+  // #401: one short, non-streamed request to the same model after the turn settled.
+  const ask = (model: string) => async (exchange: string, signal: AbortSignal) => {
+    const key = options.apiKey();
+    const response = await request(`${options.endpoint}/chat/completions`, {method: 'POST', redirect: 'error', signal,
+      headers: {'content-type': 'application/json', ...(key ? {authorization: `Bearer ${key}`} : {})},
+      body: JSON.stringify({model, stream: false, max_tokens: SUGGESTION_MAX_TOKENS, messages: [{role: 'system', content: SUGGESTION_INSTRUCTIONS}, {role: 'user', content: exchange}]})});
+    if (!response.ok) { await response.body?.cancel().catch(() => {}); return ''; }
+    const body = await response.json() as {choices?: Array<{message?: {content?: unknown}}>};
+    return body.choices?.[0]?.message?.content;
+  };
+  return {kind: 'http', run: input => withSuggestion(input, turn(input, memory, options.label, async (history, rawExtra, tools) => {
     const extra = rawExtra as HttpMessage[];
     const key = options.apiKey();
     const images = loadImages(input.images);
     const prompt = httpToolNotes(input.prompt) || '(no message)';
     const user = images.length ? [{type: 'text', text: prompt}, ...images.map(image => ({type: 'image_url', image_url: {url: `data:${image.mediaType};base64,${image.data}`}}))] : prompt;
     const browser = browserOffered(input.browserTools);
-    const system = [httpToolNotes(input.instructions), tools ? toolInstructions(input.permissionMode, input.cwd, browser, !!input.askUser) : undefined].filter(Boolean).join('\n\n');
+    const system = [httpToolNotes(input.instructions), tools ? toolInstructions(input.permissionMode, input.cwd, browser, !!input.askUser, !!input.requestSecret) : undefined].filter(Boolean).join('\n\n');
     const notes = (message: HttpMessage) => (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string' ? {...message, content: httpToolNotes(message.content) || '(no message)'} : message;
-    const body = () => JSON.stringify({model: input.model, stream: true, stream_options: {include_usage: true}, messages: [...(system ? [{role: 'system', content: system}] : []), ...history.map(notes), {role: 'user', content: user}, ...extra.map(notes)], ...(tools ? {tools: toolSpecs(input.permissionMode, browser, !!input.askUser), tool_choice: 'auto'} : {})});
+    const body = () => JSON.stringify({model: input.model, stream: true, stream_options: {include_usage: true}, messages: [...(system ? [{role: 'system', content: system}] : []), ...history.map(notes), {role: 'user', content: user}, ...extra.map(notes)], ...(tools ? {tools: toolSpecs(input.permissionMode, browser, !!input.askUser, !!input.requestSecret), tool_choice: 'auto'} : {})});
     const window = typeof input.contextWindow === 'number' && Number.isFinite(input.contextWindow) && input.contextWindow > 0 ? input.contextWindow : DEFAULT_CONTEXT_WINDOW;
     let budget = Math.floor(window * 4 * .85), compacted = false;
     fitHttpContext(history, extra, () => body().length, budget);
@@ -251,7 +264,7 @@ export function openAICompatibleAdapter(options: HttpOptions & {tools?: boolean}
     }
     const calls = [...pending.entries()].sort((a, b) => a[0] - b[0]).map(([, call], position) => ({...call, id: call.id || `call_${position}_${randomUUID().slice(0, 8)}`})).filter(call => call.name);
     return {usage, calls};
-  }, options.tools === false ? undefined : {endpoint: options.endpoint})};
+  }, options.tools === false ? undefined : {endpoint: options.endpoint}), ask(input.model))};
 }
 
 export const ANTHROPIC_API = 'https://api.anthropic.com/v1';
@@ -259,7 +272,15 @@ export const ANTHROPIC_API = 'https://api.anthropic.com/v1';
 export function anthropicAdapter(options: Omit<HttpOptions, 'endpoint' | 'label'> & {endpoint?: string; label?: string}): RunnableAdapter {
   const memory = options.memory ?? new ConversationMemory();
   const request = options.fetch ?? fetch, endpoint = options.endpoint ?? ANTHROPIC_API, label = options.label ?? 'Anthropic';
-  return {kind: 'http', run: input => turn(input, memory, label, (history, extra) => {
+  const ask = (model: string) => async (exchange: string, signal: AbortSignal) => {
+    const response = await request(`${endpoint}/messages`, {method: 'POST', redirect: 'error', signal,
+      headers: {'content-type': 'application/json', 'x-api-key': options.apiKey() ?? '', 'anthropic-version': '2023-06-01'},
+      body: JSON.stringify({model, max_tokens: SUGGESTION_MAX_TOKENS, system: SUGGESTION_INSTRUCTIONS, messages: [{role: 'user', content: exchange}]})});
+    if (!response.ok) { await response.body?.cancel().catch(() => {}); return ''; }
+    const body = await response.json() as {content?: Array<{type?: string; text?: unknown}>};
+    return body.content?.find(block => block.type === 'text')?.text;
+  };
+  return {kind: 'http', run: input => withSuggestion(input, turn(input, memory, label, (history, extra) => {
     const images = loadImages(input.images);
     const user = images.length ? [...images.map(image => ({type: 'image', source: {type: 'base64', media_type: image.mediaType, data: image.data}})), {type: 'text', text: input.prompt}] : input.prompt;
     return request(`${endpoint}/messages`, {method: 'POST', redirect: 'error', signal: input.signal,
@@ -279,7 +300,7 @@ export function anthropicAdapter(options: Omit<HttpOptions, 'endpoint' | 'label'
       if (type === 'message_stop') break;
     }
     return typeof input_tokens === 'number' ? {usage: {inputTokens: input_tokens, outputTokens: typeof output_tokens === 'number' ? output_tokens : 0}} : undefined;
-  })};
+  }), ask(input.model))};
 }
 
 /** GET a JSON model list with a timeout and a 1 MiB cap. */

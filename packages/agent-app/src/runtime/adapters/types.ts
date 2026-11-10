@@ -32,6 +32,8 @@ export interface AdapterRunInput {
   authorize?(method: string, params: Record<string, unknown>, options?: {policyOnly?: boolean}): Promise<PermissionResult>;
   /** ask_user (HTTP routes): posts the question card and resolves at once with the text for the model; it never waits for the user. */
   askUser?(args: Record<string, unknown>): Promise<string>;
+  /** #842 request_secret (HTTP routes): waits for the private card. `text` is for the model and never holds the value; `env` goes into the run's next commands. */
+  requestSecret?(args: Record<string, unknown>): Promise<{text: string; isError?: boolean; env?: Record<string, string>}>;
   /** The saved conversation to continue; only set when it belongs to this route and binding. */
   resumeThreadId?: string;
   /** Asked when `resumeThreadId` names a conversation the adapter no longer holds: returns a summary of the earlier messages to send ahead of the prompt. */
@@ -45,6 +47,9 @@ export interface AdapterRunInput {
   /** Adapters that can take a message mid-turn hand back a sender; it returns false once the run can no longer accept one,
    *  or `refused` with a reason the composer shows when the run is still going but cannot take it (#839). */
   onSteerable?(send: (text: string) => boolean | {refused: string}): void;
+  /** #401: set when the chat wants a suggested next prompt after this turn. Called at most once, after the run has settled;
+   *  routes with no suggestion never call it. It must never hold the turn: the run resolves first. */
+  onSuggestion?(text: string): void;
 }
 export interface AdapterRunResult {
   status: 'completed' | 'failed';

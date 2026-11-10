@@ -48,6 +48,10 @@ Boundaries:
 | [MUS-SPEC-01-840I](01-chat-and-composer.md#mus-spec-01-840i) | Cloud dictation through a saved OpenAI-compatible connection uses that connection's endpoint and stored key. | [`the cloud backend can use a saved provider connection and its key`](../../../packages/agent-app/tests/dictation-840.test.ts) |
 | [MUS-SPEC-01-840J](01-chat-and-composer.md#mus-spec-01-840j) | On macOS, microphone access asks the system once when undecided and returns a System Settings message when denied, without asking. | [`microphone access asks macOS when undecided and explains a denial`](../../../packages/agent-app/tests/microphone-840.test.ts) |
 | [MUS-SPEC-01-840K](01-chat-and-composer.md#mus-spec-01-840k) | The window allows a media request only for audio from the app's own page; video, other permissions and other pages are refused. | [`only the app page may open the microphone, and only for audio`](../../../packages/agent-app/tests/microphone-840.test.ts) |
+| [MUS-SPEC-01-401A](01-chat-and-composer.md#mus-spec-01-401a) | With the chat idle and the composer empty, the last turn's suggestion shows as ghost text in the composer (the textarea placeholder steps aside), and Tab puts exactly that text in the composer without sending. | [`the suggested follow-up shows as ghost text in an empty composer and Tab fills it`](../../../packages/agent-app/tests/follow-up-401-dom.tsx) |
+| [MUS-SPEC-01-401B](01-chat-and-composer.md#mus-spec-01-401b) | Clicking the suggestion fills the composer and sends nothing; a Cmd/Ctrl-click sends the suggestion as the next message. | [`clicking the suggestion fills the composer, and a modifier-click sends it`](../../../packages/agent-app/tests/follow-up-401-dom.tsx) |
+| [MUS-SPEC-01-401C](01-chat-and-composer.md#mus-spec-01-401c) | The suggestion is gone once anything is typed, and is not shown while a turn runs. | [`the suggestion hides once you type and while a turn runs`](../../../packages/agent-app/tests/follow-up-401-dom.tsx) |
+| [MUS-SPEC-01-401D](01-chat-and-composer.md#mus-spec-01-401d) | A "Switched to <model> · <effort> effort" divider sits above each message whose turn ran a different model or effort than the turn before; none above the first message, an unchanged turn, or messages with no record. | [`a divider marks the message where the model or effort changed`](../../../packages/agent-app/tests/follow-up-401-dom.tsx) |
 
 ### Imported chats keep their own model
 
@@ -430,4 +434,50 @@ Boundaries:
 - Test: `packages/agent-app/tests/microphone-840.test.ts::only the app page may open the microphone, and only for audio`
 - Environment: Main-process helper with plain inputs; no Electron.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### Suggested follow-up and model markers (#401)
+
+<a id="mus-spec-01-401a"></a>
+#### MUS-SPEC-01-401A: The suggested follow-up shows as ghost text and Tab takes it
+
+- Precondition: Suggested follow-ups are on in Settings › Chat. An idle chat whose last message carries a suggested follow-up ("Run the tests again"), with an empty composer.
+- Action: Look at the composer, then press Tab in it.
+- Expected result: The composer shows the suggestion as ghost text in place of the usual placeholder, with a Tab hint. Tab puts exactly "Run the tests again" in the composer. Nothing is sent.
+- Test: `packages/agent-app/tests/follow-up-401-dom.tsx::the suggested follow-up shows as ghost text in an empty composer and Tab fills it`
+- Environment: Real Composer and store in a DOM suite (linkedom); fake app bridge; no network.
+- Known gaps: Where the ghost text sits on screen (over the first line of the field) is CSS and is checked in the real app, not here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-401b"></a>
+#### MUS-SPEC-01-401B: Clicking the suggestion fills the composer; a modifier-click sends it
+
+- Precondition: The chat from MUS-SPEC-01-401A, composer empty, suggestion shown.
+- Action: Click the suggestion. Clear the composer, then Cmd-click (Ctrl-click off macOS) the suggestion.
+- Expected result: The click puts the suggestion in the composer and sends nothing. The modifier-click sends one `chat.send` whose text is the suggestion.
+- Test: `packages/agent-app/tests/follow-up-401-dom.tsx::clicking the suggestion fills the composer, and a modifier-click sends it`
+- Environment: Real Composer and store in a DOM suite (linkedom); fake app bridge; no network.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-401c"></a>
+#### MUS-SPEC-01-401C: The suggestion hides once you type and while a turn runs
+
+- Precondition: The chat from MUS-SPEC-01-401A, suggestion shown.
+- Action: Type one letter. Then clear the draft and mark the chat as running.
+- Expected result: With a letter typed, no suggestion is shown. With the chat running and the draft empty, no suggestion is shown either.
+- Test: `packages/agent-app/tests/follow-up-401-dom.tsx::the suggestion hides once you type and while a turn runs`
+- Environment: Real Composer and store in a DOM suite (linkedom); fake app bridge; no network.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-401d"></a>
+#### MUS-SPEC-01-401D: A divider marks where the model or effort changed
+
+- Precondition: A transcript of four messages. The first two ran "GPT-5.5" at medium effort, the third ran "GPT-5.5" at high effort, the fourth ran "Fable 5" at high effort. A fifth, older-style message has no record of what it ran with.
+- Action: Show the transcript.
+- Expected result: A divider reading "Switched to GPT-5.5 · high effort" sits above the third message and one reading "Switched to Fable 5 · high effort" above the fourth. No divider sits above the first, the second or the message with no record. The dividers use the day divider's style.
+- Test: `packages/agent-app/tests/follow-up-401-dom.tsx::a divider marks the message where the model or effort changed`
+- Environment: Real Timeline in a DOM suite (linkedom); no network.
+- Known gaps: Messages sent before this change carry no record, so they never get a divider. The model name comes from the provider list loaded at the time; a model no longer listed shows its id.
 - Evidence: UNVERIFIED

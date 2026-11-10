@@ -12,6 +12,8 @@ import type {AdapterRunInput} from './types.ts';
 import {BROWSER_TOOL_SPECS, type McpToolResult} from '../../main/agent-tools/browser-tools.ts';
 import {BROWSER_MCP, browserNote} from '../../shared/computer-use.ts';
 import {ASK_MCP, ASK_USER_SPEC, ASK_USER_TOOL} from '../ask-user.ts';
+import {REQUEST_SECRET_SPEC, REQUEST_SECRET_TOOL} from '../secret-requests.ts';
+import {redactRequestedSecrets, registerRequestedSecret} from '../secret-registry.ts';
 import {writeWorkspaceFile} from '../workspace-write.ts';
 
 /**
@@ -31,7 +33,7 @@ export interface ToolImage { mediaType: string; data: string; name: string }
 export interface ToolResult { content: string; ok: boolean; image?: ToolImage }
 /** Resolves allow to proceed. The service answers with the Project tool policy, the user-process guard and approval cards. */
 export type Authorize = NonNullable<AdapterRunInput['authorize']>;
-export interface ToolContext { /** The chat whose browser tab the browser tools drive (#424). */ chatId?: string; /** Offer Muster's in-app browser tools. */ browser?: boolean; cwd: string; access: ToolAccess; signal: AbortSignal; emit: AdapterRunInput['onEvent']; threadId: string; turnId: string; authorize?: Authorize; /** ask_user: posts the question card and resolves at once with the reply for the model. */ askUser?: (args: Record<string, unknown>) => Promise<string>; env?: Record<string, string>; deadline?: number; /** True when the model reports image input. read_file of an image returns the picture only then. */ vision?: boolean; /** Shared across one turn so the "this model cannot see images" explanation is given once. */ visionNote?: {told: boolean} }
+export interface ToolContext { /** The chat whose browser tab the browser tools drive (#424). */ chatId?: string; /** Offer Muster's in-app browser tools. */ browser?: boolean; cwd: string; access: ToolAccess; signal: AbortSignal; emit: AdapterRunInput['onEvent']; threadId: string; turnId: string; authorize?: Authorize; /** ask_user: posts the question card and resolves at once with the reply for the model. */ askUser?: (args: Record<string, unknown>) => Promise<string>; /** #842 request_secret: waits for the private card; `env` is merged into `env` for the next commands. */ requestSecret?: AdapterRunInput['requestSecret']; env?: Record<string, string>; deadline?: number; /** True when the model reports image input. read_file of an image returns the picture only then. */ vision?: boolean; /** Shared across one turn so the "this model cannot see images" explanation is given once. */ visionNote?: {told: boolean} }
 
 export const MAX_TOOL_OUTPUT = 64 * 1024, MAX_FILE_READ = 256 * 1024, MAX_EDIT_FILE = 5 * 1024 * 1024, MAX_TIMELINE_OUTPUT = 8 * 1024;
 const DEFAULT_TIMEOUT_S = 120, MAX_TIMEOUT_S = 600;
@@ -54,7 +56,7 @@ export const browserCaller = (): BrowserCaller | undefined => {
 /** Browser tools are offered only when asked for and when Muster's bridge is there to run them. */
 export const browserOffered = (browser: boolean | undefined) => !!browser && !!browserCaller();
 
-export function toolSpecs(access: ToolAccess, browser = false, ask = false): FunctionSpec[] {
+export function toolSpecs(access: ToolAccess, browser = false, ask = false, secrets = false): FunctionSpec[] {
   const tools = [
     spec('read_file', 'Read a text file (up to 256 KB per call). Relative paths are inside the working folder.', {path: string('File path'), offset: {type: 'integer', minimum: 0, description: 'Byte offset; defaults to 0. Use the next offset in a partial result to continue.'}, limit: {type: 'integer', minimum: 1, maximum: MAX_FILE_READ, description: 'Maximum bytes to read; defaults to 256 KB.'}}, ['path']),
     spec('list_directory', 'List the entries of a folder.', {path: string('Folder path; defaults to the working folder')}, []),
@@ -67,13 +69,15 @@ export function toolSpecs(access: ToolAccess, browser = false, ask = false): Fun
   if (browser) tools.push(...browserToolSpecs(access));
   // Non-blocking question to the user: allowed at every access level, since it changes nothing and never waits.
   if (ask) tools.push({type: 'function', function: {name: ASK_USER_SPEC.name, description: ASK_USER_SPEC.description, parameters: ASK_USER_SPEC.inputSchema}});
+  // #842: the person types the secret on a private card; never in a read-only chat.
+  if (secrets && access !== 'read-only') tools.push({type: 'function', function: {name: REQUEST_SECRET_SPEC.name, description: REQUEST_SECRET_SPEC.description, parameters: REQUEST_SECRET_SPEC.inputSchema}});
   if (access === 'full') tools.push(spec('run_command', `Run a shell command (${WINDOWS ? 'PowerShell' : 'sh'}) in the working folder and return its output.`, {command: string('The command line'), timeout_sec: {type: 'number', description: `Seconds before it is stopped (default ${DEFAULT_TIMEOUT_S}, max ${MAX_TIMEOUT_S})`}}, ['command']));
   return tools;
 }
 
 /** What the model is told about its tools, so it never claims to have none (or to be unable to add them). */
-export function toolInstructions(access: ToolAccess, cwd: string, browser = false, ask = false): string {
-  const names = toolSpecs(access, false, ask).map(tool => tool.function.name).join(', ');
+export function toolInstructions(access: ToolAccess, cwd: string, browser = false, ask = false, secrets = false): string {
+  const names = toolSpecs(access, false, ask, secrets).map(tool => tool.function.name).join(', ');
   const web = browser ? ` ${browserNote('native')}${access === 'read-only' ? ' In this read-only chat the browser tools can open and read pages but not click or type.' : ''}` : '';
   const limits = access === 'read-only' ? 'Access is read-only: you can look at files in the working folder but not change them or run commands.'
     : access === 'workspace' ? 'You can edit files inside the working folder; running commands needs Full access, which the user can switch on in the composer.'
@@ -293,6 +297,18 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
     try { content = await ctx.askUser(args); } catch (error) { content = `The question could not be shown (${error instanceof Error ? error.message : String(error)}). Continue with your default.`; ok = false; }
     return finish(item, {content, ok});
   }
+  if (call.name === REQUEST_SECRET_TOOL && ctx.requestSecret && ctx.access !== 'read-only') {
+    // Shown as the same muster_ask tool row the MCP routes produce. The value goes into the turn's environment only.
+    const item = {type: 'mcpToolCall', server: ASK_MCP, tool: REQUEST_SECRET_TOOL, arguments: args};
+    emit('item/started', {...base, item: {...item, id}});
+    let content: string, ok = true;
+    try {
+      const reply = await ctx.requestSecret(args);
+      content = reply.text; ok = reply.isError !== true;
+      for (const [name, value] of Object.entries(reply.env ?? {})) { registerRequestedSecret(name, value); if (ctx.env) ctx.env[name] = value; }
+    } catch (error) { content = `The secret could not be requested (${error instanceof Error ? error.message : String(error)}).`; ok = false; }
+    return finish(item, {content: redactRequestedSecrets(content), ok});
+  }
   const kindOf = call.name === 'run_command' ? 'commandExecution' : call.name === 'read_file' ? 'fileRead' : call.name === 'write_file' || call.name === 'edit_file' ? 'fileChange' : 'commandExecution';
   const allowed = toolSpecs(ctx.access).some(tool => tool.function.name === call.name);
   if (!allowed) {
@@ -315,7 +331,8 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
       const timeout = Math.min(remaining, MAX_TIMEOUT_S, Math.max(1, typeof args.timeout_sec === 'number' && Number.isFinite(args.timeout_sec) ? Math.floor(args.timeout_sec) : DEFAULT_TIMEOUT_S));
       const {output, exitCode} = await runCommand(command, timeout, ctx);
       emit('item/completed', {...base, item: {...item, id, status: exitCode === 0 ? 'completed' : 'failed', exitCode, aggregatedOutput: stored(output)}});
-      return {content: output || (exitCode === 0 ? '(no output)' : `Exited with code ${exitCode}`), ok: exitCode === 0};
+      // #842: a secret the person typed on a card never reaches the model, even when a command prints it.
+      return {content: redactRequestedSecrets(output) || (exitCode === 0 ? '(no output)' : `Exited with code ${exitCode}`), ok: exitCode === 0};
     }
     if (call.name === 'search_files') {
       item = {type: 'commandExecution', command: `search_files ${typeof args.path === 'string' ? args.path : '.'}`, cwd, commandActions: [{type: 'search', query: args.query, path: args.path ?? '.'}]};

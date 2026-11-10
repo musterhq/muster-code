@@ -267,6 +267,11 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  /** Declines the provider request (a cancel, never empty answers). */
  'question.dismiss': { input: {id: string}; output: void };
  'question.respond': { input: {id: string; answers: Record<string, {answers: string[]}>}; output: void };
+ /** #842: answers a private secret or sudo card. The value (or a 1Password op:// reference) goes to the main process only; the card never stores it. */
+ 'secret.answer': { input: {id: string; value?: string; onePassword?: string; remember?: boolean}; output: void };
+ 'secret.decline': { input: {id: string}; output: void };
+ /** Removes the remembered value a secret card used. */
+ 'secret.forget': { input: {id: string}; output: void };
  'project.create': { input: {name: string; goal: string; folderIds: string[]; primaryFolderId?: string | null}; output: Project };
  'project.tasks.list': {input:{projectId:string};output:BoundedList<ProjectTask>};
  'project.tasks.create': {input:{projectId:string;title:string;acceptance:string;dependencies:string[]};output:ProjectTask};

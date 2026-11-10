@@ -45,6 +45,7 @@ import { createProviderAdapter, NO_LIVE_SESSION, ProviderPreDispatchError, type 
 import { claudeReachesByName, commandArguments, commandBody, discoverPlugins, discoverSkills, expandClaudeCommand, invokedPluginContext, resolveAttachedSkill, resolveInvokedPlugins, selectedSkillBlock, setIconDownscaler, type IconDownscaler } from './plugin-library.ts';
 import { onBrandWanted, refreshRemotePluginIcons, setRemoteIconStore, type RemoteIconOptions } from './remote-plugin-icons.ts';
 import { CLAUDE_COMMAND_EVENT } from './adapters/claude-code.ts';
+import { cleanSuggestion } from './adapters/follow-up.ts';
 import {providerAccessPolicy} from './provider-run-lifecycle.ts';
 import {parseKillIntent, userProcessThreat, type UserProcessTarget, type UserProcessThreat} from './user-process-guard.ts';
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
@@ -82,6 +83,8 @@ import type { ReviewBaselineInfo } from '../shared/domains/review-protocol.ts';
 import type { EditRestorePreview } from '../shared/protocol.ts';
 import { randomUUID } from 'node:crypto';
 import { ToolHost, toolText } from './governance/tool-host.ts';
+import { createSecretRequests, REQUEST_SECRET_METHOD, REQUEST_SECRET_SPEC, REQUEST_SECRET_TOOL, SUDO_ASKPASS_ENV, SUDO_PASSWORD_TOOL, ASK_TOOL_TIMEOUT_SEC, writeAskpass } from './secret-requests.ts';
+import { findBinary } from './adapters/shared.ts';
 import { ASK_MCP, ASK_USER_METHOD, ASK_USER_SPEC, ASK_QUESTION_ID, askUserAnswerMessage, askUserCard, askUserReply, askUserRunOverrides, isNonBlockingQuestion, parseAskUser } from './ask-user.ts';
 import { plural } from '../shared/wording.ts';
 import { device } from '../shared/device-noun.ts';
@@ -148,6 +151,8 @@ export function userProcessNote(groups: readonly UserProcessGroup[], cwd: string
 const PROVIDER_LISTING_WAIT_MS = 15_000;
 export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; userProcesses?: () => readonly UserProcessGroup[]; userProcessTargets?: () => Promise<readonly UserProcessTarget[]>; provider?: ProviderAdapter; reconcileProvider?: (input: ReconciliationInput) => Promise<ReconciliationResult>; domains?: readonly DomainFactory[];
   /** Serve the ask_user MCP server to CLI routes (default: on outside tests). */ askUserTools?: boolean;
+  /** #842: how long a secret or sudo card waits for the person (tests shorten it). */ secretWaitMs?: number; sudoWaitMs?: number;
+  /** #842: the 1Password CLI; null turns it off, undefined finds `op` on PATH. */ onePasswordCli?: string | null;
   /** #729: scales plugin logos that are over the icon budget (the app passes Electron's nativeImage). */ downscaleIcon?: IconDownscaler;
   /** #729: fetch logos Codex lists for remote plugins that ship none (default: on outside tests). */ remotePluginIcons?: RemoteIconOptions | false }) {
   setIconDownscaler(options.downscaleIcon);
@@ -312,6 +317,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     // copy provider payloads, question options, commands, or answers here.
     for (const [itemId, pending] of approvals) add(pending.chatId, {itemId, kind:'approval', createdAt:pending.createdAt, expiresAt:new Date(pending.expiresAt).toISOString(), sourceLabel:'Provider approval'});
     for (const [itemId, pending] of questions) add(pending.chatId, {itemId, kind:'question', createdAt:pending.createdAt, expiresAt:new Date(pending.expiresAt).toISOString(), sourceLabel:'Provider question'});
+    for (const request of secretRequests.pendingRequests()) add(request.chatId, {itemId:request.itemId, kind:'question', createdAt:request.createdAt, expiresAt:request.expiresAt, sourceLabel:'Secret request'});
     const attention: PendingAttentionSummary = {totalRequests:0, chats:[]};
     for (const chat of current.chats) {
       const items = requests.get(chat.id); if (!items?.length) continue;
@@ -473,15 +479,40 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     timeline(chatId); state();
     return reply(askUserReply(input));
   }
+  // ── #842: private secret and sudo requests ──────────────────────────────
+  let onePassword: {at: number; value: string | undefined} | undefined;
+  const secretRequests = createSecretRequests({
+    dataDir: options.dataDir, store, changed: chatId => { timeline(chatId); state(); },
+    requester: chatId => { const chat = store.chat(chatId); return provider.info().find(entry => entry.id === chat?.providerId)?.name ?? 'The agent'; },
+    readOnly: chatId => { const chat = store.chat(chatId); return !chat || providerAccessPolicy(chat).permissionMode === 'read-only'; },
+    live: chatId => runs.has(chatId) && !disposed && !closing,
+    scope: chatId => { const chat = store.chat(chatId); if (chat?.projectId) return {key: `project:${chat.projectId}`, label: 'this project'}; if (chat?.folderId) return {key: `folder:${chat.folderId}`, label: 'this folder'}; return null; },
+    onePassword: () => {
+      if (options.onePasswordCli !== undefined) return options.onePasswordCli ?? undefined;
+      if (process.platform === 'win32') return undefined;
+      if (!onePassword || Date.now() - onePassword.at > 60_000) onePassword = {at: Date.now(), value: findBinary('op', process.env, homedir(), ['/opt/homebrew/bin/op', '/usr/local/bin/op'])};
+      return onePassword.value;
+    },
+    ...(options.secretWaitMs ? {secretWaitMs: options.secretWaitMs} : {}), ...(options.sudoWaitMs ? {sudoWaitMs: options.sudoWaitMs} : {}),
+  });
   let askHost: ToolHost | undefined, askLauncher: string | undefined;
   if (options.askUserTools ?? !process.env.NODE_TEST_CONTEXT) {
-    askHost = new ToolHost({dir: join(options.dataDir, 'agent-tools', 'ask'), name: ASK_MCP, title: 'Muster questions', specs: [ASK_USER_SPEC], execPath: process.execPath, timeoutMs: 30_000,
-      run: (chatId, _tool, args) => { const {text: _text, ...result} = askUser(chatId, args); return result; }});
+    askHost = new ToolHost({dir: join(options.dataDir, 'agent-tools', 'ask'), name: ASK_MCP, title: 'Muster questions', specs: [ASK_USER_SPEC, REQUEST_SECRET_SPEC], hidden: [SUDO_PASSWORD_TOOL], execPath: process.execPath, timeoutMs: (ASK_TOOL_TIMEOUT_SEC + 10) * 1000,
+      run: async (chatId, tool, args) => {
+        if (tool === REQUEST_SECRET_TOOL || tool === SUDO_PASSWORD_TOOL) { const reply = tool === SUDO_PASSWORD_TOOL ? await secretRequests.sudo(chatId, args) : await secretRequests.request(chatId, args, 'file'); return toolText(reply.text, reply.isError === true); }
+        const {text: _text, ...result} = askUser(chatId, args); return result;
+      }});
     void askHost.start().then(launcher => { askLauncher = launcher; }, error => console.warn(`Agent question tool unavailable: ${error instanceof Error ? error.message : String(error)}`));
   }
   /** Adds the muster_ask MCP server to a run (CLI routes load it; HTTP routes offer ask_user natively instead). */
   function withAskUser<T extends {configOverrides?: Record<string, unknown>}>(chatId: string, runOptions: T): T {
-    const extra = askHost && askLauncher ? askUserRunOverrides(chatId, askLauncher, askHost.chatToken(chatId)) : {};
+    const extra: Record<string, string | number> = askHost && askLauncher ? askUserRunOverrides(chatId, askLauncher, askHost.chatToken(chatId)) : {};
+    // #842: `sudo -A` in the agent's shell asks through the secret card (never in a read-only chat; no sudo on Windows).
+    const chat = store.chat(chatId);
+    if (askHost && askLauncher && process.platform !== 'win32' && chat && providerAccessPolicy(chat).permissionMode !== 'read-only') {
+      try { extra[`shell_environment_policy.set.${SUDO_ASKPASS_ENV}`] = writeAskpass(join(options.dataDir, 'agent-tools', 'askpass'), process.execPath, askHost.endpointFile, chatId, askHost.chatToken(chatId), askHost.helperToken()); }
+      catch { /* sudo then fails without a terminal, as before */ }
+    }
     return Object.keys(extra).length ? {...runOptions, configOverrides: {...runOptions.configOverrides, ...extra}} : runOptions;
   }
   /** A later answer: recorded on the card at once (so a second answer is a no-op), then delivered as a steer while the
@@ -730,7 +761,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const files = attachments.resolve(chatId, attachmentIds);
     // #450: a queued message leaves the queue in the same transaction that records its receipt.
     const queued = invoked.queued;
-    const userData = {...(invoked.userData ?? {}), ...(files.length ? {attachments: files.map(({path: _path, ...ref}) => ({...ref, state: 'sent'}))} : {})};
+    // #401: what this turn runs with, for the transcript's "Switched to …" marker (the effort the composer chose, else the model's default).
+    const ranEffort = effort ?? selectedProvider.models.find(entry => entry.id === chat.model)?.defaultEffort;
+    const ranWith = {providerId: selectedProvider.id, model: chat.model, ...(ranEffort ? {effort: ranEffort} : {})};
+    const userData = {...(invoked.userData ?? {}), ranWith, ...(files.length ? {attachments: files.map(({path: _path, ...ref}) => ({...ref, state: 'sent'}))} : {})};
     const accepted = store.recordSend(chatId, requestId, prompt, fingerprint, {...(Object.keys(userData).length ? {userData} : {}), ...(files.length || queued ? {within: () => { if (files.length) attachments.markSent(attachmentIds); if (queued) queue.consume(chatId, queued); }} : {}), ...(invoked.reuseUserItemId ? {reuseUserItemId: invoked.reuseUserItemId} : {})});
     if (accepted.replay) return {runId: accepted.runId};
     if (!digest) store.clearDigest(chatId);
@@ -751,7 +785,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       store.appendItem(chatId, 'notice', `${modelName} (${selectedProvider.name}) can’t view images, so ${attachedImages.length === 1 ? `“${attachedImages[0]!.name}” was` : `${attachedImages.length} images were`} not sent to the model. Switch to a vision model to include ${attachedImages.length === 1 ? 'it' : 'them'}.`, 'completed', {kind: 'images-unsupported', names: attachedImages.map(file => file.name)});
     }
     const fileLines = [attachedFileLines(files), blind ? `The user attached ${attachedImages.length === 1 ? 'an image' : `${attachedImages.length} images`} (${attachedImages.map(file => file.name).join(', ')}) that this model cannot view. Do not guess or describe ${attachedImages.length === 1 ? 'its' : 'their'} contents; tell the user you cannot see ${attachedImages.length === 1 ? 'it' : 'them'} if it matters.` : ''].filter(Boolean).join('\n');
+    // #401: the message this turn answers. A retried message gets this run's record, and its old suggestion goes.
+    const turnItem = invoked.reuseUserItemId ? store.item(invoked.reuseUserItemId) : store.lastUserItem(chatId);
+    if (invoked.reuseUserItemId && turnItem) { const {followUp: _old, ...kept} = turnItem.data ?? {}; store.updateItem(turnItem.id, turnItem.text, turnItem.status, {...kept, ranWith}); }
     const run: ActiveRun = {cwd, stopped: false, retry: new AbortController(), prompt}; runs.set(chatId, run); state(); timeline(chatId);
+    const suggest = turnItem && suggestionsOn() ? (raw: string) => offerSuggestion(chatId, turnItem.id, run, raw) : undefined;
     let segment: TimelineItem | undefined;
     let producedAssistant = false;
     let attemptActivity = false, lastWasTool = false, assistantText = '';
@@ -854,6 +892,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           ...(!continuationPrompt && claudeCommand ? {claudeCommand} : {}),
           ...(engineWindow ? {engineWindow} : {}),
           onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
+          ...(suggest ? {onSuggestion: suggest} : {}),
           onThreadReady: (threadId, driver) => { persistIdentity(threadId, undefined, driver); void nativeQueue.flushStranded(chatId); },
           // The saved provider thread is gone (pruned or deleted): the fresh one gets the earlier conversation and the
           // context blocks the old thread already held, and the user is told.
@@ -1020,6 +1059,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             seal();
             // ask_user from an HTTP route: the card is posted and the run continues with the default, in every access mode.
             if (method === ASK_USER_METHOD) return askUser(chatId, params);
+            // #842: request_secret from an HTTP route waits for the card; the value comes back as run environment only.
+            if (method === REQUEST_SECRET_METHOD) return {...await secretRequests.request(chatId, params, 'env')};
             // Muster's own ask_user MCP server never needs a card: calling it only posts a question.
             if ((/^item\/mcpToolCall\/requestApproval$/.test(method) || isElicitationRequest(method)) && (params.server === ASK_MCP || params.serverName === ASK_MCP || elicitationServer(params) === ASK_MCP)) return isElicitationRequest(method) ? elicitationResult(true) : {decision: 'accept'};
             if (method === 'item/tool/requestUserInput') {
@@ -1261,7 +1302,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       } finally {
         // Background sub-agents can still be waiting on a card after the parent turn ended: keep it answerable.
         const settled = run.stopped || disposed || !provider.hasActiveWork?.(chatId);
-        if (settled) { settleApprovals(chatId); settleQuestions(chatId); seal(); }
+        if (settled) { settleApprovals(chatId); settleQuestions(chatId); secretRequests.settle(chatId); seal(); }
         flushSegment(); if (segmentFlushes.get(chatId) === flushSegment) segmentFlushes.delete(chatId);
         // Stop can close the provider before it sends item/completed, and a completed or failed turn can end with a tool the
         // provider never closed (#387). Persist the terminal state once, keeping completed tools and partial output intact.
@@ -1306,6 +1347,20 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
  const shutdownRecovery = (continues: boolean): ChatRecovery => ({kind:'cancelled', retryable:false, reason: continues && settingOn('chats.resumeAfterRestart') ? 'Muster quit while this was working. It continues when Muster starts again.' : 'Muster quit while this was working. Send a message to continue.'});
   const resumeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Settings are read live (sync handler); anything unreadable keeps the default, on. */
+  /** #401: off unless the user turned it on (it costs a small extra request per turn on every route that offers it). */
+  const suggestionsOn = (): boolean => {
+    try { const result = domains.handlers.get('settings.get')?.({}) as {values?: Record<string, unknown>} | undefined; return result?.values?.['chat.suggestFollowUps'] === true; } catch { return false; }
+  };
+  /** #401: one suggestion, on the message whose turn it follows, while that message is still the newest and no other run started. */
+  function offerSuggestion(chatId: string, itemId: string, run: ActiveRun, raw: string) {
+    if (disposed || closing) return;
+    const active = runs.get(chatId);
+    if (active && active !== run) return;
+    const text = cleanSuggestion(raw), item = store.lastUserItem(chatId);
+    if (!text || !item || item.id !== itemId || item.data?.followUp !== undefined) return;
+    store.updateItem(item.id, item.text, item.status, {...item.data, followUp: text});
+    timeline(chatId);
+  }
   const settingOn = (key: 'chats.resumeAfterLimit' | 'chats.resumeAfterRestart'): boolean => {
     try { const result = domains.handlers.get('settings.get')?.({}) as {values?: Record<string, unknown>} | undefined; return result?.values?.[key] !== false; } catch { return true; }
   };
@@ -2232,6 +2287,13 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       }
       case 'question.dismiss': { const questionId = id(p.id); if (!questions.has(questionId) && isNonBlockingQuestion(store.item(questionId)?.data)) return dismissAsked(questionId); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.'); finishQuestion(questionId, pending, null, 'dismissed'); return; }
       case 'chat.compact': await compactChat(id(p.id), {fresh: p.fresh === true}); return;
+      case 'secret.answer': {
+        if (p.value !== undefined && typeof p.value !== 'string') throw new Error('Enter the value.');
+        if (p.remember !== undefined && typeof p.remember !== 'boolean') throw new Error('Invalid remember choice.');
+        return secretRequests.answer(id(p.id), {...(p.value !== undefined ? {value: p.value} : {}), ...(p.onePassword !== undefined ? {onePassword: p.onePassword} : {}), remember: p.remember === true});
+      }
+      case 'secret.decline': secretRequests.decline(id(p.id)); return;
+      case 'secret.forget': secretRequests.forget(id(p.id)); return;
       case 'question.respond': {
         const questionId = id(p.id);
         if (!questions.has(questionId) && isNonBlockingQuestion(store.item(questionId)?.data)) return answerAsked(questionId, p.answers);
@@ -2547,7 +2609,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         }
         run.stopped = true; run.retry.abort(); settleApprovals(chatId); settleQuestions(chatId);
       }
-      offIdleEvents?.(); offQueueEvents(); offInstalls?.(); nativeTurns.dispose(); askHost?.dispose();
+      offIdleEvents?.(); offQueueEvents(); offInstalls?.(); nativeTurns.dispose(); secretRequests.dispose(); askHost?.dispose();
       provider.dispose();
       // Main owns the user-visible deadline. Keep the database open until all
       // tracked callbacks settle, even if main times out and keeps the app open.
