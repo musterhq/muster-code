@@ -47,6 +47,9 @@ export interface AdapterRunInput {
   /** Adapters that can take a message mid-turn hand back a sender; it returns false once the run can no longer accept one,
    *  or `refused` with a reason the composer shows when the run is still going but cannot take it (#839). */
   onSteerable?(send: (text: string) => boolean | {refused: string}): void;
+  /** #401: set when the chat wants a suggested next prompt after this turn. Called at most once, after the run has settled;
+   *  routes with no suggestion never call it. It must never hold the turn: the run resolves first. */
+  onSuggestion?(text: string): void;
 }
 export interface AdapterRunResult {
   status: 'completed' | 'failed';

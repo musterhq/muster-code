@@ -77,6 +77,8 @@ export interface ProviderInput {
   onDelta(text: string): void;
   onReasoning(text: string): void;
   onEvent(method: string, params: Record<string, unknown>): void;
+  /** #401: asks the route for one suggested next prompt after the turn (see AdapterRunInput.onSuggestion). Codex routes ignore it. */
+  onSuggestion?(text: string): void;
   /** `options` come from the adapter, never from the provider's parameters: policyOnly asks only for the rules, the guard and a card for a threat or an ask (an adapter that runs its own tools). */
   onRequest(method: string, params: Record<string, unknown>, options?: {policyOnly?: boolean}): Promise<RequestResult>;
   /** The saved provider thread could not be resumed and a fresh one starts. Returns text (a digest of the earlier
@@ -307,6 +309,8 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         onReasoning: text => { activity = true; if (live()) input.onReasoning(text); },
         onEvent: (method, params) => { activity = true; if (live()) input.onEvent(method, params); },
         onSteerable: send => { owned.steer = send; },
+        // Arrives after the run settled, so it is not tied to the run's lifetime; the service decides whether it still applies.
+        ...(input.onSuggestion ? {onSuggestion: (text: string) => { if (!disposed) input.onSuggestion!(text); }} : {}),
       });
       const cancelled = owned.controller.signal.aborted || disposed;
       const notDispatched = result.dispatchState === 'not-dispatched' && !activity;

@@ -44,6 +44,7 @@ import { createProviderAdapter, NO_LIVE_SESSION, ProviderPreDispatchError, type 
 import { claudeReachesByName, commandArguments, commandBody, discoverPlugins, discoverSkills, expandClaudeCommand, invokedPluginContext, resolveAttachedSkill, resolveInvokedPlugins, selectedSkillBlock, setIconDownscaler, type IconDownscaler } from './plugin-library.ts';
 import { onBrandWanted, refreshRemotePluginIcons, setRemoteIconStore, type RemoteIconOptions } from './remote-plugin-icons.ts';
 import { CLAUDE_COMMAND_EVENT } from './adapters/claude-code.ts';
+import { cleanSuggestion } from './adapters/follow-up.ts';
 import {providerAccessPolicy} from './provider-run-lifecycle.ts';
 import {parseKillIntent, userProcessThreat, type UserProcessTarget, type UserProcessThreat} from './user-process-guard.ts';
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
@@ -757,7 +758,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const files = attachments.resolve(chatId, attachmentIds);
     // #450: a queued message leaves the queue in the same transaction that records its receipt.
     const queued = invoked.queued;
-    const userData = {...(invoked.userData ?? {}), ...(files.length ? {attachments: files.map(({path: _path, ...ref}) => ({...ref, state: 'sent'}))} : {})};
+    // #401: what this turn runs with, for the transcript's "Switched to …" marker (the effort the composer chose, else the model's default).
+    const ranEffort = effort ?? selectedProvider.models.find(entry => entry.id === chat.model)?.defaultEffort;
+    const ranWith = {providerId: selectedProvider.id, model: chat.model, ...(ranEffort ? {effort: ranEffort} : {})};
+    const userData = {...(invoked.userData ?? {}), ranWith, ...(files.length ? {attachments: files.map(({path: _path, ...ref}) => ({...ref, state: 'sent'}))} : {})};
     const accepted = store.recordSend(chatId, requestId, prompt, fingerprint, {...(Object.keys(userData).length ? {userData} : {}), ...(files.length || queued ? {within: () => { if (files.length) attachments.markSent(attachmentIds); if (queued) queue.consume(chatId, queued); }} : {}), ...(invoked.reuseUserItemId ? {reuseUserItemId: invoked.reuseUserItemId} : {})});
     if (accepted.replay) return {runId: accepted.runId};
     if (!digest) store.clearDigest(chatId);
@@ -778,7 +782,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       store.appendItem(chatId, 'notice', `${modelName} (${selectedProvider.name}) can’t view images, so ${attachedImages.length === 1 ? `“${attachedImages[0]!.name}” was` : `${attachedImages.length} images were`} not sent to the model. Switch to a vision model to include ${attachedImages.length === 1 ? 'it' : 'them'}.`, 'completed', {kind: 'images-unsupported', names: attachedImages.map(file => file.name)});
     }
     const fileLines = [attachedFileLines(files), blind ? `The user attached ${attachedImages.length === 1 ? 'an image' : `${attachedImages.length} images`} (${attachedImages.map(file => file.name).join(', ')}) that this model cannot view. Do not guess or describe ${attachedImages.length === 1 ? 'its' : 'their'} contents; tell the user you cannot see ${attachedImages.length === 1 ? 'it' : 'them'} if it matters.` : ''].filter(Boolean).join('\n');
+    // #401: the message this turn answers. A retried message gets this run's record, and its old suggestion goes.
+    const turnItem = invoked.reuseUserItemId ? store.item(invoked.reuseUserItemId) : store.lastUserItem(chatId);
+    if (invoked.reuseUserItemId && turnItem) { const {followUp: _old, ...kept} = turnItem.data ?? {}; store.updateItem(turnItem.id, turnItem.text, turnItem.status, {...kept, ranWith}); }
     const run: ActiveRun = {cwd, stopped: false, retry: new AbortController(), prompt}; runs.set(chatId, run); state(); timeline(chatId);
+    const suggest = turnItem && suggestionsOn() ? (raw: string) => offerSuggestion(chatId, turnItem.id, run, raw) : undefined;
     let segment: TimelineItem | undefined;
     let producedAssistant = false;
     let attemptActivity = false, lastWasTool = false, assistantText = '';
@@ -881,6 +889,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           ...(!continuationPrompt && claudeCommand ? {claudeCommand} : {}),
           ...(engineWindow ? {engineWindow} : {}),
           onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
+          ...(suggest ? {onSuggestion: suggest} : {}),
           onThreadReady: (threadId, driver) => { persistIdentity(threadId, undefined, driver); void nativeQueue.flushStranded(chatId); },
           // The saved provider thread is gone (pruned or deleted): the fresh one gets the earlier conversation and the
           // context blocks the old thread already held, and the user is told.
@@ -1335,6 +1344,20 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
  const shutdownRecovery = (continues: boolean): ChatRecovery => ({kind:'cancelled', retryable:false, reason: continues && settingOn('chats.resumeAfterRestart') ? 'Muster quit while this was working. It continues when Muster starts again.' : 'Muster quit while this was working. Send a message to continue.'});
   const resumeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Settings are read live (sync handler); anything unreadable keeps the default, on. */
+  /** #401: off unless the user turned it on (it costs a small extra request per turn on every route that offers it). */
+  const suggestionsOn = (): boolean => {
+    try { const result = domains.handlers.get('settings.get')?.({}) as {values?: Record<string, unknown>} | undefined; return result?.values?.['chat.suggestFollowUps'] === true; } catch { return false; }
+  };
+  /** #401: one suggestion, on the message whose turn it follows, while that message is still the newest and no other run started. */
+  function offerSuggestion(chatId: string, itemId: string, run: ActiveRun, raw: string) {
+    if (disposed || closing) return;
+    const active = runs.get(chatId);
+    if (active && active !== run) return;
+    const text = cleanSuggestion(raw), item = store.lastUserItem(chatId);
+    if (!text || !item || item.id !== itemId || item.data?.followUp !== undefined) return;
+    store.updateItem(item.id, item.text, item.status, {...item.data, followUp: text});
+    timeline(chatId);
+  }
   const settingOn = (key: 'chats.resumeAfterLimit' | 'chats.resumeAfterRestart'): boolean => {
     try { const result = domains.handlers.get('settings.get')?.({}) as {values?: Record<string, unknown>} | undefined; return result?.values?.[key] !== false; } catch { return true; }
   };

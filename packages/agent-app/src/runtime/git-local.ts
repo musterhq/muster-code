@@ -621,4 +621,4 @@ export async function removeWorktree(root: string, path: unknown): Promise<void>
 }
 
 /** Shared with git-history / git-conflicts / git-clone: the same no-shell, no-prompt runner, repository-root check and ref validation. */
-export {git as runGit, repository as gitRepository, commitish as gitCommitish, capBytes as capGitBytes};
+export {git as runGit, repository as gitRepository, commitish as gitCommitish, capBytes as capGitBytes, snapshot as gitSnapshot, branchName as gitBranchName};

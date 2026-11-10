@@ -8,6 +8,8 @@ export type AutomationSchedule =
   | { kind: 'interval'; minutes: number }
   | { kind: 'daily'; time: string; days: number[] }
   | { kind: 'cron'; expr: string }
+  /** #845: runs once at `at`, a wall-clock "YYYY-MM-DDTHH:MM" in the automation's time zone, then stays listed as done. */
+  | { kind: 'once'; at: string }
   /** Runs after files in the folder change, at most once a minute; changes made while its own run works never retrigger it. */
   | { kind: 'watch'; folderId: string }
   /** AUT-06: runs when the folder's GitHub repository reports one of `events` (polled through `gh` with backoff). `branch` is
@@ -94,6 +96,8 @@ export interface AutomationView extends Automation {
   webhook?: { url: string | null; hasSecret: boolean };
   /** Runs waiting for your approval. */
   awaiting: number;
+  /** #845: a once automation whose time has come and gone (it ran, or its run was missed). Kept, not deleted. */
+  done?: boolean;
 }
 /** A firing held at the approval gate. */
 export interface AutomationGate { id: string; automationId: string; automationName: string; projectId: string | null; projectName: string | null; trigger: AutomationTrigger; summary: string; variables: Record<string, string>; createdAt: string }

@@ -1,3 +1,4 @@
+import {SUGGESTION_INSTRUCTIONS, SUGGESTION_MAX_TOKENS, withSuggestion} from './follow-up.ts';
 import {networkFailure} from '../network-failure.ts';
 import {redactSecrets} from '../secret-redaction.ts';
 import {randomUUID} from 'node:crypto';
@@ -187,7 +188,17 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
 export function openAICompatibleAdapter(options: HttpOptions & {tools?: boolean}): RunnableAdapter {
   const memory = options.memory ?? new ConversationMemory();
   const request = options.fetch ?? fetch;
-  return {kind: 'http', run: input => turn(input, memory, options.label, async (history, rawExtra, tools) => {
+  // #401: one short, non-streamed request to the same model after the turn settled.
+  const ask = (model: string) => async (exchange: string, signal: AbortSignal) => {
+    const key = options.apiKey();
+    const response = await request(`${options.endpoint}/chat/completions`, {method: 'POST', redirect: 'error', signal,
+      headers: {'content-type': 'application/json', ...(key ? {authorization: `Bearer ${key}`} : {})},
+      body: JSON.stringify({model, stream: false, max_tokens: SUGGESTION_MAX_TOKENS, messages: [{role: 'system', content: SUGGESTION_INSTRUCTIONS}, {role: 'user', content: exchange}]})});
+    if (!response.ok) { await response.body?.cancel().catch(() => {}); return ''; }
+    const body = await response.json() as {choices?: Array<{message?: {content?: unknown}}>};
+    return body.choices?.[0]?.message?.content;
+  };
+  return {kind: 'http', run: input => withSuggestion(input, turn(input, memory, options.label, async (history, rawExtra, tools) => {
     const extra = rawExtra as HttpMessage[];
     const key = options.apiKey();
     const images = loadImages(input.images);
@@ -253,7 +264,7 @@ export function openAICompatibleAdapter(options: HttpOptions & {tools?: boolean}
     }
     const calls = [...pending.entries()].sort((a, b) => a[0] - b[0]).map(([, call], position) => ({...call, id: call.id || `call_${position}_${randomUUID().slice(0, 8)}`})).filter(call => call.name);
     return {usage, calls};
-  }, options.tools === false ? undefined : {endpoint: options.endpoint})};
+  }, options.tools === false ? undefined : {endpoint: options.endpoint}), ask(input.model))};
 }
 
 export const ANTHROPIC_API = 'https://api.anthropic.com/v1';
@@ -261,7 +272,15 @@ export const ANTHROPIC_API = 'https://api.anthropic.com/v1';
 export function anthropicAdapter(options: Omit<HttpOptions, 'endpoint' | 'label'> & {endpoint?: string; label?: string}): RunnableAdapter {
   const memory = options.memory ?? new ConversationMemory();
   const request = options.fetch ?? fetch, endpoint = options.endpoint ?? ANTHROPIC_API, label = options.label ?? 'Anthropic';
-  return {kind: 'http', run: input => turn(input, memory, label, (history, extra) => {
+  const ask = (model: string) => async (exchange: string, signal: AbortSignal) => {
+    const response = await request(`${endpoint}/messages`, {method: 'POST', redirect: 'error', signal,
+      headers: {'content-type': 'application/json', 'x-api-key': options.apiKey() ?? '', 'anthropic-version': '2023-06-01'},
+      body: JSON.stringify({model, max_tokens: SUGGESTION_MAX_TOKENS, system: SUGGESTION_INSTRUCTIONS, messages: [{role: 'user', content: exchange}]})});
+    if (!response.ok) { await response.body?.cancel().catch(() => {}); return ''; }
+    const body = await response.json() as {content?: Array<{type?: string; text?: unknown}>};
+    return body.content?.find(block => block.type === 'text')?.text;
+  };
+  return {kind: 'http', run: input => withSuggestion(input, turn(input, memory, label, (history, extra) => {
     const images = loadImages(input.images);
     const user = images.length ? [...images.map(image => ({type: 'image', source: {type: 'base64', media_type: image.mediaType, data: image.data}})), {type: 'text', text: input.prompt}] : input.prompt;
     return request(`${endpoint}/messages`, {method: 'POST', redirect: 'error', signal: input.signal,
@@ -281,7 +300,7 @@ export function anthropicAdapter(options: Omit<HttpOptions, 'endpoint' | 'label'
       if (type === 'message_stop') break;
     }
     return typeof input_tokens === 'number' ? {usage: {inputTokens: input_tokens, outputTokens: typeof output_tokens === 'number' ? output_tokens : 0}} : undefined;
-  })};
+  }), ask(input.model))};
 }
 
 /** GET a JSON model list with a timeout and a 1 MiB cap. */

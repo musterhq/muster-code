@@ -32,6 +32,8 @@
 .automation-item-meta { font-size: var(--font-caption); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .automation-item-when { font-size: var(--font-caption); color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .automation-item[data-state=paused] .automation-item-name, .automation-item[data-state=paused] .automation-item-when { color: var(--text-faint); }
+.automation-state[data-state=done] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-faint); }
+.automation-item[data-state=done] .automation-item-when { color: var(--text-faint); }
 .automation-item-actions { display: flex; align-items: center; gap: 2px; flex: none; }
 .automation-item-actions .icon-button { width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--radius-6); color: var(--text-faint); }
 .automation-item-actions .icon-button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }

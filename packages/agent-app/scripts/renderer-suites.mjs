@@ -28,6 +28,7 @@ export const split = new Set([
   'nav-components',
   'org-components',
   'server-outputs-dom',
+  'git-commit-actions-409-dom',
   'chat-polish-dom',
   'device-noun-dom-win32',
   'device-noun-dom-linux',
