@@ -1,7 +1,7 @@
 import { ArrowUp, AtSign, BookmarkPlus, Boxes, Brain, Check, ChevronDown, CircleAlert, CircleDot, Cpu, FilePlus, FileText, Folder, FolderKanban, Gauge, GitBranch, GitCompare, Globe, Goal, Lightbulb, LoaderCircle, MessageSquarePlus, Monitor, MessagesSquare, Mic, Paperclip, PenLine, Pencil, Plus, Search, Server, Shrink, Sparkles, Square, SquarePen, SquareTerminal, X, type LucideIcon } from 'lucide-react';
 import { MemoryRecallChip } from './MemoryRecallChip';
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { MAX_ATTACHED_SKILL_BYTES, REASONING_EFFORTS, type Chat, type FileEntry, type PluginEntry, type Project, type QueuedMessage, type ReasoningEffort, type SkillEntry } from '../../shared/protocol';
+import { MAX_ATTACHED_SKILL_BYTES, REASONING_EFFORTS, type Chat, type FileEntry, type PluginEntry, type Project, type QueuedMessage, type ReasoningEffort, type SkillEntry, type TimelineItem } from '../../shared/protocol';
 import { goalResumable } from '../../shared/domains/goals-protocol';
 import { invoke } from '../bridge';
 import { forkChat } from '../messageActions';
@@ -75,6 +75,16 @@ const speechRecognition = (): (new () => Recognition) | undefined => typeof wind
 const DICTATION_ERRORS: Record<string, string> = { 'not-allowed': 'Microphone access was denied', 'service-not-allowed': 'Dictation is not available on this system', 'no-speech': 'No speech heard', network: 'Dictation needs a network connection', 'audio-capture': 'No microphone found' };
 /** Paused goals the user chose to keep paused ("Keep paused"); not asked again this session. */
 const resumeDeclined = new Set<string>();
+const MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform || navigator.userAgent || '');
+/** #401: the follow-up the runtime stored on the newest user message (read from the end; stops at that message). */
+function newestFollowUp(items: readonly TimelineItem[] | undefined): string {
+  if (!items) return '';
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index]!;
+    if (item.kind === 'user') return typeof item.data?.followUp === 'string' ? item.data.followUp : '';
+  }
+  return '';
+}
 /** Per-chat effort, loaded once; localStorage keeps it across restarts. */
 let effortMemory: Record<string, ReasoningEffort> | null = null;
 
@@ -220,6 +230,9 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   /** CS-B11: the oldest pending provider question, answered in the panel above the card with the textarea as its custom answer. */
   const questionItem = useStoreSelector(current => pendingQuestionItem(current.timelines[chat.id]?.value)?.item);
+  /** #401: the suggested follow-up stored on the newest message of the chat, while Settings › Chat offers them. */
+  const lastFollowUp = useStoreSelector(current => current.settings['chat.suggestFollowUps'] === true ? newestFollowUp(current.timelines[chat.id]?.value) : '');
+  const sendFollowUp = useRef<string | null>(null);
   const questionFlow = useQuestionFlow(chat.id, useMemo(() => questionItem ? pendingQuestionItem([questionItem]) : null, [questionItem]));
   /** CS-A1-3: running shells and background commands of this chat, for the Terminals pill. */
   const runningTerminals = useRunningTerminals(chat.id);
@@ -536,6 +549,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
       if (goal?.status === 'paused' && !resumeDeclined.has(`${chat.id}:${goal.createdAt}`)) setAskResume(true);
     });
   };
+  // #401: a modifier-click on the suggestion sends it once the composer holds it (the send reads the draft).
+  useEffect(() => { if (sendFollowUp.current !== null && text === sendFollowUp.current) { sendFollowUp.current = null; submit(); } });
   const answerResume = async (answer: 'resume' | 'keep' | 'later') => {
     setAskResume(false);
     const goal = chat.goal;
@@ -1056,6 +1071,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
       if (!mod && !event.altKey && (event.key === 'ArrowDown' || event.key === 'ArrowUp') && caretRows.length) { event.preventDefault(); const next = nextRow(caretRows, caretActive, event.key === 'ArrowDown' ? 1 : -1); if (next >= 0) setPopoverActive(next); return; }
       if (!mod && !event.altKey && !event.shiftKey && (event.key === 'Enter' || event.key === 'Tab') && caretRows[caretActive] && !caretRows[caretActive].disabled) { event.preventDefault(); if (!event.repeat) caretRows[caretActive].run(); return; }
     }
+    // #401: Tab takes the suggested follow-up shown in the empty composer.
+    if (event.key === 'Tab' && !event.shiftKey && !mod && !event.altKey && suggestion) { event.preventDefault(); takeFollowUp(false); return; }
     // CS-B3-6: Tab takes the plugin's default prompt shown after its chip.
     if (event.key === 'Tab' && !event.shiftKey && !mod && !event.altKey && promptHint) { event.preventDefault(); replaceRange(text.length, text.length, `${/\s$/.test(text) ? '' : ' '}${promptHint}`); return; }
     if (event.key === 'Tab' && event.shiftKey && !mod && !event.altKey) { event.preventDefault(); void togglePlan(); return; }
@@ -1121,6 +1138,9 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const modelTitle = !chat.providerId ? 'No model is connected for this chat yet. Pick one, or connect a provider in Settings › Providers.' : providerMissing ? `The provider “${chat.providerId}” this chat used is not available on ${device().lower}. Pick another model to continue.` : 'Select model';
   const primaryDisabled = !hasPayload || staging || sending || modelChanging || settingsChanging || chat.archived || recoveryNeeded;
   const answering = Boolean(questionFlow && !questionFlow.collapsed);
+  // #401: only on an empty composer of an idle chat whose last turn completed; typing anything hides it.
+  const suggestion = lastFollowUp && !text && !running && !sending && !answering && !chat.archived && chat.status === 'completed' && !attachments.length ? lastFollowUp : '';
+  const takeFollowUp = (send: boolean) => { if (!suggestion) return; if (send) sendFollowUp.current = suggestion; replaceRange(0, text.length, suggestion); };
   const loadingProvider = (state.providers.value ?? []).find(row => row.id === chat.providerId && row.listing === 'loading');
   const placeholder = loadingProvider ? `Loading models from ${loadingProvider.name}…` : dictation ? (dictation.interim || 'Listening…') : chat.archived ? 'Restore this chat to continue' : answering ? (questionFlow!.question.options.length ? 'Type your own answer, or leave blank to use the selected option' : 'Type your answer') : !providers.length && state.providers.phase === 'ready' ? 'Enable a provider to send a message' : running ? 'Working…' : planMode ? 'Describe your task to generate a plan…' : 'Do anything';
   const caretPopoverId = slash ? 'composer-slash-options' : 'composer-mention-options';
@@ -1163,13 +1183,16 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
         aria-controls={slash || mention ? caretPopoverId : undefined} aria-expanded={slash || mention ? true : undefined}
         aria-activedescendant={caretRows.length && caretActive >= 0 ? `${caretPopoverId}-${caretActive}` : undefined}
         aria-keyshortcuts={modEnter ? 'Meta+Enter' : running ? 'Enter Meta+Enter' : 'Enter'}
-        placeholder={placeholder} value={text} rows={1}
+        placeholder={suggestion ? '' : placeholder} value={text} rows={1}
         onChange={event => { if (!programmatic.current) recall.current = null; setCaret(event.target.selectionStart); setSelection({ start: event.target.selectionStart, end: event.target.selectionEnd }); setDismissed(null); setComposerDraft(chat.id, event.target.value); }}
         onSelect={event => { const { selectionStart: start, selectionEnd: end } = event.currentTarget; setCaret(start === end ? start : -1); setSelection({ start, end }); }}
         onScroll={event => { if (mirror.current) mirror.current.scrollTop = event.currentTarget.scrollTop; }}
         onBlur={() => { void flushComposerDraft(chat.id); }}
         onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
         onPaste={onPaste} onKeyDown={onKeyDown} />
+      {suggestion && <button type="button" className="composer-follow-up" data-testid="composer-follow-up" title={`Tab or click to use it · ${MAC ? '⌘' : 'Ctrl+'}click to send it`}
+        onMouseDown={event => event.preventDefault()} onClick={event => takeFollowUp(event.metaKey || event.ctrlKey)}>
+        <span className="composer-ghost-hint">{suggestion}</span><kbd>Tab</kbd></button>}
       {hovered && chipHover && <TokenCard range={hovered} plugins={state.plugins.value ?? []} skills={skills} left={Math.max(0, chipHover.start)} top={chipHover.top} />}
       {hovered && chipHover && <button type="button" className="token-chip-remove" aria-label={`Remove ${hovered.chip.label}`} style={{ left: chipHover.left, top: chipHover.top }}
         onMouseDown={event => event.preventDefault()} onClick={() => removeChip(hovered)}><X size={9} /></button>}

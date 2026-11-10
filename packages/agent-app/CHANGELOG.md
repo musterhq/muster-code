@@ -7,6 +7,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 - Paths to files the agent wrote now become links in its replies: absolute and `~/` paths, paths with spaces (such as under Application Support) written as inline code, and Word, Excel, PowerPoint, OpenDocument and RTF files, including the older `.doc`, `.xls` and `.ppt`. A file inside the chat's folder opens in the file viewer; one outside them gets the outside-file link; a path to nothing stays plain text (#837).
 - A message sent while a chat is only running background work reaches the agent now instead of waiting in the queue: Codex steers the turn the app-server started when a sub-agent reports back (and Steer on a queued message does the same), and Claude Code keeps its session open while a background command runs. Where Claude Code still can't take the message, the composer says why (#839).
+- A suggested follow-up after a turn, as ghost text in the empty message field: Tab or click puts it there, Cmd/Ctrl-click sends it. Off by default (Settings › Chat › Suggest a follow-up) since it is one small extra request per turn: Claude Code chats use Claude Code's own suggestion, API and gateway chats ask the same model once; Codex chats offer none. The transcript also marks where the model or effort changed between turns: "Switched to GPT-5.5 · high effort" (#401).
 
 ## 0.3.18
 

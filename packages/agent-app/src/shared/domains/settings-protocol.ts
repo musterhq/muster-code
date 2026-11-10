@@ -32,6 +32,9 @@ export interface AppSettings {
   'chat.mathRendering': boolean;
   /** How Codex-backed agents write: `personality` in Codex config. Automatic uses your Codex config's personality, else Friendly (as the desktop app does). */
   'chat.responseStyle': ResponseStyle;
+  /** #401: after a turn, offer one suggested next prompt. Off by default: on every route that offers it, it costs one small
+   *  extra model request per turn (Claude Code makes it itself from its prompt cache; HTTP routes ask the chat's model). */
+  'chat.suggestFollowUps': boolean;
   /** The model new chats start with, unless their Project sets one. Null follows the app's built-in default. */
   'general.defaultModel': ModelPreference | null;
   /** CHAT-16: archive chats idle for this many days (0 = never). Pinned, running, snoozed and needs-attention chats are never auto-archived. */
@@ -82,6 +85,7 @@ export const SETTING_DEFAULTS: AppSettings = {
   'chat.inlineDiffs': true,
   'chat.mathRendering': true,
   'chat.responseStyle': 'auto',
+  'chat.suggestFollowUps': false,
   'general.defaultModel': null,
   'chats.autoArchiveDays': 0,
   'chats.resumeAfterLimit': true,
@@ -122,6 +126,7 @@ const CHECKS: { [K in SettingKey]: { valid(value: unknown): value is AppSettings
   'chat.inlineDiffs': { valid: bool, expected: 'true or false' },
   'chat.mathRendering': { valid: bool, expected: 'true or false' },
   'chat.responseStyle': { valid: oneOf<ResponseStyle>(RESPONSE_STYLES), expected: '"auto", "friendly" or "pragmatic"' },
+  'chat.suggestFollowUps': { valid: bool, expected: 'true or false' },
   'general.defaultModel': { valid: modelPreference, expected: 'null or {providerId, model, effort?}' },
   'notifications.runs': { valid: oneOf<RunNotifications>(['all', 'failures', 'off']), expected: '"all", "failures" or "off"' },
   'notifications.attention': { valid: bool, expected: 'true or false' },

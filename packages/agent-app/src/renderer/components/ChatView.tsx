@@ -46,6 +46,7 @@ import {TurnFileChanges} from './TurnFileChanges';
 import {LaterEditsContext,laterEdits} from '../turnFileChanges';
 import {describeTurns,foldable,rowStart} from './turnStatusModel';
 import {dividerLabel,dividerRows} from '../dayDividers';
+import {modelChangeLabel,modelChangeRows,type RanWith} from '../modelMarkers';
 import {attachmentPreview} from '../timelineBridge';
 import {attachmentPdfThumbnail,isPdf} from '../pdfThumbnail';
 import {openAttachment, openAttachmentOnKey} from '../attachmentOpen';
@@ -180,6 +181,13 @@ const DayDivider=React.memo(function DayDivider({at}:{at:number}){
   return <div className="day-divider" role="separator" aria-label={`${day} ${time}`}><time dateTime={new Date(at).toISOString()}><b>{day}</b> {time}</time></div>;
 });
 
+/** #401: "Switched to GPT-5.5 · high effort" above the message whose turn ran another model or effort. */
+const ModelDivider=React.memo(function ModelDivider({ran}:{ran:RanWith}){
+  const providers=useStoreSelector(state=>state.providers.value);
+  const label=modelChangeLabel(ran,providers??[]);
+  return <div className="day-divider model-divider" role="separator" aria-label={label} data-testid="model-divider">{label}</div>;
+});
+
 function rowImages(row:TranscriptEntry):string[] {
   if(row.kind!=='activity'&&row.kind!=='assistant')return [];
   const size=row.kind==='activity'?row.items.length+row.items.reduce((n,item)=>n+(item.status==='completed'?1:0),0):row.text.length,hit=scanned.get(row);
@@ -195,6 +203,7 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
   const project=useMemo(()=>createTimelineProjection(),[]);
   const {rows,turns,rowIndexes}=useMemo(()=>project(items),[items,project]);
   const dividers=useMemo(()=>dividerRows(rows),[rows]);
+  const modelMarks=useMemo(()=>modelChangeRows(rows),[rows]);
   const live=running??items.some(item=>item.status==='running');
   // Plan mode: the settled final answer of the latest turn is the plan.
   const planId=useMemo(()=>planCardId(items,planMode,live),[items,planMode,live]);
@@ -433,6 +442,7 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
             style={{ transform: `translateY(${v.start}px)` }}
           >
             {!hidden&&dividers.has(v.index)&&<DayDivider at={dividers.get(v.index)!}/>}
+            {!hidden&&modelMarks.has(v.index)&&<ModelDivider ran={modelMarks.get(v.index)!}/>}
             {!hidden&&<AreaBoundary area="this message" scope="item" resetKey={row}><GalleryCoverage.Provider value={galleries.get(turnModel.rowTurn[v.index]??'')?.covered??NO_COVERAGE}><TimelineCard gallery={galleryByReply.get(row.id)?.paths} item={row} meta={row.kind!=='assistant'||finalReplies.has(row.id)} plan={row.kind==='assistant'&&row.id===planId} actions={actionsFor(row)} editing={editingFor(row)} tail={live&&v.index===rows.length-1} nextAt={row.kind==='reasoning'?rowStart(rows[v.index+1]):undefined}
               reveal={activeMatch?.rowIndex===v.index?activeMatch.itemId:undefined}
               turn={info&&info.complete&&info.work>0?{durationMs:info.durationMs,open:isTurnOpen(info.id),onToggle:()=>setTurn(info.id,!isTurnOpen(info.id)),summary:turnWork.get(info.id)?.summary}:info&&!info.complete&&live&&info.id===turnModel.last?{live:rowStart(row)??''}:undefined}/></GalleryCoverage.Provider></AreaBoundary>}

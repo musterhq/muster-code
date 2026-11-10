@@ -43,6 +43,7 @@ window.muster={subscribe(fn:any){listeners.add(fn);return()=>{listeners.delete(f
   if(command==='app.snapshot')return snapshot();
   if(command==='chat.timeline')return {items:timeline,revision:1};
   if(command==='chat.send')return {runId:'run'};
+  if(command==='settings.get')return {values:{'chat.suggestFollowUps':true}};
   if(command==='chat.update'){chats=chats.map(chat=>chat.id===input.id?{...chat,...input}:chat);return chats.find(chat=>chat.id===input.id);}
   if(command==='chat.contextTelemetry')return {usedTokens:null,windowTokens:null,source:null,compacted:false,updatedAt:null};
   if(command==='providers.list')return [{id:'hybrow',name:'Hybrow',available:true,models:[{id:'gpt-5.5',name:'GPT-5.5',efforts:['low','medium','high'],defaultEffort:'medium'},{id:'fable-5',name:'Fable 5',efforts:['low','medium','high']}]}];
@@ -65,8 +66,9 @@ await until(()=>store.getState().timelines.one?.value);await delay(50);
 assert.deepEqual(errors,[]);
 const field=()=>document.querySelector('[data-testid="composer-input"]') as any;
 const ghost=()=>document.querySelector('[data-testid="composer-follow-up"]') as any;
-const draft=()=>store.getState().composerDrafts.one??'';
-const key=(name:string,extra:Record<string,unknown>={})=>field().dispatchEvent(new window.KeyboardEvent('keydown',{key:name,bubbles:true,cancelable:true,...extra}));
+const draft=()=>store.getState().composerDrafts.one?.text??'';
+const key=(name:string,extra:Record<string,unknown>={})=>{const event=new window.Event('keydown',{bubbles:true,cancelable:true});Object.assign(event,{key:name,...extra});field().dispatchEvent(event);};
+const click=(element:any,extra:Record<string,unknown>={})=>{const event=new window.Event('click',{bubbles:true,cancelable:true});Object.assign(event,{button:0,...extra});element.dispatchEvent(event);};
 const clear=async()=>{store.setComposerDraft('one','');await delay(40);};
 
 // Spec: MUS-SPEC-01-401A (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-401a)
@@ -84,12 +86,12 @@ await check('the suggested follow-up shows as ghost text in an empty composer an
 // Spec: MUS-SPEC-01-401B (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-401b)
 await check('clicking the suggestion fills the composer, and a modifier-click sends it',async()=>{
   await clear();await until(()=>ghost());
-  ghost().dispatchEvent(new window.MouseEvent('click',{bubbles:true,cancelable:true}));
+  click(ghost());
   await until(()=>draft()==='Run the tests again');
   assert.equal(draft(),'Run the tests again','a click fills the composer');
   assert.equal(calls.filter(call=>call.command==='chat.send').length,0,'a click sends nothing');
   await clear();await until(()=>ghost());
-  ghost().dispatchEvent(new window.MouseEvent('click',{bubbles:true,cancelable:true,metaKey:true,ctrlKey:true}));
+  click(ghost(),{metaKey:true,ctrlKey:true});
   await until(()=>calls.some(call=>call.command==='chat.send'));
   const sent=calls.filter(call=>call.command==='chat.send');
   assert.equal(sent.length,1,'a modifier-click sends one message');
@@ -115,7 +117,7 @@ const transcript=[
   {id:'m4',chatId:'two',kind:'user',text:'four',createdAt:at,data:{ranWith:{providerId:'hybrow',model:'fable-5',effort:'high'}}},
   {id:'m5',chatId:'two',kind:'user',text:'five',createdAt:at},
 ] as any[];
-const second=createRoot(document.getElementById('transcript')!,{onUncaughtError:error=>errors.push(error)});
+const second=createRoot(document.getElementById('transcript')!,{onUncaughtError:error=>(errors as unknown[]).push(error)});
 second.render(<Timeline chatId="two" items={transcript} running={false}/>);
 await until(()=>document.querySelector('#transcript [data-item-id="m5"]'));
 // Spec: MUS-SPEC-01-401D (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-401d)

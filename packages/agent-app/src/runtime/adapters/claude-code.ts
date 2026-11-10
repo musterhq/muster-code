@@ -42,6 +42,8 @@ export function claudeArgs(input: AdapterRunInput, sessionId: string, configFile
     // The turn arrives as stream-json user messages on stdin (images as content blocks); stdin stays open while the
     // turn runs so a steer can join it as another user message.
     '--input-format', 'stream-json',
+    // #401: Claude Code's own predicted next prompt, emitted as a `prompt_suggestion` event after the turn's result.
+    ...(input.onSuggestion ? ['--prompt-suggestions', 'true'] : []),
     // Muster's own tool servers (in-app browser, terminal, mailbox…): loaded alongside the user's, and allowed, since
     // they are first-party and each enforces its own lease and scope. Both flags are variadic, so a flag follows them.
     ...toolArgs(input.mcpServers, configFile),
@@ -152,6 +154,10 @@ export function claudeStdin(input: Pick<AdapterRunInput, 'prompt' | 'images'>): 
 
 /** Headless Claude Code (`claude -p --output-format stream-json`) in the chat folder. */
 const STEER_GRACE_MS = 2500;
+/** #401: how long a settled turn's process may stay to deliver its suggestion before it is ended. */
+export const SUGGESTION_WAIT_MS = 20_000;
+/** #401: processes of settled turns still making their suggestion, by session. The next turn of that session ends its own. */
+const lingering = new Map<string, ChildProcess>();
 /** #839: the turn ended and its session closed, but a background command keeps Claude Code running. */
 export const CLAUDE_BACKGROUND_REFUSAL = 'Claude Code finished this turn and is waiting for a background command, so it can’t take a message until that ends.';
 export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; spawn?: Spawn; killGraceMs?: number; steerGraceMs?: number}): RunnableAdapter {
@@ -159,6 +165,9 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
   return {kind: 'cli', run(input) {
     return new Promise<AdapterRunResult>(resolve => {
       const sessionId = input.resumeThreadId ?? randomUUID(), turnId = randomUUID();
+      // Two processes must never write one session: a suggestion still being made for the last turn gives way.
+      const earlier = lingering.get(sessionId);
+      if (earlier) { lingering.delete(sessionId); killTree(earlier, 'SIGTERM'); }
       // The subscription row must run on the Claude sign-in; an API key in the host env
       // would silently switch billing. That key has its own Anthropic API row.
       const env = {...(options.env ?? process.env), ...(input.env ?? {})}; delete env.ANTHROPIC_API_KEY;
@@ -179,6 +188,8 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       }
       catch (error) { cleanConfig(); resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `Claude Code could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let accepted = false, settled = false, final: {ok: boolean; text: string} | undefined, stderr = '', streamedText = false;
+      /** #401: the turn settled at its result; the process stays (bounded) only to deliver its suggestion. */
+      let lingerTimer: ReturnType<typeof setTimeout> | undefined, suggested = false;
       // `pending` counts results still owed. The CLI folds a message that arrives mid-turn into that turn, so several
       // steers can share ONE result: after a result, stdin stays open for a short grace while steers are unanswered.
       let pending = 1, inputClosed = false, unanswered = 0, grace: ReturnType<typeof setTimeout> | undefined;
@@ -293,8 +304,15 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       child.stderr?.setEncoding('utf8');
       child.stderr?.on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-4096); });
       jsonLines(child.stdout!, event => {
-        if (settled) return;
         const type = event.type;
+        // #401: it follows the result it belongs to. Only the last result's suggestion counts (a steer starts another turn).
+        if (type === 'prompt_suggestion') {
+          const suggestion = text(event.suggestion).trim();
+          if (suggestion && !suggested && pending === 0 && !grace && !input.signal.aborted && input.onSuggestion) { suggested = true; input.onSuggestion(suggestion); }
+          // The process exits on its own once it has written this; the bounded wait still ends one that does not.
+          return;
+        }
+        if (settled) return;
         if (type === 'system' && event.subtype === 'init') { accept(); return; }
         accept();
         if (type === 'control_request') { void askPermission(event); return; }
@@ -409,11 +427,23 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
             // Steers written since the last result may have been folded into this turn, or may start another one.
             unanswered = 0; pending = 1;
             grace = setTimeout(() => { grace = undefined; pending = 0; maybeClose(); }, graceMs);
-          } else { pending = 0; maybeClose(); }
+          } else {
+            pending = 0; maybeClose();
+            // #401: the turn is over once its result is in; the suggestion comes after it and must not hold the turn.
+            if (input.onSuggestion && inputClosed && final.ok && !input.signal.aborted) {
+              lingering.set(sessionId, child);
+              lingerTimer = setTimeout(() => { lingerTimer = undefined; killTree(child, 'SIGTERM'); }, SUGGESTION_WAIT_MS);
+              finish({status: 'completed', finalMessage: final.text, dispatchState: 'dispatched', threadId: sessionId, turnId});
+            }
+          }
         }
       });
       child.on('error', error => finish({status: 'failed', finalMessage: '', dispatchState: accepted ? 'dispatched' : 'not-dispatched', ...(accepted ? {threadId: sessionId, turnId} : {}), errorMessage: `Claude Code could not start: ${error.message}`}));
       child.on('close', code => {
+        if (lingering.get(sessionId) === child) lingering.delete(sessionId);
+        if (lingerTimer) { clearTimeout(lingerTimer); lingerTimer = undefined; }
+        // Settled early at its result (#401): what the process does afterwards is no longer the turn's.
+        if (settled) return;
         flushUsage();
         for (const [id, item] of tools) input.onEvent('item/completed', {threadId: toolThreads.get(id) ?? sessionId, turnId, item: {...item, id, status: 'interrupted'}});
         for (const run of agents.values()) if (run.state === 'running') { run.state = 'interrupted'; run.launched = true; run.endedAt ??= Date.now(); emitAgent(run); }

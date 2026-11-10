@@ -353,6 +353,9 @@ export function PreferencesScreen():React.ReactElement {
               <Row setting="chat.responseStyle" title="Response style" scope="New runs · Codex-based models" description={settings['chat.responseStyle']==='pragmatic'?'Short, direct answers that stick to the result.':settings['chat.responseStyle']==='friendly'?'Explains what it did and why, in a warmer tone.':'Uses the personality set in your Codex config, otherwise Friendly.'}>
                 <Segmented label="Response style" value={settings['chat.responseStyle']} options={[{value:'auto',label:'Automatic'},{value:'friendly',label:'Friendly'},{value:'pragmatic',label:'Pragmatic'}]} onChange={value=>set('chat.responseStyle',value)}/>
               </Row>
+              <Row setting="chat.suggestFollowUps" title="Suggest a follow-up" scope="All chats · off by default" description={`After a turn, offer one short next prompt in the empty message field: Tab or click puts it there, ${MAC?'⌘':'Ctrl+'}click sends it. Claude Code chats use Claude Code’s own suggestion; chats on an API or gateway route ask the same model once (a few hundred tokens). Either way it is one small extra request per turn on your plan or bill. Codex chats offer none.`}>
+                <Switch label="Suggest a follow-up" checked={settings['chat.suggestFollowUps']} onChange={value=>set('chat.suggestFollowUps',value)}/>
+              </Row>
               <Row setting="chat.inlineDiffs" title="Show file diffs inline" scope="All chats" description="Show syntax-coloured code additions and removals in the conversation. The files-changed pill and the Changes tab stay available either way.">
                 <Switch label="Show file diffs inline" checked={settings['chat.inlineDiffs']} onChange={value=>set('chat.inlineDiffs',value)}/>
               </Row>

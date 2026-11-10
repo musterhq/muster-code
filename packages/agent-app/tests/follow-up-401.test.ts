@@ -95,7 +95,7 @@ test('an HTTP route asks its own model for one short follow-up after the turn, w
     return new Response(JSON.stringify({choices:[{message:{content:'Write the migration next\nsecond line'}}]}),{status:200,headers:{'content-type':'application/json'}});
   }) as typeof fetch});
   const suggestions:string[]=[];
-  const base=(chatId:string):AdapterRunInput=>({chat:{id:chatId,mode:'chat'} as AdapterRunInput['chat'],cwd:'/work',prompt:'plan the schema change',model:'fixture-model',permissionMode:'workspace',signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){}});
+  const base=(chatId:string):AdapterRunInput=>({chat:{id:chatId,mode:'chat'} as unknown as AdapterRunInput['chat'],cwd:'/work',prompt:'plan the schema change',model:'fixture-model',permissionMode:'workspace',signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){}});
   const result=await adapter.run({...base('a'),onSuggestion:text=>{suggestions.push(text);}} as AdapterRunInput);
   assert.equal(result.status,'completed','the turn settles while the suggestion request is still open');
   await flush();

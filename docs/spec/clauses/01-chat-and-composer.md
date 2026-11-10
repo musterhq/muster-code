@@ -307,7 +307,7 @@ Boundaries:
 <a id="mus-spec-01-401a"></a>
 #### MUS-SPEC-01-401A: The suggested follow-up shows as ghost text and Tab takes it
 
-- Precondition: An idle chat whose last message carries a suggested follow-up ("Run the tests again"), with an empty composer.
+- Precondition: Suggested follow-ups are on in Settings › Chat. An idle chat whose last message carries a suggested follow-up ("Run the tests again"), with an empty composer.
 - Action: Look at the composer, then press Tab in it.
 - Expected result: The composer shows the suggestion as ghost text in place of the usual placeholder, with a Tab hint. Tab puts exactly "Run the tests again" in the composer. Nothing is sent.
 - Test: `packages/agent-app/tests/follow-up-401-dom.tsx::the suggested follow-up shows as ghost text in an empty composer and Tab fills it`
