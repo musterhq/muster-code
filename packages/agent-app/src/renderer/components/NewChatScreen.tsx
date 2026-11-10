@@ -17,7 +17,8 @@ import {ChipMirror} from './ComposerTokens';
 import {seedChatEffort,useMentionEntries} from './Composer';
 import {CaptureSourcePicker,type CaptureResult} from './CaptureSourcePicker';
 import {accessibilityAttachment} from '../captureRegion';
-import {ACCESS_OPTIONS,FullAccessConfirm} from './FullAccessConfirm';
+import {accessOptions,FullAccessConfirm} from './FullAccessConfirm';
+import {autoApprovalSupported} from '../../shared/provider-lanes';
 import {attachmentKey,attachmentName,imageBlindModel,imageBlindWarning,chipPayload,chipToken,skillToken,COMPOSER_COMMANDS,EFFORT_LABELS,findTokenRanges,formatBytes,insertToken,MAX_ATTACHMENT_BYTES,MAX_ATTACHMENTS,readFolderAccess,readMentionQuery,readSlashQuery,saveFolderAccess,scoreItem,setFullAccessSkip,skipsFullAccessConfirm,SKILL_RECORDER_PROMPT,type ComposerAccess,type ComposerChip,type ComposerCommandId} from './composerMenus';
 import {ModelPicker} from './ModelPicker';
 import {ProviderUsageWarning} from './ProviderUsage';
@@ -36,7 +37,6 @@ import {DICTATION_SHORTCUT_LABEL,useDictation} from '../dictation';
 
 const KIND_ICON={none:MessageCircle,folder:FolderOpen,project:Layers} as const;
 /** Same access options (and Full-access confirmation) an in-chat Composer uses, so the toolbars match. */
-const ACCESS=ACCESS_OPTIONS;
 const MENU_LIMIT=8;
 /** Last-resort mirror of runtime/provider.ts's MODEL/providerId, used only until (or if) `chat.defaults` answers. */
 /** The `/` commands that make sense before a chat exists (mirrors Composer's COMMAND_ICONS, not exported there). */
@@ -131,7 +131,10 @@ export function NewChatScreen():React.ReactElement {
   const modelName=displayModel?.name??(state.providers.phase==='loading'?'Loading…':(createdModel.providerId?createdModel.id.split('/').pop()||'No model':'Connect a model'));
   const modelEfforts=displayModel?.efforts??[];
   const defaultEffort:ReasoningEffort=(!chosenModel&&resolvedDefault?.effort)||displayModel?.defaultEffort||'medium';
-  const accessOption=ACCESS.find(option=>option.id===access)!;
+  // #841: a route whose approvals Muster cannot answer runs Auto as Workspace; the Auto row says so.
+  const routeDriver=providers.find(provider=>provider.id===createdModel.providerId)?.driver;
+  const accessRows=accessOptions(routeDriver===undefined||autoApprovalSupported(routeDriver));
+  const accessOption=accessRows.find(option=>option.id===access)!;
   const hasExtras=access!=='workspace'||Boolean(chosenModel)||Boolean(effort)||attachments.length>0||planMode||Boolean(goalText.trim())||chips.length>0;
 
   const skills=state.skills.value??[];
@@ -509,7 +512,7 @@ export function NewChatScreen():React.ReactElement {
           <Menu.Root open={toolMenu==='access'} onOpenChange={open=>setToolMenu(current=>open?'access':current==='access'?null:current)}>
             <Menu.Trigger className={`composer-access is-${access}`} aria-label={`Access: ${accessOption.label}`} title="Change permissions" disabled={busy}><accessOption.Icon size={14} aria-hidden="true"/><span className="composer-access-label">{accessOption.label}</span></Menu.Trigger>
             <MenuPopup side="top" align="start" sideOffset={6} className="composer-access-menu" aria-label="Permissions">
-              <Menu.RadioGroup value={access}>{ACCESS.map(option=><Menu.RadioItem key={option.id} value={option.id} render={<button type="button"/>} nativeButton closeOnClick className={`is-${option.id}`} onClick={()=>chooseAccess(option.id)}>
+              <Menu.RadioGroup value={access}>{accessRows.map(option=><Menu.RadioItem key={option.id} value={option.id} render={<button type="button"/>} nativeButton closeOnClick className={`is-${option.id}`} onClick={()=>chooseAccess(option.id)}>
                 <option.Icon size={15} aria-hidden="true"/><span><strong>{option.label}</strong><small>{option.description}</small></span>{access===option.id&&<Check size={13} aria-hidden="true"/>}
               </Menu.RadioItem>)}</Menu.RadioGroup>
             </MenuPopup>

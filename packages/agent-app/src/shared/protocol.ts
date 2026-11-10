@@ -12,7 +12,7 @@ import type {ExcludedModel, ModelPricing} from './model-catalog.ts';
 /** The only renderer capability surface. Main validates every command and sender. */
 /** One slice of a 3D model file (or companion texture); `size` is the whole file's length. */
 export interface ModelChunk { size: number; offset: number; bytes: Uint8Array }
-export type ChatPermissionMode = 'read-only' | 'workspace' | 'full';
+export type ChatPermissionMode = 'read-only' | 'workspace' | 'auto' | 'full';
 /** 'waiting' (approval or question open), 'queued', 'reconnecting' and 'limited' (a usage limit is waiting to reset) are display states derived in the renderer; the runtime never persists them. */
 export type ChatStatus = 'idle' | 'running' | 'stopping' | 'completed' | 'failed' | 'interrupted' | 'waiting' | 'queued' | 'reconnecting' | 'limited';
 /** #448: a run stopped on a provider usage limit. `resume` is this chat's "Resume at reset" choice; `gaveUp` once repeated refusals stopped the retries. */

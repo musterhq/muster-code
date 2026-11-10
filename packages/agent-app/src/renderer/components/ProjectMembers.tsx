@@ -11,7 +11,7 @@ import { cleanIpcError } from './resourceErrors';
 import { device } from '../../shared/device-noun.ts';
 
 type Team = { members: ProjectMember[]; access: Record<string, MemberAccess>; policy: AccessPolicy };
-const MODE_LABEL: Record<ChatPermissionMode, string> = { 'read-only': 'Read-only', workspace: 'Workspace', full: 'Full access' };
+const MODE_LABEL: Record<ChatPermissionMode, string> = { 'read-only': 'Read-only', workspace: 'Workspace', auto: 'Auto', full: 'Full access' };
 const message = (err: unknown, fallback: string) => cleanIpcError(err) || fallback;
 
 /** One line saying what a member may do right now, so the intersection is visible rather than implied. */

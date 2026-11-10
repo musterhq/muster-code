@@ -161,7 +161,7 @@ export const PROJECTS_COMMANDS = { ...PROJECT_TEAM_COMMANDS, ...PROJECT_GOVERNAN
   'project.coordinator.start': true, 'project.coordinator.apply': true, 'project.coordinator.dismiss': true,
   'project.sources.list': true, 'project.sources.save': true, 'project.sources.remove': true, 'project.handoff.build': true, 'project.handoff.latest': true, 'project.handoff.ack': true, 'project.events': true } as const satisfies Record<keyof ProjectsCommands, true>;
 
-const RANK: Record<ChatPermissionMode, number> = { 'read-only': 0, workspace: 1, full: 2 };
+const RANK: Record<ChatPermissionMode, number> = { 'read-only': 0, workspace: 1, auto: 2, full: 3 };
 /** The dispatch never exceeds the Project's permission mode. */
 export function clampPermission(task: ChatPermissionMode | null, project: ChatPermissionMode): ChatPermissionMode { return task && RANK[task] < RANK[project] ? task : project; }
 

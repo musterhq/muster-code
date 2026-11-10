@@ -4,7 +4,7 @@ import {copyText} from '../clipboard';
 import { Blocks, BookOpen, Bot, Check, ChevronRight, Circle, CircleCheck, CircleDot, Copy, Image as ImageIcon, ListChecks, MousePointerClick, PencilLine, Search, Sparkles, SquareSlash, SquareTerminal, Wrench } from 'lucide-react';
 import React, { Suspense, useEffect, useRef, useState } from 'react';
 import type { TimelineItem } from '../../shared/protocol';
-import { toolState, awaitingApproval, executionDenied, basename, classifyTool, commandLabel, commandOutcome, planPreview, planSteps, resolveToolPath, uniqueFileLabels, type PlanStep, type ToolKind } from './toolPresentation';
+import { autoApprovedRule, autoApprovedText, toolState, awaitingApproval, executionDenied, basename, classifyTool, commandLabel, commandOutcome, planPreview, planSteps, resolveToolPath, uniqueFileLabels, type PlanStep, type ToolKind } from './toolPresentation';
 import {getState,loadPlugins,openFile} from '../store';
 import {useStoreSelector} from '../useStore';
 import {mcpMark,mcpToolLabel,type McpMark} from '../mcpIcons';
@@ -102,6 +102,7 @@ function Metadata({item,plan}:{item:TimelineItem;plan:boolean}) {
   return <div className="tool-details">
     {typeof d.command==='string'&&classifyTool(d).kind!=='command'&&<ToolDetail id={item.id+':command'} label="Command" text={d.command} language="shell"/>}
     <dl>{typeof d.cwd==='string'&&<><dt>Folder</dt><dd>{d.cwd}</dd></>}
+      {autoApprovedRule(d)&&<><dt>Approval</dt><dd data-testid="tool-auto-approved">{autoApprovedText(autoApprovedRule(d)!)}</dd></>}
       {typeof d.durationMs==='number'&&<><dt>Duration</dt><dd>{(d.durationMs/1000).toFixed(2)}s</dd></>}
       {typeof d.exitCode==='number'&&<><dt>Exit code</dt><dd>{d.exitCode}</dd></>}
       {typeof d.model==='string'&&<><dt>Model</dt><dd>{d.model}</dd></>}
@@ -239,7 +240,7 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
   return <Collapsible.Root open={open} onOpenChange={setOpen} className={`tool-row-card kind-${p.kind}${images.length?' is-images':''}${running ? ' is-running' : ''}${waiting ? ' is-waiting' : ''}${failed ? ' is-failed' : ''}`}>
     <div className="tool-row-head">
       {/* The trigger covers the whole row; file links sit above it so they stay separate buttons. */}
-      <Collapsible.Trigger className="tool-row-hit" aria-label={label} title={p.slash&&typeof item.data?.source==='string'?[item.data.source,item.data.path].filter(value=>typeof value==='string'&&value).join(' · '):p.subject||undefined}/>
+      <Collapsible.Trigger className="tool-row-hit" aria-label={label} title={[p.slash&&typeof item.data?.source==='string'?[item.data.source,item.data.path].filter(value=>typeof value==='string'&&value).join(' · '):p.subject,autoApprovedRule(item.data)&&autoApprovedText(autoApprovedRule(item.data)!)].filter(Boolean).join('\n')||undefined}/>
       {p.computer?<AppGlyph app={p.computer.app} target={p.computer.target} running={running}/>:p.kind==='mcp'?<McpGlyph item={item} running={running}/>:<ToolGlyph kind={p.kind} running={running} image={images.length>0} slash={p.slash}/>}
       <span className="tool-row-text">
         <span className="tool-row-state">{state}</span>

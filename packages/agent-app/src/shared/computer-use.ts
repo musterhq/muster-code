@@ -192,7 +192,7 @@ export function elicitationServer(params: Record<string, unknown>): string {
  *  mode its steps run without a card (as Codex's built-in browser does). Desktop computer use still asks. */
 export function elicitationPolicy(permissionMode: ChatPermissionMode | undefined, server = ''): 'accept' | 'ask' | 'decline' {
   if (permissionMode === 'full') return 'accept';
-  if (permissionMode === 'workspace') return BROWSER_SERVER.test(server) ? 'accept' : 'ask';
+  if (permissionMode === 'workspace' || permissionMode === 'auto') return BROWSER_SERVER.test(server) ? 'accept' : 'ask';
   return 'decline';
 }
 export function elicitationResult(approved: boolean): Record<string, unknown> {

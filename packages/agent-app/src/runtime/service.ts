@@ -68,7 +68,8 @@ import type { ChatGoal } from '../shared/domains/goals-protocol.ts';
 import { firstReadyModel } from '../shared/domains/settings-protocol.ts';
 import { attentionDeadline, pendingStatusAtRead } from '../shared/attention-expiry.ts';
 import { isAdapterProvider } from './adapters/index.ts';
-import { effectiveDriver, inProcessLane } from '../shared/provider-lanes.ts';
+import { autoApprovalSupported, effectiveDriver, inProcessLane } from '../shared/provider-lanes.ts';
+import { autoApprove, type AutoApproval } from './auto-approval.ts';
 import { createSkill } from './skill-authoring.ts';
 import { exportChat, isChatExportFormat } from './chat-export.ts';
 import { redactSecrets } from './secret-redaction.ts';
@@ -716,6 +717,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       chat=store.updateChat(chatId,{providerId:selectedProvider.id,providerBindingId:bindingId,...(!nativeMatches?{providerThreadId:null,providerTurnId:null,providerThreadProviderId:null,providerThreadBindingId:null,providerThreadDriver:null}:{})});
     }
     const access = providerAccessPolicy(chat);
+    // #841: Auto settles routine requests only on routes whose approvals Muster answers; any other route runs it as Workspace.
+    // The route's own driver decides (the Messages lanes run only in Full access, so a saved lane never applies here).
+    const autoOn = access.permissionMode === 'auto' && autoApprovalSupported(selectedProvider.driver);
+    // Only Codex runs commands inside Muster's workspace sandbox; Claude Code runs them on the host.
+    const autoSandboxed = selectedProvider.driver === 'codex-app-server';
     // A fork (or a replaced turn) starts a fresh provider conversation: carry the visible history once, bounded.
     const digest = store.needsDigest(chatId) ? transcriptDigest(store.timeline(chatId), cwd) : '';
     const files = attachments.resolve(chatId, attachmentIds);
@@ -749,6 +755,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     let lastAssistantText = '';
     let planRow: TimelineItem | undefined;
     const toolIds = new Map<string, string>();
+    /** #841: requests Auto settled before the provider started their tool row; the row picks the rule up when it appears. */
+    const autoSettled = new Map<string, AutoApproval>();
     /** Local start time per provider tool item, for a measured duration. */
     const toolStarted = new Map<string, number>();
     /** Provider reasoning items whose text arrived as deltas; their completion must not repeat it. */
@@ -983,7 +991,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               if (finished && status === 'completed' && !shellChanges.length && streamed !== output)
                 shellChanges = shellPatchChanges({...patchEvidence, aggregatedOutput: streamed});
               const metadata = {...details,providerItemId:itemId,type:shellChanges.length ? 'fileChange' : type || previous?.data?.type,...(shellChanges.length ? {changes:shellChanges} : {}),name:label,output,outputTruncated:buffered.truncated,...(childThread ? {threadId:childThread} : {}),...(finished ? {awaitingApproval:undefined} : {})};
-              if (!local) { local = store.appendItem(chatId, 'tool', body, status, metadata).id; toolIds.set(itemId, local); }
+              if (!local) { const settled = autoSettled.get(itemId); autoSettled.delete(itemId); local = store.appendItem(chatId, 'tool', body, status, settled ? {...metadata, autoApproved: settled} : metadata).id; toolIds.set(itemId, local); }
               else store.updateItem(local, body, status, {...store.item(local)?.data,...metadata});
               // A tool that streamed no deltas logs its full final output once.
               if (finished) { if (finalOutput && !toolOutputLogged.has(local)) toolOutputLog.append(chatId, `item:${local}`, finalOutput); toolOutputLogged.delete(local); }
@@ -1073,7 +1081,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               });
               return elicitationResult(decision !== 'decline');
             }
-            if ((access.permissionMode !== 'workspace' && access.permissionMode !== 'full') || !/^item\/(commandExecution|fileChange|mcpToolCall)\/requestApproval$/.test(method)) return undefined;
+            if ((access.permissionMode !== 'workspace' && access.permissionMode !== 'auto' && access.permissionMode !== 'full') || !/^item\/(commandExecution|fileChange|mcpToolCall)\/requestApproval$/.test(method)) return undefined;
             // R5: a command that would signal the user's own processes always becomes a card. Full access asks the
             // provider about every non-trusted command (approvalPolicy 'untrusted') so it can be stopped here; the rest is accepted at once.
             const threat = method === 'item/commandExecution/requestApproval' ? await guardUserProcesses(params.command) : null;
@@ -1091,6 +1099,16 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             // options.policyOnly (set by the adapter, never read from the provider's params): an adapter that runs its own tools (HTTP routes) only wants the rules, the guard and a card for a threat or an ask; workspace edits inside the folder do not need a card.
             if ((access.permissionMode === 'full' || options?.policyOnly === true) && !threat && toolPolicy?.effect !== 'ask') return {decision: 'accept'};
             const change = typeof params.itemId === 'string' && toolIds.has(params.itemId) ? store.item(toolIds.get(params.itemId)!)?.data?.changes : params.changes;
+            // #841: Auto settles a routine request (a read, an edit inside the folder, a safe or allowlisted command) and says so on its row.
+            if (autoOn && !threat && toolPolicy?.effect !== 'ask') {
+              const settled = autoApprove(method, params, change ?? params.changes, {cwd: run.cwd, allowlist: autoAllowlist(), sandboxed: autoSandboxed});
+              if (settled) {
+                const rowId = typeof params.itemId === 'string' ? toolIds.get(params.itemId) : undefined, row = rowId ? store.item(rowId) : undefined;
+                if (row) { store.updateItem(row.id, row.text, row.status, {...row.data, autoApproved: settled}); timeline(chatId); }
+                else if (typeof params.itemId === 'string' && params.itemId) autoSettled.set(params.itemId, settled);
+                return {decision: 'accept'};
+              }
+            }
             const data: ApprovalData = {...approvalData(method, params, change), ...(threat ? {reason: threat.message, protectsUserProcess: true} : {})};
             const toolItemId = typeof params.itemId === 'string' ? toolIds.get(params.itemId) : undefined;
             const expiresAt = attentionDeadline(Date.now(), await mutedUntilMs());
@@ -1287,6 +1305,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   /** Settings are read live (sync handler); anything unreadable keeps the default, on. */
   const settingOn = (key: 'chats.resumeAfterLimit' | 'chats.resumeAfterRestart'): boolean => {
     try { const result = domains.handlers.get('settings.get')?.({}) as {values?: Record<string, unknown>} | undefined; return result?.values?.[key] !== false; } catch { return true; }
+  };
+  /** #841: the person's Auto allowlist (setting approvals.autoAllow), read live; unreadable means empty. */
+  const autoAllowlist = (): string[] => {
+    try { const result = domains.handlers.get('settings.get')?.({}) as {values?: Record<string, unknown>} | undefined, value = result?.values?.['approvals.autoAllow']; return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []; } catch { return []; }
   };
   /** Codex usage windows for this chat's route (live, else its session logs). */
   function usageFor(chat: Chat): ProviderUsage[] {
@@ -1721,7 +1743,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // UR-SR-a: there is no Ask mode picker any more; a legacy 'ask' default means Agent with read-only access.
         const legacyAsk = defaults.mode === 'ask';
         const mode = defaults.mode === 'plan' ? 'plan' : 'agent';
-        const permissionMode = defaults.permissionMode && ['read-only','workspace','full'].includes(defaults.permissionMode) ? defaults.permissionMode : legacyAsk ? 'read-only' : undefined;
+        const permissionMode = defaults.permissionMode && ['read-only','workspace','auto','full'].includes(defaults.permissionMode) ? defaults.permissionMode : legacyAsk ? 'read-only' : undefined;
         // Nothing chosen anywhere: the first ready provider. Nothing ready: an unbound chat that shows "Connect a model".
         const initial = defaults.providerId && defaults.model?.trim() ? {providerId: defaults.providerId, model: defaults.model.trim()} : firstReadyModel(provider.info());
         let result = store.createChat({folderId, projectId, model: initial.model, ...(initial.providerId ? {providerId: initial.providerId} : {}), mode, ...(permissionMode ? {permissionMode} : {})});
@@ -1840,7 +1862,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       }
       case 'chat.setPermissionMode': {
         const chatId = id(p.id), chat = chatFor(chatId);
-        if (typeof p.permissionMode !== 'string' || !['read-only','workspace','full'].includes(p.permissionMode)) throw new Error('Invalid access policy.');
+        if (typeof p.permissionMode !== 'string' || !['read-only','workspace','auto','full'].includes(p.permissionMode)) throw new Error('Invalid access policy.');
         if (p.acknowledgeFullAccess !== undefined && typeof p.acknowledgeFullAccess !== 'boolean') throw new Error('Invalid full-access acknowledgement.');
         // Allowed mid-run: the live turn keeps the access policy it was dispatched with (captured in send); the next turn uses this one.
         if (providerSelections.has(chatId)) throw new Error('Wait for the provider selection to finish.');

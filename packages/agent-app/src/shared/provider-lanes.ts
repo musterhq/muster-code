@@ -8,3 +8,6 @@ export const effectiveDriver = (routeDriver: string | undefined, chat: {provider
 export const CLAUDE_CODE_LANE_DRIVER = 'claude-code-cli';
 /** Lanes that run inside Muster: an unfinished turn ends with the app instead of continuing remotely. */
 export const inProcessLane = (driver: string | undefined): boolean => driver === CLAUDE_LANE_DRIVER || driver === CLAUDE_CODE_LANE_DRIVER;
+/** #841: routes whose approvals Muster answers itself, so Auto access can settle routine requests. Any other route runs an Auto
+ *  chat as Workspace (the composer's access picker says so). */
+export const autoApprovalSupported = (driver: string | undefined): boolean => driver === 'codex-app-server' || driver === CLAUDE_CODE_LANE_DRIVER;
