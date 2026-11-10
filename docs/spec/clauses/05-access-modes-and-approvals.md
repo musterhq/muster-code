@@ -260,4 +260,4 @@ A chat another chat started has its parent's access, never more, and its approva
 - Test: `packages/agent-app/tests/delegation-44.test.ts::a child's approval shows on its parent too and can be answered from either chat`
 - Environment: Node test runner; the real service and its approval flow; a fake provider that asks through onRequest.
 - Known gaps: Questions use the same path (question.respond and question.dismiss answer the child's card); only approvals are driven here.
-- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 10 passed, 0 failed, 0 skipped; commit 7662754086388ccd540e6a1b29e66c71a5504fac
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 11 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9
