@@ -28,6 +28,7 @@ import { useWorkspaceSearch } from './ContextPicker';
 import { PluginIcon } from './PluginIcon';
 import { fileVisual } from './fileVisual';
 import { GoalEditor, GoalStrip } from './GoalStrip';
+import { DICTATION_SHORTCUT_LABEL, useDictation } from '../dictation';
 import { ProjectPicker } from './ProjectPicker';
 import { RecordSkill, type SkillDraft } from './RecordSkill';
 import { SKETCH_FILE_NAME, SketchPad, type SketchStroke } from './SketchPad';
@@ -67,12 +68,6 @@ const MENU_LIMIT = 8;
  * plugins" row for the rest, instead of dumping every installed plugin inline (there can be dozens). */
 const PLUGIN_PREVIEW_LIMIT = 6;
 const NO_QUEUE: QueuedMessage[] = [];
-/** Web Speech dictation (Chromium exposes the prefixed constructor); the mic hides when absent. */
-type Recognition = { continuous: boolean; interimResults: boolean; lang: string; start(): void; stop(): void; abort(): void;
-  onresult: ((event: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null; onerror: ((event: { error: string }) => void) | null; onend: (() => void) | null };
-// CMP-14: Electron exposes the constructor but ships no speech service (every start fails), so the mic stays hidden there.
-const speechRecognition = (): (new () => Recognition) | undefined => typeof window === 'undefined' || /\bElectron\//.test(navigator.userAgent ?? '') ? undefined : (window as unknown as Record<string, new () => Recognition>).SpeechRecognition ?? (window as unknown as Record<string, new () => Recognition>).webkitSpeechRecognition;
-const DICTATION_ERRORS: Record<string, string> = { 'not-allowed': 'Microphone access was denied', 'service-not-allowed': 'Dictation is not available on this system', 'no-speech': 'No speech heard', network: 'Dictation needs a network connection', 'audio-capture': 'No microphone found' };
 /** Paused goals the user chose to keep paused ("Keep paused"); not asked again this session. */
 const resumeDeclined = new Set<string>();
 /** Per-chat effort, loaded once; localStorage keeps it across restarts. */
@@ -232,8 +227,6 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const setChips = (update: (current: ComposerChip[]) => ComposerChip[]) => setChipsState(current => { const next = update(current); saveComposerMemory(chat.id, { tokens: next }); return next; });
   const [contextChips, setContextState] = useState<ContextChip[]>(() => loadComposerMemory(chat.id).context);
   const setContext = (update: (current: ContextChip[]) => ContextChip[]) => setContextState(current => { const next = update(current); saveComposerMemory(chat.id, { context: next }); return next; });
-  const [dictation, setDictation] = useState<{ interim: string } | null>(null);
-  const recognition = useRef<Recognition | null>(null);
   const backgroundPending = useRef(false);
   const backgroundAttempt = useRef<{ key: string; chatId: string; requestId: string } | null>(null);
   const [chipHover, setChipHover] = useState<{ index: number; left: number; top: number; start: number } | null>(null);
@@ -605,32 +598,22 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     } catch (cause) { notifyError(cause); }
     finally { backgroundPending.current = false; }
   };
-  const Speech = speechRecognition();
-  /** Final dictation joins the draft at the caret; interim words show in the placeholder or status line. */
-  const dictated = useRef<(words: string) => void>(() => {});
-  dictated.current = words => {
-    const field = input.current, start = field?.selectionStart ?? text.length, end = field?.selectionEnd ?? start;
-    const lead = start > 0 && !/\s$/.test(text.slice(0, start)) ? ' ' : '';
-    replaceRange(start, end, `${lead}${words.trim()}`);
-  };
-  const toggleDictation = () => {
-    if (recognition.current) { recognition.current.stop(); return; }
-    if (!Speech) return;
-    let engine: Recognition;
-    try { engine = new Speech(); } catch (cause) { notifyError(cause); return; }
-    engine.continuous = true; engine.interimResults = true; engine.lang = navigator.language || 'en-US';
-    engine.onresult = event => {
-      let final = '', interim = '';
-      for (let index = event.resultIndex; index < event.results.length; index++) { const result = event.results[index]; if (result.isFinal) final += result[0].transcript; else interim += result[0].transcript; }
-      setDictation({ interim });
-      if (final.trim()) dictated.current(final);
-    };
-    engine.onerror = event => { if (event.error !== 'aborted') flash(DICTATION_ERRORS[event.error] ?? `Dictation stopped (${event.error})`); };
-    engine.onend = () => { if (recognition.current === engine) recognition.current = null; setDictation(null); };
-    recognition.current = engine;
-    try { engine.start(); setDictation({ interim: '' }); input.current?.focus(); } catch (cause) { recognition.current = null; notifyError(cause); }
-  };
-  useEffect(() => () => { recognition.current?.abort(); recognition.current = null; }, [chat.id]);
+  /** #840: final dictation joins the draft at the caret; Enter pressed while dictating sends once the words are in. */
+  const sendAfterDictation = useRef(false);
+  const [dictatedSend, setDictatedSend] = useState(0);
+  const dictation = useDictation({
+    onText: words => {
+      const field = input.current, start = Math.min(field?.selectionStart ?? text.length, text.length), end = Math.min(Math.max(field?.selectionEnd ?? start, start), text.length);
+      const lead = start > 0 && !/\s$/.test(text.slice(0, start)) ? ' ' : '';
+      replaceRange(start, end, `${lead}${words.trim()}`);
+      if (sendAfterDictation.current) { sendAfterDictation.current = false; setDictatedSend(value => value + 1); }
+    },
+    flash: message => flash(message),
+    onIdle: () => { sendAfterDictation.current = false; },
+  });
+  const listening = dictation.state.phase === 'recording' || dictation.state.phase === 'starting', transcribing = dictation.state.phase === 'transcribing';
+  useEffect(() => { if (!dictatedSend) return; if (running) void followUp(false); else submit(); }, [dictatedSend]);
+  useEffect(() => () => dictation.cancel(), [chat.id]);
 
   /** `muster:composer-add-context` (CMP-13): the focused chat's composer takes the chip and acknowledges with preventDefault(). */
   const takeContext = useRef<(event: Event) => void>(() => {});
@@ -1035,6 +1018,9 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+    // #840: hold ⌘⇧D to talk (a tap toggles), Esc cancels, Enter finishes and sends once the words are in.
+    if (dictation.supported && dictation.onKeyDown(event)) return;
+    if (dictation.active && event.key === 'Enter' && !event.shiftKey && !event.altKey) { event.preventDefault(); if (!event.repeat) { sendAfterDictation.current = true; dictation.finish(); } return; }
     const field = event.currentTarget, mod = event.metaKey || event.ctrlKey;
     // CS-B11-2: 1–9 pick while the custom answer is empty; Enter is Next/Submit (the popovers keep Enter while open).
     if (questionFlow && !questionFlow.collapsed && !mod && !event.altKey && !caretRows.length) {
@@ -1122,7 +1108,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const primaryDisabled = !hasPayload || staging || sending || modelChanging || settingsChanging || chat.archived || recoveryNeeded;
   const answering = Boolean(questionFlow && !questionFlow.collapsed);
   const loadingProvider = (state.providers.value ?? []).find(row => row.id === chat.providerId && row.listing === 'loading');
-  const placeholder = loadingProvider ? `Loading models from ${loadingProvider.name}…` : dictation ? (dictation.interim || 'Listening…') : chat.archived ? 'Restore this chat to continue' : answering ? (questionFlow!.question.options.length ? 'Type your own answer, or leave blank to use the selected option' : 'Type your answer') : !providers.length && state.providers.phase === 'ready' ? 'Enable a provider to send a message' : running ? 'Working…' : planMode ? 'Describe your task to generate a plan…' : 'Do anything';
+  const placeholder = loadingProvider ? `Loading models from ${loadingProvider.name}…` : listening ? (dictation.state.interim || 'Listening…') : transcribing ? 'Transcribing…' : chat.archived ? 'Restore this chat to continue' : answering ? (questionFlow!.question.options.length ? 'Type your own answer, or leave blank to use the selected option' : 'Type your answer') : !providers.length && state.providers.phase === 'ready' ? 'Enable a provider to send a message' : running ? 'Working…' : planMode ? 'Describe your task to generate a plan…' : 'Do anything';
   const caretPopoverId = slash ? 'composer-slash-options' : 'composer-mention-options';
   const hovered = chipHover ? tokenRanges[chipHover.index] : undefined;
 
@@ -1231,7 +1217,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
           </ProviderUsageHover>
           {modelError && <span className="composer-model-error" role="alert">{modelError}</span>}
         </div>
-        {Speech && <Tip label={dictation ? 'Stop dictation' : 'Dictate'}><button type="button" data-testid="composer-mic" className={`composer-mic${dictation ? ' is-listening' : ''}`} aria-label={dictation ? 'Stop dictation' : 'Dictate'} aria-pressed={Boolean(dictation)} disabled={chat.archived} onClick={toggleDictation}><Mic size={15} /></button></Tip>}
+        {dictation.supported && <Tip label={listening ? 'Stop and transcribe (Esc cancels)' : transcribing ? 'Transcribing…' : `Dictate (hold ${DICTATION_SHORTCUT_LABEL()} to talk)`}><button type="button" data-testid="composer-mic" className={`composer-mic${listening ? ' is-listening' : ''}${transcribing ? ' is-transcribing' : ''}`} aria-label={listening ? 'Stop dictation' : transcribing ? 'Transcribing' : 'Dictate'} aria-pressed={listening} aria-keyshortcuts="Meta+Shift+D Control+Shift+D" disabled={chat.archived || transcribing} onClick={dictation.toggle}>{transcribing ? <LoaderCircle size={15} className="composer-spin" /> : <Mic size={15} />}</button></Tip>}
         {running && hasPayload && <Tip label="Stop"><button type="button" className="composer-stop is-ghost" aria-label="Stop" disabled={stopping} onClick={() => void stopChat(chat.id)}><Square size={11} fill="currentColor" /></button></Tip>}
         {running && hasPayload
           ? <Tip label={`${followUpVerb} (Enter) · ${invertVerb} (⌘Enter)`}><button data-testid="composer-primary" type="button" className="composer-send" aria-label={`${followUpVerb} (Enter) · ${invertVerb} ⌘Enter`} disabled={queueing || staging || chat.archived || recoveryNeeded} onClick={event => void followUp(event.metaKey || event.ctrlKey)}><ArrowUp size={15} strokeWidth={2.25} /></button></Tip>
@@ -1254,7 +1240,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
       actions={[{ label: 'Cancel', run: () => { setLeaveSandbox(null); requestAnimationFrame(() => accessTrigger.current?.focus()); } }, { label: 'Leave sandbox', primary: true, run: confirmLeaveSandbox }]} />
     {sending ? <span className="composer-status" role="status" aria-live="polite">Sending…</span>
       : note ? <span className="composer-status" role="status" aria-live="polite">{note}</span>
-      : dictation && text ? <span className="composer-status is-dictation" role="status" aria-live="polite">{dictation.interim ? `Listening… ${dictation.interim}` : 'Listening…'}</span> : null}
+      : dictation.active ? <span className={`composer-status is-dictation${listening ? ' is-recording' : ''}`} role="status" aria-live="polite">{transcribing ? 'Transcribing…' : `Listening…${dictation.state.interim ? ` ${dictation.state.interim}` : ''} · Esc to cancel`}</span> : null}
     {(draft?.error || sendError || queueError) && <div id={errorId} className="composer-error" role="alert">
       {draft?.error ? <>Draft not saved: {draft.error} <button type="button" onClick={() => void flushComposerDraft(chat.id)}>Retry save</button></>
         : queueError ? <>Could not queue: {queueError} Your draft is retained.</>

@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- **Dictation in the composer.** The mic is back in the desktop app: click it (or hold ⌘⇧D to talk, release to transcribe), and the words land in the message box; Enter sends, Esc cancels. Choose the transcription service in Settings › Chat: Cloud uses an OpenAI-compatible `/audio/transcriptions` endpoint with your own key, or one of your saved provider connections. Audio leaves your computer only for a cloud service you chose, and nothing is kept after the words are in. Works in the steer composer and on the new-chat screen. On-device macOS speech and a local model are listed but not in this version yet (#840).
 - Paths to files the agent wrote now become links in its replies: absolute and `~/` paths, paths with spaces (such as under Application Support) written as inline code, and Word, Excel, PowerPoint, OpenDocument and RTF files, including the older `.doc`, `.xls` and `.ppt`. A file inside the chat's folder opens in the file viewer; one outside them gets the outside-file link; a path to nothing stays plain text (#837).
 - A message sent while a chat is only running background work reaches the agent now instead of waiting in the queue: Codex steers the turn the app-server started when a sub-agent reports back (and Steer on a queued message does the same), and Claude Code keeps its session open while a background command runs. Where Claude Code still can't take the message, the composer says why (#839).
 

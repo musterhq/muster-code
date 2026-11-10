@@ -88,7 +88,9 @@ for (const name of readdirSync(frameworks).filter(entry => /^Electron Helper.*\.
 }
 
 const plist = path.join(app, 'Contents/Info.plist');
-setKeys(plist, {CFBundleIdentifier: BUNDLE_ID, CFBundleName: PRODUCT, CFBundleDisplayName: PRODUCT, CFBundleExecutable: PRODUCT, CFBundleIconFile: 'icon.icns', CFBundleShortVersionString: version, CFBundleVersion: version, NSHumanReadableCopyright: `Copyright © ${new Date().getFullYear()} Muster`});
+setKeys(plist, {CFBundleIdentifier: BUNDLE_ID, CFBundleName: PRODUCT, CFBundleDisplayName: PRODUCT, CFBundleExecutable: PRODUCT, CFBundleIconFile: 'icon.icns', CFBundleShortVersionString: version, CFBundleVersion: version, NSHumanReadableCopyright: `Copyright © ${new Date().getFullYear()} Muster`,
+  // #840: dictation records from the microphone only while you dictate; macOS shows this when it asks.
+  NSMicrophoneUsageDescription: 'Muster uses the microphone only while you dictate a message.'});
 plistBuddy(plist, 'Delete :NSAppTransportSecurity', {optional: true}); // the app loads only local files
 for (const command of ['Delete :CFBundleURLTypes', 'Add :CFBundleURLTypes array', 'Add :CFBundleURLTypes:0 dict',
   `Add :CFBundleURLTypes:0:CFBundleURLName string ${BUNDLE_ID}.chat`, 'Add :CFBundleURLTypes:0:CFBundleURLSchemes array',

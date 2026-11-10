@@ -70,7 +70,8 @@ const React=await import('react'),{createRoot}=await import('react-dom/client');
 const store=await import('../src/renderer/store');
 const {Composer}=await import('../src/renderer/components/Composer');
 const {PreferencesScreen}=await import('../src/renderer/components/PreferencesScreen');
-function Screen(){const active=store.activeChat();return active?<Composer chat={active}/>:null;}
+const {useStoreSlice}=await import('../src/renderer/useStore');
+function Screen(){useStoreSlice('snapshot','activeChatId');const active=store.activeChat();return active?<Composer chat={active}/>:null;}
 const errors:unknown[]=[];const root=createRoot(document.getElementById('root')!,{onUncaughtError:error=>errors.push(error)});
 await store.boot();root.render(<Screen/>);await delay(400);
 assert.deepEqual(errors,[]);
