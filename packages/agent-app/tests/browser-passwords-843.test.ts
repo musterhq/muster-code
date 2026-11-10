@@ -64,7 +64,7 @@ const LOGIN_PAGE = `<!doctype html><html><head><title>Sign in</title></head><bod
 <script>
   globalThis.inputs = [];
   for (const id of ['email', 'pw']) document.getElementById(id).addEventListener('input', event => inputs.push({id, trusted: event.isTrusted}));
-  document.getElementById('bare').value = 'page-own-${SECRET}';
+  document.getElementById('bare').value = 'page-own-hidden-value';
 </script></body></html>`;
 const EMPTY_PAGE = `<!doctype html><html><body><h1>No form here</h1><input id="search" type="search" aria-label="Search"></body></html>`;
 
@@ -151,7 +151,7 @@ test('choosing a login fills the sign-in form from 1Password', {skip}, async () 
   assert.deepEqual(result, {title: 'Example', filled: 'login'});
   assert.equal(await evaluate('document.getElementById("email").value'), 'ada@example.test');
   assert.equal(await evaluate('document.getElementById("pw").value'), SECRET);
-  assert.equal(await evaluate('document.getElementById("bare").value'), `page-own-${SECRET}`, 'the other form is left alone');
+  assert.equal(await evaluate('document.getElementById("bare").value'), 'page-own-hidden-value', 'the other form is left alone');
   const inputs = await evaluate('inputs') as {id: string; trusted: boolean}[];
   assert.ok(inputs.some(row => row.id === 'email' && row.trusted) && inputs.some(row => row.id === 'pw' && row.trusted), 'the page saw trusted input events in both fields');
   assert.deepEqual(opCalls(), [['item', 'get', id('a'), '--vault', VAULT, '--format', 'json']]);
@@ -178,7 +178,7 @@ test('after a fill the agent never reads the password: snapshot, typing and scre
   const revealed = await call('browser_snapshot');
   const typed = await call('browser_type', {selector: '#email', text: 'x'});
   const shot = await runBrowserTool(host, 'browser_screenshot', {}, {readOnly: false});
-  for (const text of [first, revealed, typed, JSON.stringify(shot.result.content.filter(part => part.type === 'text'))]) assert.ok(!text.includes(SECRET), `no agent reply holds the password: ${text.slice(0, 400)}`);
+  for (const text of [first, revealed, typed, JSON.stringify(shot.result.content.filter(part => part.type === 'text'))]) { assert.ok(!text.includes(SECRET), 'no agent reply holds the filled password'); assert.ok(!text.replace(/data:text\/html[^ "\\]*/g, '').includes('page-own-hidden-value'), 'an unlabeled password field is not named by its value'); }
   assert.match(revealed, /value=\\"••••••\\"/);
   assert.deepEqual(masked, ['disc'], 'the revealed field is drawn as dots while the agent screenshot is taken');
   assert.notEqual(await evaluate('getComputedStyle(document.getElementById("pw")).webkitTextSecurity'), 'disc', 'and reads as the page made it afterwards');

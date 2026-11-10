@@ -6,6 +6,7 @@ What the user can do:
 - open a URL or a local dev server in a browser tab, with back, forward, reload and dev tools;
 - let the agent read, click and type in the page, and pick an element to point the agent at;
 - keep sign-ins per workspace, and see the page picture-in-picture while working elsewhere.
+- fill a sign-in form from their own 1Password; agents never see the password.
 
 Boundaries:
 - Each workspace has its own browser storage; one workspace's sign-in does not leak to another.

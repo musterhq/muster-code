@@ -34,11 +34,15 @@ export const textResult = (text: string, isError = false): McpToolResult => ({co
 /** Isolated world shared by every agent script; refs live in its globals, never in the page's DOM. */
 export const AGENT_WORLD = 1017;
 /** Walks the visible page and assigns refs to interactive elements. Output is bounded. */
+/** #843: a field holding a secret: a password field, a sign-in or one-time-code field, or one Muster filled from the
+ *  person's password manager (remembered in this isolated world, so a page that turns it into plain text stays masked). */
+const SECRET_FIELD = `el => el.type === 'password' || !!globalThis.__musterSecrets?.has(el) || /(^|\\s)(current-password|new-password|one-time-code)(\\s|$)/.test(el.autocomplete || '')`;
 export const SNAPSHOT_SCRIPT = `(() => {
   const refs = new Map(); globalThis.__musterRefs = refs; let n = 0; const lines = []; const MAX = 400;
   const interactive = 'a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button],[role=link],[role=checkbox],[role=radio],[role=tab],[role=menuitem],[role=option],[role=switch],[role=textbox],[role=combobox],[role=searchbox],[contenteditable=""],[contenteditable=true]';
+  const secret = ${SECRET_FIELD};
   const visible = el => { const r = el.getBoundingClientRect(); if (!r.width || !r.height) return false; const s = getComputedStyle(el); return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'; };
-  const name = el => (el.getAttribute('aria-label') || el.labels?.[0]?.innerText || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') || el.innerText || el.value || '').replace(/\\s+/g, ' ').trim().slice(0, 80);
+  const name = el => (el.getAttribute('aria-label') || el.labels?.[0]?.innerText || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') || el.innerText || (secret(el) ? '' : el.value) || '').replace(/\\s+/g, ' ').trim().slice(0, 80);
   const role = el => el.getAttribute('role') || ({A:'link',BUTTON:'button',SELECT:'combobox',TEXTAREA:'textbox',SUMMARY:'button'})[el.tagName] || (el.tagName === 'INPUT' ? ({checkbox:'checkbox',radio:'radio',submit:'button',button:'button',range:'slider'})[el.type] || 'textbox' : el.isContentEditable ? 'textbox' : el.tagName.toLowerCase());
   const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_ELEMENT);
   for (let el = walker.currentNode; el && n < MAX; el = walker.nextNode()) {
@@ -47,7 +51,7 @@ export const SNAPSHOT_SCRIPT = `(() => {
     const ref = 'e' + (++n); refs.set(ref, new WeakRef(el));
     let line = '- ' + role(el) + ' "' + name(el) + '" [ref=' + ref + ']';
     if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) line += el.checked ? ' [checked]' : '';
-    else if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && el.value) line += el.type === 'password' ? ' value="••••••"' : ' value="' + String(el.value).slice(0, 60) + '"';
+    else if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && el.value) line += secret(el) ? ' value="••••••"' : ' value="' + String(el.value).slice(0, 60) + '"';
     if (el.disabled) line += ' [disabled]';
     lines.push(line);
   }
@@ -73,7 +77,14 @@ export const elementScript = (ref: string, selector: string, body: string) => `(
 export const CLICK_BODY = `el.scrollIntoView({block:'center'}); if (el.focus) el.focus(); el.click(); return {ok: true};`;
 export const DOUBLE_CLICK_BODY = `el.scrollIntoView({block:'center'}); el.click(); el.click(); el.dispatchEvent(new MouseEvent('dblclick', {bubbles: true})); return {ok: true};`;
 export const HOVER_BODY = `for (const type of ['pointerover','mouseover','mouseenter','mousemove']) el.dispatchEvent(new MouseEvent(type, {bubbles: type !== 'mouseenter'})); return {ok: true};`;
-export const focusBody = (clear: boolean) => `el.scrollIntoView({block:'center'}); el.focus(); ${clear ? `if ('value' in el) { el.value = ''; el.dispatchEvent(new Event('input', {bubbles: true})); } else if (el.isContentEditable) el.textContent = '';` : ''} return {ok: document.activeElement === el || el.contains(document.activeElement), password: el.type === 'password' || /pass|otp|token|secret/i.test(el.autocomplete || '')};`;
+export const focusBody = (clear: boolean) => `el.scrollIntoView({block:'center'}); el.focus(); ${clear ? `if ('value' in el) { el.value = ''; el.dispatchEvent(new Event('input', {bubbles: true})); } else if (el.isContentEditable) el.textContent = '';` : ''} return {ok: document.activeElement === el || el.contains(document.activeElement), password: el.type === 'password' || !!globalThis.__musterSecrets?.has(el) || /pass|otp|token|secret/i.test(el.autocomplete || '')};`;
+/** #843: while the agent's screenshot is taken, filled secret fields the page shows as plain text are drawn as dots. */
+export const secretMaskScript = (masked: boolean) => `(async () => {
+  const fields = [...document.querySelectorAll('input,textarea')].filter(el => globalThis.__musterSecrets?.has(el) && el.type !== 'password');
+  for (const el of fields) { if (${masked}) { el.dataset.musterMask = el.style.getPropertyValue('-webkit-text-security') || '-'; el.style.setProperty('-webkit-text-security', 'disc', 'important'); } else if (el.dataset.musterMask) { const prior = el.dataset.musterMask; delete el.dataset.musterMask; if (prior === '-') el.style.removeProperty('-webkit-text-security'); else el.style.setProperty('-webkit-text-security', prior); } }
+  if (${masked} && fields.length) await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  return fields.length;
+})()`;
 export const selectBody = (values: string[]) => `if (el.tagName !== 'SELECT') return {error: 'The element is not a <select>.'};
   const wanted = ${JSON.stringify(values)}; let matched = 0;
   for (const option of el.options) { option.selected = wanted.includes(option.value) || wanted.includes(option.label) || wanted.includes(option.text.trim()); if (option.selected) matched++; }
