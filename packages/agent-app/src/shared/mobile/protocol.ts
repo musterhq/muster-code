@@ -13,10 +13,29 @@ export interface PairingLink { relayUrl: string; route: string; desktopKey: stri
 export class MobileError extends Error {
   constructor(readonly code: MobileErrorCode, message: string) { super(message); this.name = 'MobileError'; }
 }
-export type MobileErrorCode = 'bad-link' | 'pairing-failed' | 'revoked' | 'offline' | 'closed' | 'timeout' | 'read-only' | 'refused' | 'not-found' | 'bad-request' | 'failed';
+export type MobileErrorCode = 'bad-link' | 'pairing-failed' | 'pending' | 'revoked' | 'offline' | 'closed' | 'timeout' | 'read-only' | 'refused' | 'not-found' | 'bad-request' | 'failed';
 export const NOT_A_PAIRING_LINK = 'This is not a Muster pairing link. On your computer, open Settings › Integrations › Phone and press Pair a phone.';
 
 const B64URL = /^[A-Za-z0-9_-]+$/;
+/** Loopback and private-network hosts, the only ones a relay may be reached on without TLS. Literal addresses only: a name that
+ *  resolves to a private address still needs wss://. */
+export function isLocalHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h === '::1' || /^fe80:/.test(h) || /^f[cd][0-9a-f]{2}:/.test(h)) return true;
+  const ip = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (!ip) return false;
+  const [a, b] = [Number(ip[1]), Number(ip[2])];
+  return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+}
+export const RELAY_NEEDS_TLS = 'Use a wss:// relay address. Plain ws:// is only allowed on this computer or a private network (such as 192.168.x.x).';
+/** A relay address: wss:// anywhere, ws:// only to a loopback or private-network address. */
+export function relayUrlAllowed(url: string): boolean {
+  const m = /^(wss?):\/\/([^\s/?#]+)(?:\/[^\s?#]*)?$/.exec(url);
+  if (!m) return false;
+  if (m[1] === 'wss') return true;
+  const host = m[2]!.startsWith('[') ? m[2]!.slice(0, m[2]!.indexOf(']') + 1) : m[2]!.replace(/:\d+$/, '');
+  return isLocalHost(host);
+}
 export function formatPairingLink(link: PairingLink): string {
   const query = new URLSearchParams({v: String(MOBILE_PROTOCOL_VERSION), r: link.relayUrl, d: link.route, k: link.desktopKey, c: link.code, n: link.desktopName});
   return `${PAIRING_SCHEME}?${query.toString()}`;
@@ -27,7 +46,7 @@ export function parsePairingLink(text: string): PairingLink {
   if (!value.startsWith(`${PAIRING_SCHEME}?`)) throw bad();
   const query = new URLSearchParams(value.slice(PAIRING_SCHEME.length + 1));
   const relayUrl = query.get('r') ?? '', route = query.get('d') ?? '', desktopKey = query.get('k') ?? '', code = query.get('c') ?? '';
-  if (query.get('v') !== String(MOBILE_PROTOCOL_VERSION) || !/^wss?:\/\/[^\s]+$/.test(relayUrl) || !/^[a-f0-9]{16,64}$/.test(route)
+  if (query.get('v') !== String(MOBILE_PROTOCOL_VERSION) || !relayUrlAllowed(relayUrl) || !/^[a-f0-9]{16,64}$/.test(route)
     || !B64URL.test(desktopKey) || desktopKey.length !== 43 || !B64URL.test(code) || code.length !== 43) throw bad();
   return {relayUrl, route, desktopKey, code, desktopName: (query.get('n') ?? '').slice(0, 80) || 'Muster'};
 }
@@ -75,7 +94,9 @@ export type MobileEvent =
   | {type: 'chats'; chats: MobileChat[]}
   | {type: 'items'; chatId: string; items: MobileItem[]; revision: number}
   | {type: 'needs'; needs: MobileNeed[]}
-  | {type: 'access'; access: MobileAccess};
+  | {type: 'access'; access: MobileAccess}
+  /** The desktop confirmed this phone's check code: it is paired (read-only) from now on. */
+  | {type: 'paired'};
 
 /** Frames inside the encrypted channel. */
 export type MobileFrame =
@@ -86,8 +107,11 @@ export type MobileFrame =
 
 /** Handshake payloads. */
 export interface PairRequest { v: number; name: string; platform: string }
-export interface Welcome { v: number; desktopName: string; deviceId: string; access: MobileAccess }
+export interface Welcome { v: number; desktopName: string; deviceId: string; access: MobileAccess; /** Pairing: waits for the owner to confirm the check code on the desktop. */ pending?: boolean }
 
 /** Close codes the desktop asks the relay to use when it ends a phone's connection. */
-export const CLOSE = {pairingFailed: 4401, revoked: 4403, offline: 4404, badFrame: 4400, gone: 4410} as const;
-export const CLOSE_REASON: Record<number, MobileErrorCode> = {4401: 'pairing-failed', 4403: 'revoked', 4404: 'offline', 4400: 'closed', 4410: 'closed'};
+/** 4400: a frame (or the first handshake message) did not decrypt or parse. 4401: pairing failed; the reason says why
+ *  (\`code-used\`, \`rejected\`, \`expired\`, \`pairing-failed\`). 4403: the phone's key is not paired (revoked). 4404: the desktop is
+ *  offline. 4408: the handshake took too long. 4410: the desktop went away. 4429: too many connections or attempts. */
+export const CLOSE = {badFrame: 4400, pairingFailed: 4401, revoked: 4403, offline: 4404, timeout: 4408, gone: 4410, busy: 4429} as const;
+export const CLOSE_REASON: Record<number, MobileErrorCode> = {4400: 'closed', 4401: 'pairing-failed', 4403: 'revoked', 4404: 'offline', 4408: 'closed', 4410: 'closed', 4429: 'closed'};

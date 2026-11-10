@@ -1,13 +1,17 @@
 /**
  * `mobile.*` (#326): phones paired with this computer (docs/mobile/DESIGN.md).
  *
- * - This computer's Noise static key and its relay route secret live in the secret store (OS-encrypted). Pairing is refused
- *   without secure storage.
- * - Pairing makes a one-time 32-byte code (5 minutes, one phone, dead after 5 wrong tries) shown as a muster://pair QR link.
- *   The phone runs Noise IKpsk1 with it; a valid first message adds the phone to the registry as read-only.
- * - Later sessions are Noise IK; only a phone whose static key is in the registry gets in. Revoke closes its sessions at once.
- * - The relay link is open while a relay address is set and this computer has its key (made by the first pairing).
- * - Requests go through bridge.ts (allowlist, access checks, slim wire types). Chat changes reach open sessions as events.
+ * - Keys, all in the OS-encrypted secret store: this computer's Noise static key (phones trust it) and its Ed25519 route key
+ *   (the relay registers the route only for a signature over its own one-time challenge). Pairing is refused without secure
+ *   storage, and a key that exists but can't be decrypted is refused, never silently replaced: `mobile.reset` rotates it.
+ * - Pairing makes a one-time 32-byte code (5 minutes, one phone) shown as a muster://pair QR link. The phone runs Noise
+ *   IKpsk1 with it; a valid first message makes the phone *pending*: both ends show the same 6-digit check code (from the
+ *   handshake hash) and the owner adds the phone on the desktop (`mobile.pair.confirm`) or rejects it. Only then is it in the
+ *   registry (read-only). A second phone using a taken code is told so. Wrong codes close their own connection only.
+ * - Later sessions are Noise IK. A first message that does not decrypt closes with 4400; one from a key that is not paired
+ *   closes with 4403 (revoked). A session counts as connected only after its first valid encrypted message.
+ * - Handshakes time out after 10 s, and unauthenticated connections are capped.
+ * - Requests go through bridge.ts (allowlist, access checked again right before each runtime command, slim wire types).
  *
  * Non-secret state is in dataDir/mobile/{config,devices}.json.
  */
@@ -18,29 +22,41 @@ import {join} from 'node:path';
 import type {AgentEvent, Snapshot} from '../../shared/protocol.ts';
 import type {MobileDeviceView, MobileStatus} from '../../shared/domains/mobile-protocol.ts';
 import {equalBytes, fromBase64, fromUtf8, toBase64, utf8} from '../../shared/mobile/bytes.ts';
-import {prologue, SecureChannel, MODE_BYTE, type ChannelMode} from '../../shared/mobile/channel.ts';
+import {checkCodeOf, keyFingerprint, prologue, SecureChannel, MODE_BYTE, type ChannelMode} from '../../shared/mobile/channel.ts';
 import {Handshake, type KeyPair} from '../../shared/mobile/noise.ts';
-import {CLOSE, formatPairingLink, MOBILE_ACCESS, MOBILE_PROTOCOL_VERSION, MobileError, type MobileAccess, type MobileEvent, type MobileFrame, type PairRequest, type Welcome} from '../../shared/mobile/protocol.ts';
+import {CLOSE, formatPairingLink, MOBILE_ACCESS, MOBILE_PROTOCOL_VERSION, MobileError, RELAY_NEEDS_TLS, relayUrlAllowed, type MobileAccess, type MobileEvent, type MobileFrame, type PairRequest, type Welcome} from '../../shared/mobile/protocol.ts';
 import {device} from '../../shared/device-noun.ts';
 import {activeSecretStore, openSecretStores, type SecretStore} from '../secret-store.ts';
 import {handle, mobileChats, mobileItem, needsList} from '../mobile/bridge.ts';
-import {nodeNoiseCrypto} from '../mobile/node-crypto.ts';
+import {generateRouteKey, nodeNoiseCrypto, signWithRouteKey, type RouteKey} from '../mobile/node-crypto.ts';
 import {RelayLink} from '../mobile/relay-link.ts';
 import type {DomainContext, DomainModule} from './types.ts';
 
-/** Test seams: the secret store to use and a shorter pairing lifetime. */
-export const mobileSeams: {secrets?: () => SecretStore | undefined; pairingTtlMs?: number} = {};
+/** Test seams: the secret store, and shorter or smaller limits. */
+export const mobileSeams: {secrets?: () => SecretStore | undefined; pairingTtlMs?: number; handshakeTimeoutMs?: number; maxPendingSessions?: number} = {};
 export const PAIRING_TTL_MS = 5 * 60_000;
-const MAX_PAIRING_FAILURES = 5;
+export const HANDSHAKE_TIMEOUT_MS = 10_000;
+export const MAX_PENDING_SESSIONS = 32;
+/** Failed pairing attempts allowed per minute; past it, attempts are refused until the minute passes (the pairing stays). */
+export const PAIRING_ATTEMPTS_PER_MINUTE = 20;
 const MAX_DEVICES = 20;
-const KEY_SECRET = 'mobile-desktop-key', ROUTE_SECRET = 'mobile-route-secret';
+const KEY_SECRET = 'mobile-desktop-key', ROUTE_SECRET = 'mobile-route-key';
+/** The route secret of the first build of #326; removed by reset. */
+const LEGACY_ROUTE_SECRET = 'mobile-route-secret';
 
 interface Device { id: string; name: string; platform: string; publicKey: string; access: MobileAccess; pairedAt: string; lastSeenAt: string | null }
-interface Pairing { code: Uint8Array; link: string; expiresAt: number; failures: number }
+interface Pending { session: Session; device: Device; checkCode: string; fingerprint: string }
+interface Pairing { code: Uint8Array; link: string; expiresAt: number; pending: Pending | null; timer: ReturnType<typeof setTimeout> }
 interface Session {
   conn: number; deviceId: string | null; channel: SecureChannel | null; watching: string | null;
+  /** A valid encrypted message arrived: only then is the phone shown as connected. */
+  verified: boolean;
+  /** Pairing: waits for the owner's confirmation; every request is refused meanwhile. */
+  pending: boolean;
   sentChats: string; sentNeeds: string; queue: Promise<void>;
+  timer: ReturnType<typeof setTimeout> | undefined;
 }
+interface Identity { keys: KeyPair; route: RouteKey }
 
 function readJson<T>(path: string, fallback: T): T { try { return JSON.parse(readFileSync(path, 'utf8')) as T; } catch { return fallback; } }
 function writeJson(path: string, value: unknown): void {
@@ -52,7 +68,8 @@ function writeJson(path: string, value: unknown): void {
 }
 const cleanName = (value: unknown, fallback: string) => typeof value === 'string' && value.trim() ? value.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 80) : fallback;
 export const desktopName = (): string => cleanName(hostname().replace(/\.local$/i, ''), device().title);
-const RELAY_URL = /^wss?:\/\/[^\s/?#]+(?:\/[^\s?#]*)?$/;
+const pair64 = (a: Uint8Array, b: Uint8Array) => `${toBase64(a, true)}.${toBase64(b, true)}`;
+const unpair64 = (text: string | undefined) => { const [a, b] = (text ?? '').split('.'); return a && b ? [fromBase64(a), fromBase64(b)] as const : null; };
 
 export function createMobileDomain(context: DomainContext): DomainModule {
   const crypto = nodeNoiseCrypto();
@@ -61,7 +78,11 @@ export function createMobileDomain(context: DomainContext): DomainModule {
   let config = readJson<{relayUrl: string | null}>(configPath, {relayUrl: null});
   let devices = readJson<{devices: Device[]}>(devicesPath, {devices: []}).devices.filter(entry => entry && typeof entry.id === 'string' && typeof entry.publicKey === 'string');
   let pairing: Pairing | null = null;
+  /** The last code a phone took, so a second phone using it is told "already used" instead of "wrong code". */
+  let usedCode: {code: Uint8Array; until: number} | null = null;
+  let failures: number[] = [];
   let link: RelayLink | null = null;
+  let identityError: string | null = null;
   let disposed = false;
   const sessions = new Map<number, Session>();
   const name = desktopName();
@@ -70,78 +91,116 @@ export function createMobileDomain(context: DomainContext): DomainModule {
   const secure = () => Boolean(secrets()?.secureStorage());
   const changed = () => { if (!disposed) context.emit({type: 'mobileChanged'}); };
   const saveDevices = () => writeJson(devicesPath, {version: 1, devices});
+  const unreadable = () => `Muster can’t read the key phones trust from ${device().secretStore}, so it won’t make a new one over it (that would unpair every phone without telling you). If ${device().secretStoreShort} was reset or moved, use Reset phone access in Settings › Integrations › Phone to start over.`;
 
-  /** This computer's static key and route secret; made on first pairing. Throws without secure storage. */
-  function identity(create: boolean): {keys: KeyPair; routeSecret: string} | null {
+  /** This computer's keys. `create` makes them when there are none; an entry that exists but can't be read always throws. */
+  function identity(create: boolean): Identity | null {
     const store = secrets();
     if (!store?.secureStorage()) {
       if (!create) return null;
       throw new Error(`Secure storage is unavailable on ${device().the}, so a phone can't be paired: Muster keeps the key phones trust in ${device().secretStore}. On Linux, install and unlock a keyring, then try again.`);
     }
-    const stored = store.get(KEY_SECRET), route = store.get(ROUTE_SECRET);
-    if (stored && route) {
-      const [publicKey, privateKey] = stored.split('.');
-      if (publicKey && privateKey) return {keys: {publicKey: fromBase64(publicKey), privateKey: fromBase64(privateKey)}, routeSecret: route};
+    const hasKey = store.status(KEY_SECRET).stored, hasRoute = store.status(ROUTE_SECRET).stored;
+    if (hasKey || hasRoute) {
+      const keys = unpair64(store.get(KEY_SECRET)), route = unpair64(store.get(ROUTE_SECRET));
+      if (!keys || !route) throw new Error(unreadable());
+      return {keys: {publicKey: keys[0], privateKey: keys[1]}, route: {publicKey: route[0], privateKey: route[1]}};
     }
     if (!create) return null;
-    const keys = crypto.generateKeyPair(), routeSecret = toBase64(crypto.randomBytes(32), true);
-    store.set(KEY_SECRET, `${toBase64(keys.publicKey, true)}.${toBase64(keys.privateKey, true)}`);
-    store.set(ROUTE_SECRET, routeSecret);
-    return {keys, routeSecret};
+    const keys = crypto.generateKeyPair(), route = generateRouteKey();
+    store.set(KEY_SECRET, pair64(keys.publicKey, keys.privateKey));
+    store.set(ROUTE_SECRET, pair64(route.publicKey, route.privateKey));
+    return {keys, route};
   }
-  /** Must match the relay's routeFor: hex of the first 16 bytes of sha256(secret). */
-  const routeOf = (secret: string) => Array.from(crypto.sha256(utf8(secret)).subarray(0, 16), byte => byte.toString(16).padStart(2, '0')).join('');
+  /** Must match the relay's routeFor: hex of the first 16 bytes of sha256(route public key). */
+  const routeOf = (publicKey: Uint8Array) => Array.from(crypto.sha256(publicKey).subarray(0, 16), byte => byte.toString(16).padStart(2, '0')).join('');
 
-  const pairingOpen = () => { if (pairing && pairing.expiresAt <= Date.now()) pairing = null; return pairing; };
+  function endPairing(reason: 'expired' | 'rejected' | 'cancelled' | 'used') {
+    const current = pairing;
+    if (!current) return;
+    pairing = null;
+    clearTimeout(current.timer);
+    if (current.pending && reason !== 'used') drop(current.pending.session, CLOSE.pairingFailed, reason === 'rejected' ? 'rejected' : 'expired');
+    changed();
+  }
+  const pairingOpen = () => { if (pairing && pairing.expiresAt <= Date.now()) endPairing('expired'); return pairing; };
+
   function status(): MobileStatus {
     const open = pairingOpen();
-    const connected = new Set([...sessions.values()].filter(s => s.channel && s.deviceId).map(s => s.deviceId!));
-    const views: MobileDeviceView[] = devices.map(d => ({id: d.id, name: d.name, platform: d.platform, access: d.access, pairedAt: d.pairedAt, lastSeenAt: d.lastSeenAt, connected: connected.has(d.id)}));
-    return {relayUrl: config.relayUrl, relay: link ? link.state : 'off', relayError: link?.error ?? null, secureStorage: secure(), desktopName: name,
-      pairing: open ? {link: open.link, expiresAt: new Date(open.expiresAt).toISOString()} : null, devices: views};
+    const connected = new Set([...sessions.values()].filter(s => s.verified && s.deviceId && !s.pending).map(s => s.deviceId!));
+    const views: MobileDeviceView[] = devices.map(d => ({id: d.id, name: d.name, platform: d.platform, fingerprint: keyFingerprint(crypto, fromBase64(d.publicKey)), access: d.access, pairedAt: d.pairedAt, lastSeenAt: d.lastSeenAt, connected: connected.has(d.id)}));
+    const pending = open?.pending ? {name: open.pending.device.name, platform: open.pending.device.platform, checkCode: open.pending.checkCode, fingerprint: open.pending.fingerprint} : null;
+    return {relayUrl: config.relayUrl, relay: link ? link.state : 'off', relayError: identityError ?? link?.error ?? null, secureStorage: secure(), desktopName: name,
+      pairing: open ? {expiresAt: new Date(open.expiresAt).toISOString(), pending} : null, devices: views};
   }
 
-  /** Opens or closes the relay link to match what there is to serve. */
+  /** Opens or closes the relay link: on while a relay is set and this computer has its keys. */
   function syncLink(): RelayLink | null {
-    // On while a relay is set and this computer has a key: a revoked phone that comes back is told so, not "offline".
     const want = Boolean(config.relayUrl) && !disposed;
-    const id = want ? identity(false) : null;
+    let id: Identity | null = null;
+    identityError = null;
+    if (want) { try { id = identity(false); } catch (error) { identityError = (error as Error).message; } }
     if (!want || !id) { stopLink(); return null; }
     if (link) return link;
-    link = new RelayLink(config.relayUrl!, id.routeSecret, {
-      open: conn => sessions.set(conn, {conn, deviceId: null, channel: null, watching: null, sentChats: '', sentNeeds: '', queue: Promise.resolve()}),
+    const route = id.route;
+    link = new RelayLink(config.relayUrl!, nonce => ({key: toBase64(route.publicKey), sig: toBase64(signWithRouteKey(route, utf8(`muster-relay/1 register ${nonce}`)))}), {
+      open: conn => {
+        const limit = mobileSeams.maxPendingSessions ?? MAX_PENDING_SESSIONS;
+        if ([...sessions.values()].filter(s => !s.channel).length >= limit) { link?.closePhone(conn, CLOSE.busy, 'busy'); return; }
+        const session: Session = {conn, deviceId: null, channel: null, watching: null, verified: false, pending: false, sentChats: '', sentNeeds: '', queue: Promise.resolve(), timer: undefined};
+        session.timer = setTimeout(() => { if (!session.channel) drop(session, CLOSE.timeout, 'timeout'); }, mobileSeams.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS);
+        session.timer.unref?.();
+        sessions.set(conn, session);
+      },
       data: (conn, data) => { const session = sessions.get(conn); if (session) session.queue = session.queue.then(() => receive(session, data)).catch(() => drop(session, CLOSE.badFrame, 'error')); },
-      closed: conn => { if (sessions.delete(conn)) changed(); },
+      closed: conn => { const session = sessions.get(conn); if (session) forget(session); },
       state: () => changed(),
     });
     return link;
   }
   function stopLink() {
     const current = link; link = null;
+    for (const session of sessions.values()) clearTimeout(session.timer);
     sessions.clear();
     current?.stop();
   }
-  function drop(session: Session, code: number, reason: string) {
+  /** The phone side went away: a pending pairing goes back to waiting for a phone. */
+  function forget(session: Session) {
     if (!sessions.delete(session.conn)) return;
-    link?.closePhone(session.conn, code, reason);
+    clearTimeout(session.timer);
+    if (pairing?.pending?.session === session) pairing.pending = null;
     if (session.deviceId) changed();
+  }
+  function drop(session: Session, code: number, reason: string) {
+    if (!sessions.has(session.conn)) return;
+    forget(session);
+    link?.closePhone(session.conn, code, reason);
   }
   function send(session: Session, frame: MobileFrame) {
     if (!session.channel || !link || sessions.get(session.conn) !== session) return;
     for (const message of session.channel.seal(frame)) link.send(session.conn, message);
   }
   const sendEvent = (session: Session, event: MobileEvent) => send(session, {t: 'evt', e: event});
+  /** Rate limit on failed pairing attempts, across connections; the pairing itself is never ended by them. */
+  const throttled = () => { const now = Date.now(); failures = failures.filter(at => now - at < 60_000); return failures.length >= PAIRING_ATTEMPTS_PER_MINUTE; };
 
   async function receive(session: Session, data: string): Promise<void> {
     if (session.channel) {
       let frame: MobileFrame | null;
       try { frame = session.channel.open(data); } catch { drop(session, CLOSE.badFrame, 'bad frame'); return; }
       if (!frame) return;
+      if (!session.verified && !session.pending) {
+        session.verified = true;
+        const entry = devices.find(d => d.id === session.deviceId);
+        if (entry) { entry.lastSeenAt = new Date().toISOString(); saveDevices(); }
+        changed();
+      }
       if (frame.t !== 'req' || typeof frame.id !== 'number') return;
       const request = frame;
       // Requests run concurrently (a send must not wait behind a slow read); replies carry their id.
       void (async () => {
         try {
+          if (session.pending) throw new MobileError('pending', `Confirm the check code on ${device().your} first.`);
           const result = await handle(bridgeFor(session), request.m, request.p);
           send(session, {t: 'res', id: request.id, ok: true, r: result});
         } catch (error) {
@@ -152,43 +211,54 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       return;
     }
     // Handshake: [mode byte] + Noise message 1.
-    const id = identity(false);
+    let id: Identity | null = null;
+    try { id = identity(false); } catch { /* reported by status */ }
     let bytes: Uint8Array;
     try { bytes = fromBase64(data); } catch { drop(session, CLOSE.badFrame, 'bad frame'); return; }
     const mode: ChannelMode | null = bytes[0] === MODE_BYTE.pair ? 'pair' : bytes[0] === MODE_BYTE.session ? 'session' : null;
     if (!id || !mode) { drop(session, CLOSE.badFrame, 'bad frame'); return; }
-    const open = mode === 'pair' ? pairingOpen() : null;
-    if (mode === 'pair' && !open) { drop(session, CLOSE.pairingFailed, 'pairing-failed'); return; }
-    const noise = new Handshake(crypto, {pattern: mode === 'pair' ? 'IKpsk1' : 'IK', initiator: false, s: id.keys, ...(open ? {psk: open.code} : {}), prologue: prologue(mode)});
-    let payload: Uint8Array;
-    try { payload = noise.readMessage(bytes.subarray(1)); } catch {
-      if (open) { open.failures++; if (open.failures >= MAX_PAIRING_FAILURES) { pairing = null; changed(); } }
-      drop(session, mode === 'pair' ? CLOSE.pairingFailed : CLOSE.revoked, mode === 'pair' ? 'pairing-failed' : 'revoked');
+    if (mode === 'pair') return receivePairing(session, id, bytes.subarray(1));
+    const noise = new Handshake(crypto, {pattern: 'IK', initiator: false, s: id.keys, prologue: prologue('session')});
+    try { noise.readMessage(bytes.subarray(1)); } catch { drop(session, CLOSE.badFrame, 'bad frame'); return; }
+    const phoneKey = noise.remoteStatic!;
+    const entry = devices.find(d => equalBytes(fromBase64(d.publicKey), phoneKey));
+    if (!entry) { drop(session, CLOSE.revoked, 'revoked'); return; }
+    openSession(session, noise, entry, false);
+  }
+
+  function receivePairing(session: Session, id: Identity, message: Uint8Array): void {
+    if (throttled()) { drop(session, CLOSE.busy, 'busy'); return; }
+    const attempt = (code: Uint8Array) => {
+      const noise = new Handshake(crypto, {pattern: 'IKpsk1', initiator: false, s: id.keys, psk: code, prologue: prologue('pair')});
+      try { return {noise, payload: noise.readMessage(message)}; } catch { return null; }
+    };
+    const open = pairingOpen();
+    const fresh = open ? attempt(open.code) : null;
+    if (!fresh || !open || open.pending) {
+      // A taken code (pending or already used) decrypts but is refused; anything else failed to decrypt.
+      const taken = (open?.pending && fresh) || (usedCode && usedCode.until > Date.now() && attempt(usedCode.code));
+      if (!taken) failures.push(Date.now());
+      drop(session, CLOSE.pairingFailed, taken ? 'code-used' : 'pairing-failed');
       return;
     }
-    const phoneKey = noise.remoteStatic!;
-    let entry: Device | undefined;
-    if (mode === 'pair') {
-      let request: Partial<PairRequest> = {};
-      try { request = JSON.parse(fromUtf8(payload)) as PairRequest; } catch { /* a nameless phone still pairs */ }
-      if (devices.length >= MAX_DEVICES) { drop(session, CLOSE.pairingFailed, 'pairing-failed'); return; }
-      const publicKey = toBase64(phoneKey, true);
-      devices = devices.filter(d => d.publicKey !== publicKey);
-      entry = {id: randomUUID(), name: cleanName(request.name, 'Phone'), platform: cleanName(request.platform, 'unknown').slice(0, 20), publicKey, access: 'read-only', pairedAt: new Date().toISOString(), lastSeenAt: null};
-      devices.push(entry);
-      pairing = null;
-    } else {
-      entry = devices.find(d => equalBytes(fromBase64(d.publicKey), phoneKey));
-      if (!entry) { drop(session, CLOSE.revoked, 'revoked'); return; }
-    }
-    entry.lastSeenAt = new Date().toISOString();
-    saveDevices();
-    const welcome: Welcome = {v: MOBILE_PROTOCOL_VERSION, desktopName: name, deviceId: entry.id, access: entry.access};
+    if (devices.length >= MAX_DEVICES) { drop(session, CLOSE.pairingFailed, 'pairing-failed'); return; }
+    let request: Partial<PairRequest> = {};
+    try { request = JSON.parse(fromUtf8(fresh.payload)) as PairRequest; } catch { /* a nameless phone still pairs */ }
+    const phoneKey = fresh.noise.remoteStatic!;
+    const entry: Device = {id: randomUUID(), name: cleanName(request.name, 'Phone'), platform: cleanName(request.platform, 'unknown').slice(0, 20), publicKey: toBase64(phoneKey, true), access: 'read-only', pairedAt: new Date().toISOString(), lastSeenAt: null};
+    session.pending = true;
+    openSession(session, fresh.noise, entry, true);
+    open.pending = {session, device: entry, checkCode: checkCodeOf(fresh.noise.handshakeHash), fingerprint: keyFingerprint(crypto, phoneKey)};
+    changed();
+  }
+
+  function openSession(session: Session, noise: Handshake, entry: Device, pending: boolean) {
+    const welcome: Welcome = {v: MOBILE_PROTOCOL_VERSION, desktopName: name, deviceId: entry.id, access: entry.access, ...(pending ? {pending: true} : {})};
     link?.send(session.conn, toBase64(noise.writeMessage(utf8(JSON.stringify(welcome)))));
     const {send: out, receive: incoming} = noise.split();
     session.channel = new SecureChannel(out, incoming);
     session.deviceId = entry.id;
-    changed();
+    clearTimeout(session.timer); session.timer = undefined;
   }
 
   function bridgeFor(session: Session) {
@@ -196,6 +266,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       invoke: context.invoke,
       snapshot: () => context.invoke('app.snapshot', undefined),
       access: (): MobileAccess => devices.find(d => d.id === session.deviceId)?.access ?? 'read-only',
+      alive: () => sessions.get(session.conn) === session && devices.some(d => d.id === session.deviceId),
       desktopName: name, deviceId: session.deviceId ?? '',
       watch: (chatId: string | null) => { session.watching = chatId; },
     };
@@ -203,9 +274,10 @@ export function createMobileDomain(context: DomainContext): DomainModule {
 
   // Chat changes → open sessions.
   let lastAttention = '';
+  const ready = () => [...sessions.values()].filter(s => s.channel && !s.pending);
   function fanOut(event: AgentEvent) {
     if (disposed) return;
-    const live = [...sessions.values()].filter(s => s.channel);
+    const live = ready();
     if (!live.length) return;
     if (event.type === 'snapshot') {
       const chats = mobileChats(event.snapshot), json = JSON.stringify(chats);
@@ -227,26 +299,27 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       if (disposed) return;
       const needs = await needsList(context.invoke, snapshot);
       const json = JSON.stringify(needs);
-      for (const session of sessions.values()) if (session.channel && session.sentNeeds !== json) { session.sentNeeds = json; sendEvent(session, {type: 'needs', needs}); }
+      for (const session of ready()) if (session.sentNeeds !== json) { session.sentNeeds = json; sendEvent(session, {type: 'needs', needs}); }
     }).catch(() => undefined);
   }
   const offEvents = context.hooks.onAgentEvent?.(fanOut);
 
   // A computer with paired phones reconnects to the relay on start.
-  try { syncLink(); } catch { /* reported by mobile.status */ }
+  syncLink();
 
   const byId = (value: unknown): Device => {
     const found = devices.find(d => d.id === value);
     if (!found) throw new Error('That phone is not paired with this computer.');
     return found;
   };
+  const time = (iso: string) => new Date(iso).toLocaleTimeString(undefined, {hour: '2-digit', minute: '2-digit'});
   return {
     handlers: {
       'mobile.status': () => status(),
       'mobile.relay.set': input => {
-        const url = input.url === null || input.url === '' ? null : String(input.url ?? '').trim();
-        if (url !== null && !RELAY_URL.test(url)) throw new Error('Enter the relay address as ws:// or wss:// followed by its host.');
-        config = {relayUrl: url ? url.replace(/\/+$/, '') : null};
+        const url = input.url === null || input.url === '' ? null : String(input.url ?? '').trim().replace(/\/+$/, '');
+        if (url !== null && !relayUrlAllowed(url)) throw new Error(/^ws:\/\//.test(url) ? RELAY_NEEDS_TLS : 'Enter the relay address as wss:// followed by its host.');
+        config = {relayUrl: url};
         writeJson(configPath, {version: 1, ...config});
         stopLink(); syncLink();
         changed();
@@ -255,22 +328,44 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       'mobile.pair.start': async () => {
         if (!config.relayUrl) throw new Error('Set the relay address first.');
         const id = identity(true)!;
+        endPairing('cancelled');
         const code = crypto.randomBytes(32);
-        const expiresAt = Date.now() + (mobileSeams.pairingTtlMs ?? PAIRING_TTL_MS);
-        const text = formatPairingLink({relayUrl: config.relayUrl, route: routeOf(id.routeSecret), desktopKey: toBase64(id.keys.publicKey, true), code: toBase64(code, true), desktopName: name});
-        pairing = {code, link: text, expiresAt, failures: 0};
+        const ttl = mobileSeams.pairingTtlMs ?? PAIRING_TTL_MS, expiresAt = Date.now() + ttl;
+        const text = formatPairingLink({relayUrl: config.relayUrl, route: routeOf(id.route.publicKey), desktopKey: toBase64(id.keys.publicKey, true), code: toBase64(code, true), desktopName: name});
+        const timer = setTimeout(() => { if (pairing?.code === code) endPairing('expired'); }, ttl + 50);
+        timer.unref?.();
+        pairing = {code, link: text, expiresAt, pending: null, timer};
         const current = syncLink();
         changed();
         try { await current?.ready(); } catch (error) { throw new Error(`Can’t reach the relay at ${config.relayUrl}: ${(error as Error).message}`); }
         return {link: text, expiresAt: new Date(expiresAt).toISOString()};
       },
-      'mobile.pair.cancel': () => { pairing = null; syncLink(); changed(); return status(); },
+      /** The QR panel's own read of the link (mobile.status never carries it). */
+      'mobile.pair.link': () => { const open = pairingOpen(); return open ? {link: open.link, expiresAt: new Date(open.expiresAt).toISOString()} : null; },
+      'mobile.pair.confirm': input => {
+        const open = pairingOpen();
+        const pending = open?.pending;
+        if (!open || !pending) throw new Error('No phone is waiting to be added.');
+        if (input.checkCode !== pending.checkCode) throw new Error('That is not the check code this phone showed. Reject it if you are not sure.');
+        if (!sessions.has(pending.session.conn)) throw new Error('The phone disconnected before it was added. Pair it again.');
+        devices = [...devices.filter(d => d.publicKey !== pending.device.publicKey), pending.device];
+        pending.device.lastSeenAt = new Date().toISOString();
+        saveDevices();
+        usedCode = {code: open.code, until: open.expiresAt};
+        pending.session.pending = false;
+        endPairing('used');
+        sendEvent(pending.session, {type: 'paired'});
+        context.emit({type: 'notice', message: `A phone named ${pending.device.name} paired at ${time(pending.device.pairedAt)}. If that wasn’t you, revoke it in Settings › Integrations › Phone.`});
+        changed();
+        return status();
+      },
+      'mobile.pair.reject': () => { if (pairing?.pending) usedCode = {code: pairing.code, until: pairing.expiresAt}; endPairing('rejected'); return status(); },
+      'mobile.pair.cancel': () => { endPairing('cancelled'); return status(); },
       'mobile.devices.revoke': input => {
         const target = byId(input.id);
         devices = devices.filter(d => d.id !== target.id);
         saveDevices();
         for (const session of [...sessions.values()]) if (session.deviceId === target.id) drop(session, CLOSE.revoked, 'revoked');
-        syncLink();
         changed();
         return status();
       },
@@ -279,7 +374,21 @@ export function createMobileDomain(context: DomainContext): DomainModule {
         if (!(MOBILE_ACCESS as readonly unknown[]).includes(input.access)) throw new Error('Access must be read-only or act.');
         target.access = input.access as MobileAccess;
         saveDevices();
-        for (const session of sessions.values()) if (session.deviceId === target.id && session.channel) sendEvent(session, {type: 'access', access: target.access});
+        for (const session of sessions.values()) if (session.deviceId === target.id && session.channel && !session.pending) sendEvent(session, {type: 'access', access: target.access});
+        changed();
+        return status();
+      },
+      /** Deliberately new keys and route: every phone is unpaired and must pair again. */
+      'mobile.reset': () => {
+        endPairing('cancelled');
+        for (const session of [...sessions.values()]) drop(session, CLOSE.revoked, 'revoked');
+        stopLink();
+        devices = []; saveDevices();
+        usedCode = null; failures = [];
+        const store = secrets();
+        for (const entry of [KEY_SECRET, ROUTE_SECRET, LEGACY_ROUTE_SECRET]) store?.clear(entry);
+        if (store?.secureStorage()) identity(true);
+        syncLink();
         changed();
         return status();
       },
@@ -287,6 +396,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
     dispose() {
       disposed = true;
       offEvents?.();
+      if (pairing) clearTimeout(pairing.timer);
       for (const session of [...sessions.values()]) drop(session, CLOSE.gone, 'closed');
       stopLink();
     },
