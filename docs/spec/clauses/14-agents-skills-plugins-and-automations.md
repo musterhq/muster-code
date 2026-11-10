@@ -760,7 +760,7 @@ An automation can run once at a date and time instead of repeating. The time is 
 - Test: `packages/agent-app/tests/automations-once-845.test.ts::a once automation runs at its local date and time, then shows as done with its run linked`
 - Environment: Node test runner; the real service with its scheduler clock (automationTiming.now) moved by the test; a fake provider.
 - Known gaps: Runs only while Muster is open, like every automation.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/845/green-workflow.log; exit 0; 5 passed, 0 failed, 0 skipped; commit f9ec3210c81cb85a725b81e73ce5d8b4ce170f89
 
 <a id="mus-spec-14-845b"></a>
 #### MUS-SPEC-14-845B: A once time that has already passed is refused at save
@@ -771,7 +771,7 @@ An automation can run once at a date and time instead of repeating. The time is 
 - Test: `packages/agent-app/tests/automations-once-845.test.ts::a once time that has already passed is refused at save, and the preview says so`
 - Environment: Node test runner; the real service; the scheduler clock moved by the test.
 - Known gaps: A time a few seconds ahead can still pass before the first tick; it then runs on that tick as a normal on-time run.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/845/green-workflow.log; exit 0; 5 passed, 0 failed, 0 skipped; commit f9ec3210c81cb85a725b81e73ce5d8b4ce170f89
 
 <a id="mus-spec-14-845c"></a>
 #### MUS-SPEC-14-845C: Closed at the set time: it runs once at the next start and says it ran late
@@ -782,7 +782,7 @@ An automation can run once at a date and time instead of repeating. The time is 
 - Test: `packages/agent-app/tests/automations-once-845.test.ts::closed at the set time: it runs once at the next start and says it ran late, or records one missed entry when catch-up is off`
 - Environment: Node test runner; two real service instances on one data folder; the scheduler clock moved by the test; a fake provider.
 - Known gaps: A run is "late" after the scheduler grace (150 seconds); a run within the grace counts as on time.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/845/green-workflow.log; exit 0; 5 passed, 0 failed, 0 skipped; commit f9ec3210c81cb85a725b81e73ce5d8b4ce170f89
 
 <a id="mus-spec-14-845d"></a>
 #### MUS-SPEC-14-845D: A scheduled once automation can be moved to another chat before it runs
@@ -793,7 +793,7 @@ An automation can run once at a date and time instead of repeating. The time is 
 - Test: `packages/agent-app/tests/automations-once-845.test.ts::a scheduled once automation moved to another chat before its time runs in the new chat only, at the same time`
 - Environment: Node test runner; the real service; the scheduler clock moved by the test; a fake provider.
 - Known gaps: Moving uses the existing Edit form; there is no drag between chats. The same applies to every automation, not only once.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/845/green-workflow.log; exit 0; 5 passed, 0 failed, 0 skipped; commit f9ec3210c81cb85a725b81e73ce5d8b4ce170f89
 
 <a id="mus-spec-14-845e"></a>
 #### MUS-SPEC-14-845E: Once times are wall-clock times in their time zone
@@ -804,7 +804,7 @@ An automation can run once at a date and time instead of repeating. The time is 
 - Test: `packages/agent-app/tests/automations-once-845.test.ts::once times are wall-clock times in their zone, DST included, and malformed ones are refused`
 - Environment: Node test runner; pure schedule functions.
 - Known gaps: None.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/845/green-workflow.log; exit 0; 5 passed, 0 failed, 0 skipped; commit f9ec3210c81cb85a725b81e73ce5d8b4ce170f89
 
 <a id="mus-spec-14-845f"></a>
 #### MUS-SPEC-14-845F: The editor offers Once in its Repeat picker, and a run once automation reads Done
@@ -815,4 +815,4 @@ An automation can run once at a date and time instead of repeating. The time is 
 - Test: `packages/agent-app/tests/automations-once-845-dom.tsx::#845 the editor schedules a once run with a date and time in a named zone, and a run once automation reads Done with its chat linked`
 - Environment: Renderer DOM suite (linkedom); stubbed bridge.
 - Known gaps: Not a screenshot of the real app; the native date and time picker is not opened.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/845/green-dom.log; exit 0; 1 passed, 0 failed, 0 skipped; commit f9ec3210c81cb85a725b81e73ce5d8b4ce170f89
