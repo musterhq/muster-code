@@ -5,6 +5,7 @@ Muster keeps the user's secrets out of transcripts, logs, memory and exports.
 What the user can do:
 - store keys and tokens in the system secret store;
 - approve or decline when an agent asks for a secret;
+- type a secret or sudo password on a private card when an agent needs one, once or remembered for a folder;
 - share or export a chat with secrets redacted.
 
 Boundaries:
@@ -36,6 +37,17 @@ Boundaries:
 | [MUS-SPEC-19-406D](19-security-and-redaction.md#mus-spec-19-406d) | Memory endpoint host, port and scheme edits clear encrypted and session-only keys before a connection test; same-origin edits retain them. | [`editing the memory endpoint never sends the old key to a different origin`](../../../packages/agent-app/tests/memory-run.test.ts) |
 | [MUS-SPEC-19-406E](19-security-and-redaction.md#mus-spec-19-406e) | Every external action in every workflow uses a full commit SHA and records its version in a trailing comment. | [`every external workflow action is pinned to a full commit with its version recorded`](../../../packages/agent-app/tests/hardening-406.test.ts) |
 | [MUS-SPEC-19-406F](19-security-and-redaction.md#mus-spec-19-406f) | The mandatory release guard refuses missing or ad-hoc signing and accepts the three supported identity modes before packaging. | [`the macOS release refuses ad-hoc signing before it packages a build`](../../../packages/agent-app/tests/hardening-406.test.ts) |
+| [MUS-SPEC-19-842A](19-security-and-redaction.md#mus-spec-19-842a) | The card shows the name, reason, who asks and a deadline, and counts as a request. The tool result holds a file path and how to pass it to a command, never the value. The file is 0600 and holds the value; it is removed when the run ends. | [`an agent on a CLI route asks for a secret on a private card and gets a file reference, never the value`](../../../packages/agent-app/tests/secret-requests-842.test.ts) |
+| [MUS-SPEC-19-842B](19-security-and-redaction.md#mus-spec-19-842b) | The tool result has no value; the next command sees the value in its environment; output that prints it reaches the model as `••••(NAME)`; no timeline event holds it. Read-only does not offer the tool. | [`on an HTTP route the secret is set in the environment of the next commands and masked in what the model reads`](../../../packages/agent-app/tests/secret-requests-842.test.ts) |
+| [MUS-SPEC-19-842C](19-security-and-redaction.md#mus-spec-19-842c) | The saved thread shows `••••(NAME)` and never the value; Markdown, JSON and HTML exports hold no value; the next turn sent to the provider (prompt, instructions, overrides) holds no value; no file under the data folder (SQLite database, WAL, output logs) holds it. | [`a requested secret never lands in the timeline database, output logs, exports or the next prompt`](../../../packages/agent-app/tests/secret-requests-842.test.ts) |
+| [MUS-SPEC-19-842D](19-security-and-redaction.md#mus-spec-19-842d) | Read-only: the tool answers with an error naming read-only, no card is posted, no sudo helper is set and the instructions do not mention request_secret. Full access: the card is posted and the tool waits until the person answers. | [`a read-only chat cannot request a secret; Full access still shows the card and waits for the person`](../../../packages/agent-app/tests/secret-requests-842.test.ts) |
+| [MUS-SPEC-19-842E](19-security-and-redaction.md#mus-spec-19-842e) | The agent is told it was declined (no value, no environment) and the card is Dismissed; the unanswered one tells the agent there was no answer, the card is Expired and a late answer is refused. | [`a declined or unanswered secret request tells the agent so and the card says what happened`](../../../packages/agent-app/tests/secret-requests-842.test.ts) |
+| [MUS-SPEC-19-842F](19-security-and-redaction.md#mus-spec-19-842f) | Without Remember nothing is stored. With Remember one encrypted entry is stored and the file has no plain value. The later request is answered at once from it and the card says the saved value was used. Forget removes it. | [`one-time is the default; "Remember for this folder" keeps it encrypted and answers the next request in that folder`](../../../packages/agent-app/tests/secret-requests-842.test.ts) |
+| [MUS-SPEC-19-842G](19-security-and-redaction.md#mus-spec-19-842g) | The instructions tell agents to use `sudo -A`. The card shows the sudo prompt and offers keychain storage, off by default. The helper prints the password to stdout only and exits 0; unanswered, it prints nothing, exits non-zero and the card is Expired. No saved file or timeline row holds the password. | [`sudo -A in an agent shell asks through the card, prints the password only to sudo, and times out cleanly`](../../../packages/agent-app/tests/secret-requests-842.test.ts) |
+| [MUS-SPEC-19-842H](19-security-and-redaction.md#mus-spec-19-842h) | The card offers 1Password. A failed lookup is an error naming 1Password and leaves the card open. The right one gives the agent the value; the card records the source and holds no value. | [`a secret can be picked from 1Password by reference; the value goes from op to the agent only`](../../../packages/agent-app/tests/secret-requests-842.test.ts) |
+| [MUS-SPEC-19-842I](19-security-and-redaction.md#mus-spec-19-842i) | The server lists request_secret and ask_user, not the sudo channel, and the provider tool timeout is at least 300 seconds. | [`the secret request tool sits beside ask_user in the muster_ask server and the run waits long enough for a person`](../../../packages/agent-app/tests/secret-requests-842.test.ts) |
+| [MUS-SPEC-19-842J](19-security-and-redaction.md#mus-spec-19-842j) | The field is a password field with autocomplete off; Remember is unchecked; Send is disabled until a value is typed; one secret.answer call carries the value with remember false; the field is cleared; Decline sends secret.decline. | [`the secret card takes a masked value, sends it once and clears the field`](../../../packages/agent-app/tests/secret-request-card-842-dom.tsx) |
+| [MUS-SPEC-19-842K](19-security-and-redaction.md#mus-spec-19-842k) | The sudo card offers keychain storage; the 1Password reference is sent instead of a value; an answered card says Sent privately with no field; a saved-value card offers Forget; an expired card says No answer in time. | [`a sudo card, a 1Password pick and a settled card read plainly and never show a value`](../../../packages/agent-app/tests/secret-request-card-842-dom.tsx) |
 
 ### Known secret values
 
@@ -274,4 +286,127 @@ Boundaries:
 - Test: `packages/agent-app/tests/hardening-406.test.ts::the macOS release refuses ad-hoc signing before it packages a build`
 - Environment: Node test runner; local bash; no release run.
 - Known gaps: Does not build or sign an installer.
+- Evidence: UNVERIFIED
+
+### Private secret and sudo requests
+
+<a id="mus-spec-19-842a"></a>
+#### MUS-SPEC-19-842A: An agent on a CLI route asks for a secret on a private card and gets a file reference
+
+- Precondition: A chat runs on a CLI route (Codex, Claude Code, OpenCode, Grok) that loads the muster_ask MCP server.
+- Action: The agent calls request_secret with a name and a reason through the real MCP server; the person types the value on the card.
+- Expected result: The card shows the name, reason, who asks and a deadline, and counts as a request. The tool result holds a file path and how to pass it to a command, never the value. The file is 0600 and holds the value; it is removed when the run ends.
+- Test: `packages/agent-app/tests/secret-requests-842.test.ts::an agent on a CLI route asks for a secret on a private card and gets a file reference, never the value`
+- Environment: Node test runner; the agent service with a fake provider; the real muster_ask MCP server process.
+- Known gaps: A command the agent runs that prints the file still shows the value to that CLI; Muster masks it only in what it saves.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-842b"></a>
+#### MUS-SPEC-19-842B: On an HTTP route the secret goes into the environment of the next commands
+
+- Precondition: An HTTP route with Full access offers request_secret beside run_command.
+- Action: The agent calls request_secret, then runs a command that uses the variable and one that prints it.
+- Expected result: The tool result has no value; the next command sees the value in its environment; output that prints it reaches the model as `••••(NAME)`; no timeline event holds it. Read-only does not offer the tool.
+- Test: `packages/agent-app/tests/secret-requests-842.test.ts::on an HTTP route the secret is set in the environment of the next commands and masked in what the model reads`
+- Environment: Node test runner; the HTTP tool executor with a stubbed service answer; a real shell.
+- Known gaps: The service answer is stubbed here; case 842C covers the service side.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-842c"></a>
+#### MUS-SPEC-19-842C: A requested secret never lands in the database, output logs, exports or the next prompt
+
+- Precondition: A chat on a route that takes run environment.
+- Action: The person answers a request; the agent prints the value in a command and repeats it in its reply; the person sends another message.
+- Expected result: The saved thread shows `••••(NAME)` and never the value; Markdown, JSON and HTML exports hold no value; the next turn sent to the provider (prompt, instructions, overrides) holds no value; no file under the data folder (SQLite database, WAL, output logs) holds it.
+- Test: `packages/agent-app/tests/secret-requests-842.test.ts::a requested secret never lands in the timeline database, output logs, exports or the next prompt`
+- Environment: Node test runner; the agent service with a fake provider; a temp data folder.
+- Known gaps: Values shorter than 4 characters are not masked.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-842d"></a>
+#### MUS-SPEC-19-842D: Read-only chats cannot request a secret; Full access still asks the person
+
+- Precondition: One chat with Read-only access and one with Full access.
+- Action: The agent requests a secret in each.
+- Expected result: Read-only: the tool answers with an error naming read-only, no card is posted, no sudo helper is set and the instructions do not mention request_secret. Full access: the card is posted and the tool waits until the person answers.
+- Test: `packages/agent-app/tests/secret-requests-842.test.ts::a read-only chat cannot request a secret; Full access still shows the card and waits for the person`
+- Environment: Node test runner; the agent service with a fake provider.
+- Known gaps: None.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-842e"></a>
+#### MUS-SPEC-19-842E: A declined or unanswered request tells the agent so
+
+- Precondition: A chat with a short request deadline.
+- Action: The person declines one request; another gets no answer.
+- Expected result: The agent is told it was declined (no value, no environment) and the card is Dismissed; the unanswered one tells the agent there was no answer, the card is Expired and a late answer is refused.
+- Test: `packages/agent-app/tests/secret-requests-842.test.ts::a declined or unanswered secret request tells the agent so and the card says what happened`
+- Environment: Node test runner; the agent service with a fake provider; a 150 ms deadline.
+- Known gaps: None.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-842f"></a>
+#### MUS-SPEC-19-842F: One-time by default; Remember keeps it encrypted for the folder
+
+- Precondition: A chat in a folder; a keychain stand-in.
+- Action: Answer once without Remember, once with Remember; request again in a later run; then Forget.
+- Expected result: Without Remember nothing is stored. With Remember one encrypted entry is stored and the file has no plain value. The later request is answered at once from it and the card says the saved value was used. Forget removes it.
+- Test: `packages/agent-app/tests/secret-requests-842.test.ts::one-time is the default; "Remember for this folder" keeps it encrypted and answers the next request in that folder`
+- Environment: Node test runner; the agent service with a fake provider; a SecretStore with a stand-in keychain.
+- Known gaps: No Settings list of remembered values yet; Forget is on the card.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-842g"></a>
+#### MUS-SPEC-19-842G: sudo -A asks through the card and times out cleanly
+
+- Precondition: A chat with Workspace access on macOS or Linux; a short sudo deadline. No real sudo runs.
+- Action: Run the SUDO_ASKPASS helper from the run environment the way `sudo -A` does; answer once; leave the next one unanswered.
+- Expected result: The instructions tell agents to use `sudo -A`. The card shows the sudo prompt and offers keychain storage, off by default. The helper prints the password to stdout only and exits 0; unanswered, it prints nothing, exits non-zero and the card is Expired. No saved file or timeline row holds the password.
+- Test: `packages/agent-app/tests/secret-requests-842.test.ts::sudo -A in an agent shell asks through the card, prints the password only to sudo, and times out cleanly`
+- Environment: Node test runner; the agent service with a fake provider; the real askpass helper process.
+- Known gaps: Does not run sudo. A `sudo` without -A in a terminal-less shell fails instead of asking.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-842h"></a>
+#### MUS-SPEC-19-842H: A secret can be picked from 1Password by reference
+
+- Precondition: A stand-in `op` CLI that answers one reference.
+- Action: Answer with a missing reference, then with the right one.
+- Expected result: The card offers 1Password. A failed lookup is an error naming 1Password and leaves the card open. The right one gives the agent the value; the card records the source and holds no value.
+- Test: `packages/agent-app/tests/secret-requests-842.test.ts::a secret can be picked from 1Password by reference; the value goes from op to the agent only`
+- Environment: Node test runner; the agent service with a fake provider; a shell script standing in for op.
+- Known gaps: Does not contact the real 1Password app. No item browser: the person pastes an op:// reference.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-842i"></a>
+#### MUS-SPEC-19-842I: request_secret sits beside ask_user and the run waits for a person
+
+- Precondition: A chat on a CLI route.
+- Action: Start a run and read the muster_ask server it is given.
+- Expected result: The server lists request_secret and ask_user, not the sudo channel, and the provider tool timeout is at least 300 seconds.
+- Test: `packages/agent-app/tests/secret-requests-842.test.ts::the secret request tool sits beside ask_user in the muster_ask server and the run waits long enough for a person`
+- Environment: Node test runner; the agent service with a fake provider.
+- Known gaps: Does not start a real provider CLI.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-842j"></a>
+#### MUS-SPEC-19-842J: The secret card takes a masked value and sends it once
+
+- Precondition: The card for a pending request in a folder chat.
+- Action: Type a value and press Send privately; press Decline.
+- Expected result: The field is a password field with autocomplete off; Remember is unchecked; Send is disabled until a value is typed; one secret.answer call carries the value with remember false; the field is cleared; Decline sends secret.decline.
+- Test: `packages/agent-app/tests/secret-request-card-842-dom.tsx::the secret card takes a masked value, sends it once and clears the field`
+- Environment: DOM suite (linkedom) with the real PendingQuestion component; stubbed bridge.
+- Known gaps: Does not open the Electron window.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-19-842k"></a>
+#### MUS-SPEC-19-842K: sudo, 1Password and settled secret cards read plainly
+
+- Precondition: Cards for a sudo request, a 1Password pick and settled states.
+- Action: Render each; pick 1Password and send a reference; press Forget on a saved-value card.
+- Expected result: The sudo card offers keychain storage; the 1Password reference is sent instead of a value; an answered card says Sent privately with no field; a saved-value card offers Forget; an expired card says No answer in time.
+- Test: `packages/agent-app/tests/secret-request-card-842-dom.tsx::a sudo card, a 1Password pick and a settled card read plainly and never show a value`
+- Environment: DOM suite (linkedom) with the real PendingQuestion component; stubbed bridge.
+- Known gaps: Does not open the Electron window.
 - Evidence: UNVERIFIED
