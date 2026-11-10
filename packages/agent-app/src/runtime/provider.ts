@@ -201,7 +201,7 @@ export const runAccessPolicy = (chat: Chat, overrides: ProviderInput['configOver
 export const CODEX_SANDBOX_FEATURES = ['features.shell_tool=false', 'features.unified_exec=false'] as const;
 /** Test runners construct many services; they opt into real CLI/API adapters by passing a catalog. */
 const defaultCatalog = () => process.env.NODE_TEST_CONTEXT && process.env.MUSTER_PROVIDER_ADAPTERS !== '1' ? undefined : createAdapterCatalog();
-interface AdapterRun {controller: AbortController; completed: Promise<void>; /** Set by adapters that accept mid-turn messages (Claude Code). */ steer?: (text: string) => boolean}
+interface AdapterRun {controller: AbortController; completed: Promise<void>; /** Set by adapters that accept mid-turn messages (Claude Code). */ steer?: (text: string) => boolean | {refused: string}}
 
 export function createProviderAdapter(options: { core?: CoreClient; available?: () => boolean; command?: string; instances?:()=>ProviderInstance[]; catalog?: AdapterCatalog } = {}): ProviderAdapter {
   // Each warm chat keeps a node proxy + codex app-server (~300 MB) alive; core defaults (8 chats, 30 min) held 1-2.5 GB idle.
@@ -638,12 +638,16 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       const adapterRun = adapterRuns.get(id);
       if (adapterRun) return adapterRun.steer ? adapterRun.steer(text) : {refused: NO_MID_RUN_STEER};
       const session = sessions.get(id);
-      if (disposed || !session?.active || session.stop || session.controller.signal.aborted || !core) return false;
+      if (disposed || !session || session.stop || session.controller.signal.aborted || !core) return false;
+      // #839: between Muster's runs the app-server may run a parent turn of its own (a sub-agent reporting back, a native
+      // queued or goal turn). The chat shows it as running, and it takes a steer like Muster's own turn.
+      const turnId = session.active ? session.turnId : session.idleTurnId;
+      if (!session.active && !turnId) return false;
       // Codex `turn/steer` always names the turn it expects, so a steer never lands in a newer turn.
       let failure: unknown;
-      if (session.threadId && session.turnId) {
+      if (session.threadId && turnId) {
         try {
-          await core.callCodexConversation(session.key, 'turn/steer', {threadId: session.threadId, expectedTurnId: session.turnId, input: [{type: 'text', text}]}, {transportOwner: session.owner, requireOwner: true, timeoutMs: 15_000});
+          await core.callCodexConversation(session.key, 'turn/steer', {threadId: session.threadId, expectedTurnId: turnId, input: [{type: 'text', text}]}, {transportOwner: session.owner, requireOwner: true, timeoutMs: 15_000});
           return true;
         } catch (error) {
           const verdict = steerFailure(error);

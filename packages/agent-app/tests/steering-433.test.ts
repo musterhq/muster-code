@@ -35,7 +35,7 @@ test('provider.steer reaches a Claude Code run through the real adapter',async()
 test('Claude Code: three rapid steers arrive in order; one shared result still ends the run (the CLI folds them into the turn)',async()=>{
   const fake=fakeChild();let ended=false;fake.child.stdin.on('finish',()=>{ended=true;});
   const adapter=claudeCodeAdapter({binary:'/bin/claude',steerGraceMs:30,spawn:(()=>fake.child as unknown as ChildProcess) as Spawn});
-  let send!:(text:string)=>boolean;
+  let send!:(text:string)=>boolean|{refused:string};
   const running=adapter.run({chat:{id:'c'} as any,cwd:'/w',prompt:'start',model:'claude-code/opus',permissionMode:'workspace',signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){},onSteerable:fn=>{send=fn;}});
   await tick();fake.emit({type:'system',subtype:'init',session_id:'s'},{type:'assistant',message:{content:[{type:'text',text:'working'}]}});
   assert.deepEqual(['one','two','three'].map(send),[true,true,true]);
@@ -54,7 +54,7 @@ test('Claude Code: three rapid steers arrive in order; one shared result still e
 test('Claude Code: if the CLI answers each steer with its own result, stdin stays open until the last one',async()=>{
   const fake=fakeChild();let ended=false;fake.child.stdin.on('finish',()=>{ended=true;});
   const adapter=claudeCodeAdapter({binary:'/bin/claude',steerGraceMs:40,spawn:(()=>fake.child as unknown as ChildProcess) as Spawn});
-  let send!:(text:string)=>boolean;
+  let send!:(text:string)=>boolean|{refused:string};
   const running=adapter.run({chat:{id:'c'} as any,cwd:'/w',prompt:'start',model:'claude-code/opus',permissionMode:'workspace',signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){},onSteerable:fn=>{send=fn;}});
   await tick();fake.emit({type:'system',subtype:'init',session_id:'s'});
   send('a');send('b');
@@ -144,7 +144,7 @@ test('HTTP route: three steers sent during a stream join the next request in ord
     fetch:async(_url,init)=>{bodies.push(JSON.parse(String(init?.body)));calls++;
       if(calls===1)return new Response(new ReadableStream({start(c){c.enqueue(enc.encode(chunk('first reply')));release=()=>{c.enqueue(enc.encode('data: [DONE]\n\n'));c.close();};}}),{status:200});
       return new Response(new ReadableStream({start(c){c.enqueue(enc.encode(chunk('after steers')+'data: [DONE]\n\n'));c.close();}}),{status:200});}});
-  let send!:(text:string)=>boolean;
+  let send!:(text:string)=>boolean|{refused:string};
   const log:string[]=[];
   const run=adapter.run({chat:{id:'c'} as any,cwd:'/w',prompt:'start',model:'m',permissionMode:'workspace',signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta:t=>log.push(t),onReasoning(){},onEvent(){},onSteerable:fn=>{send=fn;}});
   await until(()=>typeof release==='function');

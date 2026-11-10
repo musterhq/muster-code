@@ -41,8 +41,9 @@ export interface AdapterRunInput {
   onDelta(text: string): void;
   onReasoning(text: string): void;
   onEvent(method: string, params: Record<string, unknown>): void;
-  /** Adapters that can take a message mid-turn hand back a sender; it returns false once the run can no longer accept one. */
-  onSteerable?(send: (text: string) => boolean): void;
+  /** Adapters that can take a message mid-turn hand back a sender; it returns false once the run can no longer accept one,
+   *  or `refused` with a reason the composer shows when the run is still going but cannot take it (#839). */
+  onSteerable?(send: (text: string) => boolean | {refused: string}): void;
 }
 export interface AdapterRunResult {
   status: 'completed' | 'failed';

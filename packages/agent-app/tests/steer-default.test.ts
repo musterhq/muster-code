@@ -28,7 +28,7 @@ function fakeChild(){
 test('Claude Code: a steer tells the model to continue the current task, and the run stays open until the work after it ends',async()=>{
   const fake=fakeChild();let ended=false;fake.child.stdin.on('finish',()=>{ended=true;});
   const adapter=claudeCodeAdapter({binary:'/bin/claude',steerGraceMs:30,spawn:(()=>fake.child as unknown as ChildProcess) as Spawn});
-  let send!:(text:string)=>boolean;
+  let send!:(text:string)=>boolean|{refused:string};
   const running=adapter.run({chat:{id:'c'} as any,cwd:'/w',prompt:'build the page',model:'claude-code/opus',permissionMode:'workspace',signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){},onSteerable:fn=>{send=fn;}});
   await tick();fake.emit({type:'system',subtype:'init',session_id:'s'},{type:'assistant',message:{content:[{type:'text',text:'working'}]}});
   assert.equal(send('use blue, not red'),true);
@@ -50,7 +50,7 @@ const enc=new TextEncoder();
 const sse=(...events:unknown[])=>new Response(new ReadableStream({start(c){for(const e of events)c.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n\n`));c.enqueue(enc.encode('data: [DONE]\n\n'));c.close();}}),{status:200});
 // Spec: MUS-SPEC-02-478B (docs/spec/clauses/02-turns-streaming-and-queue.md#mus-spec-02-478b)
 test('HTTP route: at the turn’s tool-call cap, accepted steers reach the closing request and later ones are refused',async()=>{
-  let send!:(text:string)=>boolean;const bodies:any[]=[];let rounds=0,lateSteer:boolean|undefined,acceptedSteer:boolean|undefined;
+  let send!:(text:string)=>boolean|{refused:string};const bodies:any[]=[];let rounds=0,lateSteer:boolean|{refused:string}|undefined,acceptedSteer:boolean|{refused:string}|undefined;
   const calls=Array.from({length:16},(_,i)=>({index:i,id:`c${i}`,function:{name:'nope',arguments:'{}'}}));
   const adapter=openAICompatibleAdapter({endpoint:'https://llm.example/v1',apiKey:()=>'k',label:'Example',tools:true,
     fetch:async(_url,init)=>{const body=JSON.parse(String(init?.body));bodies.push(body);
@@ -68,7 +68,7 @@ test('HTTP route: at the turn’s tool-call cap, accepted steers reach the closi
   assert.equal(send('after'),false);
 });
 test('HTTP route: once the final stream has finished, a steer is refused',async()=>{
-  let send!:(text:string)=>boolean;let release!:()=>void;
+  let send!:(text:string)=>boolean|{refused:string};let release!:()=>void;
   const adapter=openAICompatibleAdapter({endpoint:'https://llm.example/v1',apiKey:()=>'k',label:'Example',tools:false,
     fetch:async()=>new Response(new ReadableStream({start(c){c.enqueue(enc.encode(`data: ${JSON.stringify({choices:[{delta:{content:'hi'}}]})}\n\n`));release=()=>{c.enqueue(enc.encode('data: [DONE]\n\n'));c.close();};}}),{status:200})});
   const running=adapter.run({chat:{id:'c'} as any,cwd:'/w',prompt:'go',model:'m',permissionMode:'workspace',signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){},onSteerable:fn=>{send=fn;}});

@@ -152,6 +152,8 @@ export function claudeStdin(input: Pick<AdapterRunInput, 'prompt' | 'images'>): 
 
 /** Headless Claude Code (`claude -p --output-format stream-json`) in the chat folder. */
 const STEER_GRACE_MS = 2500;
+/** #839: the turn ended and its session closed, but a background command keeps Claude Code running. */
+export const CLAUDE_BACKGROUND_REFUSAL = 'Claude Code finished this turn and is waiting for a background command, so it can’t take a message until that ends.';
 export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; spawn?: Spawn; killGraceMs?: number; steerGraceMs?: number}): RunnableAdapter {
   const spawn = options.spawn ?? (nodeSpawn as unknown as Spawn);
   return {kind: 'cli', run(input) {
@@ -235,7 +237,12 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       // tool_use id as parent_tool_use_id. A background child outlives the tool_result that launched it.
       type AgentRun = {childId: string; base: Record<string, unknown>; background: boolean; state: 'running' | 'completed' | 'failed' | 'interrupted'; message?: string; launched: boolean; startedAt: number; endedAt?: number};
       const agents = new Map<string, AgentRun>(), taskTools = new Map<string, string>(), toolThreads = new Map<string, string>();
-      const backgroundRunning = () => [...agents.values()].some(run => run.background && run.state === 'running');
+      // #839: the CLI lists its background tasks (shells and agents) in `background_tasks_changed`. While any is listed the
+      // session stays open, so a message sent after the turn's result still reaches it (a new turn on the same session).
+      const backgroundTasks = new Set<string>();
+      /** A background shell was started; a CLI that does not list its tasks cannot take messages once stdin closed. */
+      let backgroundShell = false;
+      const backgroundRunning = () => backgroundTasks.size > 0 || [...agents.values()].some(run => run.background && run.state === 'running');
       // Stop (the abort signal) is what ends a background child that never reports back: there is no time limit, since a
       // long-running child is legitimate and a cut-off marked live work as interrupted.
       const maybeClose = () => {
@@ -309,6 +316,15 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
           // task_updated patches precede the notification that carries the summary, which is what settles a child.
           return;
         }
+        if (type === 'system' && event.subtype === 'background_tasks_changed') {
+          backgroundTasks.clear();
+          for (const task of Array.isArray(event.tasks) ? event.tasks.slice(0, 256) : []) {
+            const id = task && typeof task === 'object' ? text((task as {task_id?: unknown}).task_id) : '';
+            if (id) backgroundTasks.add(id);
+          }
+          maybeClose();
+          return;
+        }
         if (type === 'system' && event.subtype === 'task_updated') {
           const run = agents.get(taskTools.get(text(event.task_id)) ?? ''), end = (event.patch as {end_time?: unknown} | undefined)?.end_time;
           if (run && typeof end === 'number' && end >= run.startedAt) run.endedAt = end;
@@ -346,6 +362,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
                 emitAgent(run);
                 continue;
               }
+              if (block.name === 'Bash' && args.run_in_background === true) backgroundShell = true;
               const item = claudeToolItem(block.id, block.name, args, input.cwd);
               if (tools.size < 4096) { tools.set(block.id, item); toolThreads.set(block.id, threadFor(event.parent_tool_use_id)); }
               input.onEvent('item/started', {threadId: threadFor(event.parent_tool_use_id), turnId, item});
@@ -409,6 +426,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       child.stdin?.on('error', () => {});
       child.stdin?.write(claudeStdin(input));
       input.onSteerable?.(message => {
+        if (inputClosed && !settled && !input.signal.aborted && backgroundShell) return {refused: CLAUDE_BACKGROUND_REFUSAL};
         if (settled || inputClosed || !child.stdin || input.signal.aborted) return false;
         pending++; unanswered++;
         try { child.stdin.write(claudeUserMessage(claudeSteerText(message))); if (grace) { clearTimeout(grace); grace = undefined; } return true; } catch { pending--; unanswered--; return false; }

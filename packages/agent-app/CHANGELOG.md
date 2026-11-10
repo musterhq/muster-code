@@ -3,6 +3,10 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- A message sent while a chat is only running background work reaches the agent now instead of waiting in the queue: Codex steers the turn the app-server started when a sub-agent reports back (and Steer on a queued message does the same), and Claude Code keeps its session open while a background command runs. Where Claude Code still can't take the message, the composer says why (#839).
+
 ## 0.3.18
 
 You can edit any visual the agent made, right in the chat, the agent can update a page it showed instead of adding a new one, office previews keep up with the file, and pages the agent showed stay visible when its turn folds.
