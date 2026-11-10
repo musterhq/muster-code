@@ -1,4 +1,5 @@
 import type {HtmlRenderView} from '../html-render.ts';
+import type {McpAppView} from '../mcp-apps.ts';
 /**
  * Artifacts domain contract: canvases (WRK-12), side chats bound to a resource (WRK-13) and sandboxed plugin UI
  * entries (EXT-10). The allowlist and service dispatch pick these commands up through shared/domains/index.ts.
@@ -79,6 +80,9 @@ export interface ArtifactsCommands {
   'htmlRenders.open': { input: { id: string }; output: { url: string; token: string; page: HtmlRenderView } };
   /** The person allows network (https only) for one stored page that asked for it (main). */
   'htmlRenders.allowNetwork': { input: { id: string }; output: HtmlRenderView };
+  /** #844 MCP Apps: the app of a finished MCP tool row, read through the runtime and served scripts-only from its own origin, with
+   *  network only for the hosts it declared and only once the person allowed it (main). */
+  'mcpApps.open': { input: { chatId: string; itemId: string }; output: { url: string; token: string; app: McpAppView } };
   /** A local server card's "Mini player": the chat's agent browser tab opens the URL and streams to the mini player (main). */
   'previews.open': { input: { chatId: string; url: string; panel?: boolean }; output: { owner: string; profileId: string; url: string } };
   /** Visuals: prints a registered report to PDF in a hidden sandboxed window and writes it where the person chooses (main). */
@@ -94,7 +98,7 @@ export const ARTIFACTS_COMMANDS = {
   'artifacts.sideChat.create': true, 'artifacts.sideChat.list': true, 'artifacts.sideChat.promote': true, 'artifacts.sideChat.discard': true,
   'artifacts.authorize': true, 'artifacts.read': true,
   'plugins.ui.entry': true, 'plugins.ui.open': true,
-  'reports.open': true, 'reports.pdf': true, 'htmlRenders.open': true, 'htmlRenders.allowNetwork': true, 'previews.open': true,
+  'reports.open': true, 'reports.pdf': true, 'htmlRenders.open': true, 'htmlRenders.allowNetwork': true, 'mcpApps.open': true, 'previews.open': true,
 } as const satisfies Record<keyof ArtifactsCommands, true>;
 
 /** Short label for a side chat's tab and header. */

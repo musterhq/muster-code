@@ -660,6 +660,17 @@ export class AgentStore {
     return row ? rowToItem(row) : undefined;
   }
 
+  /** #175: the chat's newest reply with text (one indexed row, never the whole history). */
+  lastAssistantItem(chatId: string): TimelineItem | undefined {
+    const row = this.db.prepare("SELECT * FROM timeline WHERE chat_id = ? AND kind = 'assistant' AND length(trim(text)) > 0 ORDER BY seq DESC LIMIT 1").get(chatId) as TimelineRow | undefined;
+    return row ? rowToItem(row) : undefined;
+  }
+
+  /** #175: the chat's newest shell command rows (at most `limit`), oldest first. */
+  commandItems(chatId: string, limit = 200): TimelineItem[] {
+    return (this.db.prepare("SELECT * FROM timeline WHERE chat_id = ? AND kind = 'tool' AND json_extract(data, '$.type') = 'commandExecution' ORDER BY seq DESC LIMIT ?").all(chatId, limit) as unknown as TimelineRow[]).map(rowToItem).reverse();
+  }
+
   /** The chat's notices of one `data.kind`, in order. */
   noticesOfKind(chatId: string, kind: string): TimelineItem[] {
     return (this.db.prepare("SELECT * FROM timeline WHERE chat_id = ? AND kind = 'notice' AND json_extract(data, '$.kind') = ? ORDER BY seq").all(chatId, kind) as unknown as TimelineRow[]).map(rowToItem);

@@ -32,6 +32,8 @@ export interface AdapterRunInput {
   authorize?(method: string, params: Record<string, unknown>, options?: {policyOnly?: boolean}): Promise<PermissionResult>;
   /** ask_user (HTTP routes): posts the question card and resolves at once with the text for the model; it never waits for the user. */
   askUser?(args: Record<string, unknown>): Promise<string>;
+  /** #842 request_secret (HTTP routes): waits for the private card. `text` is for the model and never holds the value; `env` goes into the run's next commands. */
+  requestSecret?(args: Record<string, unknown>): Promise<{text: string; isError?: boolean; env?: Record<string, string>}>;
   /** The saved conversation to continue; only set when it belongs to this route and binding. */
   resumeThreadId?: string;
   /** Asked when `resumeThreadId` names a conversation the adapter no longer holds: returns a summary of the earlier messages to send ahead of the prompt. */

@@ -4,6 +4,7 @@ import {downscaleIcon} from './icon-downscale.ts';
 import {BrowserSessionVault} from './browser-session-vault.ts';
 import {PLUGIN_SCHEME,PluginUiRegistry} from './plugin-ui.ts';
 import {REPORT_SCHEME,ReportRegistry,capturePage,printReport} from './report-origin.ts';
+import {mcpAppNetwork} from '../shared/mcp-apps.ts';
 import {HTML_RENDER_FALLBACK} from '../shared/html-render.ts';
 import {HtmlRenderStore} from './agent-tools/html-render-store.ts';
 import {exportFileName} from '../shared/rich-block.ts';
@@ -702,6 +703,15 @@ async function main(): Promise<void> {
         if (!page) throw new Error('This page is no longer available.');
         const { url, token } = reports.register({ html: page.html, scripts: true, themed: true, key: `render:${page.id}:${page.networkAllowed ? 'net' : 'local'}`, network: page.networkAllowed });
         return { url, token, page };
+      }
+      case 'mcpApps.open': {
+        // #844: the runtime reads the app from the row's own MCP server and says whether the person allowed its network; main
+        // serves it scripts-only from its own origin, with only the declared hosts and only after that grant.
+        if (!service) throw new Error('Agent service is unavailable.');
+        const request = input as Commands['mcpApps.open']['input'];
+        const app = await service.invoke('mcp.apps.open', { chatId: request?.chatId, itemId: request?.itemId });
+        const { url, token } = reports.register({ html: app.html, scripts: true, key: `mcp-app:${request.itemId}:${app.networkAllowed ? 'net' : 'local'}`, network: mcpAppNetwork(app) });
+        return { url, token, app };
       }
       case 'htmlRenders.allowNetwork': return htmlRenders.allowNetwork((input as Commands['htmlRenders.allowNetwork']['input'])?.id);
       case 'previews.open': { const request = input as Commands['previews.open']['input']; return browserBridge.openPreview(request?.chatId, request?.url, request?.panel === true); }

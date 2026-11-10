@@ -94,7 +94,7 @@ assert.equal(byTest('composer-access')!.getAttribute('aria-label'),'Access: Ask 
 await click('[data-testid="composer-plus"]');
 const plus=await until(()=>document.querySelector('[role="dialog"][aria-label="Add files and more"]') as HTMLElement|null,'the + menu');
 assert.deepEqual(headers(),['Add','Plugins','Skills']);
-assert.deepEqual(rowLabels(),['Files and folders','Capture window','Work in a project','Goal','Plan mode','Record a skill','Save as skill','Sketch','Mention file or chat…','Start in background','Stash prompt','Stashes','Gmail','HeyGen','PDF Skill'],'Codex + menu order; every row works end to end');
+assert.deepEqual(rowLabels(),['Files and folders','Capture window','Work in a project','Goal','Plan mode','Record a skill','Save as skill','Sketch','Mention file or chat…','Start in background','Send to several…','Stash prompt','Stashes','Gmail','HeyGen','PDF Skill'],'Codex + menu order; every row works end to end');
 const pluginRows=Array.from(plus.querySelectorAll('[data-testid="composer-row"]')).filter(row=>/Gmail|HeyGen/.test(row.textContent??''));
 assert.ok(pluginRows[0].querySelector('img.item-icon'));assert.equal(pluginRows[1].querySelector('.item-monogram')?.textContent,'H');
 await key(plus,'g');await key(plus,'m');

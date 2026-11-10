@@ -70,6 +70,8 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
   const extra: Array<{role: string; content?: string | unknown[] | null; tool_calls?: unknown; tool_call_id?: string}> = [];
   const pictures = new Set<object>();
   const visionNote = {told: false};
+  // #842: one environment object for the whole turn, so a secret the person gives reaches the commands that follow.
+  const runEnv = input.requestSecret ? {...(input.env ?? {})} : input.env;
   const usages: Array<{inputTokens?: number; outputTokens?: number; totalTokens?: number}> = [];
   const deadline = Date.now() + TURN_DEADLINE_MS;
   const used: string[] = [];
@@ -141,7 +143,7 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
       for (const message of extra) if (pictures.delete(message)) message.content = '[an earlier image was shown here and has been omitted to save space]';
       const seen: Array<{role: string; content: unknown[]}> = [];
       for (const call of calls) {
-        const result = await executeTool(call, {chatId: input.chat.id, ...(browserOffered(input.browserTools) ? {browser: true} : {}), cwd: input.cwd, access: input.permissionMode, ...(input.vision ? {vision: true} : {}), visionNote, signal: input.signal, emit: input.onEvent, threadId, turnId, ...(input.authorize ? {authorize: input.authorize} : {}), ...(input.askUser ? {askUser: input.askUser} : {}), ...(input.env ? {env: input.env} : {}), deadline});
+        const result = await executeTool(call, {chatId: input.chat.id, ...(browserOffered(input.browserTools) ? {browser: true} : {}), cwd: input.cwd, access: input.permissionMode, ...(input.vision ? {vision: true} : {}), visionNote, signal: input.signal, emit: input.onEvent, threadId, turnId, ...(input.authorize ? {authorize: input.authorize} : {}), ...(input.askUser ? {askUser: input.askUser} : {}), ...(input.requestSecret ? {requestSecret: input.requestSecret} : {}), ...(runEnv ? {env: runEnv} : {}), deadline});
         used.push(`${call.name}${result.ok ? '' : ' (failed)'}`);
         toolTrace.push(redactSecrets(`${call.name}(${headAndTail(call.arguments, 2048)}) — ${result.ok ? 'completed' : 'failed'}\n${headAndTail(result.content, 8192)}`));
         // Bound memory while a long turn is still running, as well as the text ultimately saved.
@@ -203,9 +205,9 @@ export function openAICompatibleAdapter(options: HttpOptions & {tools?: boolean}
     const prompt = httpToolNotes(input.prompt) || '(no message)';
     const user = images.length ? [{type: 'text', text: prompt}, ...images.map(image => ({type: 'image_url', image_url: {url: `data:${image.mediaType};base64,${image.data}`}}))] : prompt;
     const browser = browserOffered(input.browserTools);
-    const system = [httpToolNotes(input.instructions), tools ? toolInstructions(input.permissionMode, input.cwd, browser, !!input.askUser) : undefined].filter(Boolean).join('\n\n');
+    const system = [httpToolNotes(input.instructions), tools ? toolInstructions(input.permissionMode, input.cwd, browser, !!input.askUser, !!input.requestSecret) : undefined].filter(Boolean).join('\n\n');
     const notes = (message: HttpMessage) => (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string' ? {...message, content: httpToolNotes(message.content) || '(no message)'} : message;
-    const body = () => JSON.stringify({model: input.model, stream: true, stream_options: {include_usage: true}, messages: [...(system ? [{role: 'system', content: system}] : []), ...history.map(notes), {role: 'user', content: user}, ...extra.map(notes)], ...(tools ? {tools: toolSpecs(input.permissionMode, browser, !!input.askUser), tool_choice: 'auto'} : {})});
+    const body = () => JSON.stringify({model: input.model, stream: true, stream_options: {include_usage: true}, messages: [...(system ? [{role: 'system', content: system}] : []), ...history.map(notes), {role: 'user', content: user}, ...extra.map(notes)], ...(tools ? {tools: toolSpecs(input.permissionMode, browser, !!input.askUser, !!input.requestSecret), tool_choice: 'auto'} : {})});
     const window = typeof input.contextWindow === 'number' && Number.isFinite(input.contextWindow) && input.contextWindow > 0 ? input.contextWindow : DEFAULT_CONTEXT_WINDOW;
     let budget = Math.floor(window * 4 * .85), compacted = false;
     fitHttpContext(history, extra, () => body().length, budget);

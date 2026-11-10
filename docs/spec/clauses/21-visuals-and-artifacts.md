@@ -130,6 +130,15 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-829N](21-visuals-and-artifacts.md#mus-spec-21-829n) | office.live.watch on an office_render result re-renders the changed file with the LibreOffice already there into new page images; a failed render keeps the last pages and reports the error; with no LibreOffice it fails and downloads nothing; a file preview only reports the change. | [`an office_render preview re-renders a changed file with the installed LibreOffice and keeps the last pages when a render fails`](../../../packages/agent-app/tests/office-live-829.test.ts) |
 | [MUS-SPEC-21-829O](21-visuals-and-artifacts.md#mus-spec-21-829o) | An office_render tool row on screen watches its file, swaps in the new pages and says Updated just now; a failed refresh keeps the pages and shows the error; off screen or unmounted it stops watching. | [`an office_render row redraws its pages when the file changes, only while it is on screen`](../../../packages/agent-app/tests/office-live-829-dom.tsx) |
 | [MUS-SPEC-21-829P](21-visuals-and-artifacts.md#mus-spec-21-829p) | The file viewer's office preview re-reads a changed file in place and says Updated just now; a failed re-read keeps the last preview and shows the error; closing it stops watching. | [`the file viewer's office preview redraws in place when the file changes and keeps the last preview on a failure`](../../../packages/agent-app/tests/office-live-829-dom.tsx) |
+| [MUS-SPEC-21-844A](21-visuals-and-artifacts.md#mus-spec-21-844a) | The app row of a tool that declares a UI resource is its own row and its HTML is read from that same server. | [`a tool that declares a ui:// resource gets its app row, read from its own server`](../../../packages/agent-app/tests/mcp-apps-844.test.ts) |
+| [MUS-SPEC-21-844B](21-visuals-and-artifacts.md#mus-spec-21-844b) | Ui/initialize is answered with the 2026-01-26 host info; tool-input then tool-result are sent only after initialized. | [`the bridge answers ui/initialize, then sends the tool input and result only after the app says it is initialized`](../../../packages/agent-app/tests/mcp-apps-844.test.ts) |
+| [MUS-SPEC-21-844C](21-visuals-and-artifacts.md#mus-spec-21-844c) | A read-only tool runs on the app's own server; another server's, an app-hidden or an unknown tool is refused. | [`the app calls a read-only tool on its own server through the host, never another server's or an app-hidden tool`](../../../packages/agent-app/tests/mcp-apps-844.test.ts) |
+| [MUS-SPEC-21-844D](21-visuals-and-artifacts.md#mus-spec-21-844d) | In a read-only chat the app's mutating call is refused and never reaches the server. | [`a read-only chat refuses the app's mutating tool call and the server never runs it`](../../../packages/agent-app/tests/mcp-apps-844.test.ts) |
+| [MUS-SPEC-21-844E](21-visuals-and-artifacts.md#mus-spec-21-844e) | A Workspace chat asks on the approval card for the app's mutating call (approve runs it, decline refuses it); Full access runs it without a card. | [`the app's mutating tool call waits on the same approval card, and full access runs it without one`](../../../packages/agent-app/tests/mcp-apps-844.test.ts) |
+| [MUS-SPEC-21-844F](21-visuals-and-artifacts.md#mus-spec-21-844f) | Ui/open-link needs a click and an http(s) URL; ui/message fills the composer and never sends. | [`ui/open-link opens the in-app browser only after a click, and ui/message fills the composer without sending`](../../../packages/agent-app/tests/mcp-apps-844.test.ts) |
+| [MUS-SPEC-21-844G](21-visuals-and-artifacts.md#mus-spec-21-844g) | No network by default; after Allow only the declared https domains, never http, frames, workers or forms. | [`an app has no network until the person allows it, and then only its declared https domains`](../../../packages/agent-app/tests/mcp-apps-844.test.ts) |
+| [MUS-SPEC-21-844H](21-visuals-and-artifacts.md#mus-spec-21-844h) | An app that cannot load shows the tool's text result, no frame. | [`an MCP app that cannot load shows the tool's text result instead`](../../../packages/agent-app/tests/mcp-apps-844-dom.tsx) |
+| [MUS-SPEC-21-844I](21-visuals-and-artifacts.md#mus-spec-21-844i) | The app frame is scripts-only on its own origin; its bridge answers only that frame and routes tools/call to the host. | [`an MCP app row draws in the scripts-only sandbox and answers the app over the bridge`](../../../packages/agent-app/tests/mcp-apps-844-dom.tsx) |
 
 ### Side chats
 
@@ -1383,4 +1392,107 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/office-live-829-dom.tsx::the file viewer's office preview redraws in place when the file changes and keeps the last preview on a failure`
 - Environment: DOM suite (linkedom) with a stubbed bridge.
 - Known gaps: The PDF reader (Word, PowerPoint and PDF files) uses pdf.js, which linkedom cannot run; it re-reads on the same path and is checked by hand in the app.
+- Evidence: UNVERIFIED
+
+### MCP Apps (#844)
+
+An MCP tool can declare an interactive UI (the MCP Apps extension, spec version 2026-01-26): a `ui://` resource of type `text/html;profile=mcp-app`. Muster reads it from the same server, draws it under the tool row in the sandboxed frame used for agent pages, and talks to it over the postMessage JSON-RPC bridge the spec defines. The app can call tools on its own server only, under the chat's access level and approvals.
+
+<a id="mus-spec-21-844a"></a>
+#### MUS-SPEC-21-844A: A tool that declares a UI resource shows its app as its own row
+
+- Precondition: A chat in Workspace access; an MCP server added in Settings (a fake stdio server) whose `show_board` tool declares `_meta.ui.resourceUri` `ui://board/app.html` (a `text/html;profile=mcp-app` resource) and whose `plain` tool declares none.
+- Action: The agent's run reports a completed `mcpToolCall` of `show_board`, then one of `plain`, on that server; open the app of the `show_board` row.
+- Expected result: The run finishes without waiting for the server. The `show_board` row is marked with its `ui://` resource and is a visual row of its own (not folded with the tools around it); the `plain` row is not marked. Opening the app reads the resource from the same server and returns its HTML, the tool's arguments and its result.
+- Test: `packages/agent-app/tests/mcp-apps-844.test.ts::a tool that declares a ui:// resource gets its app row, read from its own server`
+- Environment: Node test runner with the real agent service, a fixture provider that reports the tool rows and a fake MCP server spawned as a child process.
+- Known gaps: The resource comes from Muster's own connection to the server (the agent's route is not asked); a server Muster does not know (not added or detected in Settings) shows no app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-844b"></a>
+#### MUS-SPEC-21-844B: The app gets the tool input and result over the bridge
+
+- Precondition: An MCP app bridge for a finished tool call with arguments and a result.
+- Action: The app sends `ui/initialize`, then a message before `ui/notifications/initialized`, then `ui/notifications/initialized`, then `ping` and an unknown method.
+- Expected result: `ui/initialize` answers with protocol version 2026-01-26, Muster as host, the host capabilities (open links, server tools) and the host context (theme, inline display mode). Nothing else is sent before `initialized`; then `ui/notifications/tool-input` with the arguments and `ui/notifications/tool-result` with the result, in that order. `ping` answers `{}` and an unknown method gets a JSON-RPC error.
+- Test: `packages/agent-app/tests/mcp-apps-844.test.ts::the bridge answers ui/initialize, then sends the tool input and result only after the app says it is initialized`
+- Environment: Node test runner with the bridge alone (no frame).
+- Known gaps: Partial tool input (`tool-input-partial`) is not sent: the app is shown only after the call finished.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-844c"></a>
+#### MUS-SPEC-21-844C: The app calls a read-only tool on its own server
+
+- Precondition: The chat and server of MUS-SPEC-21-844A; the server's `count` tool has `readOnlyHint` and its `secret_admin` tool is visible to the model only (`_meta.ui.visibility: ["model"]`).
+- Action: From the app row, call `count` with arguments; call it again naming another server; call `secret_admin`; call a tool the server does not have.
+- Expected result: `count` runs on the app's own server with the arguments and its result comes back, with no approval card. Naming another server changes nothing: the call still goes to the app's own server. `secret_admin` and the unknown tool are refused and never reach the server.
+- Test: `packages/agent-app/tests/mcp-apps-844.test.ts::the app calls a read-only tool on its own server through the host, never another server's or an app-hidden tool`
+- Environment: Node test runner with the real agent service and the fake MCP server, which records every call it gets.
+- Known gaps: The app's calls go to Muster's own connection to the server, not the agent's: a stdio server's in-memory state is not shared with the agent's process.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-844d"></a>
+#### MUS-SPEC-21-844D: A read-only chat refuses the app's mutating tool call
+
+- Precondition: The app row of MUS-SPEC-21-844A in a chat set to Read only; the server's `move_card` tool has no `readOnlyHint`.
+- Action: From the app, call `move_card`.
+- Expected result: The call is refused with a message naming read-only access, no approval card is posted and the server never gets the call. A read-only tool still runs.
+- Test: `packages/agent-app/tests/mcp-apps-844.test.ts::a read-only chat refuses the app's mutating tool call and the server never runs it`
+- Environment: Node test runner with the real agent service and the fake MCP server.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-844e"></a>
+#### MUS-SPEC-21-844E: The app's mutating tool call goes through the approval card
+
+- Precondition: The app row of MUS-SPEC-21-844A in a Workspace chat.
+- Action: From the app, call `move_card`; approve the card. Call it again and decline. Switch the chat to Full access and call it again.
+- Expected result: Each Workspace call posts an MCP approval card naming the server, the tool and the arguments; approving runs the tool on the server and returns its result, declining refuses it and the server never gets that call. In Full access it runs with no card.
+- Test: `packages/agent-app/tests/mcp-apps-844.test.ts::the app's mutating tool call waits on the same approval card, and full access runs it without one`
+- Environment: Node test runner with the real agent service and the fake MCP server.
+- Known gaps: Project tool rules (allow, ask, deny) are applied through the same resolver as the agent's own calls; this case does not set any.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-844f"></a>
+#### MUS-SPEC-21-844F: Links open only on a click; messages only fill the composer
+
+- Precondition: An MCP app bridge whose host records links and composer text.
+- Action: The app sends `ui/open-link` without a recent click, with a click, and with a `javascript:` URL; then `ui/message` with a text block.
+- Expected result: Without a click the link is refused and nothing opens. With a click an https link opens in the in-app browser. A non-http(s) URL is refused. `ui/message` puts its text in the composer and is never sent.
+- Test: `packages/agent-app/tests/mcp-apps-844.test.ts::ui/open-link opens the in-app browser only after a click, and ui/message fills the composer without sending`
+- Environment: Node test runner with the bridge alone; the click is the frame's user-activation flag.
+- Known gaps: Whether a real frame reports user activation for a click is checked in the app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-844g"></a>
+#### MUS-SPEC-21-844G: An app has no network until the person allows it
+
+- Precondition: The app row of MUS-SPEC-21-844A; the resource declares the https domain `api.example.com` in `connectDomains`, and the https domain `cdn.example.com` and a plain-http domain in `resourceDomains`.
+- Action: Open the app; serve it; allow network for it; open and serve it again.
+- Expected result: First the app says it asked for network and is not allowed, and its served page allows no network at all (`connect-src 'none'`, no remote scripts or images). After Allow for this page it is allowed, and the served page may connect only to `api.example.com` over https and load only from `cdn.example.com` over https: never the plain-http domain, any other https host, frames, workers or forms. A resource that declares no domains cannot be given network.
+- Test: `packages/agent-app/tests/mcp-apps-844.test.ts::an app has no network until the person allows it, and then only its declared https domains`
+- Environment: Node test runner with the real agent service, the fake MCP server and the report origin's CSP.
+- Known gaps: The CSP is checked as served; a real blocked request is checked in the app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-844h"></a>
+#### MUS-SPEC-21-844H: An app that cannot load falls back to the tool's text result
+
+- Precondition: A finished MCP tool row marked with an app and the text result `Board has 3 cards`; opening the app fails (the server is gone or the resource is not an MCP app).
+- Action: Show the row.
+- Expected result: The row shows the tool's text result in place of the app, with no frame and no endless loading state. In the runtime, a resource that is not `text/html;profile=mcp-app`, a non-`ui://` URI or a server that is gone makes opening fail with a message.
+- Test: `packages/agent-app/tests/mcp-apps-844-dom.tsx::an MCP app that cannot load shows the tool's text result instead`
+- Environment: DOM suite (linkedom) with a stubbed bridge; the runtime refusals are checked in the Node test of MUS-SPEC-21-844A.
+- Known gaps: linkedom has no layout: the look of the fallback is checked in the app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-844i"></a>
+#### MUS-SPEC-21-844I: The app row draws in the scripts-only sandbox and talks over the bridge
+
+- Precondition: A finished MCP tool row marked with an app, a stubbed bridge that opens it, and a fake frame window.
+- Action: Show the row; the frame posts `ui/initialize`, then `initialized`, then `tools/call`; a message from another window posts `tools/call` too.
+- Expected result: The app is drawn under the tool row in a frame sandboxed to scripts only (no same-origin), served from its own `muster-report://` origin, with no referrer and no permissions. The frame gets the initialize answer, then the tool input and result; its `tools/call` reaches the host as `mcp.apps.callTool` for this chat and row, and the answer goes back to the frame. The other window's message is ignored. A resource that asked for network shows Allow for this page.
+- Test: `packages/agent-app/tests/mcp-apps-844-dom.tsx::an MCP app row draws in the scripts-only sandbox and answers the app over the bridge`
+- Environment: DOM suite (linkedom) with a stubbed bridge and a fake frame window.
+- Known gaps: linkedom has no layout and runs no frame: a real MCP Apps server is checked by hand in the app.
 - Evidence: UNVERIFIED

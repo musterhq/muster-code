@@ -1,5 +1,5 @@
 import { isWebHost } from '../webHost.ts';
-import {AppWindow,Archive,ArchiveRestore,AtSign,Boxes,BookmarkPlus,CircleDot,Folder,FolderKanban,Goal,Lightbulb,ListOrdered,Monitor,Paperclip,PenLine,Server,Sparkles,SquarePen,SquareSlash,SquareTerminal} from 'lucide-react';
+import {AppWindow,Archive,ArchiveRestore,AtSign,Boxes,BookmarkPlus,CircleDot,Folder,FolderKanban,GitCompare,Goal,Lightbulb,ListOrdered,Monitor,Paperclip,PenLine,Server,Sparkles,SquarePen,SquareSlash,SquareTerminal} from 'lucide-react';
 import React, { useEffect, useRef } from 'react';
 import type {FileEntry,ItemIcon,PluginEntry,SkillEntry} from '../../shared/protocol';
 import {mcpMark} from '../mcpIcons';
@@ -111,6 +111,8 @@ export interface AddRowInput<T extends { key: string; label: string } = { key: s
   onSketch(): void; sketchDisabled?: boolean;
   onMention?(): void;
   backgroundDescription?: string; backgroundDisabled?: boolean; onBackground?(): void;
+  /** #175: Send to several (models in their own worktrees). */
+  compareDescription?: string; compareDisabled?: boolean; onCompare?(): void;
   /** CMP-19: save the draft as a named stash without sending, and open the Stashes list. */
   onStash?(): void; stashDisabled?: boolean; onStashes?(): void;
   plugins: readonly PluginEntry[]; onPlugin(plugin: PluginEntry): void; onBrowsePlugins?(): void;
@@ -151,6 +153,7 @@ export function buildAddRows<T extends { key: string; label: string }>(input: Ad
     { key: 'sketch', section: 'Add', label: 'Sketch', description: 'Draw a sketch', disabled: input.sketchDisabled, icon: <PenLine size={15} />, score: 0, run: input.onSketch },
     ...(input.onMention ? [{ key: 'mention', section: 'Add', label: 'Mention file or chat…', description: 'Type @ in the composer', icon: <AtSign size={15} />, score: 0, run: input.onMention } satisfies MenuRow] : []),
     ...(input.onBackground ? [{ key: 'background', section: 'Add', label: 'Start in background', description: input.backgroundDescription, icon: <SquarePen size={15} />, disabled: input.backgroundDisabled, score: 0, run: input.onBackground } satisfies MenuRow] : []),
+    ...(input.onCompare ? [{ key: 'compare', section: 'Add', label: 'Send to several…', description: input.compareDescription, icon: <GitCompare size={15} />, disabled: input.compareDisabled, score: 0, run: input.onCompare } satisfies MenuRow] : []),
     ...(input.onStash ? [{ key: 'stash', section: 'Add', label: 'Stash prompt', description: 'Save this draft for later without sending · ⌘⇧S', icon: <Archive size={15} />, disabled: input.stashDisabled, score: 0, run: input.onStash } satisfies MenuRow] : []),
     ...(input.onStashes ? [{ key: 'stashes', section: 'Add', label: 'Stashes', description: 'Restore, rename or delete stashed prompts', icon: <ArchiveRestore size={15} />, score: 0, run: input.onStashes } satisfies MenuRow] : []),
     ...(input.onQueueing ? [{ key: 'queueing', section: 'Add', label: input.queueing ? 'Turn off queueing' : 'Turn on queueing', description: input.queueing ? 'Follow-ups will steer the running agent' : 'Follow-ups will wait for this turn to finish', icon: <ListOrdered size={15} />, checked: input.queueing, score: 0, run: input.onQueueing } satisfies MenuRow] : []),
