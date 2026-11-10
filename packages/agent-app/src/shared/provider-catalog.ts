@@ -9,8 +9,8 @@
 import type { ProviderInfo } from './protocol.ts';
 import { device } from './device-noun.ts';
 
-/** subscription-cli: sign in with a vendor CLI. api-key: hosted API with one key. local: self-hosted URL plus optional key. custom: any OpenAI-compatible URL. */
-export type CatalogAuthKind = 'subscription-cli' | 'api-key' | 'local' | 'custom';
+/** subscription-cli: sign in with a vendor CLI. api-key: hosted API with one key. local: self-hosted URL plus optional key. custom: any OpenAI-compatible URL. acp: any Agent Client Protocol command (#160). */
+export type CatalogAuthKind = 'subscription-cli' | 'api-key' | 'local' | 'custom' | 'acp';
 /** Glyph keys that ProviderLogo ships (simple-icons, CC0). An entry without one gets a monogram. */
 export type CatalogLogo = 'anthropic' | 'claude' | 'openai' | 'ollama' | 'lmstudio' | 'opencode'
   | 'mistral' | 'openrouter' | 'deepseek' | 'gemini' | 'cursor';
@@ -60,6 +60,7 @@ export function fieldRules(kind: CatalogAuthKind): FieldRules {
     case 'api-key': return {signIn: false, key: 'required', endpoint: 'advanced', advanced: true};
     case 'local': return {signIn: false, key: 'optional', endpoint: 'shown', advanced: true};
     case 'custom': return {signIn: false, key: 'optional', endpoint: 'shown', advanced: true};
+    case 'acp': return {signIn: false, key: 'none', endpoint: 'none', advanced: false};
   }
 }
 
@@ -104,6 +105,8 @@ export const PROVIDER_CATALOG: CatalogEntry[] = [
     installUrl: 'https://lmstudio.ai', defaultEndpoint: 'http://127.0.0.1:1234/v1', detect: endpointStatus('http://127.0.0.1:1234/v1')},
   {id: 'omniroute', name: 'OmniRoute', description: 'A local or self-hosted model gateway.', authKind: 'local',
     defaultEndpoint: 'http://127.0.0.1:20128/v1', detect: endpointStatus('http://127.0.0.1:20128/v1')},
+  {id: 'acp', name: 'ACP agent', description: 'Any agent that speaks the Agent Client Protocol.', authKind: 'acp',
+    detect: providers => providers.some(p => p.driver === 'acp-agent' && p.available) ? 'connected' : 'not-connected'},
   {id: 'custom', name: 'Custom endpoint', description: 'Any OpenAI-compatible URL.', authKind: 'custom', defaultEndpoint: '', detect: never},
 ];
 
