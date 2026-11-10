@@ -65,7 +65,7 @@ async function setup(t:TestContext,options:{dataDir?:string;access?:Chat['permis
   };
   return {dataDir,service,fake,folder,chat};
 }
-const timeline=(service:Service,id:string)=>service.invoke('chat.timeline',{id}) as Promise<TimelineItem[]>;
+const timeline=async(service:Service,id:string):Promise<TimelineItem[]>=>(await service.invoke('chat.timeline',{id})).items;
 const notices=async(service:Service,id:string,kind:string)=>(await timeline(service,id)).filter(item=>item.kind==='notice'&&item.data?.kind===kind);
 const chatOf=async(service:Service,id:string)=>(await service.invoke('app.snapshot',undefined)).chats.find(chat=>chat.id===id);
 const idIn=(text:string)=>/Started ([a-zA-Z0-9-]{8,}) /.exec(text)?.[1]??'';
@@ -149,8 +149,8 @@ test('message_task steers a working child, and gives an idle child a new turn',a
   const gate=deferred();let childId='';
   fake.script=async(input,tools)=>{
     if(input.chat.id===parent.id&&/Start/.test(input.prompt)){childId=idIn((await tools.call('delegate_task',{prompt:'Write the tests.',title:'Tests'})).text);return 'Started.';}
-    if(input.chat.id===childId&&/Write the tests/.test(input.prompt)){await gate.promise;return 'Wrote 4 tests.';}
-    if(input.chat.id===childId)return 'Added the edge case.';
+    if(/Write the tests/.test(input.prompt)){await gate.promise;return 'Wrote 4 tests.';}
+    if(/unicode case/.test(input.prompt))return 'Added the edge case.';
     return 'ok';
   };
   await send(service,parent.id,'Start the tests.');
@@ -178,8 +178,8 @@ test('interrupt_task stops a child and the chat it started, and a stop does not 
   let childId='',grandchildId='';const forever=deferred();
   fake.script=async(input,tools)=>{
     if(input.chat.id===parent.id&&/Start/.test(input.prompt)){childId=idIn((await tools.call('delegate_task',{prompt:'Refactor the parser.',title:'Refactor'})).text);return 'Started.';}
-    if(input.chat.id===childId){grandchildId=idIn((await tools.call('delegate_task',{prompt:'Benchmark the parser.',title:'Benchmark'})).text);await forever.promise;return 'never';}
-    if(input.chat.id===grandchildId){await forever.promise;return 'never';}
+    if(/Refactor the parser/.test(input.prompt)){grandchildId=idIn((await tools.call('delegate_task',{prompt:'Benchmark the parser.',title:'Benchmark'})).text);await forever.promise;return 'never';}
+    if(/Benchmark the parser/.test(input.prompt)){await forever.promise;return 'never';}
     return 'ok';
   };
   await send(service,parent.id,'Start the refactor.');
@@ -208,7 +208,7 @@ test('read_task returns status, the final reply and changed files, and reading a
       childGate.resolve();await parentGate.promise;
       read=await tools.call('read_task',{id:childId});return 'Read it.';
     }
-    if(input.chat.id===childId){await childGate.promise;input.onEvent('item/completed',{item:{id:'f-1',type:'fileChange',status:'completed',changes:[{path:'SEEDS.md',kind:{type:'add'}}]}});return 'Seeded SEEDS.md.';}
+    if(/Seed the docs/.test(input.prompt)){await childGate.promise;input.onEvent('item/completed',{item:{id:'f-1',type:'fileChange',status:'completed',changes:[{path:'SEEDS.md',kind:{type:'add'}}]}});return 'Seeded SEEDS.md.';}
     return 'ok';
   };
   await send(service,parent.id,'Start seeding.');
@@ -227,21 +227,21 @@ test('children get the parent\'s access and never more; read-only chats get no t
   const {service,fake,chat,dataDir}=await setup(t);
   const reader=await chat('Reader','read-only'),full=await chat('Builder','full'),lead=await chat('Lead');
   const results:Record<string,{text:string;isError:boolean}[]>={};
-  const gates:ReturnType<typeof deferred>[]=[];const chain:string[]=[];
+  const gates:ReturnType<typeof deferred<void>>[]=[];const chain:string[]=[];
   fake.script=async(input,tools)=>{
     const say=(key:string,value:{text:string;isError:boolean})=>{(results[key]??=[]).push(value);return value;};
     if(input.chat.id===reader.id)return 'Only reading.';
     if(input.chat.id===full.id&&/Start/.test(input.prompt)){say('full',await tools.call('delegate_task',{prompt:'Deploy preview.',title:'Deploy'}));return 'ok';}
-    if(input.chat.id===lead.id&&/Chain/.test(input.prompt)){chain.push(lead.id);say('chain',await tools.call('delegate_task',{prompt:'Level 1 go deeper.',title:'Level 1'}));return 'ok';}
-    if(/Level (\d) go deeper/.test(input.prompt)){const n=Number(/Level (\d)/.exec(input.prompt)![1]);chain.push(input.chat.id);say('chain',await tools.call('delegate_task',{prompt:`Level ${n+1} go deeper.`,title:`Level ${n+1}`}));return `level ${n}`;}
+    if(input.chat.id===lead.id&&/Chain/.test(input.prompt)){chain.push(lead.id);say('chain',await tools.call('delegate_task',{prompt:'Level 1 go deeper.',title:'Level 1',wait:true}));return 'ok';}
+    if(/Level (\d) go deeper/.test(input.prompt)){const n=Number(/Level (\d)/.exec(input.prompt)![1]);chain.push(input.chat.id);say('chain',await tools.call('delegate_task',{prompt:`Level ${n+1} go deeper.`,title:`Level ${n+1}`,wait:true}));return `level ${n}`;}
     if(input.chat.id===lead.id&&/Fan out/.test(input.prompt)){
-      for(let i=0;i<5;i++)say('fan',await tools.call('delegate_task',{prompt:`Shard ${i}.`,title:`Shard ${i}`}));
       say('model',await tools.call('delegate_task',{prompt:'x',model:'gpt-unknown'}));
       say('provider',await tools.call('delegate_task',{prompt:'x',provider:'gamma',model:'g-1'}));
       say('folder',await tools.call('delegate_task',{prompt:'x',folder:'/etc'}));
+      for(let i=0;i<5;i++)say('fan',await tools.call('delegate_task',{prompt:`Shard ${i}.`,title:`Shard ${i}`}));
       return 'ok';
     }
-    if(/Shard \d/.test(input.prompt)){const gate=deferred();gates.push(gate);await gate.promise;return 'shard done';}
+    if(/^Shard \d$/.test(input.chat.title)){const gate=deferred();gates.push(gate);await gate.promise;return 'shard done';}
     return 'ok';
   };
   await send(service,reader.id,'Look around.');
@@ -249,28 +249,28 @@ test('children get the parent\'s access and never more; read-only chats get no t
   assert.equal(fake.turns(reader.id)[0]!.configOverrides?.['mcp_servers.muster_delegation.command'],undefined,'no delegation tools in read-only');
   assert.equal(fake.turns(reader.id)[0]!.configOverrides?.[TOKEN],undefined);
   await until(()=>idle(service,reader.id),'reader idle');
-  // A token for the read-only chat (as if a stale process had one) is still refused by the runner.
-  const forged=await callTool(dataDir,reader.id,'0'.repeat(64),'delegate_task',{prompt:'x'});
-  assert.equal(forged.status,403,'a chat without its own token cannot call');
-
   await send(service,full.id,'Start the deploy.');
   await until(()=>results.full?.length===1,'full delegation');
   const fullChild=(await service.invoke('delegation.children',{chatId:full.id}))[0]!;
   assert.equal((await chatOf(service,fullChild.id))!.permissionMode,'full','a Full access parent passes Full access on');
   await until(()=>idle(service,full.id),'full idle');
-  await service.invoke('chat.setPermissionMode',{id:full.id,permissionMode:'workspace'});
+  // The read-only chat has no token of its own; a made-up one is refused by the host.
+  const forged=await callTool(dataDir,reader.id,'0'.repeat(64),'delegate_task',{prompt:'x'});
+  assert.equal(forged.status,403,'a chat without its own token cannot call');
 
   await send(service,lead.id,'Chain three deep.');
   await until(()=>(results.chain?.length??0)===4,'four delegate attempts down the chain');
+  // Each level waits for the next, so the deepest answer comes back first.
   const chainResults=results.chain!;
-  assert.deepEqual(chainResults.map(result=>result.isError),[false,false,false,true]);
-  assert.match(chainResults[3]!.text,/at most 3 chats deep, and this chat is already 3 deep/);
+  assert.deepEqual(chainResults.map(result=>result.isError),[true,false,false,false]);
+  assert.match(chainResults[0]!.text,/at most 3 chats deep, and this chat is already 3 deep/);
   for(const id of chain.slice(1))assert.equal((await chatOf(service,id))!.permissionMode,'workspace');
   await until(async()=>{for(const id of chain)if(!await idle(service,id))return false;return true;},'chain idle');
 
   const before=(await service.invoke('app.snapshot',undefined)).chats.length;
   await send(service,lead.id,'Fan out.');
-  await until(()=>results.folder?.length===1,'fan out');
+  t.after(()=>{for(const gate of gates)gate.resolve();});
+  await until(()=>results.fan?.length===5,'fan out');
   assert.deepEqual(results.fan!.map(result=>result.isError),[false,false,false,false,true]);
   assert.match(results.fan![4]!.text,/4 chats you started are still working \(at most 4 at once\)/);
   assert.match(results.model![0]!.text,/"gpt-unknown" is not a model you have set up\. Set up: Alpha \(alpha\): alpha-1; Beta \(beta\): beta-1\./);
@@ -287,7 +287,7 @@ test('a child\'s approval shows on its parent too and can be answered from eithe
   let childId='';const decisions:string[]=[];
   fake.script=async(input,tools)=>{
     if(input.chat.id===parent.id&&/Start/.test(input.prompt)){childId=idIn((await tools.call('delegate_task',{prompt:'Clean the build.',title:'Clean'})).text);return 'Started.';}
-    if(input.chat.id===childId){
+    if(/Clean the build/.test(input.prompt)){
       for(const command of ['rm -rf build','rm -rf dist']){
         const answer=await input.onRequest('item/commandExecution/requestApproval',{command,cwd:'/tmp',reason:'Clean up'});
         decisions.push(`${command}: ${String((answer as {decision?:string})?.decision)}`);
@@ -299,7 +299,9 @@ test('a child\'s approval shows on its parent too and can be answered from eithe
   await send(service,parent.id,'Start cleaning.');
   const pending=async(id:string)=>(await timeline(service,id)).filter(item=>item.kind==='approval'&&item.status==='pending');
   await until(async()=>(await pending(parent.id)).length===1,'the copy on the parent');
-  const [copy]=await pending(parent.id),[own]=await pending(childId);
+  const [copy]=await pending(parent.id);
+  childId=String((copy!.data?.delegated as {chatId?:string})?.chatId);
+  const [own]=await pending(childId);
   assert.equal(copy!.text,own!.text);assert.match(own!.text,/rm -rf build/);
   assert.deepEqual(copy!.data?.delegated,{chatId:childId,itemId:own!.id,title:'Clean'});
   await service.invoke('approval.respond',{id:copy!.id,approved:true});
@@ -323,8 +325,8 @@ test('only a parent or its ancestors may control a child; a sibling or the child
   let childId='',grandchildId='';const hold=deferred();
   fake.script=async(input,tools)=>{
     if(input.chat.id===parent.id&&/Start/.test(input.prompt)){childId=idIn((await tools.call('delegate_task',{prompt:'Plan the release.',title:'Release'})).text);return 'ok';}
-    if(input.chat.id===childId&&/Plan the release/.test(input.prompt)){grandchildId=idIn((await tools.call('delegate_task',{prompt:'Draft notes.',title:'Notes'})).text);return 'planned';}
-    if(input.chat.id===grandchildId){await hold.promise;return 'notes';}
+    if(/Plan the release/.test(input.prompt)){grandchildId=idIn((await tools.call('delegate_task',{prompt:'Draft notes.',title:'Notes'})).text);return 'planned';}
+    if(/Draft notes/.test(input.prompt)){await hold.promise;return 'notes';}
     return 'ok';
   };
   await send(service,sibling.id,'Hello.');
@@ -389,7 +391,7 @@ test('stopping a parent\'s children stops every working chat below it',async t=>
   const ids:string[]=[];const forever=deferred();
   fake.script=async(input,tools)=>{
     if(input.chat.id===parent.id&&/Start/.test(input.prompt)){for(const title of ['One','Two'])ids.push(idIn((await tools.call('delegate_task',{prompt:`${title} job.`,title})).text));return 'ok';}
-    if(ids.includes(input.chat.id)){await forever.promise;return 'never';}
+    if(/(One|Two) job/.test(input.prompt)){await forever.promise;return 'never';}
     return 'ok';
   };
   await send(service,parent.id,'Start two.');

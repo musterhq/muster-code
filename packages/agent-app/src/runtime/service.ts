@@ -448,6 +448,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const toolItemId = typeof item?.data?.toolItemId === 'string' ? item.data.toolItemId : undefined, tool = toolItemId ? store.item(toolItemId) : undefined;
     if (tool?.data?.awaitingApproval === itemId) { const {awaitingApproval: _cleared, ...rest} = tool.data; store.updateItem(tool.id, tool.text, tool.status, {...rest, ...(status === 'declined' ? {executionDenied:true} : status === 'expired' ? {executionDenied:true, deniedReason:'timeout'} : {})}); }
     timeline(pending.chatId); state(); pending.resolve(decision);
+    domainHooks.attention({chatId: pending.chatId, itemId, state: 'settled'});
   }
   function finishQuestion(itemId: string, pending: PendingQuestionRequest, answers: QuestionAnswers, status: string, receiptAnswers?: Record<string, {answers:string[]}>, reason?: 'stale') {
     if (questions.get(itemId) !== pending) return;
@@ -458,6 +459,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (status === 'expired') store.appendItem(pending.chatId, 'notice', 'A question timed out before you answered, so the agent was told it was cancelled. Use Ask again to have it re-ask.', 'completed', {kind:'attention-expired', itemId});
     timeline(pending.chatId); state();
     pending.resolve(answers); pending.waiters.splice(0).forEach(resolve => resolve(answers));
+    domainHooks.attention({chatId: pending.chatId, itemId, state: 'settled'});
   }
   // ── ask_user: non-blocking questions ─────────────────────────────────────
   /** Posts the question card and answers the tool at once with the default. Never waits, in any access mode. */
@@ -467,8 +469,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (disposed || closing || !chat) return reply('This chat is not available.', true);
     const input = parseAskUser(args);
     if (typeof input === 'string') return reply(input, true);
-    store.appendItem(chatId, 'question', input.question, 'pending', {...askUserCard(input)});
-    timeline(chatId); state();
+    const asked = store.appendItem(chatId, 'question', input.question, 'pending', {...askUserCard(input)});
+    timeline(chatId); state(); domainHooks.attention({chatId, itemId: asked.id, state: 'pending'});
     return reply(askUserReply(input));
   }
   let askHost: ToolHost | undefined, askLauncher: string | undefined;
@@ -497,7 +499,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const answer = list[0].trim();
     const question = Array.isArray(item.data?.questions) ? String((item.data.questions[0] as {question?: unknown} | undefined)?.question ?? item.text) : item.text;
     store.updateItem(itemId, item.text, 'answered', {...item.data, answers: {[ASK_QUESTION_ID]: {answers: [answer]}}});
-    timeline(chat.id); state();
+    timeline(chat.id); state(); domainHooks.attention({chatId: chat.id, itemId, state: 'settled'});
     const message = askUserAnswerMessage(question, answer), requestId = `ask-${itemId}`;
     let delivered: 'steered' | 'queued' = 'queued';
     if (runs.has(chat.id) && (await steerRun(chat, message, requestId, {})).steered) delivered = 'steered';
@@ -509,6 +511,13 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const item = store.item(itemId);
     if (!item || item.status !== 'pending') return;
     store.updateItem(itemId, item.text, 'dismissed', item.data); timeline(item.chatId); state();
+    domainHooks.attention({chatId: item.chatId, itemId, state: 'settled'});
+  }
+  /** #44: a delegating chat's copy of a child's card answers the child's own card (`data.delegated.itemId`). */
+  function attentionTarget(itemId: string): string {
+    if (approvals.has(itemId) || questions.has(itemId)) return itemId;
+    const delegated = store.item(itemId)?.data?.delegated as {itemId?: unknown} | undefined;
+    return typeof delegated?.itemId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(delegated.itemId) ? delegated.itemId : itemId;
   }
   function settleApprovals(chatId: string) {
     for (const [itemId, pending] of approvals) if (pending.chatId === chatId) finishApproval(itemId, pending, 'decline', 'interrupted');
@@ -1069,7 +1078,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
                 let pending!: PendingQuestionRequest;
                 pending = { chatId, createdAt:item.createdAt, expiresAt, providerKey, itemId: item.id, questions: parsed, resolve: answers => resolve(answers ? { answers } : CANCELLED_REQUEST), waiters: [], timer: undefined as never };
                 armExpiry(item.id, pending, () => questions.get(item.id) === pending, () => finishQuestion(item.id, pending, null, 'expired'));
-                questions.set(item.id, pending); questionsByProviderKey.set(providerKey, item.id); wakeForAttention(chatId); state();
+                questions.set(item.id, pending); questionsByProviderKey.set(providerKey, item.id); wakeForAttention(chatId); state(); domainHooks.attention({chatId, itemId: item.id, state: 'pending'});
               });
             }
             if (isElicitationRequest(method)) {
@@ -1086,7 +1095,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
                 let pending!: PendingApproval;
                 pending = { chatId, createdAt: item.createdAt, expiresAt, resolve, timer: undefined as never };
                 armExpiry(approvalId, pending, () => approvals.get(approvalId) === pending, () => finishApproval(approvalId, pending, 'decline', 'expired'));
-                approvals.set(approvalId, pending); wakeForAttention(chatId); state();
+                approvals.set(approvalId, pending); wakeForAttention(chatId); state(); domainHooks.attention({chatId, itemId: approvalId, state: 'pending'});
               });
               return elicitationResult(decision !== 'decline');
             }
@@ -1133,7 +1142,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               let pending!: PendingApproval;
               pending = {chatId, createdAt:item.createdAt, expiresAt, resolve, timer: undefined as never};
               armExpiry(approvalId, pending, () => approvals.get(approvalId) === pending, () => finishApproval(approvalId, pending, 'decline', 'expired'));
-              approvals.set(approvalId, pending); wakeForAttention(chatId); state();
+              approvals.set(approvalId, pending); wakeForAttention(chatId); state(); domainHooks.attention({chatId, itemId: approvalId, state: 'pending'});
             });
             // Never let the provider remember a stop-the-user's-process approval for the rest of the session.
             return {decision: threat && decision === 'acceptForSession' ? 'accept' : decision};
@@ -2188,7 +2197,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           return {chat:updated,resolved:true,reason:result.reason};
         } finally {reconciliations.delete(chatId);}
       }
-      case 'approval.respond': { const approvalId = id(p.id); if (typeof p.approved !== 'boolean') throw new Error('Invalid approval decision.');
+      case 'approval.respond': { const approvalId = attentionTarget(id(p.id)); if (typeof p.approved !== 'boolean') throw new Error('Invalid approval decision.');
         if (p.decision !== undefined && !['accept','acceptForSession','decline'].includes(p.decision as string)) throw new Error('Invalid approval decision.');
         const decision: ApprovalDecision = !p.approved ? 'decline' : p.decision === 'acceptForSession' ? 'acceptForSession' : 'accept';
         const pending = approvals.get(approvalId); if (!pending) throw new Error('This approval is no longer pending.');
@@ -2199,7 +2208,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         finishApproval(approvalId, pending, decision, decision === 'decline' ? 'declined' : decision === 'acceptForSession' ? 'approved-session' : 'approved'); return; }
       case 'attention.sweep': return {expired: await sweepExpired()};
       case 'approval.reask': {
-        const itemId = id(p.id), item = store.item(itemId);
+        const itemId = attentionTarget(id(p.id)), item = store.item(itemId);
         if (!item || (item.kind !== 'approval' && item.kind !== 'question')) throw new Error('This request no longer exists.');
         if (item.status !== 'expired' && item.status !== 'unavailable' && !(item.status === 'interrupted' && item.data?.expiredReason === 'stale')) throw new Error('This request is still open or was already answered.');
         if (item.data?.reaskedAt) throw new Error('The agent was already asked again.');
@@ -2250,10 +2259,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         store.appendItem(chatId, 'notice', 'Continued without confirming the earlier attempt. It may still have been working at the provider; nothing was resent.', 'completed', {kind: 'continue-anyway', providerThreadId: chat.providerThreadId, providerTurnId: chat.providerTurnId});
         timeline(chatId); state(); return updated;
       }
-      case 'question.dismiss': { const questionId = id(p.id); if (!questions.has(questionId) && isNonBlockingQuestion(store.item(questionId)?.data)) return dismissAsked(questionId); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.'); finishQuestion(questionId, pending, null, 'dismissed'); return; }
+      case 'question.dismiss': { const questionId = attentionTarget(id(p.id)); if (!questions.has(questionId) && isNonBlockingQuestion(store.item(questionId)?.data)) return dismissAsked(questionId); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.'); finishQuestion(questionId, pending, null, 'dismissed'); return; }
       case 'chat.compact': await compactChat(id(p.id), {fresh: p.fresh === true}); return;
       case 'question.respond': {
-        const questionId = id(p.id);
+        const questionId = attentionTarget(id(p.id));
         if (!questions.has(questionId) && isNonBlockingQuestion(store.item(questionId)?.data)) return answerAsked(questionId, p.answers);
         const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.');
         if (Date.now() >= pending.expiresAt) { finishQuestion(questionId, pending, null, 'expired'); throw new Error('This question timed out before it was answered. Use Ask again.'); }
