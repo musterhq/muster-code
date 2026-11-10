@@ -36,6 +36,8 @@ const support = {
   'tests/fixtures/cli-agents/fake-gemini.cjs': 'subprocess fixture for CLI workflows',
   'tests/fixtures/mock-openai-router.ts': 'local HTTP fixture for router workflows',
   'tests/fixtures/paperclip-challenge-mock.ts': 'local HTTP fixture for sign-in workflows',
+  'tests/fixtures/fake-forge-server.ts': 'local HTTP fixture standing in for the GitLab and Bitbucket APIs (#329)',
+  'tests/fixtures/fake-glab.cjs': 'subprocess fixture standing in for the glab CLI (#329)',
   'tests/html-sandbox-security.suite.ts': 'driven by tests/run-html-sandbox-security.mjs',
   'tests/three-model.suite.ts': 'driven by tests/run-three-model.mjs',
   'tests/model-viewer-dom.tsx': 'driven by tests/run-model-viewer-dom.mjs',
