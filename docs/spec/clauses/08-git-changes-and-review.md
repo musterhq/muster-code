@@ -11,6 +11,11 @@ What the user can do:
 Boundaries:
 - Nothing is discarded, reset or force-pushed without a confirm.
 - Checking out, cherry-picking or reverting a commit from history confirms first and never runs over uncommitted changes.
+- create branches and worktrees, commit, push, open a pull request and follow its CI checks;
+- send one prompt to two to four models, each in its own worktree, compare the runs side by side and merge the one they pick.
+
+Boundaries:
+- Nothing is discarded, reset or force-pushed without a confirm. A run's unmerged work is removed only when the user chose to discard it.
 - Large comparisons say when they are cut short; exactly at the limit is not cut short.
 - CI checks that share a name across workflows are listed separately.
 
@@ -56,6 +61,15 @@ Boundaries:
 | [MUS-SPEC-08-409K](08-git-changes-and-review.md#mus-spec-08-409k) | The dialog names the running chat and its confirm reads “… anyway”; confirming sends `allowRunning`. | [`a running chat in the same folder is named before HEAD changes and the confirm says anyway`](../../../packages/agent-app/tests/git-commit-actions-409-dom.tsx) |
 | [MUS-SPEC-08-409L](08-git-changes-and-review.md#mus-spec-08-409l) | After the action reports conflicts, the Changes tab and a conflict tab for the first file are open. | [`a conflicting cherry-pick opens changes and the conflict view for the first file`](../../../packages/agent-app/tests/git-commit-actions-409-dom.tsx) |
 | [MUS-SPEC-08-409M](08-git-changes-and-review.md#mus-spec-08-409m) | The dialog has a name field and a “Switch to it” option; submit sends the name, the commit and the switch choice. | [`create branch here asks for a name and whether to switch to it`](../../../packages/agent-app/tests/git-commit-actions-409-dom.tsx) |
+| [MUS-SPEC-08-175A](08-git-changes-and-review.md#mus-spec-08-175a) | Three chats with the chosen provider and model, each in its own worktree and branch at the start commit, each run given the same prompt and file; the checkout stays clean; 1, 5 or repeated pairs are refused. | [`send to several makes one chat per model in its own worktree off the current branch, all sent the same prompt and files`](../../../packages/agent-app/tests/compare-agents-175.test.ts) |
+| [MUS-SPEC-08-175B](08-git-changes-and-review.md#mus-spec-08-175b) | The send is refused with a message that says the folder must be a Git repository so each agent can work in its own copy. | [`a folder that is not a Git repository is refused and nothing is created`](../../../packages/agent-app/tests/compare-agents-175.test.ts) |
+| [MUS-SPEC-08-175C](08-git-changes-and-review.md#mus-spec-08-175c) | Each run lists its status, how long it took, its tokens, its last reply, its changed files with lines added and removed against the start commit, and the result of the test command it ran. | [`the comparison lists each run with its status, time, tokens, reply, changed files and test result`](../../../packages/agent-app/tests/compare-agents-175.test.ts) |
+| [MUS-SPEC-08-175D](08-git-changes-and-review.md#mus-spec-08-175d) | `main` holds the winner's uncommitted work after a merge commit; the winner's chat is in the original folder; the others are archived; no worktree is left; the kept branch has its work and the discarded one is gone. | [`use this one merges the winner into the original branch, archives the others and removes their worktrees, keeping the branches the user keeps`](../../../packages/agent-app/tests/compare-agents-175.test.ts) |
+| [MUS-SPEC-08-175E](08-git-changes-and-review.md#mus-spec-08-175e) | Picking during a run and picking without a keep/discard choice are both refused; `main`, the chats, worktrees and branches are unchanged. | [`unmerged work is never removed without a keep or discard choice, and nothing is merged while a run is still working`](../../../packages/agent-app/tests/compare-agents-175.test.ts) |
+| [MUS-SPEC-08-175F](08-git-changes-and-review.md#mus-spec-08-175f) | The first pick returns the conflicted file with the merge in progress and worktrees kept; after resolving and continuing, the second pick cleans up. | [`a merge conflict is left for the conflict view and the pick finishes once it is resolved`](../../../packages/agent-app/tests/compare-agents-175.test.ts) |
+| [MUS-SPEC-08-175G](08-git-changes-and-review.md#mus-spec-08-175g) | The comparison is listed with the same runs, branches, start commit and state, and its compare view still shows each run's time and changed files. | [`a comparison and its runs survive a restart`](../../../packages/agent-app/tests/compare-agents-175.test.ts) |
+| [MUS-SPEC-08-175H](08-git-changes-and-review.md#mus-spec-08-175h) | One column per run with model, status, time, tokens, reply, files with counts and tests; a selected file's diff shows per run; Use this one confirms with Keep branch choices and sends them. | [`the compare view shows each run side by side and the diff of one file across runs`](../../../packages/agent-app/tests/compare-agents-175-dom.tsx) |
+| [MUS-SPEC-08-175I](08-git-changes-and-review.md#mus-spec-08-175i) | Send stays off until two models are picked and no more than four can be picked. | [`send to several picks two to four models and starts one comparison`](../../../packages/agent-app/tests/compare-agents-175-dom.tsx) |
 
 ### Refs, dash-named files and submodules
 
@@ -481,4 +495,105 @@ Boundaries:
 - Test: `packages/agent-app/tests/git-commit-actions-409-dom.tsx::create branch here asks for a name and whether to switch to it`
 - Environment: linkedom DOM; stubbed bridge; no Electron.
 - Known gaps: Name validation is git’s own and is reported by the runtime.
+- Evidence: UNVERIFIED
+
+### Compare runs of one prompt on several agents
+
+<a id="mus-spec-08-175a"></a>
+#### MUS-SPEC-08-175A: Send to several gives each model its own chat in its own worktree
+
+- Precondition: A chat in a Git folder on branch `main`, with a file staged in its composer.
+- Action: The user sends one prompt to three provider/model pairs with "Send to several…".
+- Expected result: Three new chats exist, one per pair, each with that provider and model. Each works in its own new worktree on its own branch that starts at the current commit of `main`, and each run receives the same prompt and the staged file. The original checkout is untouched. Fewer than two, more than four, or a repeated pair is refused.
+- Test: `packages/agent-app/tests/compare-agents-175.test.ts::send to several makes one chat per model in its own worktree off the current branch, all sent the same prompt and files`
+- Environment: Node test runner; a real temporary Git repository; a fake provider records each run's folder and prompt.
+- Known gaps: Real providers are not run.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-175b"></a>
+#### MUS-SPEC-08-175B: A folder that is not a Git repository is refused
+
+- Precondition: A chat in a plain folder that is not a Git repository.
+- Action: The user sends a prompt to two models with "Send to several…".
+- Expected result: The send is refused with a message that says the folder must be a Git repository so each agent can work in its own copy. No chat, worktree or comparison is created.
+- Test: `packages/agent-app/tests/compare-agents-175.test.ts::a folder that is not a Git repository is refused and nothing is created`
+- Environment: Node test runner; a real temporary folder; a fake provider.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-175c"></a>
+#### MUS-SPEC-08-175C: The comparison lists each run side by side
+
+- Precondition: A comparison of two runs that have finished: one changed `answer.txt` and passed its tests, the other changed `answer.txt` and added `notes.md` and failed its tests.
+- Action: The compare view asks for the comparison.
+- Expected result: Each run lists its status, how long it took, its tokens, its last reply, its changed files with lines added and removed against the start commit, and the result of the test command it ran. A file's diff can be read for each run against the same start commit.
+- Test: `packages/agent-app/tests/compare-agents-175.test.ts::the comparison lists each run with its status, time, tokens, reply, changed files and test result`
+- Environment: Node test runner; a real temporary Git repository; a fake provider writes files, reports token use and a test command.
+- Known gaps: CI checks show only when a CI repair ran for the folder; a pull request opened by hand from a run's branch is not looked up.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-175d"></a>
+#### MUS-SPEC-08-175D: Use this one merges the winner and clears away the others
+
+- Precondition: A finished comparison of three runs that all changed files.
+- Action: The user picks one run with "Use this one", keeps the second run's branch and discards the third.
+- Expected result: The winner's work, including changes it did not commit, is merged into `main` in the original checkout. The winner's chat moves to the original folder. The other two chats are archived and every worktree is removed. The kept branch still has the second run's work committed on it; the discarded branch is gone. The comparison is marked merged.
+- Test: `packages/agent-app/tests/compare-agents-175.test.ts::use this one merges the winner into the original branch, archives the others and removes their worktrees, keeping the branches the user keeps`
+- Environment: Node test runner; a real temporary Git repository; a fake provider.
+- Known gaps: The merge always makes a merge commit; squash is not offered.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-175e"></a>
+#### MUS-SPEC-08-175E: Unmerged work is never removed without a choice
+
+- Precondition: A comparison where one run is still working, then one where every run has finished with changes.
+- Action: The user picks a winner while a run works, then picks one without saying whether to keep or discard the other run's work.
+- Expected result: Both picks are refused with a message saying what to do. Nothing is merged, no chat is archived and every worktree and branch is still there.
+- Test: `packages/agent-app/tests/compare-agents-175.test.ts::unmerged work is never removed without a keep or discard choice, and nothing is merged while a run is still working`
+- Environment: Node test runner; a real temporary Git repository; a fake provider that can be held mid-run.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-175f"></a>
+#### MUS-SPEC-08-175F: A merge conflict goes to the conflict view
+
+- Precondition: A finished comparison, and a commit on `main` that changes the same lines as the winner.
+- Action: The user picks the winner, resolves the conflict with the existing conflict commands, then picks it again.
+- Expected result: The first pick reports the conflicted files and leaves the merge in progress with every worktree in place. After the conflict is resolved and the merge continued, the second pick archives the others and removes the worktrees.
+- Test: `packages/agent-app/tests/compare-agents-175.test.ts::a merge conflict is left for the conflict view and the pick finishes once it is resolved`
+- Environment: Node test runner; a real temporary Git repository; a fake provider.
+- Known gaps: The conflict screens themselves are covered by their own cases.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-175g"></a>
+#### MUS-SPEC-08-175G: Comparisons survive a restart
+
+- Precondition: A finished comparison of two runs.
+- Action: Muster is closed and opened again on the same data.
+- Expected result: The comparison is listed with the same runs, branches, start commit and state, and its compare view still shows each run's time and changed files.
+- Test: `packages/agent-app/tests/compare-agents-175.test.ts::a comparison and its runs survive a restart`
+- Environment: Node test runner; a real temporary Git repository; the runtime is disposed and created again on the same data folder.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-175h"></a>
+#### MUS-SPEC-08-175H: The compare view shows the runs side by side and asks before picking
+
+- Precondition: A comparison of two finished runs that both changed `answer.txt`.
+- Action: The user opens the compare view, selects `answer.txt`, then presses "Use this one" on a run.
+- Expected result: Each run shows a column with its model, status, time, tokens, reply, changed files with counts and test result. Selecting a file shows its diff in every run that changed it. "Use this one" first shows a confirm that names the branch, the target branch and each other run with a "Keep branch" choice, on by default for a run with work; confirming sends that choice.
+- Test: `packages/agent-app/tests/compare-agents-175-dom.tsx::the compare view shows each run side by side and the diff of one file across runs`
+- Environment: linkedom DOM suite; the real compare screen and the existing diff editor; a fake bridge.
+- Known gaps: Layout and colours need a look in the real app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-175i"></a>
+#### MUS-SPEC-08-175I: The composer picks two to four models to send to
+
+- Precondition: A chat in a Git folder with a draft and three runnable models.
+- Action: The user opens "Send to several…", picks two models and presses Send.
+- Expected result: Send stays off until two models are picked and no more than four can be picked. Pressing Send starts one comparison with the draft, the chosen models and the staged files.
+- Test: `packages/agent-app/tests/compare-agents-175-dom.tsx::send to several picks two to four models and starts one comparison`
+- Environment: linkedom DOM suite; the real picker; a fake bridge.
+- Known gaps: The + menu row that opens the picker is checked in the real app.
 - Evidence: UNVERIFIED

@@ -109,7 +109,9 @@ export type FileBody = {native?: boolean; text: string; truncated: boolean; revi
 export interface AppState {
   /** Settings › Chat "Follow-up behavior": what Enter does while a turn runs (this Mac). */
   followUpMode: FollowUpMode;
-  screen: 'work' | 'providers' | 'projects' | 'plugins' | 'memory' | 'settings' | 'automations' | 'hub';
+  screen: 'work' | 'providers' | 'projects' | 'plugins' | 'memory' | 'settings' | 'automations' | 'hub' | 'compare';
+  /** screen 'compare' (#175): the comparison on screen. */
+  compareId?: string;
   /** Scheduled agent work; kept live by `automationsChanged` events once loaded. */
   automations: Loadable<AutomationView[]>;
   bridgeAvailable: boolean;
@@ -1183,6 +1185,8 @@ export function openProjectsScreen(): void { set({ screen: 'projects', revealed:
 export function openAutomationsScreen(): void { set({ screen: 'automations', revealed: {} }); void loadAutomations(true); }
 /** Inbox, Roster, Ledger, Outputs and task threads (#115). Which one is on screen lives in hubStore. */
 export function openHubScreen(): void { set({ screen: 'hub', revealed: {} }); }
+/** #175: runs of one prompt on several agents, side by side. */
+export function openCompareScreen(id: string): void { set({ screen: 'compare', compareId: id, revealed: {} }); }
 let automationsRequest = 0;
 /** The list stays live through events; this is the first read and the focus refresh. */
 export async function loadAutomations(force = false): Promise<void> {
