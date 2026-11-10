@@ -24,6 +24,7 @@ Boundaries:
 | [MUS-SPEC-15-147B](15-settings-and-themes.md#mus-spec-15-147b) | The first connect stops at `hostkey-unknown` with the SHA256 fingerprint and writes no known_hosts line; a wrong fingerprint is refused; the right one is written to Muster’s own known_hosts (the user’s file is untouched) and the connection then works; a changed key is reported as changed and cannot be trusted with one click. | [`first connect shows the host key fingerprint and trusts it only after confirmation`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
 | [MUS-SPEC-15-147C](15-settings-and-themes.md#mus-spec-15-147c) | When the host refuses every key, the state is `auth` and the message tells the user to run `ssh-add`; every ssh Muster starts runs with BatchMode=yes and StrictHostKeyChecking=yes. | [`a host that wants a passphrase or password asks for ssh-add and never prompts`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
 | [MUS-SPEC-15-147D](15-settings-and-themes.md#mus-spec-15-147d) | Settings › Environments lists the config hosts with an Add button, shows a host waiting for its key with the fingerprint and a Trust button, sends the shown fingerprint, and offers a folder path field for a connected host. | [`the SSH workspaces panel adds a config host and shows the fingerprint before trusting`](../../../packages/agent-app/tests/ssh-workspaces-147-dom.tsx) |
+| [MUS-SPEC-15-147E](15-settings-and-themes.md#mus-spec-15-147e) | The choice defaults to the host’s own login and says Muster sends no key; choosing your key calls remote.hosts.agentCredentials and says it goes as a variable for that run only. | [`agents on a host sign in with the host’s own login unless you choose to pass your key`](../../../packages/agent-app/tests/ssh-workspaces-147-dom.tsx) |
 
 ### Built-in themes
 
@@ -126,4 +127,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/ssh-workspaces-147-dom.tsx::the SSH workspaces panel adds a config host and shows the fingerprint before trusting`
 - Environment: linkedom DOM suite in `scripts/test-renderer.mjs` with the real Settings panel and a stubbed bridge. No Electron, no ssh.
 - Known gaps: Stubbed bridge: the runtime side is covered by the other #147 cases. Layout is not checked.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-15-147e"></a>
+#### MUS-SPEC-15-147E: Agents on a host sign in with the host’s own login unless you choose to pass your key
+
+- Precondition: The SSH workspaces panel with one trusted, connected host.
+- Action: Read the host’s agent sign-in choice, then choose “My API key from Muster”.
+- Expected result: The choice reads the host’s own login by default and says Muster sends no key; choosing the key calls `remote.hosts.agentCredentials` with `muster` for that host and the hint says the key goes as an environment variable for that run only and is never written on the host.
+- Test: `packages/agent-app/tests/ssh-workspaces-147-dom.tsx::agents on a host sign in with the host’s own login unless you choose to pass your key`
+- Environment: DOM suite (linkedom) with the real RemoteHostsPanel and a stubbed bridge; no ssh.
+- Known gaps: Does not open the Electron window.
 - Evidence: UNVERIFIED
