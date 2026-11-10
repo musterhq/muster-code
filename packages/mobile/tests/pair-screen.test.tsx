@@ -1,4 +1,4 @@
-import {fireEvent, render, screen, waitFor} from '@testing-library/react-native';
+import {act, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
 import {PairScreen} from '../src/screens/PairScreen';
 import {createPairingStore, memorySecureStore} from '../src/connection/store';
 import {formatPairingLink, type PairedRecord, type PairingLink} from '../src/shared';
@@ -9,7 +9,9 @@ const record: PairedRecord = {relayUrl: link.relayUrl, route: link.route, deskto
 // Spec: MUS-SPEC-23-4B (docs/spec/clauses/23-mobile.md#mus-spec-23-4b)
 test('pairs from a pasted link and rejects a malformed one', async () => {
   const store = createPairingStore(memorySecureStore());
-  const pairWith = jest.fn(async (_link: PairingLink) => record);
+  let confirm = () => {};
+  const confirmed = new Promise<void>(resolve => { confirm = resolve; });
+  const pairWith = jest.fn(async (_link: PairingLink) => ({record, checkCode: '123456', confirmed}));
   const onPaired = jest.fn();
   await render(<PairScreen pairWith={pairWith} store={store} onPaired={onPaired} />);
   await fireEvent.changeText(screen.getByPlaceholderText('Pairing link'), 'hello');
@@ -19,8 +21,12 @@ test('pairs from a pasted link and rejects a malformed one', async () => {
   expect(await store.load()).toBeNull();
   await fireEvent.changeText(screen.getByPlaceholderText('Pairing link'), formatPairingLink(link));
   await fireEvent.press(screen.getByText('Pair'));
-  expect(await screen.findByText('Paired with Studio Mac')).toBeTruthy();
+  expect(await screen.findByText('123 456')).toBeTruthy();
+  expect(screen.getByText(/confirm it on your computer/i)).toBeTruthy();
   expect(pairWith).toHaveBeenCalledWith(link);
+  expect(await store.load()).toBeNull();
+  await act(async () => { confirm(); });
+  expect(await screen.findByText('Paired with Studio Mac')).toBeTruthy();
   await waitFor(async () => expect(await store.load()).toEqual(record));
   expect(onPaired).toHaveBeenCalledWith(record);
 });

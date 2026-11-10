@@ -17,8 +17,15 @@ import {mobileSeams} from '../src/runtime/domains/mobile.ts';
 import {nodeNoiseCrypto} from '../src/runtime/mobile/node-crypto.ts';
 import {connectPhone, pairPhone, MobileError, type MobileConnection, type PairedRecord} from '../src/shared/mobile/client.ts';
 import {parsePairingLink, formatPairingLink, type MobileEvent} from '../src/shared/mobile/protocol.ts';
+import {MODE_BYTE, prologue, SecureChannel} from '../src/shared/mobile/channel.ts';
+import {Handshake, NOISE_MAX_MESSAGE, type NoiseCrypto} from '../src/shared/mobile/noise.ts';
+import {fromBase64, toBase64, utf8} from '../src/shared/mobile/bytes.ts';
+import {handle, mobileItem} from '../src/runtime/mobile/bridge.ts';
+import type {AgentEvent, Snapshot, TimelineItem} from '../src/shared/protocol.ts';
+import {createHash, createPrivateKey, sign as edSign} from 'node:crypto';
 
-const box = {isEncryptionAvailable: () => true, encryptString: (value: string) => Buffer.from(`box:${value}`), decryptString: (value: Buffer) => value.toString().slice(4)};
+/** An OS secret box double; `broken` makes every decryption fail (a keychain that can no longer be read). */
+const makeBox = () => { const b = {broken: false, isEncryptionAvailable: () => true, encryptString: (value: string) => Buffer.from(`box:${value}`), decryptString: (value: Buffer) => { if (b.broken) throw new Error('cannot decrypt'); return value.toString().slice(4); }}; return b; };
 const socket = (url: string) => new WebSocket(url);
 const crypto = nodeNoiseCrypto();
 
@@ -42,28 +49,35 @@ function scripted(script: (input: ProviderInput, turn: number) => Promise<Provid
 }
 const quick = () => scripted(async input => { input.onDelta?.('ok'); return {status: 'completed', finalMessage: 'ok'}; });
 
-interface Desktop { relay: DevRelay; service: ReturnType<typeof createAgentService>; dataDir: string }
-async function desktop(t: TestContext, provider: ProviderAdapter, options: {secure?: boolean; pairingTtlMs?: number} = {}): Promise<Desktop> {
-  const relay = await startRelay();
+interface Desktop { relay: DevRelay; service: ReturnType<typeof createAgentService>; dataDir: string; box: ReturnType<typeof makeBox>; secrets: SecretStore; events: AgentEvent[] }
+async function desktop(t: TestContext, provider: ProviderAdapter, options: {secure?: boolean; pairingTtlMs?: number; relayTest?: boolean; handshakeTimeoutMs?: number; maxPendingSessions?: number} = {}): Promise<Desktop> {
+  const relay = await startRelay({test: options.relayTest !== false});
   const dataDir = await mkdtemp(join(tmpdir(), 'muster-mobile-326-'));
+  const box = makeBox();
   const secrets = new SecretStore(dataDir, () => options.secure === false ? undefined : box);
   mobileSeams.secrets = () => secrets;
   if (options.pairingTtlMs) mobileSeams.pairingTtlMs = options.pairingTtlMs;
-  const service = createAgentService({dataDir, provider, onEvent() {}});
+  if (options.handshakeTimeoutMs) mobileSeams.handshakeTimeoutMs = options.handshakeTimeoutMs;
+  if (options.maxPendingSessions) mobileSeams.maxPendingSessions = options.maxPendingSessions;
+  const events: AgentEvent[] = [];
+  const service = createAgentService({dataDir, provider, onEvent(event) { events.push(event); }});
   t.after(async () => {
     await service.dispose();
     await relay.close();
     secrets.close();
-    delete mobileSeams.secrets; delete mobileSeams.pairingTtlMs;
+    for (const key of Object.keys(mobileSeams)) delete (mobileSeams as Record<string, unknown>)[key];
     await rm(dataDir, {recursive: true, force: true, maxRetries: 5, retryDelay: 200});
   });
   await service.invoke('mobile.relay.set', {url: relay.url});
-  return {relay, service, dataDir};
+  return {relay, service, dataDir, box, secrets, events};
 }
+/** Pairs a phone and confirms its check code on the desktop, as the owner would. */
 async function pair(t: TestContext, d: Desktop, name = 'Test phone'): Promise<{client: MobileConnection; record: PairedRecord; link: string}> {
   const {link} = await d.service.invoke('mobile.pair.start', {});
-  const {client, record} = await pairPhone({link, crypto, socket, name, platform: 'ios'});
+  const {client, record, checkCode, confirmed} = await pairPhone({link, crypto, socket, name, platform: 'ios'});
   t.after(() => client.close());
+  await d.service.invoke('mobile.pair.confirm', {checkCode});
+  await confirmed;
   return {client, record, link};
 }
 async function allowAct(d: Desktop, client: MobileConnection) {
@@ -89,8 +103,11 @@ test('a phone pairs with the QR link through the relay and is listed read-only',
   assert.ok(parsed.route.length >= 16 && parsed.desktopKey && parsed.code, 'route, key and code');
   assert.ok(Date.parse(expiresAt) > Date.now());
   assert.ok((await d.service.invoke('mobile.status', {})).pairing, 'pairing open');
-  const {client, record} = await pairPhone({link, crypto, socket, name: 'Dhairya’s iPhone', platform: 'ios'});
+  const {client, record, checkCode, confirmed} = await pairPhone({link, crypto, socket, name: 'Dhairya’s iPhone', platform: 'ios'});
   t.after(() => client.close());
+  await d.service.invoke('mobile.pair.confirm', {checkCode});
+  await confirmed;
+  await until(async () => (await d.service.invoke('mobile.status', {})).devices[0]?.connected === true, 'connected');
   assert.equal(client.desktopName, parsed.desktopName);
   assert.equal(client.access, 'read-only');
   assert.equal(record.desktopKey, parsed.desktopKey);
@@ -108,6 +125,7 @@ test('a pairing code works once, expires, and a wrong code stores nothing', asyn
   const first = await pair(t, d);
   const reused = await rejection(pairPhone({link: first.link, crypto, socket, name: 'Second', platform: 'android'}));
   assert.equal(reused.code, 'pairing-failed');
+  assert.match(reused.message, /already used/);
   const {link} = await d.service.invoke('mobile.pair.start', {});
   const wrong = parsePairingLink(link);
   const flipped = formatPairingLink({...wrong, code: wrong.code.slice(0, -2) + (wrong.code.endsWith('AA') ? 'BB' : 'AA')});
@@ -362,4 +380,267 @@ test('a tampered or replayed frame is rejected and closes the session', async t 
   await delay(100);
   assert.deepEqual(await userTexts(d, chat.id), ['once']);
   await until(() => prompts.length === 1, 'one run');
+});
+
+// --- Security review (#862): relay registration, pairing confirmation, unreadable keys, close codes, hardening -----------
+
+const ED_PKCS8 = Buffer.from('302e020100300506032b657004220420', 'hex');
+/** The desktop's route signing key, read from its secret store as the test's stand-in for someone who stole nothing else. */
+function routeKey(d: Desktop) {
+  const [publicKey, privateKey] = d.secrets.get('mobile-route-key')!.split('.');
+  return {publicKey: publicKey!, sign: (data: Uint8Array) => toBase64(new Uint8Array(edSign(null, data, createPrivateKey({key: Buffer.concat([ED_PKCS8, Buffer.from(fromBase64(privateKey!))]), format: 'der', type: 'pkcs8'}))))};
+}
+const REGISTER = (nonce: string) => utf8(`muster-relay/1 register ${nonce}`);
+/** A raw desktop-side connection to the relay: resolves with its first challenge; `closed` settles when the relay closes it. */
+function rawDesktop(relay: DevRelay) {
+  const ws = new WebSocket(`${relay.url}/v1/desktop`);
+  const messages: Array<{t: string; nonce?: string; route?: string}> = [];
+  const challenge = new Promise<string>((resolve, reject) => {
+    ws.onmessage = event => { const message = JSON.parse(String(event.data)); messages.push(message); if (message.t === 'challenge') resolve(message.nonce); };
+    ws.onerror = () => reject(new Error('socket error'));
+  });
+  const closed = new Promise<number>(resolve => { ws.onclose = event => resolve(event.code); });
+  return {ws, messages, challenge, closed};
+}
+
+// Spec: MUS-SPEC-23-6A (docs/spec/clauses/23-mobile.md#mus-spec-23-6a)
+test('the relay registers a route only for a fresh signature; a replayed or forged registration is refused and the live one stays', async t => {
+  const d = await desktop(t, quick().provider);
+  await d.service.invoke('mobile.pair.start', {});
+  const key = routeKey(d);
+  // A signature made for one nonce does not register on another connection.
+  const first = rawDesktop(d.relay);
+  const oldNonce = await first.challenge;
+  const replayed = {t: 'register', key: key.publicKey, sig: key.sign(REGISTER(oldNonce))};
+  first.ws.close();
+  const second = rawDesktop(d.relay);
+  await second.challenge;
+  second.ws.send(JSON.stringify(replayed));
+  assert.ok(await second.closed >= 4000, 'the replayed registration is closed');
+  assert.ok(!second.messages.some(message => message.t === 'registered'));
+  // The route's public key with a bad signature does not register either.
+  const third = rawDesktop(d.relay);
+  const nonce = await third.challenge;
+  const bad = fromBase64(key.sign(REGISTER(nonce))); bad[0]! ^= 1;
+  third.ws.send(JSON.stringify({t: 'register', key: key.publicKey, sig: toBase64(bad)}));
+  assert.ok(await third.closed >= 4000, 'the forged registration is closed');
+  assert.ok(!third.messages.some(message => message.t === 'registered'));
+  // The live registration stays: a phone still pairs through it.
+  await pair(t, d);
+  assert.equal((await d.service.invoke('mobile.status', {})).devices.length, 1);
+  // A relay not started for tests records nothing.
+  const plain = await desktop(t, quick().provider, {relayTest: false});
+  await pair(t, plain);
+  assert.equal(plain.relay.frames.length, 0);
+});
+
+// Spec: MUS-SPEC-23-6B (docs/spec/clauses/23-mobile.md#mus-spec-23-6b)
+test('a relay address must be wss:// except on loopback and private networks', async t => {
+  const d = await desktop(t, quick().provider);
+  await assert.rejects(d.service.invoke('mobile.relay.set', {url: 'ws://relay.example.com'}), /wss:\/\//);
+  for (const url of ['ws://192.168.1.5:7480', 'ws://10.0.0.2', 'ws://127.0.0.1:7480', 'ws://localhost:7480', 'wss://relay.example.com']) {
+    assert.equal((await d.service.invoke('mobile.relay.set', {url})).relayUrl, url, url);
+  }
+  const link = (relayUrl: string) => formatPairingLink({relayUrl, route: 'a'.repeat(32), desktopKey: 'k'.repeat(43), code: 'c'.repeat(43), desktopName: 'Studio'});
+  assert.throws(() => parsePairingLink(link('ws://relay.example.com')), (error: unknown) => (error as MobileError).code === 'bad-link');
+  assert.equal(parsePairingLink(link('wss://relay.example.com')).relayUrl, 'wss://relay.example.com');
+  assert.equal(parsePairingLink(link('ws://192.168.1.5:7480')).relayUrl, 'ws://192.168.1.5:7480');
+});
+
+const fingerprintOf = (publicKey: string) => createHash('sha256').update(fromBase64(publicKey)).digest('hex').slice(0, 16).replace(/(.{4})(?!$)/g, '$1 ');
+
+// Spec: MUS-SPEC-23-7A (docs/spec/clauses/23-mobile.md#mus-spec-23-7a)
+test('a new phone waits for the check code to be confirmed on the desktop and cannot act or reconnect until then', async t => {
+  const d = await desktop(t, quick().provider);
+  const {link} = await d.service.invoke('mobile.pair.start', {});
+  const {client, record, checkCode, confirmed} = await pairPhone({link, crypto, socket, name: 'Dhairya’s iPhone', platform: 'ios'});
+  t.after(() => client.close());
+  assert.match(checkCode, /^\d{6}$/);
+  const pending = (await d.service.invoke('mobile.status', {})).pairing?.pending;
+  assert.deepEqual(pending, {name: 'Dhairya’s iPhone', platform: 'ios', checkCode, fingerprint: fingerprintOf(record.publicKey)});
+  assert.equal((await rejection(client.call('chats.list', {}))).code, 'pending');
+  assert.deepEqual((await d.service.invoke('mobile.status', {})).devices, []);
+  assert.equal((await rejection(connectPhone({record, crypto, socket}))).code, 'revoked', 'a pending phone can’t open a session');
+  const wrong = checkCode === '000000' ? '111111' : '000000';
+  await assert.rejects(d.service.invoke('mobile.pair.confirm', {checkCode: wrong}), /check code/i);
+  await d.service.invoke('mobile.pair.confirm', {checkCode});
+  await confirmed;
+  const [phone] = (await d.service.invoke('mobile.status', {})).devices;
+  assert.equal(phone?.name, 'Dhairya’s iPhone');
+  assert.equal(phone?.platform, 'ios');
+  assert.equal(phone?.access, 'read-only');
+  assert.equal(phone?.fingerprint, fingerprintOf(record.publicKey));
+  assert.ok(Date.parse(phone!.pairedAt) <= Date.now());
+  assert.ok(d.events.some(event => event.type === 'notice' && /^A phone named Dhairya’s iPhone paired at /.test(event.message)), 'a desktop notice');
+  assert.ok(Array.isArray((await client.call('chats.list', {})).chats), 'it can read now');
+});
+
+// Spec: MUS-SPEC-23-7B (docs/spec/clauses/23-mobile.md#mus-spec-23-7b)
+test('a second phone using a taken code is told to check the desktop list, and the owner can reject the first', async t => {
+  const d = await desktop(t, quick().provider);
+  const {link} = await d.service.invoke('mobile.pair.start', {});
+  const attacker = await pairPhone({link, crypto, socket, name: 'Owner’s iPhone', platform: 'ios'});
+  t.after(() => attacker.client.close());
+  attacker.confirmed.catch(() => undefined);
+  const owner = await rejection(pairPhone({link, crypto, socket, name: 'Owner’s iPhone', platform: 'ios'}));
+  assert.equal(owner.code, 'pairing-failed');
+  assert.match(owner.message, /already used/);
+  assert.match(owner.message, /check/i);
+  await d.service.invoke('mobile.pair.reject', {});
+  await until(() => attacker.client.closed, 'the pending phone is disconnected');
+  const status = await d.service.invoke('mobile.status', {});
+  assert.deepEqual(status.devices, []);
+  assert.equal(status.pairing, null);
+});
+
+// Spec: MUS-SPEC-23-7C (docs/spec/clauses/23-mobile.md#mus-spec-23-7c)
+test('mobile.status never carries the pairing link or code', async t => {
+  const d = await desktop(t, quick().provider);
+  const {link, expiresAt} = await d.service.invoke('mobile.pair.start', {});
+  const json = JSON.stringify(await d.service.invoke('mobile.status', {}));
+  const {code} = parsePairingLink(link);
+  assert.ok(!json.includes(code) && !json.includes('muster://'), 'no code or link in status');
+  assert.ok(json.includes(expiresAt), 'the expiry is there');
+  assert.deepEqual(await d.service.invoke('mobile.pair.link', {}), {link, expiresAt});
+});
+
+// Spec: MUS-SPEC-23-8A (docs/spec/clauses/23-mobile.md#mus-spec-23-8a)
+test('an unreadable phone key is refused, never replaced, and Reset phone access rotates it', async t => {
+  const d = await desktop(t, quick().provider);
+  const {record, link} = await pair(t, d);
+  const before = JSON.parse(await readFile(join(d.dataDir, 'secrets.json'), 'utf8')).secrets['mobile-desktop-key'].cipher;
+  // The keychain can no longer decrypt, and nothing is cached: a new store over the same file.
+  d.box.broken = true;
+  const fresh = new SecretStore(d.dataDir, () => d.box);
+  t.after(() => fresh.close());
+  mobileSeams.secrets = () => fresh;
+  await assert.rejects(d.service.invoke('mobile.pair.start', {}), /can.t read[\s\S]*Reset phone access/i);
+  const after = JSON.parse(await readFile(join(d.dataDir, 'secrets.json'), 'utf8')).secrets['mobile-desktop-key'].cipher;
+  assert.equal(after, before, 'the stored key is left as it was');
+  await d.service.invoke('mobile.reset', {});
+  assert.deepEqual((await d.service.invoke('mobile.status', {})).devices, []);
+  const next = parsePairingLink((await d.service.invoke('mobile.pair.start', {})).link);
+  const old = parsePairingLink(link);
+  assert.notEqual(next.route, old.route);
+  assert.notEqual(next.desktopKey, old.desktopKey);
+  const gone = await rejection(connectPhone({record, crypto, socket}));
+  assert.ok(gone.code === 'offline' || gone.code === 'revoked', gone.code);
+});
+
+// Spec: MUS-SPEC-23-9A (docs/spec/clauses/23-mobile.md#mus-spec-23-9a)
+test('a first message that does not decrypt closes with 4400, and only an unknown key closes with 4403', async t => {
+  const d = await desktop(t, quick().provider);
+  const {record} = await pair(t, d);
+  const otherDesktop = toBase64(crypto.generateKeyPair().publicKey, true);
+  const garbled = await rejection(connectPhone({record: {...record, desktopKey: otherDesktop}, crypto, socket}));
+  assert.equal(garbled.code, 'closed');
+  const stranger = crypto.generateKeyPair();
+  const unknown = await rejection(connectPhone({record: {...record, publicKey: toBase64(stranger.publicKey, true), privateKey: toBase64(stranger.privateKey, true)}, crypto, socket}));
+  assert.equal(unknown.code, 'revoked');
+});
+
+/** A session handshake done by hand, so the test controls what is sent after it. */
+async function rawSession(record: PairedRecord) {
+  const ws = new WebSocket(`${record.relayUrl}/v1/phone/${record.route}`);
+  const noise = new Handshake(crypto, {pattern: 'IK', initiator: true, s: {publicKey: fromBase64(record.publicKey), privateKey: fromBase64(record.privateKey)}, rs: fromBase64(record.desktopKey), prologue: prologue('session')});
+  const replies: string[] = [];
+  await new Promise<void>((resolve, reject) => { ws.onopen = () => resolve(); ws.onerror = () => reject(new Error('socket')); });
+  const first = new Promise<string>(resolve => { ws.onmessage = event => { replies.push(String(event.data)); if (replies.length === 1) resolve(String(event.data)); }; });
+  const message = noise.writeMessage(utf8('{"v":1}'));
+  ws.send(toBase64(Uint8Array.from([MODE_BYTE.session, ...message])));
+  noise.readMessage(fromBase64(await first));
+  const {send, receive} = noise.split();
+  return {ws, channel: new SecureChannel(send, receive), replies};
+}
+
+// Spec: MUS-SPEC-23-10A (docs/spec/clauses/23-mobile.md#mus-spec-23-10a)
+test('a phone counts as connected only after its first valid encrypted message', async t => {
+  const d = await desktop(t, quick().provider);
+  const {client, record} = await pair(t, d);
+  client.close();
+  await until(async () => (await d.service.invoke('mobile.status', {})).devices[0]?.connected === false, 'disconnected');
+  const seen = (await d.service.invoke('mobile.status', {})).devices[0]!.lastSeenAt;
+  await delay(20);
+  const raw = await rawSession(record);
+  t.after(() => raw.ws.close());
+  await delay(100);
+  const mid = (await d.service.invoke('mobile.status', {})).devices[0]!;
+  assert.equal(mid.connected, false, 'not connected after the handshake alone');
+  assert.equal(mid.lastSeenAt, seen, 'last seen unchanged');
+  for (const message of raw.channel.seal({t: 'req', id: 1, m: 'hello', p: {}})) raw.ws.send(message);
+  await until(async () => (await d.service.invoke('mobile.status', {})).devices[0]?.connected === true, 'connected after hello');
+  assert.ok(Date.parse((await d.service.invoke('mobile.status', {})).devices[0]!.lastSeenAt!) > Date.parse(seen!));
+});
+
+// Spec: MUS-SPEC-23-10B (docs/spec/clauses/23-mobile.md#mus-spec-23-10b)
+test('stalled handshakes time out, pending connections are capped, and wrong codes do not end the pairing', async t => {
+  const d = await desktop(t, quick().provider, {handshakeTimeoutMs: 300, maxPendingSessions: 3});
+  const {link} = await d.service.invoke('mobile.pair.start', {});
+  const parsed = parsePairingLink(link);
+  const silent = () => { const ws = new WebSocket(`${parsed.relayUrl}/v1/phone/${parsed.route}`); const closed = new Promise<number>(resolve => { ws.onclose = event => resolve(event.code); }); return {ws, closed, at: Date.now()}; };
+  const stalled = silent();
+  const code = await stalled.closed;
+  assert.ok(code >= 4000 && Date.now() - stalled.at >= 250, `closed after the timeout (${code})`);
+  const crowd = [silent(), silent(), silent()];
+  await delay(50);
+  const extra = silent();
+  const extraCode = await Promise.race([extra.closed, delay(250).then(() => 0)]);
+  assert.ok(extraCode >= 4000, 'the connection over the cap closes at once');
+  for (const c of crowd) c.ws.close();
+  await delay(50);
+  for (let i = 0; i < 6; i++) {
+    const wrong = formatPairingLink({...parsed, code: toBase64(crypto.randomBytes(32), true)});
+    assert.equal((await rejection(pairPhone({link: wrong, crypto, socket, name: 'Junk', platform: 'android'}))).code, 'pairing-failed');
+  }
+  const good = await pairPhone({link, crypto, socket, name: 'Mine', platform: 'ios'});
+  t.after(() => good.client.close());
+  good.confirmed.catch(() => undefined);
+  assert.equal((await d.service.invoke('mobile.status', {})).pairing?.pending?.name, 'Mine');
+});
+
+const snapshotOf = (chats: Array<{id: string}>): Snapshot => ({folders: [], projects: [], version: 1, chats: chats.map(chat => ({id: chat.id, title: 'T', pinned: false, archived: false, draft: '', status: 'idle', updatedAt: new Date().toISOString()})) as Snapshot['chats']});
+
+// Spec: MUS-SPEC-23-10C (docs/spec/clauses/23-mobile.md#mus-spec-23-10c)
+test('access and the session are checked again right before the runtime command runs', async () => {
+  const invoked: string[] = [];
+  let access: 'act' | 'read-only' = 'act', alive = true;
+  const ctx = {
+    invoke: (async (command: string) => { invoked.push(command); return {runId: 'r'}; }) as never,
+    snapshot: async () => { access = 'read-only'; return snapshotOf([{id: 'c1'}]); },
+    access: () => access, alive: () => alive, desktopName: 'Studio', deviceId: 'p1', watch() {},
+  };
+  const params = {id: 'c1', text: 'hi', requestId: 'r1'};
+  assert.equal((await rejection(handle(ctx, 'chat.send', params) as Promise<unknown>)).code, 'read-only');
+  access = 'act';
+  ctx.snapshot = async () => { alive = false; return snapshotOf([{id: 'c1'}]); };
+  assert.equal((await rejection(handle(ctx, 'chat.send', params) as Promise<unknown>)).code, 'closed');
+  assert.deepEqual(invoked, []);
+});
+
+// Spec: MUS-SPEC-23-10D (docs/spec/clauses/23-mobile.md#mus-spec-23-10d)
+test('frames over 65,535 bytes are refused before decrypting', () => {
+  let decrypts = 0;
+  const counting: NoiseCrypto = {...crypto, decrypt: (...args) => { decrypts++; return crypto.decrypt(...args); }};
+  const keys = counting.generateKeyPair();
+  const responder = new Handshake(counting, {pattern: 'IK', initiator: false, s: keys, prologue: prologue('session')});
+  assert.throws(() => responder.readMessage(new Uint8Array(NOISE_MAX_MESSAGE + 1)), /too large/i);
+  const initiator = new Handshake(counting, {pattern: 'IK', initiator: true, s: counting.generateKeyPair(), rs: keys.publicKey, prologue: prologue('session')});
+  const other = new Handshake(counting, {pattern: 'IK', initiator: false, s: keys, prologue: prologue('session')});
+  other.readMessage(initiator.writeMessage());
+  initiator.readMessage(other.writeMessage());
+  const split = initiator.split();
+  const channel = new SecureChannel(split.send, split.receive);
+  decrypts = 0;
+  assert.throws(() => channel.open(toBase64(new Uint8Array(70_000))), /too large/i);
+  assert.equal(decrypts, 0);
+});
+
+// Spec: MUS-SPEC-23-10E (docs/spec/clauses/23-mobile.md#mus-spec-23-10e)
+test('the phone gets folder names and relative file paths, never full paths', () => {
+  const item = (data: Record<string, unknown>): TimelineItem => ({id: 'a', chatId: 'c', kind: 'approval', text: 'Approve', status: 'pending', createdAt: new Date().toISOString(), data});
+  const command = mobileItem(item({method: 'item/commandExecution/requestApproval', kind: 'command', command: 'npm test', cwd: '/Users/someone/work/app'}));
+  assert.equal(command.approval?.cwd, 'app');
+  const files = mobileItem(item({method: 'item/fileChange/requestApproval', kind: 'fileChange', cwd: '/Users/someone/work/app', diff: [{path: '/Users/someone/work/app/src/a.ts'}, {path: 'README.md'}, {path: '/etc/hosts'}]}));
+  assert.deepEqual(files.approval?.files, ['src/a.ts', 'README.md', 'hosts']);
+  assert.ok(!JSON.stringify([command, files]).includes('/Users/someone'));
 });
