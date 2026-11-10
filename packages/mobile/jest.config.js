@@ -3,5 +3,7 @@
 module.exports = {
   preset: 'jest-expo',
   testMatch: ['<rootDir>/tests/**/*.test.ts?(x)'],
+  // The shared files sit outside this package; babel helpers they need resolve from this package's node_modules.
+  modulePaths: ['<rootDir>/node_modules'],
   transformIgnorePatterns: ['node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|expo-router|@noble/.*|@testing-library/.*))'],
 };
