@@ -34,7 +34,7 @@ export function PhoneSettings(): React.ReactElement {
   const [confirming, setConfirming] = useState<string | null>(null);
   const noun = device();
   const reload = useCallback(async () => {
-    try { const next = await invoke('mobile.status', {}); setStatus(next); setRelay(current => current || next.relayUrl || ''); } catch (cause) { notifyError(cause); }
+    try { const next = await invoke('mobile.status', {}); if (!next) return; setStatus(next); setRelay(current => current || next.relayUrl || ''); } catch (cause) { notifyError(cause); }
   }, []);
   useEffect(() => {
     void reload();
