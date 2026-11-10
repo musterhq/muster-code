@@ -138,6 +138,8 @@ const COMMANDS = {
   'providers.save': true,
   'providers.remove': true,
   'providers.check': true,
+  'providers.acp.save': true,
+  'providers.acp.check': true,
   'providers.cancelCheck': true,
   'plugins.list': true,
   'plugins.inventory': true,

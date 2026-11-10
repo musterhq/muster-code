@@ -110,12 +110,12 @@ function windowsComponentProblem(component: string): string | undefined {
 }
 const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT' || (error as NodeJS.ErrnoException)?.code === 'ENOTDIR';
 
-interface Resolved { path: string; base: string; confined: boolean }
+export interface Resolved { path: string; base: string; confined: boolean }
 /**
  * Lexical check, then an lstat of every component below the folder: outside Full access a link (symlink, junction or
  * other reparse point) anywhere on the way is refused, whether or not its target exists yet.
  */
-async function resolvePath(raw: unknown, ctx: ToolContext): Promise<Resolved> {
+export async function resolvePath(raw: unknown, ctx: Pick<ToolContext, 'cwd' | 'access'>): Promise<Resolved> {
   if (typeof raw !== 'string' || !raw.trim() || raw.includes('\0')) throw new Error('A path is required.');
   const lexicalBase = normalizeFsPath(ctx.cwd);
   const target = normalizeFsPath(isAbsolute(raw) || /^[A-Za-z]:|^\\\\/.test(raw) ? raw : join(lexicalBase, raw));
@@ -134,7 +134,7 @@ async function resolvePath(raw: unknown, ctx: ToolContext): Promise<Resolved> {
   return {path: join(base, ...parts), base, confined: true};
 }
 /** Workspace writes walk pinned directory handles; no creating syscall resolves a checked parent by path. */
-async function writeConfined(resolved: Resolved, content: string): Promise<void> {
+export async function writeConfined(resolved: Resolved, content: string): Promise<void> {
   const {path, base, confined} = resolved;
   if (!confined) { await fs.mkdir(dirname(path), {recursive: true}); await fs.writeFile(path, content, 'utf8'); return; }
   const parts = relative(base, path).split(sep).filter(Boolean);
@@ -143,7 +143,7 @@ async function writeConfined(resolved: Resolved, content: string): Promise<void>
 }
 
 /** At most `limit` bytes of a regular file, never the whole thing. */
-async function readLimited(path: string, limit: number, refuseHardLinked = false, offset = 0): Promise<{text: string; size: number; bytesRead: number}> {
+export async function readLimited(path: string, limit: number, refuseHardLinked = false, offset = 0): Promise<{text: string; size: number; bytesRead: number}> {
   // stat first: opening a FIFO or device for reading can block forever.
   if (!(await fs.stat(path)).isFile()) throw new Error(`${path} is not a regular file.`);
   const handle = await fs.open(path, fsc.O_RDONLY);

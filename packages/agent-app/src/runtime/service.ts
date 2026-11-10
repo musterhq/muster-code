@@ -18,6 +18,7 @@ import { discoverLocalProviders } from './provider-discovery.ts';
 import { homedir } from 'node:os';
 import { absentCliAgentRows } from './adapters/cli-agents.ts';
 import { CustomProviders } from './custom-providers.ts';
+import { AcpAgents } from './acp-agents.ts';
 import { AgentStore } from './store.ts';
 import { applyFolderAliases, canonicalFolderPath } from './folder-merge.ts';
 import { WorkspaceWatchService } from './workspace-watch.ts';
@@ -176,6 +177,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const contextLedger = new ContextLedger();
   const projectTasks = new ProjectTaskStore(options.dataDir);
   const customProviders = new CustomProviders(options.dataDir);
+  /** #160: ACP agents added in Settings › Providers. */
+  const acpAgents = new AcpAgents(options.dataDir);
   const annotations = new FileAnnotations(options.dataDir);
   const provider = options.provider ?? createProviderAdapter();
   /** R5: whether an agent command would stop a process the user started in Muster (terminal shell or Commands-tab command). */
@@ -1776,7 +1779,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         ...detected.filter(entry=>!runtime.some(runnable=>runnable.id===entry.id||(runnable.codex?.kind==='gateway'&&runnable.codex.modelProvider===entry.id&&!runnable.codex.account))&&shown(entry)).map(({identity,credentialPresent,...entry})=>({...entry,available:false,models:[],canReveal:Boolean(identity),source:'Local configuration discovery',detail:`${entry.detail}. No runnable adapter is enabled for this entry.`})),
         // Agent CLIs that are not installed: listed (with How to install) but never offered in the model picker.
         ...(process.env.NODE_TEST_CONTEXT && process.env.MUSTER_PROVIDER_ADAPTERS !== '1' ? [] : absentCliAgentRows(process.env, homedir()).filter(row => !runtime.some(entry => entry.id === row.id))),
-        ...customProviders.list()];
+        ...customProviders.list(), ...acpAgents.list()];
     }
     if (command === 'plugins.inventory') return discoverPlugins();
     const p = input === undefined && domains.handlers.has(command) ? {} : object(input);
@@ -2437,7 +2440,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'git.diff': { const root = folderFor(p.folderId).path; const result = await new AgentModeReviewHost(() => root).readChange(text(p.path,'path')); if (result.error) throw new Error(result.error); return {path: result.path, before: result.before, after: result.after, truncated: result.truncated}; }
       case 'providers.save': return customProviders.save({id:p.id,name:p.name,endpoint:p.endpoint,apiKeyEnv:p.apiKeyEnv});
       case 'providers.cancelCheck': customProviders.cancel(id(p.id)); return;
-      case 'providers.remove': { const key=id(p.id); if(!key.startsWith('custom_')) throw new Error('Discovered connections are managed in their original app.'); customProviders.remove(key); return; }
+      case 'providers.remove': { const key=id(p.id); if(key.startsWith('acp_')&&acpAgents.has(key)){acpAgents.remove(key);return;} if(!key.startsWith('custom_')) throw new Error('Discovered connections are managed in their original app.'); customProviders.remove(key); return; }
+      case 'providers.acp.save': return acpAgents.save({id:p.id,name:p.name,command:p.command,args:p.args,env:p.env,preset:p.preset});
+      case 'providers.acp.check': return acpAgents.check(id(p.id));
       case 'providers.check': return customProviders.check(id(p.id));
       case 'providers.reveal': { const key=id(p.id), source=key==='openai-direct'?'codex':key; const info=(await discoverLocalProviders()).find(row=>row.id===source); if(!info?.identity) throw new Error('This connection has no account label to reveal.'); return {identity:info.identity}; }
       case 'memory.list': { const context = memoryContext(p.folderId); const objects = await listMemory(context.cwd); return new MemoryTombstones(options.dataDir).filter(objects.filter(object => isVisibleInScopes(object, context.scopes))); }
@@ -2624,7 +2629,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       await Promise.allSettled([...invocations,...[...runs.values()].flatMap(run => run.promise ? [run.promise] : [])]);
       await domains.dispose();
       await toolOutputLog.flush().catch(() => {});
-      disposed = true; snapshots.dispose(); for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); annotations.close(); projectTasks.close(); store.close();
+      disposed = true; snapshots.dispose(); for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); acpAgents.close(); annotations.close(); projectTasks.close(); store.close();
     })();
     return disposal;
   }};
