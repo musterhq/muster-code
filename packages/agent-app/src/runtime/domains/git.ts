@@ -2,6 +2,7 @@ import {promises as fs} from 'node:fs';
 import {commitGit, createWorktree, fetchGit, gitInfo, headMessage, listBranches, listWorktrees, removeWorktree, switchBranch} from '../git-local.ts';
 import {blameFile, commitDetail, compareRefs, listCommits, refDiff} from '../git-history.ts';
 import {conflictFile, conflictState, continueOperation, markResolved, writeConflict} from '../git-conflicts.ts';
+import {commitAction} from '../git-commit-actions.ts';
 import {cancelClone, defaultDestination, disposeClones, startClone} from '../git-clone.ts';
 import type {Folder} from '../../shared/protocol.ts';
 import type {DomainContext, DomainModule} from './types.ts';
@@ -84,6 +85,15 @@ export function createGitDomain(context: DomainContext): DomainModule {
       const target = folder(input.folderId);
       if (busy(target.id)) throw new Error('A chat is running in this folder. Stop it before continuing or aborting.');
       const result = await continueOperation(target.path, input.action);
+      changed(target); return result;
+    },
+    // Commit actions from the history graph (#409). Changing HEAD under a running chat needs the person's confirmation of the warning.
+    'git.commitAction': async input => {
+      const target = folder(input.folderId);
+      const movesHead = input.action !== 'branch' || input.checkout === true;
+      if (movesHead && input.allowRunning !== true && busy(target.id)) throw new Error('A chat is running in this folder. Confirm the warning, or stop the chat, before changing what is checked out.');
+      const identity = input.action === 'cherry-pick' || input.action === 'revert' ? context.hooks.commitIdentity?.(target.id) ?? undefined : undefined;
+      const result = await commitAction(target.path, {action: input.action, sha: input.sha, revision: input.revision, branch: input.branch, checkout: input.checkout === true, ...(identity ? {identity} : {})});
       changed(target); return result;
     },
     // Clone (GIT-10): progress streams as gitClone events; the finished checkout is added as a folder before the done event.
