@@ -35,6 +35,7 @@ Boundaries:
 | [MUS-SPEC-05-841D](05-access-modes-and-approvals.md#mus-spec-05-841d) | A Claude Code chat in Auto access sends its permission prompts to Muster in default mode; a safe git command is allowed at once and git push waits for the card. | [`Auto access on Claude Code: prompts reach Muster, a safe command is allowed at once and git push still asks`](../../../packages/agent-app/tests/auto-approvals-841.test.ts) |
 | [MUS-SPEC-05-841E](05-access-modes-and-approvals.md#mus-spec-05-841e) | Codex runs Auto with a workspace sandbox and asks Muster about every untrusted command; Full access still never prompts; an OpenCode route runs as Workspace; the picker lists Auto and says when it runs as Ask for approval. | [`Auto access: Codex asks Muster about every untrusted command; other routes run as Workspace and the picker says so`](../../../packages/agent-app/tests/auto-approvals-841.test.ts) |
 | [MUS-SPEC-05-841F](05-access-modes-and-approvals.md#mus-spec-05-841f) | Environment prefixes, rg preprocessors, git config and output options, writing or executing sed scripts, sort helpers and tools that write output still ask in Auto; project code (tests, scripts, linters) settles only inside Codex's workspace sandbox; edits inside `.git` ask. | [`Auto access: read-only commands that can run programs or write files still ask`](../../../packages/agent-app/tests/auto-approvals-841.test.ts) |
+| [MUS-SPEC-05-147A](05-access-modes-and-approvals.md#mus-spec-05-147a) | Auto settles the safe command by itself (no card) and the CLI is allowed. | [`approvals on the host go through Muster: Auto settles a safe command, Workspace shows a card`](../../../packages/agent-app/tests/ssh-agents-147.test.ts) |
 
 ### Confined writes and policy-only requests
 
@@ -245,3 +246,16 @@ Boundaries:
 - Environment: Node test runner; the Auto classifier and a fake Claude Code process; temp folder; no network.
 - Known gaps: A conservative list, not a shell interpreter: forms it does not recognise ask. A program on PATH that was itself replaced is outside this check.
 - Evidence: local; ~/.muster-work/review/841/green.txt; exit 0; 6 passed, 0 failed, 0 skipped; commit 3c30a000465f4b482ef8f7eaf07e101fb31fab0c
+
+### Agents on an SSH host (#147)
+
+<a id="mus-spec-05-147a"></a>
+#### MUS-SPEC-05-147A: Approvals for a CLI on an SSH host go through Muster at every access level
+
+- Precondition: Claude Code chats in a remote folder in Auto, Workspace and Full access.
+- Action: In each, the CLI asks before `git status`; in Full access send a message.
+- Expected result: Auto settles the safe command by itself (no card) and the CLI is allowed; Workspace shows an approval card naming the command; Full access runs the CLI with its bypass mode, which on the host is still only the host user’s own rights.
+- Test: `packages/agent-app/tests/ssh-agents-147.test.ts::approvals on the host go through Muster: Auto settles a safe command, Workspace shows a card`
+- Environment: Node test runner with the real agent service (Claude Code, Codex and ACP routes whose local binaries do not exist), a temp data folder and a temp HOME; a stand-in `ssh` on PATH (`tests/fixtures/fake-ssh/`) that runs the remote commands under /bin/sh on this machine with a host PATH of its own, relays reverse forwards over real 127.0.0.1 sockets, and starts each session in its own process group; the fake Claude Code (`fake-ssh/fake-claude.cjs`), the fake Codex app-server and the fake ACP agent "installed on the host". No network, no real host.
+- Known gaps: Auto rules judge paths against the folder’s path on the host; a host whose paths differ only by links is not covered.
+- Evidence: UNVERIFIED

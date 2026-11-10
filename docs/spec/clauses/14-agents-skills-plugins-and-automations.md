@@ -81,6 +81,7 @@ Boundaries:
 | [MUS-SPEC-14-845D](14-agents-skills-plugins-and-automations.md#mus-spec-14-845d) | Editing the target from chat A to chat B keeps the set time; at that time the run goes to chat B only and chat A gets nothing. | [`a scheduled once automation moved to another chat before its time runs in the new chat only, at the same time`](../../../packages/agent-app/tests/automations-once-845.test.ts) |
 | [MUS-SPEC-14-845E](14-agents-skills-plugins-and-automations.md#mus-spec-14-845e) | Kolkata, New York summer and winter, a DST-skipped 02:30 (runs 03:30) and a repeated 01:30 (runs the first) all resolve; nothing after the time; summaries name the zone; malformed and impossible dates are refused. | [`once times are wall-clock times in their zone, DST included, and malformed ones are refused`](../../../packages/agent-app/tests/automations-once-845.test.ts) |
 | [MUS-SPEC-14-845F](14-agents-skills-plugins-and-automations.md#mus-spec-14-845f) | Repeat lists "Once at a date and time"; picking it shows a date and time control (9:00 tomorrow) and the time zone; the preview says "Runs at"; a refused past time shows in the editor; the save sends the once schedule; a run once automation reads Done with its chat linked. | [`#845 the editor schedules a once run with a date and time in a named zone, and a run once automation reads Done with its chat linked`](../../../packages/agent-app/tests/automations-once-845-dom.tsx) |
+| [MUS-SPEC-14-147A](14-agents-skills-plugins-and-automations.md#mus-spec-14-147a) | Every server in the CLI’s config is the relay script in `~/.muster-remote` on the host with the forwarded port. | [`Muster’s tools reach the CLI on the host through the reverse-forwarded relay`](../../../packages/agent-app/tests/ssh-agents-147.test.ts) |
 
 ### Claude Code background sub-agents
 
@@ -816,3 +817,16 @@ An automation can run once at a date and time instead of repeating. The time is 
 - Environment: Renderer DOM suite (linkedom); stubbed bridge.
 - Known gaps: Not a screenshot of the real app; the native date and time picker is not opened.
 - Evidence: local; ~/.muster-work/review/845/green-dom.log; exit 0; 1 passed, 0 failed, 0 skipped; commit f9ec3210c81cb85a725b81e73ce5d8b4ce170f89
+
+### Muster tools for agents on an SSH host (#147)
+
+<a id="mus-spec-14-147a"></a>
+#### MUS-SPEC-14-147A: Muster’s tools reach a CLI on an SSH host through a reverse-forwarded relay
+
+- Precondition: A Claude Code chat in a remote folder; Muster’s question tool (and the canvas and office tools) are on.
+- Action: The CLI starts each tool server from its MCP config, lists its tools and calls ask_user.
+- Expected result: Every server in the CLI’s config is the relay script in `~/.muster-remote` on the host with the forwarded port; the question card appears in the chat; the chat token stays on this computer; the run token is in the CLI’s environment and not on its command line; the reverse forward binds 127.0.0.1 on the host.
+- Test: `packages/agent-app/tests/ssh-agents-147.test.ts::Muster’s tools reach the CLI on the host through the reverse-forwarded relay`
+- Environment: Node test runner with the real agent service (Claude Code, Codex and ACP routes whose local binaries do not exist), a temp data folder and a temp HOME; a stand-in `ssh` on PATH (`tests/fixtures/fake-ssh/`) that runs the remote commands under /bin/sh on this machine with a host PATH of its own, relays reverse forwards over real 127.0.0.1 sockets, and starts each session in its own process group; the fake Claude Code (`fake-ssh/fake-claude.cjs`), the fake Codex app-server and the fake ACP agent "installed on the host". No network, no real host.
+- Known gaps: Claude Code passing its environment (or expanding `${MUSTER_RELAY_TOKEN}`) to MCP servers is assumed from its documentation and needs a check against the real CLI.
+- Evidence: UNVERIFIED
