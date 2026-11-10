@@ -26,9 +26,12 @@ import {openScreenshotTab} from './ComputerPip';
 import {ChatImage} from './ChatImage';
 import {GalleryCoverage,ImageGallery,type GalleryTarget} from './ImageGallery';
 import {OfficeLiveLine,useOfficeLive} from '../officeLive';
+import {mcpAppOf,rowResultText} from '../../shared/mcp-apps';
 
 /** #html-preview: render_html pages load their chunk (and their frame) only when a row has one. */
 const HtmlRenderCard = React.lazy(() => import('./rich/HtmlRenderCard'));
+/** #844: an MCP tool's own app (MCP Apps), drawn under its row the same way. */
+const McpAppCard = React.lazy(() => import('./rich/McpAppCard'));
 
 type Glyph = React.ComponentType<{size?: number; strokeWidth?: number; 'aria-hidden'?: boolean | 'true'}>;
 /** Codex transcript glyphs: thin, monochrome, one per verb. */
@@ -255,6 +258,7 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
     {steps.length>0&&!open&&<PlanChecklist steps={steps}/>}
     {images.length>0&&<ImageThumbs item={item} paths={images}/>}
     {!open&&<ResultShots item={item}/>}
+    {!failed&&item.status==='completed'&&mcpAppOf(item.data)&&<div className="tool-html-render"><Suspense fallback={null}><McpAppCard chatId={item.chatId} itemId={item.id} title={subject||p.subject} fallback={rowResultText(item.data,output)}/></Suspense></div>}
     {p.htmlRender?.id&&!failed&&<div className="tool-html-render"><Suspense fallback={null}><HtmlRenderCard renderId={p.htmlRender.id} title={p.htmlRender.title} chatId={item.chatId}/></Suspense></div>}
     <Collapsible.Panel className="activity-disclosure"><div className="tool-row-body" id={`tool-body-${item.id}`}>
       {edit&&<EditDiffs item={item}/>}

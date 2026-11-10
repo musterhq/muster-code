@@ -1,6 +1,7 @@
 import type {TimelineItem} from '../../shared/protocol';
 import {APPROVAL_WAIT_LABEL,awaitingApproval,classifyTool,executionDenied} from './toolPresentation.ts';
 import {htmlRenderIdOf,isHtmlRenderTool} from '../../shared/html-render.ts';
+import {mcpAppOf} from '../../shared/mcp-apps.ts';
 import {agentDisplayName,agentDisplayNames} from '../agentIdentity.ts';
 import {projectSubagentActivity,subagentLifecycle,subagentState,type SubagentActivity,type SubagentLifecycleEvent} from '../subagentActivity.ts';
 
@@ -13,7 +14,8 @@ export interface ActivityEntry {kind:'activity';id:string;items:TimelineItem[];
   visual?:true}
 export type TranscriptEntry = TimelineItem | ActivityEntry;
 /** #771: a finished render_html row that drew a page: the reader sees it where it was drawn, not inside a folded group. */
-export const showsVisual=(item:TimelineItem)=>item.kind==='tool'&&item.status==='completed'&&isHtmlRenderTool(item.data)&&!!htmlRenderIdOf(item.data);
+/** #844: so is an MCP tool row whose tool declared an app (MCP Apps). */
+export const showsVisual=(item:TimelineItem)=>item.kind==='tool'&&item.status==='completed'&&(isHtmlRenderTool(item.data)&&!!htmlRenderIdOf(item.data)||!!mcpAppOf(item.data));
 const isCollab=(item:TimelineItem)=>item.kind==='tool'&&item.data?.type==='collabAgentToolCall';
 // Timeline items are immutable: parse a report's lifecycle once, not on every streamed update.
 const lifecycles=new WeakMap<TimelineItem,ReturnType<typeof subagentLifecycle>>();
