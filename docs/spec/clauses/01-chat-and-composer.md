@@ -37,6 +37,10 @@ Boundaries:
 | [MUS-SPEC-01-403D](01-chat-and-composer.md#mus-spec-01-403d) | Duplicate chat names show distinct visible suffix hints, including same-folder chats; unique names stay plain. | [`duplicate sidebar chat names get distinct suffixes without renaming them`](../../../packages/agent-app/tests/sidebar-chrome-403-dom.tsx) |
 | [MUS-SPEC-01-792A](01-chat-and-composer.md#mus-spec-01-792a) | A chat with no folder and one plain reply renders no summary card, and `.center` has no `data-summary`, so the transcript and composer keep the full width. | [`a chat with nothing to summarise shows no summary card and reserves no room`](../../../packages/agent-app/tests/summary-card-empty-dom.tsx) |
 | [MUS-SPEC-01-792B](01-chat-and-composer.md#mus-spec-01-792b) | When the same chat edits a file, the summary card appears with a Sources section and `.center` gets its `data-summary` layout. | [`the summary card appears once the chat changes a file`](../../../packages/agent-app/tests/summary-card-empty-dom.tsx) |
+| [MUS-SPEC-01-401A](01-chat-and-composer.md#mus-spec-01-401a) | With the chat idle and the composer empty, the last turn's suggestion shows as ghost text in the composer (the textarea placeholder steps aside), and Tab puts exactly that text in the composer without sending. | [`the suggested follow-up shows as ghost text in an empty composer and Tab fills it`](../../../packages/agent-app/tests/follow-up-401-dom.tsx) |
+| [MUS-SPEC-01-401B](01-chat-and-composer.md#mus-spec-01-401b) | Clicking the suggestion fills the composer and sends nothing; a Cmd/Ctrl-click sends the suggestion as the next message. | [`clicking the suggestion fills the composer, and a modifier-click sends it`](../../../packages/agent-app/tests/follow-up-401-dom.tsx) |
+| [MUS-SPEC-01-401C](01-chat-and-composer.md#mus-spec-01-401c) | The suggestion is gone once anything is typed, and is not shown while a turn runs. | [`the suggestion hides once you type and while a turn runs`](../../../packages/agent-app/tests/follow-up-401-dom.tsx) |
+| [MUS-SPEC-01-401D](01-chat-and-composer.md#mus-spec-01-401d) | A "Switched to <model> · <effort> effort" divider sits above each message whose turn ran a different model or effort than the turn before; none above the first message, an unchanged turn, or messages with no record. | [`a divider marks the message where the model or effort changed`](../../../packages/agent-app/tests/follow-up-401-dom.tsx) |
 
 ### Imported chats keep their own model
 
@@ -297,3 +301,49 @@ Boundaries:
 - Environment: Real SummaryCard inside a `.center` element in a DOM suite (linkedom); fake app bridge; no network.
 - Known gaps: Covers the Sources section only; folders, processes, subagents and scheduled automations use the same visibility check but are not each tested here.
 - Evidence: local; node packages/agent-app/dist/tests/summary-card-empty-dom.mjs; exit 0; 2 passed, 0 failed, 0 skipped; commit 51d98019fafa5b2fe3842c1acb1a3e7c3cbe9d56
+
+### Suggested follow-up and model markers (#401)
+
+<a id="mus-spec-01-401a"></a>
+#### MUS-SPEC-01-401A: The suggested follow-up shows as ghost text and Tab takes it
+
+- Precondition: An idle chat whose last message carries a suggested follow-up ("Run the tests again"), with an empty composer.
+- Action: Look at the composer, then press Tab in it.
+- Expected result: The composer shows the suggestion as ghost text in place of the usual placeholder, with a Tab hint. Tab puts exactly "Run the tests again" in the composer. Nothing is sent.
+- Test: `packages/agent-app/tests/follow-up-401-dom.tsx::the suggested follow-up shows as ghost text in an empty composer and Tab fills it`
+- Environment: Real Composer and store in a DOM suite (linkedom); fake app bridge; no network.
+- Known gaps: Where the ghost text sits on screen (over the first line of the field) is CSS and is checked in the real app, not here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-401b"></a>
+#### MUS-SPEC-01-401B: Clicking the suggestion fills the composer; a modifier-click sends it
+
+- Precondition: The chat from MUS-SPEC-01-401A, composer empty, suggestion shown.
+- Action: Click the suggestion. Clear the composer, then Cmd-click (Ctrl-click off macOS) the suggestion.
+- Expected result: The click puts the suggestion in the composer and sends nothing. The modifier-click sends one `chat.send` whose text is the suggestion.
+- Test: `packages/agent-app/tests/follow-up-401-dom.tsx::clicking the suggestion fills the composer, and a modifier-click sends it`
+- Environment: Real Composer and store in a DOM suite (linkedom); fake app bridge; no network.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-401c"></a>
+#### MUS-SPEC-01-401C: The suggestion hides once you type and while a turn runs
+
+- Precondition: The chat from MUS-SPEC-01-401A, suggestion shown.
+- Action: Type one letter. Then clear the draft and mark the chat as running.
+- Expected result: With a letter typed, no suggestion is shown. With the chat running and the draft empty, no suggestion is shown either.
+- Test: `packages/agent-app/tests/follow-up-401-dom.tsx::the suggestion hides once you type and while a turn runs`
+- Environment: Real Composer and store in a DOM suite (linkedom); fake app bridge; no network.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-401d"></a>
+#### MUS-SPEC-01-401D: A divider marks where the model or effort changed
+
+- Precondition: A transcript of four messages. The first two ran "GPT-5.5" at medium effort, the third ran "GPT-5.5" at high effort, the fourth ran "Fable 5" at high effort. A fifth, older-style message has no record of what it ran with.
+- Action: Show the transcript.
+- Expected result: A divider reading "Switched to GPT-5.5 · high effort" sits above the third message and one reading "Switched to Fable 5 · high effort" above the fourth. No divider sits above the first, the second or the message with no record. The dividers use the day divider's style.
+- Test: `packages/agent-app/tests/follow-up-401-dom.tsx::a divider marks the message where the model or effort changed`
+- Environment: Real Timeline in a DOM suite (linkedom); no network.
+- Known gaps: Messages sent before this change carry no record, so they never get a divider. The model name comes from the provider list loaded at the time; a model no longer listed shows its id.
+- Evidence: UNVERIFIED
