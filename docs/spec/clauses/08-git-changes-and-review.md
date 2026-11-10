@@ -63,6 +63,7 @@ Boundaries:
 | [MUS-SPEC-08-329E](08-git-changes-and-review.md#mus-spec-08-329e) | A token saved for git.acme.test is never sent to gitlab.com; the 401 says to sign in with glab or add a gitlab.com token in Settings › Integrations; a URL is refused as a host name; removing the account clears it. | [`a GitLab token is sent only to the host it was saved for; signed out says how to sign in`](../../../packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts) |
 | [MUS-SPEC-08-329F](08-git-changes-and-review.md#mus-spec-08-329f) | With a username and app password saved, the repository, PR list, create draft, create, PR view, build-status checks, conversation (inline and deleted comments left out, approvals as reviews), comment and merge (stale head refused before merging, squash strategy) work and every request uses basic auth. | [`Bitbucket Cloud with an app password: list, create, view, comment and merge a pull request; build statuses are its checks`](../../../packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts) |
 | [MUS-SPEC-08-329G](08-git-changes-and-review.md#mus-spec-08-329g) | Review threads, line comments, replies, resolve, reviews, reviewer requests and mark-ready each fail on GitLab and Bitbucket with a message naming the service, the noun and “GitHub-only”, and no request is sent. | [`GitHub-only review features say so on GitLab and Bitbucket, and send nothing`](../../../packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts) |
+| [MUS-SPEC-08-329H](08-git-changes-and-review.md#mus-spec-08-329h) | The summary card shows “Create merge request”, a “Merge requests” section with `!5` and “Review merge request”; the PR tab titles `!5`, has Merge but no Request review or Review, and a note says those are GitHub-only with “Open on GitLab”. | [`a GitLab remote is labelled merge request with ! numbers, and its PR tab hides the GitHub-only review controls`](../../../packages/agent-app/tests/forge-labels-329-dom.tsx) |
 
 ### Refs, dash-named files and submodules
 
@@ -566,5 +567,16 @@ Boundaries:
 - Expected result: Every call is refused with “… GitHub-only …” naming GitLab / merge request or Bitbucket / pull request; the fake servers saw no request.
 - Test: `packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts::GitHub-only review features say so on GitLab and Bitbucket, and send nothing`
 - Environment: Node test runner; git on PATH; local HTTP servers standing in for GitLab and Bitbucket.
-- Known gaps: The PR tab hides these controls for those remotes; that rendering is not covered by a DOM case.
+- Known gaps: The PR tab hiding these controls is MUS-SPEC-08-329H.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-329h"></a>
+#### MUS-SPEC-08-329H: A GitLab remote is labelled merge request, and the PR tab hides GitHub-only review controls
+
+- Precondition: A folder whose status reports a GitLab remote (no GitHub `remoteUrl`) and one open merge request !5 on another branch.
+- Action: Render the summary card, expand the merge request row, then render the PR tab for !5.
+- Expected result: The card offers “Create merge request”, heads its list “Merge requests”, numbers the row `!5` and offers “Review merge request”; the PR tab titles it `!5`, keeps Merge, shows no Request review or Review button, and a note says reviews are GitHub-only with an “Open on GitLab” link.
+- Test: `packages/agent-app/tests/forge-labels-329-dom.tsx::a GitLab remote is labelled merge request with ! numbers, and its PR tab hides the GitHub-only review controls`
+- Environment: linkedom DOM; stubbed bridge; no Electron.
+- Known gaps: Bitbucket uses the GitHub words (pull request, `#`) and the same hidden controls; it has no separate DOM case. The Settings › Integrations Git hosts card has no DOM case.
 - Evidence: UNVERIFIED
