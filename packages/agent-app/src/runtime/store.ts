@@ -654,6 +654,12 @@ export class AgentStore {
     return this.db.prepare(`SELECT 1 AS hit FROM timeline WHERE chat_id = ? AND kind = 'user'${withText ? " AND length(trim(text)) > 0" : ''} LIMIT 1`).get(chatId) !== undefined;
   }
 
+  /** #401: the chat's newest message from the user (one indexed row, never the whole history). */
+  lastUserItem(chatId: string): TimelineItem | undefined {
+    const row = this.db.prepare("SELECT * FROM timeline WHERE chat_id = ? AND kind = 'user' ORDER BY seq DESC LIMIT 1").get(chatId) as TimelineRow | undefined;
+    return row ? rowToItem(row) : undefined;
+  }
+
   /** The chat's notices of one `data.kind`, in order. */
   noticesOfKind(chatId: string, kind: string): TimelineItem[] {
     return (this.db.prepare("SELECT * FROM timeline WHERE chat_id = ? AND kind = 'notice' AND json_extract(data, '$.kind') = ? ORDER BY seq").all(chatId, kind) as unknown as TimelineRow[]).map(rowToItem);

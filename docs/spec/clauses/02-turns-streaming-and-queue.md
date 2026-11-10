@@ -85,6 +85,10 @@ Boundaries:
 | [MUS-SPEC-02-839D](02-turns-streaming-and-queue.md#mus-spec-02-839d) | After the turn’s result stdin stays open while the CLI lists a background task; the steer is written as a user message; stdin closes once the list is empty and the run completes. | [`Claude Code: after the turn ends with a background shell running, a steer still reaches the open session`](../../../packages/agent-app/tests/background-steer-839.test.ts) |
 | [MUS-SPEC-02-839E](02-turns-streaming-and-queue.md#mus-spec-02-839e) | The steer returns a refusal whose reason names the background command, so the composer shows why it queued. | [`Claude Code: when the session can no longer take a message during a background shell, the steer says why`](../../../packages/agent-app/tests/background-steer-839.test.ts) |
 | [MUS-SPEC-02-800A](02-turns-streaming-and-queue.md#mus-spec-02-800a) | With the window inactive, newly streamed words show at full opacity instead of being held at the start of their fade; a focused window still fades them in. | [`streamed words are fully visible while the window is inactive`](../../../packages/agent-app/tests/stream-fade-inactive-800.test.ts) |
+| [MUS-SPEC-02-401A](02-turns-streaming-and-queue.md#mus-spec-02-401a) | With suggestions asked for, Claude Code runs with `--prompt-suggestions`; the turn settles at its result without waiting for the process; the `prompt_suggestion` that follows reaches the chat once, and the process is ended after a bounded wait. Not asked for: no flag. | [`Claude Code: the turn settles at its result and the suggestion that follows reaches the chat`](../../../packages/agent-app/tests/follow-up-401.test.ts) |
+| [MUS-SPEC-02-401B](02-turns-streaming-and-queue.md#mus-spec-02-401b) | The run is asked for a suggestion only with the setting on (off by default); the suggestion is stored, cleaned to one short line, on the turn's message; one that arrives after a newer message is dropped. | [`a follow-up suggestion is offered on its turn only when the setting is on, and a newer message drops a late one`](../../../packages/agent-app/tests/follow-up-401.test.ts) |
+| [MUS-SPEC-02-401C](02-turns-streaming-and-queue.md#mus-spec-02-401c) | An HTTP route settles the turn first, then makes one non-streamed request to the same model with a small output cap and returns its one line; with no suggestion asked for it makes no extra request. | [`an HTTP route asks its own model for one short follow-up after the turn, without holding the turn`](../../../packages/agent-app/tests/follow-up-401.test.ts) |
+| [MUS-SPEC-02-401D](02-turns-streaming-and-queue.md#mus-spec-02-401d) | Each sent message records the provider, model and reasoning effort its turn ran with. | [`each message records the model, provider and effort its turn ran with`](../../../packages/agent-app/tests/follow-up-401.test.ts) |
 
 ### Tool rows when a turn ends
 
@@ -875,4 +879,50 @@ Boundaries:
 - Test: `packages/agent-app/tests/stream-fade-inactive-800.test.ts::streamed words are fully visible while the window is inactive`
 - Environment: Headless Chrome over CDP with the real styles.css and message-body.css; skipped when Chrome is not installed.
 - Known gaps: The window-activity tracking that sets the attribute (windowActivity.ts) is not driven here; the test sets the attribute directly.
+- Evidence: UNVERIFIED
+
+### Suggested follow-up after a turn (#401)
+
+<a id="mus-spec-02-401a"></a>
+#### MUS-SPEC-02-401A: Claude Code's own suggestion arrives after the turn without holding it
+
+- Precondition: A Claude Code run asked for a follow-up suggestion, and one not asked for.
+- Action: Claude Code reports the turn's result, then (with the process still open) a `prompt_suggestion` event. Then time passes.
+- Expected result: The asked run passes `--prompt-suggestions` and settles as completed at the result, before the process exits. The suggestion text reaches the run's suggestion callback once. After the bounded wait the process is ended. The run not asked for has no `--prompt-suggestions` flag.
+- Test: `packages/agent-app/tests/follow-up-401.test.ts::Claude Code: the turn settles at its result and the suggestion that follows reaches the chat`
+- Environment: Node test runner; the Claude Code adapter with a fake child process; mocked timers.
+- Known gaps: The event shape (`{"type":"prompt_suggestion","suggestion":…}`) was read from Claude Code 2.1.322 by hand; a later CLI that changes it is not caught here. Claude Code decides itself when to suggest (it skips some turns).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-401b"></a>
+#### MUS-SPEC-02-401B: The suggestion is stored on its turn only when asked for, and a late one is dropped
+
+- Precondition: An agent service with a fake provider. The follow-up setting is at its default.
+- Action: Send a message and finish the turn. Turn the setting on, send again, finish the turn, and report the suggestion `  "Run the tests again"\nand more`. Send a third message, then report a suggestion for the second turn.
+- Expected result: With the default setting the run gets no suggestion callback. With it on, the second message's record holds `Run the tests again` (one line, no quotes). The late suggestion for the second turn is not stored on the third message.
+- Test: `packages/agent-app/tests/follow-up-401.test.ts::a follow-up suggestion is offered on its turn only when the setting is on, and a newer message drops a late one`
+- Environment: Node test runner; the agent service with a fake provider; a temp data folder.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-401c"></a>
+#### MUS-SPEC-02-401C: An HTTP route asks its own model for one short follow-up after the turn
+
+- Precondition: An OpenAI-compatible route with a fake endpoint. The suggestion request is held open.
+- Action: Run a turn asked for a suggestion, then release the suggestion request. Run another turn not asked for one.
+- Expected result: The turn settles while the suggestion request is still open. That request is a single non-streamed `chat/completions` call to the same model with `max_tokens` of 60 or less, and its reply's one line reaches the suggestion callback. The turn not asked for makes exactly one request.
+- Test: `packages/agent-app/tests/follow-up-401.test.ts::an HTTP route asks its own model for one short follow-up after the turn, without holding the turn`
+- Environment: Node test runner; the HTTP adapter with a fake fetch; no network.
+- Known gaps: The Anthropic API adapter uses the same helper and is not driven here. The Codex app-server, OpenCode, Cursor, Gemini and Grok CLI routes offer no suggestion.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-401d"></a>
+#### MUS-SPEC-02-401D: Each message records what its turn ran with
+
+- Precondition: An agent service with a fake provider listing two models with efforts.
+- Action: Send a message at high effort. Switch the chat's model, then send another without choosing an effort.
+- Expected result: The first message's record holds the provider, the first model and `high`. The second holds the provider, the second model and `high`, since the chosen effort carries to later messages. A chat where no effort was ever chosen records the model's default effort.
+- Test: `packages/agent-app/tests/follow-up-401.test.ts::each message records the model, provider and effort its turn ran with`
+- Environment: Node test runner; the agent service with a fake provider; a temp data folder.
+- Known gaps: The model-default case is not driven here. An effort set by a Project or agent run option (not the composer) is not what the record shows; the record shows the composer's choice or the model's default.
 - Evidence: UNVERIFIED
