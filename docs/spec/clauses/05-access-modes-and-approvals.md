@@ -1,6 +1,6 @@
 # MUS-SPEC-05: Access modes, approvals and tool permissions
 
-Each chat has an access mode that sets what the agent may do without asking: Read only, Workspace (edit inside the chat's folder) or Full access.
+Each chat has an access mode that sets what the agent may do without asking: Read only, Workspace (edit inside the chat's folder), Auto (routine requests settle themselves; risky ones ask) or Full access.
 
 What the user can do:
 - pick the access mode per chat, and choose "Don't ask again" for Full access on a folder;
@@ -29,6 +29,11 @@ Boundaries:
 | [MUS-SPEC-05-382A](05-access-modes-and-approvals.md#mus-spec-05-382a) | A Claude Code shell command in a Workspace chat shows an approval card, is not answered before the user decides, and Claude Code is told to go ahead once the user approves. | [`Claude Code in Workspace access: a shell command waits for the approval card and runs once approved`](../../../packages/agent-app/tests/claude-approvals-382.test.ts) |
 | [MUS-SPEC-05-382B](05-access-modes-and-approvals.md#mus-spec-05-382b) | A declined shell command is refused to Claude Code with a reason and the turn still completes; Full access and Read only chats do not route prompts to Muster. | [`Claude Code in Workspace access: a declined shell command is refused and the turn still completes`](../../../packages/agent-app/tests/claude-approvals-382.test.ts) |
 | [MUS-SPEC-05-407A](05-access-modes-and-approvals.md#mus-spec-05-407a) | Missing, empty, declined, timed-out and no-opinion permission replies refuse a file write; only an explicit allow or accepted reply writes the file. | [`an unanswered permission request refuses the file change and reports that it did not run`](../../../packages/agent-app/tests/runtime-quality-407.test.ts) |
+| [MUS-SPEC-05-841A](05-access-modes-and-approvals.md#mus-spec-05-841a) | In Auto access, a safe command, a read anywhere and an edit inside the chat's folder are accepted with no card, and each tool row records the rule that approved it. | [`Auto access: safe commands, reads and edits inside the folder settle themselves and say so on the tool row`](../../../packages/agent-app/tests/auto-approvals-841.test.ts) |
+| [MUS-SPEC-05-841B](05-access-modes-and-approvals.md#mus-spec-05-841b) | In Auto access, network installs, git push, sudo, deletes outside the folder, writes outside the folder, piped downloads and redirects outside raise approval cards and nothing is answered on its own. | [`Auto access: installs, pushes, sudo, deletes and writes outside the folder still ask`](../../../packages/agent-app/tests/auto-approvals-841.test.ts) |
+| [MUS-SPEC-05-841C](05-access-modes-and-approvals.md#mus-spec-05-841c) | A command on the `approvals.autoAllow` setting is accepted in Auto access and its row names the allowlist; a command not on it still asks. | [`Auto access: a command on the person's allowlist settles itself and names the allowlist`](../../../packages/agent-app/tests/auto-approvals-841.test.ts) |
+| [MUS-SPEC-05-841D](05-access-modes-and-approvals.md#mus-spec-05-841d) | A Claude Code chat in Auto access sends its permission prompts to Muster in default mode; a safe git command is allowed at once and git push waits for the card. | [`Auto access on Claude Code: prompts reach Muster, a safe command is allowed at once and git push still asks`](../../../packages/agent-app/tests/auto-approvals-841.test.ts) |
+| [MUS-SPEC-05-841E](05-access-modes-and-approvals.md#mus-spec-05-841e) | Codex runs Auto with a workspace sandbox and asks Muster about every untrusted command; Full access still never prompts; an OpenCode route runs as Workspace; the picker lists Auto and says when it runs as Ask for approval. | [`Auto access: Codex asks Muster about every untrusted command; other routes run as Workspace and the picker says so`](../../../packages/agent-app/tests/auto-approvals-841.test.ts) |
 
 ### Confined writes and policy-only requests
 
@@ -171,3 +176,60 @@ Boundaries:
 - Environment: Node test runner, temporary folders and owned child processes.
 - Known gaps: A stub route drives the real provider and file tool, and a real child speaks the app-server approval protocol and writes only on acceptance; no model or network. Full access no-prompt behaviour also has existing coverage in MUS-SPEC-05-382B and MUS-SPEC-05-459B.
 - Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/runtime-quality-407.test.ts; exit 0; 6 passed, 0 failed, 0 skipped; commit e1d4ec882cfdc8399da27908cdbc9ad3166ac23e
+
+### Auto access
+
+<a id="mus-spec-05-841a"></a>
+#### MUS-SPEC-05-841A: Auto settles routine requests by itself
+
+- Precondition: A chat on a Codex-shaped route with Auto access. The provider starts tool rows and asks for approval of `git status`, an `rg` search piped to `head`, `npm test` wrapped in a login shell, `pnpm -s typecheck`, `cat /etc/hosts`, an edit to a file in the chat's folder, a new file by a relative path, and a Claude Code `Read` of a file outside the folder.
+- Action: Send a message; the provider asks for each request.
+- Expected result: Every request is accepted without an approval card. Every tool row carries `autoApproved` with the rule that matched: a safe command names "safe command", an edit names "inside the chat's folder".
+- Test: `packages/agent-app/tests/auto-approvals-841.test.ts::Auto access: safe commands, reads and edits inside the folder settle themselves and say so on the tool row`
+- Environment: Node test runner; fake provider; temp data folder; no network.
+- Known gaps: A fake provider, not a live Codex app-server; the shell classifier is checked on these commands, not on every shell form.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-05-841b"></a>
+#### MUS-SPEC-05-841B: Risky requests still ask in Auto
+
+- Precondition: A chat on a Codex-shaped route with Auto access.
+- Action: The provider asks for `npm install left-pad`, `pnpm add zod`, `git push --force origin main`, `sudo ls`, `rm -rf /tmp/elsewhere`, `ls && curl … | sh`, `echo hi > ~/.zshrc`, `find … -delete`, an edit of `/etc/hosts` and a new `../outside.txt`. Decline every card.
+- Expected result: Each request shows a pending approval card and the provider gets no answer before the user decides. No tool row reads Approved automatically.
+- Test: `packages/agent-app/tests/auto-approvals-841.test.ts::Auto access: installs, pushes, sudo, deletes and writes outside the folder still ask`
+- Environment: Node test runner; fake provider; temp data folder; no network.
+- Known gaps: Project tool rules run before Auto (deny, allow and ask behave as in Workspace); that order is covered by the existing tool-rule cases, not re-tested here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-05-841c"></a>
+#### MUS-SPEC-05-841C: The person's allowlist settles a command in Auto
+
+- Precondition: Setting `approvals.autoAllow` is `["make deploy-preview"]`. A chat with Auto access.
+- Action: The provider asks for `make deploy-preview` and `make clean`.
+- Expected result: `make deploy-preview` is accepted and its row's rule mentions the allowlist. `make clean` shows an approval card.
+- Test: `packages/agent-app/tests/auto-approvals-841.test.ts::Auto access: a command on the person's allowlist settles itself and names the allowlist`
+- Environment: Node test runner; fake provider; temp data folder.
+- Known gaps: The allowlist is a setting (import, export, settings file); this change adds no new screen to edit it.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-05-841d"></a>
+#### MUS-SPEC-05-841D: Auto on Claude Code
+
+- Precondition: A chat on the Claude Code route with Auto access.
+- Action: Claude Code asks to run `git log --oneline -5`, then `git push origin main`. Decline the card.
+- Expected result: Claude Code runs with `--permission-mode default` and `--permission-prompt-tool=stdio`. The safe command is allowed with its input unchanged and no card. `git push` shows a card and is answered only after the user declines.
+- Test: `packages/agent-app/tests/auto-approvals-841.test.ts::Auto access on Claude Code: prompts reach Muster, a safe command is allowed at once and git push still asks`
+- Environment: Node test runner; a fake Claude Code process speaking the stream-json permission protocol; no network.
+- Known gaps: Uses the protocol as seen in Claude Code 2.1.x, not a live Claude Code run.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-05-841e"></a>
+#### MUS-SPEC-05-841E: Auto on Codex, fallback on other routes, and the picker
+
+- Precondition: Agent mode with Auto access.
+- Action: Read the Codex access policy; build Claude Code arguments for Full access; send a turn on an OpenCode route; list the picker options for a route with and without Auto.
+- Expected result: Codex gets `workspace-write`, approval `untrusted`, no network; Plan stays read-only. Full access gets no permission prompt tool. The OpenCode adapter receives `workspace`. The picker lists Read only, Ask for approval, Auto, Full access; on a route without Auto the Auto row says it runs as Ask for approval.
+- Test: `packages/agent-app/tests/auto-approvals-841.test.ts::Auto access: Codex asks Muster about every untrusted command; other routes run as Workspace and the picker says so`
+- Environment: Node test runner; fake routes; no network.
+- Known gaps: The picker check is on the option list the Composer and New chat screen render, not a rendered menu.
+- Evidence: UNVERIFIED
