@@ -1,0 +1,14 @@
+{
+  "name": "@muster/relay",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Muster phone relay (#326): forwards end-to-end encrypted frames between a paired phone and a desktop. Development and tests only; production hosting is not decided yet (docs/mobile/DESIGN.md §9).",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "start": "node --experimental-transform-types src/main.ts"
+  }
+}

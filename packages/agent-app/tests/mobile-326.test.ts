@@ -297,7 +297,7 @@ test('the needs-you feed lists pending approvals and questions across chats', as
   await d.service.invoke('approval.respond', {id: byChat.Deploy!.itemId, approved: true, decision: 'accept'});
   await d.service.invoke('question.respond', {id: byChat.Naming!.itemId, answers: {q: {answers: ['notes.md']}}});
   await until(async () => (await client.call('needs.list', {})).needs.length === 0, 'needs cleared');
-  assert.ok(events.some(event => event.type === 'needs' && event.needs.length === 2), 'a needs event with both');
+  await until(() => events.some(event => event.type === 'needs' && event.needs.length === 2), 'a needs event with both');
   await until(() => events.some(event => event.type === 'needs' && event.needs.length === 0), 'a needs event when cleared');
 });
 

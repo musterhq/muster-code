@@ -67,6 +67,8 @@ export interface DomainHooks {
   onCommand?(fn: (event: CommandCompleted) => void): () => void;
   /** #654: release what a chat owns. On 'delete' a throw keeps the chat (its message is shown); 'archive' never fails the archive. Optional so bare test contexts need not provide it. */
   onChatRemoval?(fn: (event: ChatRemoval) => Promise<void> | void): () => void;
+  /** #326: every event the runtime emits (the phone link forwards chat changes). Observers must not throw or block. Optional so bare test contexts need not provide it. */
+  onAgentEvent?(fn: (event: AgentEvent) => void): () => void;
 }
 
 export interface DomainContext {
