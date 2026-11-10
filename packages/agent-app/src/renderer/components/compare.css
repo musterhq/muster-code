@@ -27,7 +27,7 @@
 .compare-head-text h1 { margin: 0; font-size: var(--fs-14); font-weight: 600; }
 .compare-head-text p { margin: 2px 0 0; color: var(--text-dim); font-size: var(--fs-12); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .compare-head-base { color: var(--text-faint); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
-.compare-head-state { padding: 1px 8px; border-radius: 999px; background: rgb(var(--fg-rgb) / 6%); color: var(--text-dim); font-size: var(--fs-11); }
+.compare-head-state { padding: 1px 8px; border-radius: var(--radius-full); background: rgb(var(--fg-rgb) / 6%); color: var(--text-dim); font-size: var(--fs-11); }
 .compare-head-state[data-state='merging'] { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--text); }
 .compare-grid { display: grid; grid-template-columns: repeat(var(--compare-columns, 2), minmax(240px, 1fr)); gap: 12px; align-items: start; overflow-x: auto; }
 .compare-run { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 12px; border-radius: var(--radius-12); border: 1px solid rgb(var(--fg-rgb) / 8%); background: rgb(var(--fg-rgb) / 2%); }
@@ -61,5 +61,5 @@
 .compare-confirm label { display: inline-flex; align-items: center; gap: 6px; }
 .compare-confirm-foot { display: flex; justify-content: flex-end; gap: 6px; margin-top: 14px; }
 
-.compare-chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 999px; background: rgb(var(--fg-rgb) / 6%); color: var(--text-dim); font-size: var(--fs-11); white-space: nowrap; }
+.compare-chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: var(--radius-full); background: rgb(var(--fg-rgb) / 6%); color: var(--text-dim); font-size: var(--fs-11); white-space: nowrap; }
 .compare-chip:hover { background: var(--bg-hover); color: var(--text); }

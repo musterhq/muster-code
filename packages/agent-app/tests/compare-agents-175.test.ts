@@ -29,6 +29,8 @@ async function fixture(t: TestContext, options: {git?: boolean; dataDir?: string
   const repo = join(root, 'repo'); await mkdir(repo);
   if (options.git !== false) {
     git(repo, 'init', '-q', '-b', 'main');
+    // No detached `gc --auto` after commits and merges: it would still be writing objects when the folder is removed.
+    git(repo, 'config', 'gc.auto', '0');
     git(repo, 'config', 'user.email', 'test@example.com'); git(repo, 'config', 'user.name', 'Muster Test'); git(repo, 'config', 'commit.gpgsign', 'false');
     await writeFile(join(repo, 'a.txt'), 'a\n'); await writeFile(join(repo, 'answer.txt'), 'start\n');
     git(repo, 'add', '.'); git(repo, 'commit', '-q', '-m', 'first');
@@ -63,7 +65,7 @@ async function fixture(t: TestContext, options: {git?: boolean; dataDir?: string
   };
   const dataDir = options.dataDir ?? join(root, 'state');
   let service = createAgentService({dataDir, provider, onEvent() {}});
-  t.after(async () => { await service.dispose(); await rm(root, {recursive: true, force: true}); });
+  t.after(async () => { await service.dispose(); await rm(root, {recursive: true, force: true, maxRetries: 5, retryDelay: 200}); });
   const snapshot = () => service.invoke('app.snapshot', undefined);
   const chat = async (id: string) => (await snapshot()).chats.find(entry => entry.id === id);
   const settle = async (ids: string[]) => {
