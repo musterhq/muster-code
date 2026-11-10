@@ -1,4 +1,5 @@
 import { applyPendingRestore } from './backups.ts';
+import {isRemoteFolderPath, parseRemoteFolderPath} from '../shared/domains/remote-protocol.ts';
 import { APPROVAL_SHOWN_EVENT } from './turn-ledger.ts';
 import { addMemory, listMemory, searchMemory, inspectMemoryStore, isVisibleInScopes, projectMemoryScope } from './memory-adapter.ts';
 import { createMemoryIdentity } from './memory-identity.ts';
@@ -87,6 +88,8 @@ import { findBinary } from './adapters/shared.ts';
 import { ASK_MCP, ASK_USER_METHOD, ASK_USER_SPEC, ASK_QUESTION_ID, askUserAnswerMessage, askUserCard, askUserReply, askUserRunOverrides, isNonBlockingQuestion, parseAskUser } from './ask-user.ts';
 import { plural } from '../shared/wording.ts';
 import { device } from '../shared/device-noun.ts';
+/** #147: the commands that touch a folder's files or repository. */
+const REMOTE_ROUTED = /^(?:files|git|review|github|ci)\./;
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid command input.');
@@ -297,6 +300,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   /** A folder moved or deleted outside Muster shows as missing (with Relink) before a send fails. Stat results live 10s. */
   const folderStats = new Map<string, {at: number; missing: boolean}>();
   const folderMissing = (path: string) => {
+    // #147: a folder on an SSH host is never "missing" by a local stat; its host's connection state says where it stands.
+    if (isRemoteFolderPath(path)) return false;
     const at = Date.now(), cached = folderStats.get(path);
     if (cached && at - cached.at < 10_000) return cached.missing;
     let missing = true; try { missing = !statSync(path).isDirectory(); } catch { /* unreadable counts as missing */ }
@@ -718,6 +723,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     let claudeEntry: (typeof attachedSkills)[number] | undefined;
     for (const entry of attachedSkills) if (entry.claude && await claudeReachesByName(entry, folder ? [folder.path] : [])) { claudeEntry = entry; break; }
     const nativeSkillContext = claudeEntry ? [...attachedSkills.filter(entry => entry !== claudeEntry).map(entry => selectedSkillBlock(entry, prompt)), invokedPluginContext(plugins)].filter(Boolean).join('\n\n') : '';
+    // #147 phase 1: agents do not run on an SSH host yet, and must never run on this computer in its place.
+    if (folder && isRemoteFolderPath(folder.path)) throw new Error(`This chat’s folder is on the SSH host ${parseRemoteFolderPath(folder.path)?.authority ?? ''}. Agents that run on an SSH host come in a later release; use the folder’s terminal, file tree and Git pane meanwhile.`);
     const defaultCwd = folder ? canonicalFolderPath(folder.path) : join(options.dataDir, 'scratch', chatId);
     const cwd = await domainHooks.runEnvironment(chat, defaultCwd);
     if (folder || cwd !== defaultCwd) { if (!(await fs.stat(cwd)).isDirectory()) throw new Error('Selected folder is unavailable.'); }
@@ -1773,6 +1780,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     }
     if (command === 'plugins.inventory') return discoverPlugins();
     const p = input === undefined && domains.handlers.has(command) ? {} : object(input);
+    // #147: file and Git commands for a folder on an SSH host run there, never against a local path.
+    if (typeof p.folderId === 'string' && REMOTE_ROUTED.test(command) && !command.startsWith('files.runActions.')) {
+      const folder = store.folder(p.folderId);
+      if (folder && isRemoteFolderPath(folder.path)) return domainHooks.remoteFolder(command, p, folder);
+    }
     switch (command) {
       case 'folder.add': { const path = await fs.realpath(text(p.path, 'folder path')); if (!(await fs.stat(path)).isDirectory()) throw new Error('Choose a folder.'); const result = store.addFolder(path, basename(path)); state(); return result; }
       case 'chat.create': {
@@ -2326,7 +2338,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'project.export': { const projectId=id(p.projectId), project=store.project(projectId); if(!project) throw new Error('Project not found.'); const folders=project.folderIds.map(folderId=>store.folder(folderId)).filter((folder):folder is NonNullable<typeof folder>=>Boolean(folder)); const chats=store.projectChats(projectId).map(({id,title,folderId,providerId,model,mode,permissionMode,status,updatedAt,recovery})=>({id,title,...(folderId?{folderId}:{}),providerId:providerId??'',model,mode,...(permissionMode?{permissionMode}:{}),status,updatedAt,...(recovery?{recovery}:{} )})); return projectTasks.exportProject(project,folders,chats); }
       case 'workspace.watch': {
         if (!Array.isArray(p.folderIds) || p.folderIds.length > 32) throw new Error('Invalid watched folders.');
-        const folders = [...new Set(p.folderIds.map(id))].map(folderFor);
+        const folders = [...new Set(p.folderIds.map(id))].map(folderFor).filter(folder => !isRemoteFolderPath(folder.path));
         const desired = new Set(folders.map(folder=>folder.id));
         for (const folderId of watchedFolders) if (!desired.has(folderId)) { watcher.unwatch(folderId); watchedFolders.delete(folderId); }
         await Promise.all(folders.map(async folder => {

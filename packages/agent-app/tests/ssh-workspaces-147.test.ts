@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -32,7 +32,7 @@ const until = async <T>(fn: () => T | undefined | null | false | Promise<T | und
 interface Logged { argv: string[]; kind: string; fresh?: boolean; tty?: boolean; refused?: string }
 /** A fake host (state folder + "remote" home with ~/project) and the real agent service, with its events captured. */
 async function setup(t: TestContext, opts: { known?: boolean } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'muster-147-host-')), dataDir = mkdtempSync(join(tmpdir(), 'muster-147-data-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'muster-147-host-'))), dataDir = mkdtempSync(join(tmpdir(), 'muster-147-data-'));
   process.env.MUSTER_FAKE_SSH_ROOT = root;
   const hostKey = keyLine(); writeFileSync(join(root, 'host_key'), hostKey);
   writeFileSync(join(root, 'config.json'), JSON.stringify({ aliases: { devbox: { hostname: '10.0.0.5', port: 22, user: 'dev' } } }));
@@ -242,14 +242,14 @@ test('remote file paths stay inside the folder and are never run by the shell', 
   await assert.rejects(h.invoke('files.write', { folderId: id, path: 'linkdir/secret.txt', text: 'owned' }), /outside/i);
   await assert.rejects(h.invoke('files.write', { folderId: id, path: '../escape.txt', text: 'owned' }), /outside|not allowed/i);
   assert.equal(readFileSync(join(outside, 'secret.txt'), 'utf8'), 'secret\n'); assert.ok(!existsSync(join(h.root, 'home', 'escape.txt')));
-  const marker = join(h.root, 'PWNED');
-  const names = [`a'; touch ${marker}; echo '.txt`, `$(touch ${marker}).txt`, `\`touch ${marker}\`.txt`, '-rf'];
+  // A file name cannot hold a slash, so each would-be command touches PWNED in whatever folder it ran from.
+  const names = ["a'; touch PWNED; echo '.txt", '$(touch PWNED).txt', '`touch PWNED`.txt', '-rf'];
   for (const name of names) {
     await h.invoke('files.create', { folderId: id, path: name, kind: 'file' });
     await h.invoke('files.write', { folderId: id, path: name, text: 'literal' });
     assert.equal(readFileSync(join(h.project, name), 'utf8'), 'literal', name);
   }
-  assert.ok(!existsSync(marker), 'nothing ran');
+  for (const where of [h.project, join(h.root, 'home'), h.root, process.cwd()]) assert.ok(!existsSync(join(where, 'PWNED')), `nothing ran in ${where}`);
   const listed = (await h.invoke('files.list', { folderId: id })).map((e: { name: string }) => e.name);
   for (const name of names) assert.ok(listed.includes(name), name);
   assert.ok(!listed.includes('link.txt'), 'a link that leads out of the folder is not listed');

@@ -7,6 +7,8 @@ import {spawnRemoteTerminal,type AppServerConnection,type TerminalPty} from './r
 import {loginShell,resolveTerminalShell,shellArgs} from './terminal-shell.ts';
 import {createRequire} from 'node:module';
 import {unpackedPath} from './unpacked-path.ts';
+import {sshEnvironment} from './remote/ssh.ts';
+import {homedir} from 'node:os';
 import type {ProcessEvent,TerminalCreate,TerminalInfo,TerminalReplay} from '../shared/process-protocol.ts';
 
 export const MAX_TERMINALS=12;
@@ -18,6 +20,8 @@ export interface RemoteTerminalHost {connection:AppServerConnection;cwd?:string;
 export interface TerminalOptions {
   /** CR-18: the user's shell preference ('system', 'zsh', 'bash', 'fish' or an absolute path), read per new terminal. */
   shell?:()=>Promise<string|undefined>|string|undefined;
+  /** #147: the ssh command line for a terminal in an `ssh://` folder (a shell on the host, through its shared connection). */
+  remote?:(folderPath:string)=>Promise<{file:string;args:string[];title:string}>;
 }
 /** C3.b4: one terminal's newest output for the agent, ANSI stripped (redaction is the caller's job). */
 export interface TerminalTail {id:string;title:string;status:TerminalInfo['status'];text:string;truncated:boolean}
@@ -139,13 +143,25 @@ export class TerminalSessions {
     const remote=host?.kind==='remote'?this.remoteHosts.get(host.id):undefined;
     if(host?.kind==='remote'&&!remote)throw new Error('That remote host is not connected.');
     let {cwd}=await this.authorize({chatId:input.chatId,operation:'terminal',...(input.folderId?{folderId:input.folderId}:{})});
-    if(typeof cwd!=='string'||!isAbsolute(cwd)||cwd.includes('\0'))throw new Error('The terminal folder is unavailable.');
+    let ssh:{file:string;args:string[];title:string}|undefined;
+    if(!remote&&typeof cwd==='string'&&cwd.startsWith('ssh://')){
+      if(!this.options.remote)throw new Error('Terminals on SSH hosts are not available here.');
+      ssh=await this.options.remote(cwd);
+      if(!ssh||!isAbsolute(ssh.file)||!Array.isArray(ssh.args)||ssh.args.some(arg=>typeof arg!=='string'||arg.includes('\0')))throw new Error('The SSH terminal could not be prepared.');
+    }
+    if(typeof cwd!=='string'||(!ssh&&!isAbsolute(cwd))||cwd.includes('\0'))throw new Error('The terminal folder is unavailable.');
     let child:TerminalPty,file:string;
     if(remote){
       // The folder lives on the remote host; the local authorization still decides whether this chat may open a terminal.
       if(remote.cwd!==undefined){if(!isAbsolute(remote.cwd)||remote.cwd.includes('\0'))throw new Error('The remote folder is invalid.');cwd=remote.cwd;}
       file=remote.shell&&isAbsolute(remote.shell)&&!remote.shell.includes('\0')?remote.shell:'/bin/sh';
       child=await spawnRemoteTerminal(remote.connection,{command:[file,...shellArgs(file)],cwd,cols:input.cols,rows:input.rows,env:{TERM:'xterm-256color',COLORTERM:'truecolor',TERM_PROGRAM:'Muster'}});
+    }else if(ssh){
+      const pty=await loadPty();
+      if(this.closing)throw new Error('Muster is stopping background work.');
+      file=ssh.file;
+      try{child=pty.spawn(ssh.file,ssh.args,{name:'xterm-256color',cols:input.cols,rows:input.rows,cwd:homedir(),env:{...sshEnvironment(),TERM:'xterm-256color',COLORTERM:'truecolor',TERM_PROGRAM:'Muster'}});}
+      catch(error){throw new Error(`The SSH terminal could not start (${error instanceof Error?error.message:'launch error'}).`);}
     }else{
       if(!(await fs.stat(cwd).then(stat=>stat.isDirectory(),()=>false)))throw new Error('The terminal folder no longer exists.');
       const pty=await loadPty();
@@ -159,7 +175,7 @@ export class TerminalSessions {
     }
     if(this.closing){try{child.kill();}catch{}throw new Error('Muster is stopping background work.');}
     let resolve!:()=>void;const done=new Promise<void>(accept=>{resolve=accept;});
-    const info:TerminalInfo={id:`terminal:${randomUUID()}`,chatId:input.chatId,title:remote?.title?`${remote.title} · ${basename(file)}`.slice(0,80):basename(file),cwd,shell:file,owner:'user',status:'running',startedAt:new Date().toISOString(),exitCode:null};
+    const info:TerminalInfo={id:`terminal:${randomUUID()}`,chatId:input.chatId,title:ssh?ssh.title.slice(0,80):remote?.title?`${remote.title} · ${basename(file)}`.slice(0,80):basename(file),cwd,shell:file,owner:'user',status:'running',startedAt:new Date().toISOString(),exitCode:null};
     const entry:Entry={info,ring:new TerminalRing(),pty:child,pending:'',paused:false,closing:false,done,resolve};
     this.entries.set(info.id,entry);
     child.onData(data=>{

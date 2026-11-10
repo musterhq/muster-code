@@ -10,8 +10,10 @@ import { looksLikeWindowsPath, normalizeFsPath, pathKey, currentPathPlatform } f
  * normalised path on the survivor. Idempotent, and tolerant of tables the database does not have yet.
  */
 const platformFor = (path: string) => looksLikeWindowsPath(path) ? 'win32' as const : currentPathPlatform();
-export const canonicalFolderPath = (path: string) => normalizeFsPath(path, platformFor(path));
-export const canonicalFolderKey = (path: string) => pathKey(path, platformFor(path));
+/** #147: an `ssh://host/path` folder is already canonical (the host resolved its real path); it is never a local path. */
+const remote = (path: string) => path.startsWith('ssh://');
+export const canonicalFolderPath = (path: string) => remote(path) ? path : normalizeFsPath(path, platformFor(path));
+export const canonicalFolderKey = (path: string) => remote(path) ? path : pathKey(path, platformFor(path));
 
 const hasTable = (db: DatabaseSync, name: string) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?").get(name);
 const hasColumn = (db: DatabaseSync, table: string, column: string) => (db.prepare(`SELECT name FROM pragma_table_info('${table}')`).all() as { name: string }[]).some(c => c.name === column);
