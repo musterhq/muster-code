@@ -6,7 +6,7 @@ import {check} from './dom-check.ts';
 const require = createRequire(import.meta.url), {parseHTML} = require('linkedom');
 const {window} = parseHTML('<html><body><div id="root"></div></body></html>');
 const saved = new Map<string, string>();
-Object.assign(globalThis, {window, document: window.document, HTMLElement: window.HTMLElement, Element: window.Element, Node: window.Node, navigator: {userAgent: 'node', platform: 'MacIntel'},
+Object.assign(globalThis, {window, document: window.document, HTMLElement: window.HTMLElement, Element: window.Element, Node: window.Node,
   localStorage: {getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => void saved.set(key, value), removeItem: (key: string) => void saved.delete(key)},
   requestAnimationFrame: (fn: () => void) => setTimeout(fn, 0), cancelAnimationFrame: (id: number) => clearTimeout(id)});
 
@@ -35,7 +35,13 @@ const {CompareScreen} = await import('../src/renderer/components/CompareScreen')
 const {CompareSendPicker} = await import('../src/renderer/components/CompareSendPicker');
 const root = createRoot(document.getElementById('root')!);
 const until = async (label: string, test: () => boolean) => { for (let i = 0; i < 200; i++) { if (test()) return; await delay(5); } throw new Error(`timed out: ${label}`); };
-const click = (element: Element | null | undefined) => { assert.ok(element, 'element to click'); (element as HTMLElement).dispatchEvent(new window.MouseEvent('click', {bubbles: true})); };
+// linkedom does not toggle a checkbox on a synthetic click; a browser does, and React reads the new state on click.
+const click = (element: Element | null | undefined) => {
+  assert.ok(element, 'element to click');
+  const input = element as HTMLInputElement;
+  if (input.tagName === 'INPUT' && input.type === 'checkbox') { if (input.disabled) return; input.checked = !input.checked; }
+  input.dispatchEvent(new window.Event('click', {bubbles: true, cancelable: true}));
+};
 const text = (element: Element | null | undefined) => (element?.textContent ?? '').replace(/\s+/g, ' ').trim();
 const buttonNamed = (name: RegExp, scope: ParentNode = document) => Array.from(scope.querySelectorAll('button')).find(button => name.test(text(button)) || name.test(button.getAttribute('aria-label') ?? ''));
 

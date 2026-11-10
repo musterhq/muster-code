@@ -13,7 +13,7 @@ import { TaskLinkHost } from './components/TaskLinkHost';
 import { HandBackHost, NoticeCountdown } from './components/HandBackHost';
 import { SetupGuideHost } from './components/SetupGuide';
 import { ResourcePane } from './components/ResourcePane';
-import {LazyAutomationsScreen,LazyBoundary,LazyHubScreen,LazyMemoryScreen,LazyPreferencesScreen,LazyProjectsScreen,preloadScreens} from './lazyScreens';
+import {LazyAutomationsScreen,LazyBoundary,LazyCompareScreen,LazyHubScreen,LazyMemoryScreen,LazyPreferencesScreen,LazyProjectsScreen,preloadScreens} from './lazyScreens';
 import { SummaryCard } from './components/SummaryCard';
 import { AreaBoundary } from './components/AreaBoundary';
 import {Tip,TipProvider} from './components/Tooltip';
@@ -46,7 +46,7 @@ import './app-shell.css';
 function saveNavWidth():void { try { persistNavWidth(); } catch {} }
 
 export function App(): React.ReactElement {
-  const state = useStoreSlice('activeChatId','boot','memoryFolderId','navHidden','navWidth','notices','screen','settings');
+  const state = useStoreSlice('activeChatId','boot','compareId','memoryFolderId','navHidden','navWidth','notices','screen','settings');
   const noticeStack=useNoticePlacement(state.notices.length);
   const draft = useNewChatDraft();
   const dragging = useRef(false);
@@ -159,7 +159,7 @@ export function App(): React.ReactElement {
         </div>
         {/* 'providers' and 'plugins' are no longer standalone screens: openProvidersTab()/openPluginsScreen()
             route through Settings so their entry points always land in the same shell, at their section. */}
-        {state.screen!=='work'&&<LazyBoundary label={state.screen}>{state.screen === 'projects' ? <LazyProjectsScreen onBack={closeSettings} onStartChat={(projectId:string, folderId:string)=>void createChat(folderId, projectId).then(() => focusComposer())} /> : state.screen === 'memory' ? <LazyMemoryScreen key={state.memoryFolderId ?? 'personal'} /> : state.screen === 'settings' ? <LazyPreferencesScreen/> : state.screen === 'automations' ? <LazyAutomationsScreen/> : state.screen === 'hub' ? <LazyHubScreen/> : null}</LazyBoundary>}
+        {state.screen!=='work'&&<LazyBoundary label={state.screen}>{state.screen === 'projects' ? <LazyProjectsScreen onBack={closeSettings} onStartChat={(projectId:string, folderId:string)=>void createChat(folderId, projectId).then(() => focusComposer())} /> : state.screen === 'memory' ? <LazyMemoryScreen key={state.memoryFolderId ?? 'personal'} /> : state.screen === 'settings' ? <LazyPreferencesScreen/> : state.screen === 'automations' ? <LazyAutomationsScreen/> : state.screen === 'hub' ? <LazyHubScreen/> : state.screen === 'compare' && state.compareId ? <LazyCompareScreen key={state.compareId} id={state.compareId}/> : null}</LazyBoundary>}
         {state.screen==='work'&&<WorkControls/>}
         {state.screen==='work'&&state.boot.phase==='ready'&&<AreaBoundary area="the summary card" scope="card"><SummaryCard/></AreaBoundary>}
       </main>

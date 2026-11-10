@@ -22,12 +22,12 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS comparisons (
   id TEXT PRIMARY KEY, request_id TEXT UNIQUE, folder_id TEXT NOT NULL, source_chat_id TEXT NOT NULL,
   base_branch TEXT NOT NULL, base_sha TEXT NOT NULL, prompt TEXT NOT NULL, created_at TEXT NOT NULL,
-  state TEXT NOT NULL DEFAULT 'open', winner_chat_id TEXT);
+  state TEXT NOT NULL DEFAULT 'open', winner_chat_id TEXT, choices TEXT);
 CREATE TABLE IF NOT EXISTS comparison_runs (
   comparison_id TEXT NOT NULL, ordinal INTEGER NOT NULL, chat_id TEXT NOT NULL UNIQUE, folder_id TEXT NOT NULL,
   branch TEXT NOT NULL, worktree_path TEXT NOT NULL, provider_id TEXT NOT NULL, model TEXT NOT NULL,
   started_at TEXT, settled_at TEXT, outcome TEXT, PRIMARY KEY (comparison_id, ordinal));`;
-interface GroupRow {id: string; request_id: string | null; folder_id: string; source_chat_id: string; base_branch: string; base_sha: string; prompt: string; created_at: string; state: string; winner_chat_id: string | null}
+interface GroupRow {id: string; request_id: string | null; folder_id: string; source_chat_id: string; base_branch: string; base_sha: string; prompt: string; created_at: string; state: string; winner_chat_id: string | null; choices: string | null}
 interface RunRow {comparison_id: string; ordinal: number; chat_id: string; folder_id: string; branch: string; worktree_path: string; provider_id: string; model: string; started_at: string | null; settled_at: string | null; outcome: string | null}
 
 /** Commands whose name says it runs a test suite: `npm test`, `pnpm run test:unit`, `pytest`, `cargo test`, `go test ./...`, `vitest`… */
@@ -289,7 +289,10 @@ export function createCompareDomain(context: DomainContext): DomainModule {
       const original = context.folderFor(group.folder_id);
       if (context.store.snapshot().chats.some(chat => chat.folderId === original.id && busy(chat))) throw new Error(`A chat is running in ${original.name}. Stop it before merging.`);
       const repo = await gitRepository(original.path);
-      const choices = (input.others && typeof input.others === 'object' ? input.others : {}) as Record<string, unknown>;
+      // Finishing a merge that stopped on conflicts reuses the keep/discard choices made when it started.
+      let stored: Record<string, unknown> = {};
+      try { stored = group.choices ? JSON.parse(group.choices) as Record<string, unknown> : {}; } catch { stored = {}; }
+      const choices = {...stored, ...(input.others && typeof input.others === 'object' && !Array.isArray(input.others) ? input.others as Record<string, unknown> : {})};
       const decided = new Map<string, CompareChoice | 'none'>();
       for (const run of others) {
         const choice = choices[run.chat_id];
@@ -325,7 +328,7 @@ export function createCompareDomain(context: DomainContext): DomainModule {
       });
       context.emit({type: 'workspaceChanged', folderId: original.id});
       if (merged) {
-        db().prepare("UPDATE comparisons SET state = 'merging', winner_chat_id = ? WHERE id = ?").run(chatId, group.id);
+        db().prepare("UPDATE comparisons SET state = 'merging', winner_chat_id = ?, choices = ? WHERE id = ?").run(chatId, JSON.stringify(Object.fromEntries([...decided].filter(([, choice]) => choice !== 'none'))), group.id);
         announce(group.id);
         return {status: 'conflicts', files: merged, comparison: toComparison(groupRow(group.id))} satisfies ComparePickResult;
       }
