@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Muster",
+    "slug": "muster",
+    "scheme": "muster",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "dev.muster.mobile",
+      "supportsTablet": true,
+      "infoPlist": {"NSCameraUsageDescription": "Muster uses the camera to scan the pairing code shown on your computer."}
+    },
+    "android": {
+      "package": "dev.muster.mobile",
+      "permissions": ["android.permission.CAMERA"]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      ["expo-camera", {"cameraPermission": "Muster uses the camera to scan the pairing code shown on your computer.", "recordAudioAndroid": false}]
+    ],
+    "experiments": {"typedRoutes": false}
+  }
+}
