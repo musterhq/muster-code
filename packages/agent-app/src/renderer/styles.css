@@ -524,6 +524,8 @@ textarea:focus-visible {
 /* "Today 0:52": marks where a chat starts or resumes after a pause. */
 .day-divider { display: flex; justify-content: center; padding: 14px 0 18px; color: var(--text-faint); font-size: var(--fs-13); font-variant-numeric: tabular-nums; user-select: none; }
 .day-divider b { color: var(--text-dim); font-weight: 500; }
+/* #401: "Switched to <model> · <effort> effort" right under a day divider sits closer to it. */
+.day-divider + .model-divider { padding-top: 0; }
 
 .msg { max-width: 720px; }
 .msg-user {
