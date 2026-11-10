@@ -8,7 +8,7 @@ const chat = (id: string, title: string, extra: Partial<MobileChat> = {}): Mobil
 // Spec: MUS-SPEC-23-4C (docs/spec/clauses/23-mobile.md#mus-spec-23-4c)
 test('lists chats with status and needs-you, and updates live', async () => {
   const connection = fakeConnection({'chats.list': {chats: [chat('a', 'Release notes'), chat('b', 'Deploy', {status: 'waiting', needsYou: 1})]}});
-  render(<ChatsScreen connection={connection} onOpen={() => undefined} />);
+  await render(<ChatsScreen connection={connection} onOpen={() => undefined} />);
   expect(await screen.findByText('Release notes')).toBeTruthy();
   expect(screen.getByText('Deploy')).toBeTruthy();
   expect(screen.getByText('Needs you')).toBeTruthy();

@@ -11,11 +11,11 @@ const naming: MobileNeed = {chatId: 'c2', chatTitle: 'Naming', itemId: 'q-item',
 // Spec: MUS-SPEC-23-4F (docs/spec/clauses/23-mobile.md#mus-spec-23-4f)
 test('the needs-you feed answers a question without opening the chat', async () => {
   const connection = fakeConnection({'needs.list': {needs: [deploy, naming]}});
-  render(<NeedsYouScreen connection={connection} />);
+  await render(<NeedsYouScreen connection={connection} />);
   expect(await screen.findByText('Deploy')).toBeTruthy();
   expect(screen.getByText('Naming')).toBeTruthy();
   expect(screen.getByText('make deploy')).toBeTruthy();
-  fireEvent.press(screen.getByText('B'));
+  await fireEvent.press(screen.getByText('B'));
   await act(async () => undefined);
   expect(connection.calls.find(call => call.method === 'question.respond')?.params).toEqual({itemId: 'q-item', answers: {q1: ['B']}});
   await act(async () => { connection.emit({type: 'needs', needs: [deploy]}); });
