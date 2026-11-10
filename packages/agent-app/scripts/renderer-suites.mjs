@@ -15,6 +15,7 @@ export function discoverRenderer(cwd = root) {
  * chunk, so Base UI is evaluated after the suite installs its linkedom globals (not on its SSR no-op paths). */
 export const split = new Set([
   'orgs-dom',
+  'compare-agents-175-dom',
   'org-sidebar-pages-dom',
   'markdown-table-dom',
   'reply-file-links-837-dom',
