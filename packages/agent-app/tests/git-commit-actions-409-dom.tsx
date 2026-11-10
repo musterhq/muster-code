@@ -66,7 +66,7 @@ const click=async(el:Element|null|undefined,what:string)=>{assert.ok(el,`${what}
 const closeMenu=async()=>{const open=document.querySelector('[role=menu]');if(open)await press(open,'Escape');await settle();};
 const openMenuOn=async(index:number)=>{await rightClick(rows()[index]);await until(()=>items().length,'the commit menu');};
 const choose=async(label:RegExp)=>{await click(item(label),`menu item ${label}`);await until(()=>dialog(),'the action dialog');await until(()=>confirmButton()&&!/Checking/.test(text(confirmButton())),'the dialog to finish checking');};
-const showRef=async(value:string)=>{const select=host.querySelector<HTMLSelectElement>('select[aria-label="Commits shown"]');assert.ok(select,'the branch selector');await act(async()=>{select.value=value;select.dispatchEvent(new window.Event('change',{bubbles:true}));await delay(30);});await until(()=>called('git.log').at(-1)?.input.ref===(value||undefined)&&rows()[0]?.textContent?.includes(value==='topic'?'Topic fix':'Main 0'),`the ${value||'current'} history`);};
+const showRef=async(value:string)=>{const select=host.querySelector<HTMLSelectElement>('select[aria-label="Commits shown"]');assert.ok(select,'the branch selector');await act(async()=>{for(const option of select.querySelectorAll('option'))option.toggleAttribute('selected',option.getAttribute('value')===value);select.dispatchEvent(new window.Event('change',{bubbles:true}));await delay(30);});await until(()=>called('git.log').at(-1)?.input.ref===(value||undefined)&&rows()[0]?.textContent?.includes(value==='topic'?'Topic fix':'Main 0'),`the ${value||'current'} history`);};
 
 const root=createRoot(host);
 await act(async()=>{root.render(<GitHistoryTab tab={{id:'history:f',kind:'history',folderId:'f',title:'History · Repo'}}/>);});
@@ -156,10 +156,10 @@ await check('create branch here asks for a name and whether to switch to it',asy
   assert.ok(input,'a name field');
   assert.equal(confirmButton()!.disabled,true,'a name is needed');
   let proto=Object.getPrototypeOf(input),descriptor:PropertyDescriptor|undefined;while(proto&&!(descriptor=Object.getOwnPropertyDescriptor(proto,'value')))proto=Object.getPrototypeOf(proto);
-  await act(async()=>{descriptor!.set!.call(input,'hotfix');input.dispatchEvent(new window.Event('input',{bubbles:true}));await delay(20);});
+  await act(async()=>{descriptor!.set!.call(input,'hotfix');input.dispatchEvent(new window.Event('input',{bubbles:true}));input.dispatchEvent(new window.Event('change',{bubbles:true}));await delay(20);});
   const box=dialog()!.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
   assert.match(text(box.closest('label')),/Switch to it/);
-  await click(box,'Switch to it');
+  await act(async()=>{box.checked=true;box.dispatchEvent(new window.Event('click',{bubbles:true}));await delay(20);});
   await click(confirmButton(),'Create branch');
   await until(()=>!dialog(),'the dialog to close');
   assert.deepEqual(called('git.commitAction').at(-1)?.input,{folderId:'f',action:'branch',sha:sha(3),branch:'hotfix',checkout:true,revision:'r1'});

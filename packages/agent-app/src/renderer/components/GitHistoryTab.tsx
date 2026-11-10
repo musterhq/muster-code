@@ -15,6 +15,7 @@ import {Tip} from './Tooltip';
 import {FileTypeIcon} from './FileTypeIcon';
 import {ResourceState} from './ResourceState';
 import {cleanIpcError, gitErrorMessage, isNotGitRepository} from './resourceErrors';
+import {CommitActionDialog, CommitActionsMenu, commitMenuKey, type CommitActionRequest, type CommitMenuRequest} from './CommitActions';
 import './git-history.css';
 
 const PAGE = 100, ROW = 26;
@@ -106,9 +107,12 @@ function GraphCell({row, width}: {row: GraphRow; width: number}): React.ReactEle
   </svg>;
 }
 
-function CommitRow({commit, selected, onSelect, now, graph, graphWidth}: {commit: GitCommit; selected: boolean; onSelect: () => void; now: number; graph?: GraphRow; graphWidth: number}): React.ReactElement {
+function CommitRow({commit, selected, onSelect, onMenu, now, graph, graphWidth}: {commit: GitCommit; selected: boolean; onSelect: () => void; onMenu?: (request: CommitMenuRequest) => void; now: number; graph?: GraphRow; graphWidth: number}): React.ReactElement {
   const merge = commit.parents.length > 1;
-  return <button type="button" className={`git-history-row${selected ? ' is-selected' : ''}${commit.head ? ' is-head' : ''}${merge ? ' is-merge' : ''}`} aria-pressed={selected} onClick={onSelect} title={`${merge ? 'Merge commit · ' : ''}${commit.subject}\n${commit.author} · ${exactTime(commit.authoredAt)}`}>
+  // #409: right-click, Shift+F10 or the ContextMenu key opens the commit's actions (at the cursor, or under the row from the keyboard).
+  const onContextMenu = onMenu ? (event: React.MouseEvent<HTMLButtonElement>) => { event.preventDefault(); const {clientX: x, clientY: y} = event; onMenu({commit, anchor: {getBoundingClientRect: () => ({x, y, left: x, top: y, right: x, bottom: y, width: 0, height: 0, toJSON: () => ({})}) as DOMRect}, returnFocus: event.currentTarget}); } : undefined;
+  const onKeyDown = onMenu ? (event: React.KeyboardEvent<HTMLButtonElement>) => { if (!commitMenuKey(event)) return; event.preventDefault(); onMenu({commit, anchor: event.currentTarget, returnFocus: event.currentTarget}); } : undefined;
+  return <button type="button" className={`git-history-row${selected ? ' is-selected' : ''}${commit.head ? ' is-head' : ''}${merge ? ' is-merge' : ''}`} aria-pressed={selected} aria-haspopup={onMenu ? 'menu' : undefined} aria-keyshortcuts={onMenu ? 'Shift+F10' : undefined} onClick={onSelect} onContextMenu={onContextMenu} onKeyDown={onKeyDown} title={`${merge ? 'Merge commit · ' : ''}${commit.subject}\n${commit.author} · ${exactTime(commit.authoredAt)}`}>
     {graph && <GraphCell row={graph} width={graphWidth}/>}
     <span className="git-history-sha">{commit.short}</span>
     {merge && <GitMerge size={11} className="git-history-merge" aria-label="Merge commit"/>}
@@ -155,7 +159,7 @@ function CommitDetailView({folderId, sha}: {folderId: string; sha: string}): Rea
   </div>;
 }
 
-function CommitList({folderId, selected, onSelect, reloadKey}: {folderId: string; selected: string | null; onSelect: (sha: string) => void; reloadKey: number}): React.ReactElement {
+function CommitList({folderId, selected, onSelect, onMenu, reloadKey, refName}: {folderId: string; selected: string | null; onSelect: (sha: string) => void; onMenu?: (request: CommitMenuRequest) => void; reloadKey: number; refName?: string}): React.ReactElement {
   const [commits, setCommits] = useState<GitCommit[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -168,7 +172,7 @@ function CommitList({folderId, selected, onSelect, reloadKey}: {folderId: string
     const mine = ++token.current;
     if (skip === 0) setPhase('loading');
     try {
-      const page = await invoke('git.log', {folderId, skip, limit: PAGE});
+      const page = await invoke('git.log', {folderId, skip, limit: PAGE, ...(refName ? {ref: refName} : {})});
       if (mine !== token.current) return;
       setCommits(previous => skip === 0 ? page.commits : [...previous, ...page.commits]);
       setHasMore(page.hasMore); setPhase('ready'); setError('');
@@ -176,7 +180,7 @@ function CommitList({folderId, selected, onSelect, reloadKey}: {folderId: string
       if (mine !== token.current) return;
       setError(cleanIpcError(cause) || 'History could not be read.'); setPhase('error');
     } finally { if (mine === token.current) loading.current = false; }
-  }, [folderId]);
+  }, [folderId, refName]);
   useEffect(() => { token.current++; loading.current = false; void load(0); }, [load, reloadKey]);
   const scroller = useRef<HTMLDivElement>(null);
   const graph = useMemo(() => commitGraph(commits), [commits]);
@@ -193,7 +197,7 @@ function CommitList({folderId, selected, onSelect, reloadKey}: {folderId: string
       {items.map(item => {
         const commit = commits[item.index];
         return <div key={commit?.sha ?? 'more'} role="listitem" style={{position: 'absolute', top: 0, left: 0, width: '100%', height: item.size, transform: `translateY(${item.start}px)`}}>
-          {commit ? <CommitRow commit={commit} selected={commit.sha === selected} now={now} graph={graph[item.index]} graphWidth={graphWidth} onSelect={() => onSelect(commit.sha)}/> : <div className="git-history-more" role="status">Loading more…</div>}
+          {commit ? <CommitRow commit={commit} selected={commit.sha === selected} now={now} graph={graph[item.index]} graphWidth={graphWidth} onSelect={() => onSelect(commit.sha)} onMenu={onMenu}/> : <div className="git-history-more" role="status">Loading more…</div>}
         </div>;
       })}
     </div>
@@ -268,11 +272,18 @@ export function GitHistoryTab({tab, embedded = false}: {tab: WorkspaceTab; embed
     return () => { live = false; };
   }, [folderId, reloadKey]);
   const [refs, setRefs] = useState<RefContext>({});
+  const [branchNames, setBranchNames] = useState<string[]>([]);
   useEffect(() => {
     let live = true;
-    invoke('git.branches', {folderId}).then(list => { if (live && list) setRefs({current: list.current, local: new Set(list.local.map(branch => branch.name))}); }, () => {});
+    invoke('git.branches', {folderId}).then(list => { if (live && list) { setRefs({current: list.current, local: new Set(list.local.map(branch => branch.name))}); setBranchNames(list.local.map(branch => branch.name)); } }, () => {});
     return () => { live = false; };
   }, [folderId, reloadKey]);
+  // #409: which branch's commits the graph shows ('' = the checked-out one). Another branch's commits can be cherry-picked onto this one.
+  const [shown, setShown] = useState('');
+  useEffect(() => { if (shown && branchNames.length && (!branchNames.includes(shown) || shown === refs.current)) setShown(''); }, [shown, branchNames, refs.current]);
+  const [menu, setMenu] = useState<CommitMenuRequest | null>(null);
+  const [action, setAction] = useState<CommitActionRequest | null>(null);
+  const target = {branch: refs.current ?? null};
   if (notRepo) return <div className="files-tab git-history-tab"><div className="resource-neutral" role="status"><History size={18} aria-hidden="true"/><strong>Not a Git repository</strong><span>History appears once this folder is a Git repository.</span></div></div>;
   return <RefCtx.Provider value={refs}><div className={`files-tab git-history-tab${embedded ? ' is-embedded' : ''}`} data-testid="git-history">
     <header className="git-history-head">
@@ -282,15 +293,21 @@ export function GitHistoryTab({tab, embedded = false}: {tab: WorkspaceTab; embed
       </div>
       {embedded ? <span className="git-history-legend" aria-label="Ref colours"><GitRefChip name="HEAD" kind="head"/><GitRefChip name="branch" kind="local"/><GitRefChip name="remote" kind="remote"/><GitRefChip name="tag" kind="tag"/></span>
         : <span className="git-history-folder" title={folder?.path}>{folder?.name ?? tab.title}</span>}
+      {mode === 'history' && branchNames.length > 1 && <select className="git-history-ref" aria-label="Commits shown" title="Whose commits the graph shows" value={shown} onChange={event => setShown(event.target.value)}>
+        <option value="">{refs.current ? `${refs.current} (checked out)` : 'HEAD (detached)'}</option>
+        {branchNames.filter(name => name !== refs.current).map(name => <option key={name} value={name}>{name}</option>)}
+      </select>}
       <Tip label="Refresh history"><button type="button" className="icon-button" aria-label="Refresh history" onClick={() => setReloadKey(n => n + 1)}><RefreshCw size={12}/></button></Tip>
     </header>
     {mode === 'history'
       ? <div className="git-history-split">
-        <CommitList folderId={folderId} selected={selected} onSelect={setSelected} reloadKey={reloadKey}/>
+        <CommitList folderId={folderId} selected={selected} onSelect={setSelected} onMenu={setMenu} reloadKey={reloadKey} refName={shown || undefined}/>
         {selected
           ? <CommitDetailView key={selected} folderId={folderId} sha={selected}/>
           : <div className="git-history-placeholder" role="status">Select a commit to see what it changed.</div>}
       </div>
       : <ComparePane folderId={folderId} reloadKey={reloadKey}/>}
+    <CommitActionsMenu folderId={folderId} request={menu} target={target} onHead={!shown} onClose={() => setMenu(null)} onAction={next => { setMenu(null); setAction(next); }}/>
+    <CommitActionDialog folderId={folderId} request={action} target={target} onClose={() => setAction(null)} onDone={() => setReloadKey(n => n + 1)}/>
   </div></RefCtx.Provider>;
 }
