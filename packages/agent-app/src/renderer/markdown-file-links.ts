@@ -1,17 +1,21 @@
 /** File references in replies become links, as Codex writes them: `src/app.py:342` or "fleet_status.py (line 134)".
  *
- * A remark plugin for chat replies. Inline code that is only a path, and plain-text paths with a known extension,
- * become links marked `data-auto-file`; ResourceLink resolves them inside the conversation's folders and leaves
- * anything it cannot find as ordinary text. URLs, code blocks and existing links are never touched. */
+ * A remark plugin for chat replies. Inline code that is only a path (relative, absolute or `~/`; an absolute one may
+ * hold spaces), and plain-text paths with a known extension, become links marked `data-auto-file`; ResourceLink
+ * resolves them (inside the conversation's folders, or an existing file outside them) and leaves anything it cannot
+ * find as ordinary text. URLs, code blocks and existing links are never touched. */
 import type {Link, Parent, Root, RootContent, Text} from 'mdast';
 
-const EXTENSIONS = 'tsx?|jsx?|mjs|cjs|py|pyi|rb|go|rs|java|kts?|swift|c|h|cc|cpp|hpp|cs|php|sql|jsonc?|ya?ml|toml|ini|cfg|conf|mdx?|txt|rst|sh|bash|zsh|fish|ps1|css|scss|less|html?|vue|svelte|lua|r|scala|dart|exs?|erl|proto|graphql|gql|gradle|xml|plist|lock|env|tf|tfvars|hcl|ipynb|csv|tsv|log|pdf|docx|xlsx|pptx|png|jpe?g|gif|svg';
+const EXTENSIONS = 'tsx?|jsx?|mjs|cjs|py|pyi|rb|go|rs|java|kts?|swift|c|h|cc|cpp|hpp|cs|php|sql|jsonc?|ya?ml|toml|ini|cfg|conf|mdx?|txt|rst|sh|bash|zsh|fish|ps1|css|scss|less|html?|vue|svelte|lua|r|scala|dart|exs?|erl|proto|graphql|gql|gradle|xml|plist|lock|env|tf|tfvars|hcl|ipynb|csv|tsv|log|pdf|docx?|xlsx?|xlsm|pptx?|odt|ods|odp|rtf|png|jpe?g|gif|svg';
 const NAMES = 'Dockerfile|Makefile|Procfile|Gemfile|Rakefile|Justfile|Caddyfile|Brewfile';
-const PATH = `(?:\\.{0,2}/)?(?:[\\w@.+-]+/)*(?:[\\w@.+-]+\\.(?:${EXTENSIONS})|(?:${NAMES}))`;
+const PATH = `(?:~/|\\.{0,2}/)?(?:[\\w@.+-]+/)*(?:[\\w@.+-]+\\.(?:${EXTENSIONS})|(?:${NAMES}))`;
+/** An absolute or `~/` path whose folders and name may hold spaces ("Application Support"); only ever a whole inline-code value. */
+const SEGMENT = '[^/\\u0000-\\u001f:*?"<>|`]+';
+const SPACED_PATH = `~?/(?:${SEGMENT}/)*${SEGMENT}\\.(?:${EXTENSIONS})`;
 /** A whole inline-code value: path, then `:12`, `:12-20`, `:12:5`, `#L12` or " (line 12)". */
-const CODE_REF = new RegExp(`^(${PATH})(?::(\\d+)(?:[-:]\\d+)?|#L(\\d+)(?:-L?\\d+)?| \\(line (\\d+)\\))?$`);
+const CODE_REF = new RegExp(`^(${PATH}|${SPACED_PATH})(?::(\\d+)(?:[-:]\\d+)?|#L(\\d+)(?:-L?\\d+)?| \\(line (\\d+)\\))?$`);
 /** The same inside prose, bounded so e-mail addresses, URLs and version numbers are not matched. */
-const TEXT_REF = new RegExp(`(?<![\\w@/:.\\-])(${PATH})(?::(\\d+)(?:[-:]\\d+)?|#L(\\d+)(?:-L?\\d+)?| \\(line (\\d+)\\))?(?![\\w/@-]|\\.\\w)`, 'g');
+const TEXT_REF = new RegExp(`(?<![\\w@/:.~\\-])(${PATH})(?::(\\d+)(?:[-:]\\d+)?|#L(\\d+)(?:-L?\\d+)?| \\(line (\\d+)\\))?(?![\\w/@-]|\\.\\w)`, 'g');
 
 export interface FileMention { path: string; line?: number }
 
