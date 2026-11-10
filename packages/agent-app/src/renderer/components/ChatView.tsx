@@ -29,6 +29,7 @@ import {createTimelineProjection,findTranscriptMatches,turnAtRow,type Transcript
 import {TimelineNavigation} from './TimelineNavigation';
 import {ForkOrigin,MessageEditor,MessageMeta,type MessageActions} from './MessageMeta';
 import {ImportOrigin} from './ImportConversations';
+import {DelegationRow} from './DelegationRows';
 import './chat-continuity.css';
 import {TurnChanges} from './TurnChanges';
 import {useStoreSelector} from '../useStore';
@@ -146,6 +147,7 @@ function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, edi
     case 'question': return <PendingQuestion item={item} />;
     case 'notice':
       if (item.data?.kind === 'compaction') return <CompactionRow item={item}/>;
+      if (item.data?.kind === 'delegated-task' || item.data?.kind === 'delegated-from') return <DelegationRow item={item}/>;
       return <div className="timeline-notice">{item.text}</div>;
   }
 }

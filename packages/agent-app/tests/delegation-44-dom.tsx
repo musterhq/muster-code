@@ -38,7 +38,7 @@ const calls:{command:string;input:any}[]=[];
 window.muster={subscribe(){return()=>{};},async invoke(command:string,input:any){
   calls.push({command,input});
   if(command==='app.snapshot')return {version:1,chats,folders:[{id:'folder',name:'Folder',path:'/fixture'}],projects:[],activeChatId:'lead'};
-  if(command==='chat.timeline'||command==='chat.select')return {items:input.id==='api'?childItems:input.id==='lead'?leadItems:[],revision:1};
+  if(command==='chat.timeline')return {items:input.id==='api'?childItems:input.id==='lead'?leadItems:[],revision:1};
   if(command==='delegation.children')return [{id:'api',parentChatId:'lead',rootChatId:'lead',depth:1,title:'Audit API',model:'beta-1',status:'running',createdAt:at},{id:'ui',parentChatId:'lead',rootChatId:'lead',depth:1,title:'Audit UI',model:'beta-1',status:'completed',createdAt:at}];
   if(command==='delegation.stopChildren')return {stopped:1};
   if(command==='subagents.capabilities')return {stop:true,steer:true};
@@ -60,19 +60,19 @@ await check('#44 started chats show as compact linked rows in both transcripts, 
   const rows=[...document.querySelectorAll('[data-testid="delegated-task"]')];
   assert.deepEqual(rows.map(row=>row.textContent),['Started Audit API on Beta One','Started Audit UI on Beta One','Audit UI finished']);
   assert.equal(rows[2]!.getAttribute('data-state'),'finished');
-  let seen=since();click(rows[0]!.querySelector('button'));await delay(40);
-  assert.ok(seen().some(call=>call.command==='chat.select'&&call.input.id==='api'),'the row opens the child chat');
+  click(rows[0]!.querySelector('button'));await delay(40);
+  assert.equal(store.getState().activeChatId,'api','the row opens the child chat');
   // The parent's copy of the child's approval names the child and answers through the copy.
   const card=document.querySelector('.approval-card')!;
   assert.equal(card.querySelector('[data-testid="delegated-ask"]')!.textContent,'From Audit API, a chat this one started');
-  seen=since();click([...card.querySelectorAll('button')].find(button=>/Approve$/.test(button.textContent!.trim()))!);await delay(30);
+  let seen=since();click([...card.querySelectorAll('button')].find(button=>/Approve$/.test(button.textContent!.trim()))!);await delay(30);
   assert.deepEqual(seen().filter(call=>call.command==='approval.respond').map(call=>call.input),[{id:'copy',approved:true,decision:'accept'}]);
 
   root.render(<Timeline chatId="api" items={childItems as any} running/>);await delay(80);
   const origin=document.querySelector('[data-testid="delegated-from"]')!;
   assert.equal(origin.textContent,'Started by Lead');
-  seen=since();click(origin.querySelector('button'));await delay(40);
-  assert.ok(seen().some(call=>call.command==='chat.select'&&call.input.id==='lead'),'"Started by" opens the parent');
+  click(origin.querySelector('button'));await delay(40);
+  assert.equal(store.getState().activeChatId,'lead','"Started by" opens the parent');
 
   await store.selectChat('lead');await delay(40);
   root.render(<SubagentsTab tab={{id:'subagents:lead',kind:'subagents',chatId:'lead',title:'Lead'} as any}/>);await delay(80);
@@ -81,8 +81,8 @@ await check('#44 started chats show as compact linked rows in both transcripts, 
   assert.equal(document.querySelector('.subagents-count')!.textContent,'2');
   assert.match(document.querySelector('.subagent-counts')!.textContent!,/1 running.*1 completed/);
   assert.equal(document.querySelector('.subagents-empty'),null);
-  seen=since();click(cards[1]!.querySelector('button'));await delay(40);
-  assert.ok(seen().some(call=>call.command==='chat.select'&&call.input.id==='ui'),'a card opens that chat');
+  click(cards[1]!.querySelector('button'));await delay(40);
+  assert.equal(store.getState().activeChatId,'ui','a card opens that chat');
 
   // Stop: OK stops the working children too; Cancel stops only this chat.
   const asked:string[]=[];

@@ -813,9 +813,20 @@ export async function sendMessage(id: string, text: string, skill?: string | Sen
   }
 }
 
+const WORKING_CHILD = new Set(['running', 'stopping', 'waiting', 'queued', 'reconnecting']);
+/** #44: Stop on a chat that started other chats asks whether to stop those too (OK) or only this one (Cancel). */
+async function stopChildrenToo(id: string): Promise<boolean> {
+  const working = (await invoke('delegation.children', { chatId: id }).catch(() => [])).filter(child => WORKING_CHILD.has(child.status));
+  if (!working.length || typeof window.confirm !== 'function') return false;
+  const names = working.slice(0, 3).map(child => `“${child.title}”`).join(', ') + (working.length > 3 ? ` and ${working.length - 3} more` : '');
+  return window.confirm(`This chat started ${working.length === 1 ? 'a chat that is' : `${working.length} chats that are`} still working: ${names}.\n\nStop ${working.length === 1 ? 'it' : 'them'} too? Cancel stops only this chat.`);
+}
+
 export async function stopChat(id: string): Promise<void> {
   try {
+    const children = await stopChildrenToo(id);
     await invoke('chat.stop', { id });
+    if (children) await invoke('delegation.stopChildren', { chatId: id });
   } catch (cause) {
     notifyError(cause, () => stopChat(id));
   }

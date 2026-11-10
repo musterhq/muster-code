@@ -4,6 +4,7 @@ import { respondQuestion } from '../store';
 import { invoke } from '../bridge';
 import './pending-question.css';
 import { useQuestionHosted } from './ComposerQuestionPanel';
+import { DelegatedAsk } from './DelegationRows';
 
 function questionData(item: TimelineItem): PendingQuestionData | null {
   const value = item.data;
@@ -48,6 +49,7 @@ export function PendingQuestion({ item }: { item: TimelineItem }): React.ReactEl
   // CS-B11-1: while the composer's panel hosts this question it is answered there (1–9, typed answer), not here too.
   if (hosted && item.status === 'pending') return <section className="pending-question is-hosted" data-testid="pending-question-hosted" aria-label="Provider question">
     <h3>Input needed</h3>
+    <DelegatedAsk data={item.data}/>
     {data.questions.map(question => <p key={question.id}>{question.question}</p>)}
     <p className="pending-question-outcome"><span>Answer in the panel above the message box.</span></p>
   </section>;
@@ -73,6 +75,7 @@ export function PendingQuestion({ item }: { item: TimelineItem }): React.ReactEl
   const outcome = item.status === 'pending' ? null : questionOutcome(item);
   return <section className={`pending-question${item.status === 'pending' ? '' : ' is-settled'}`} aria-label="Provider question">
     <h3>Input needed</h3>
+    <DelegatedAsk data={item.data}/>
     {data.questions.map(question => <fieldset key={question.id} disabled={!pending}>
       <legend>{question.header}</legend>
       <p>{question.question}</p>
