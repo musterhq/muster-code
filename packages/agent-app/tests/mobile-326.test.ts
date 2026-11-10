@@ -23,6 +23,8 @@ import {fromBase64, toBase64, utf8} from '../src/shared/mobile/bytes.ts';
 import {handle, mobileItem} from '../src/runtime/mobile/bridge.ts';
 import type {AgentEvent, Snapshot, TimelineItem} from '../src/shared/protocol.ts';
 import {createHash, createPrivateKey, sign as edSign} from 'node:crypto';
+import {connect as netConnect} from 'node:net';
+import {request as httpsRequest} from 'node:https';
 
 /** An OS secret box double; `broken` makes every decryption fail (a keychain that can no longer be read). */
 const makeBox = () => { const b = {broken: false, isEncryptionAvailable: () => true, encryptString: (value: string) => Buffer.from(`box:${value}`), decryptString: (value: Buffer) => { if (b.broken) throw new Error('cannot decrypt'); return value.toString().slice(4); }}; return b; };
@@ -643,4 +645,81 @@ test('the phone gets folder names and relative file paths, never full paths', ()
   const files = mobileItem(item({method: 'item/fileChange/requestApproval', kind: 'fileChange', cwd: '/Users/someone/work/app', diff: [{path: '/Users/someone/work/app/src/a.ts'}, {path: 'README.md'}, {path: '/etc/hosts'}]}));
   assert.deepEqual(files.approval?.files, ['src/a.ts', 'README.md', 'hosts']);
   assert.ok(!JSON.stringify([command, files]).includes('/Users/someone'));
+});
+
+/** A self-signed certificate for 127.0.0.1, for the relay's TLS listener in tests only. */
+const TEST_CERT = `-----BEGIN CERTIFICATE-----
+MIICDzCCAbQCCQCd2QsJHdX4eTAKBggqhkjOPQQDAjAUMRIwEAYDVQQDDAkxMjcu
+MC4wLjEwIBcNMjYxMTEwMTQzMTM2WhgPMjEyNjEwMTcxNDMxMzZaMBQxEjAQBgNV
+BAMMCTEyNy4wLjAuMTCCAUswggEDBgcqhkjOPQIBMIH3AgEBMCwGByqGSM49AQEC
+IQD/////AAAAAQAAAAAAAAAAAAAAAP///////////////zBbBCD/////AAAAAQAA
+AAAAAAAAAAAAAP///////////////AQgWsY12Ko6k+ez671VdpiGvGUdBrDMU7D2
+O848PifSYEsDFQDEnTYIhucEk2pmeOETnSa3gZ9+kARBBGsX0fLhLEJH+Lzm5WOk
+QPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/
+UfUCIQD/////AAAAAP//////////vOb6racXnoTzucrC/GMlUQIBAQNCAAT1+3q/
+2YbYGZ3QXCIKaO4UpyYSXhyqbPj8LIMVHojIsATKXoE6v0JODi+X7VRo9tYWFgHQ
+fCdy3OB20MxX7Pf+MAoGCCqGSM49BAMCA0kAMEYCIQDeT8PlDou6YONHATiPfoO+
+xkfpxKGXqipUIAB+hn1q8AIhAK97txPcnAB+iRVqnajyWWHujOr8/iya5HKB6YR7
+HWH8
+-----END CERTIFICATE-----`;
+const TEST_KEY = `-----BEGIN PRIVATE KEY-----
+MIIBeQIBADCCAQMGByqGSM49AgEwgfcCAQEwLAYHKoZIzj0BAQIhAP////8AAAAB
+AAAAAAAAAAAAAAAA////////////////MFsEIP////8AAAABAAAAAAAAAAAAAAAA
+///////////////8BCBaxjXYqjqT57PrvVV2mIa8ZR0GsMxTsPY7zjw+J9JgSwMV
+AMSdNgiG5wSTamZ44ROdJreBn36QBEEEaxfR8uEsQkf4vOblY6RA8ncDfYEt6zOg
+9KE5RdiYwpZP40Li/hp/m47n60p8D54WK84zV2sxXs7LtkBoN79R9QIhAP////8A
+AAAA//////////+85vqtpxeehPO5ysL8YyVRAgEBBG0wawIBAQQgDuYMbokcMGd9
+afYeQLOfiaw1kLSzGZ6IRNtBMow01ZOhRANCAAT1+3q/2YbYGZ3QXCIKaO4UpyYS
+XhyqbPj8LIMVHojIsATKXoE6v0JODi+X7VRo9tYWFgHQfCdy3OB20MxX7Pf+
+-----END PRIVATE KEY-----`;
+
+// Spec: MUS-SPEC-23-6C (docs/spec/clauses/23-mobile.md#mus-spec-23-6c)
+test('the relay serves plain ws:// only on loopback unless it is a test relay, and wss:// with a certificate', async t => {
+  await assert.rejects(startRelay({host: '0.0.0.0'}), /TLS/);
+  const local = await startRelay({host: '127.0.0.1'});
+  t.after(() => local.close());
+  assert.match(local.url, /^ws:\/\/127\.0\.0\.1:\d+$/);
+  const secure = await startRelay({host: '127.0.0.1', tls: {cert: TEST_CERT, key: TEST_KEY}});
+  t.after(() => secure.close());
+  assert.match(secure.url, /^wss:\/\/127\.0\.0\.1:\d+$/);
+  const status = await new Promise<number>((resolve, reject) => {
+    const req = httpsRequest(`${secure.url.replace(/^wss/, 'https')}/nothing`, {rejectUnauthorized: false}, res => { res.resume(); resolve(res.statusCode ?? 0); });
+    req.on('error', reject); req.end();
+  });
+  assert.equal(status, 404, 'answers over TLS');
+});
+
+/** A WebSocket client that completes the upgrade and then never reads or answers anything (a half-open peer). */
+function silentSocket(relayUrl: string, path: string): Promise<{closed: Promise<void>}> {
+  const {hostname, port} = new URL(relayUrl.replace(/^ws/, 'http'));
+  return new Promise((resolve, reject) => {
+    const sock = netConnect(Number(port), hostname);
+    sock.on('error', () => undefined);
+    const closed = new Promise<void>(done => sock.on('close', () => done()));
+    sock.once('connect', () => sock.write(`GET ${path} HTTP/1.1\r\nHost: ${hostname}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`));
+    sock.once('data', chunk => { if (String(chunk).startsWith('HTTP/1.1 101')) { sock.pause(); resolve({closed}); } else reject(new Error(String(chunk))); });
+  });
+}
+
+// Spec: MUS-SPEC-23-10F (docs/spec/clauses/23-mobile.md#mus-spec-23-10f)
+test('the relay closes unregistered and silent sockets and refuses oversized messages', async t => {
+  const relay = await startRelay({test: true, registerTimeoutMs: 150, keepAlive: {intervalMs: 100, timeoutMs: 100}});
+  t.after(() => relay.close());
+  // A desktop that never registers.
+  const idle = rawDesktop(relay);
+  await idle.challenge;
+  assert.equal(await idle.closed, 4408);
+  // A peer that stops answering pings.
+  const silent = await silentSocket(relay.url, '/v1/desktop');
+  await Promise.race([silent.closed, delay(3000).then(() => assert.fail('the silent socket was not closed'))]);
+  // A phone message over one Noise message's base64 length is refused and never forwarded.
+  const d = await desktop(t, quick().provider);
+  const {link} = await d.service.invoke('mobile.pair.start', {});
+  const route = parsePairingLink(link).route;
+  const phone = new WebSocket(`${d.relay.url}/v1/phone/${route}`);
+  const code = new Promise<number>(resolve => { phone.onclose = event => resolve(event.code); });
+  await new Promise<void>((resolve, reject) => { phone.onopen = () => resolve(); phone.onerror = () => reject(new Error('phone socket error')); });
+  phone.send('A'.repeat(87_385));
+  assert.equal(await code, 1009);
+  assert.ok(!d.relay.frames.some(frame => frame.data.length > 87_384), 'nothing oversized was forwarded');
 });

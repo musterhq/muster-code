@@ -41,6 +41,7 @@ Boundaries:
 | [MUS-SPEC-23-5A](23-mobile.md#mus-spec-23-5a) | Settings › Integrations › Phone shows a QR for the pairing link, a pending phone with its check code to add or reject, lists a paired phone as read-only with platform and key fingerprint and an access switch, and Revoke removes it. | [`Phone settings show the pairing QR, list the phone read-only, and revoke it`](../../../packages/agent-app/tests/mobile-settings-326-dom.tsx) |
 | [MUS-SPEC-23-6A](23-mobile.md#mus-spec-23-6a) | The relay registers a route only after a fresh Ed25519 signature over its own nonce; a replayed or forged registration is refused and the live registration stays; a relay not started for tests records nothing. | [`the relay registers a route only for a fresh signature; a replayed or forged registration is refused and the live one stays`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-6B](23-mobile.md#mus-spec-23-6b) | mobile.relay.set and the phone's link parser accept wss:// anywhere and ws:// only for loopback and private-network addresses. | [`a relay address must be wss:// except on loopback and private networks`](../../../packages/agent-app/tests/mobile-326.test.ts) |
+| [MUS-SPEC-23-6C](23-mobile.md#mus-spec-23-6c) | Started without the test flag, the relay refuses a plain ws:// listener off loopback and serves wss:// when given a certificate. | [`the relay serves plain ws:// only on loopback unless it is a test relay, and wss:// with a certificate`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-7A](23-mobile.md#mus-spec-23-7a) | After the handshake the phone and the desktop show the same 6-digit check code; the phone can do nothing and cannot reconnect until the desktop adds it; then it is listed with platform, paired-at and key fingerprint and a notice says a phone paired. | [`a new phone waits for the check code to be confirmed on the desktop and cannot act or reconnect until then`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-7B](23-mobile.md#mus-spec-23-7b) | A second phone using a code another phone already took is told the code was used and to check the desktop list; rejecting the pending phone disconnects it and adds nothing. | [`a second phone using a taken code is told to check the desktop list, and the owner can reject the first`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-7C](23-mobile.md#mus-spec-23-7c) | mobile.status carries the pairing expiry and the pending phone, never the code or the link; mobile.pair.link returns the link. | [`mobile.status never carries the pairing link or code`](../../../packages/agent-app/tests/mobile-326.test.ts) |
@@ -53,6 +54,7 @@ Boundaries:
 | [MUS-SPEC-23-10C](23-mobile.md#mus-spec-23-10c) | If a phone's access drops to read-only, or its session ends, while a request is in flight, the runtime command is not called. | [`access and the session are checked again right before the runtime command runs`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-10D](23-mobile.md#mus-spec-23-10d) | A handshake message or transport message over 65,535 bytes throws without any decryption attempt. | [`frames over 65,535 bytes are refused before decrypting`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-10E](23-mobile.md#mus-spec-23-10e) | Approval details reach the phone with the folder name instead of the working directory's full path, and changed files relative to it. | [`the phone gets folder names and relative file paths, never full paths`](../../../packages/agent-app/tests/mobile-326.test.ts) |
+| [MUS-SPEC-23-10F](23-mobile.md#mus-spec-23-10f) | The relay closes a desktop that does not register in time and a socket that stops answering pings, and closes a phone that sends a message over 87,384 characters without forwarding it. | [`the relay closes unregistered and silent sockets and refuses oversized messages`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 
 ### Pairing, the device registry and access
 
@@ -308,6 +310,17 @@ Boundaries:
 - Known gaps: Hostnames that resolve to private addresses are treated as public (only literal private IPs and localhost may use ws://).
 - Evidence: UNVERIFIED
 
+<a id="mus-spec-23-6c"></a>
+#### MUS-SPEC-23-6C: The relay serves wss:// except on loopback
+
+- Precondition: packages/relay, started without the test flag.
+- Action: Start it on 0.0.0.0 without a certificate; start it on 127.0.0.1 without one; start it on 127.0.0.1 with a certificate and key and make an HTTPS request to it.
+- Expected result: The 0.0.0.0 start is refused with a message about TLS. The loopback start gives a ws:// address (for a TLS tunnel or proxy in front). The start with a certificate gives a wss:// address and answers over TLS.
+- Test: `packages/agent-app/tests/mobile-326.test.ts::the relay serves plain ws:// only on loopback unless it is a test relay, and wss:// with a certificate`
+- Environment: Node test runner on the dev relay from packages/relay; a self-signed test certificate.
+- Known gaps: Whether a tunnel in front of a loopback relay uses TLS is up to the tunnel; the desktop and phone refuse ws:// relay addresses off the local network (6B).
+- Evidence: UNVERIFIED
+
 ### Confirming a pairing (security review)
 
 <a id="mus-spec-23-7a"></a>
@@ -446,4 +459,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/mobile-326.test.ts::the phone gets folder names and relative file paths, never full paths`
 - Environment: Node test runner; the shared modules are called directly.
 - Known gaps: Maps items directly; the end-to-end path is covered by 2C.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-10f"></a>
+#### MUS-SPEC-23-10F: The relay closes unregistered and silent sockets and refuses oversized messages
+
+- Precondition: The dev relay with a short register timeout and keep-alive interval (test seams), and a registered desktop.
+- Action: Open a desktop connection and never register; open a raw WebSocket that never answers pings; from a phone connection send one message of 87,385 characters.
+- Expected result: The unregistered desktop is closed with 4408; the silent socket is closed after a missed pong; the phone is closed with 1009 and the desktop never receives the oversized message.
+- Test: `packages/agent-app/tests/mobile-326.test.ts::the relay closes unregistered and silent sockets and refuses oversized messages`
+- Environment: Node test runner on the dev relay from packages/relay on 127.0.0.1; raw sockets for the silent peer.
+- Known gaps: The production intervals (10 s to register, 25 s ping, 10 s pong) are not waited out.
 - Evidence: UNVERIFIED
