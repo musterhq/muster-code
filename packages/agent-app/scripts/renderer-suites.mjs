@@ -17,6 +17,7 @@ export const split = new Set([
   'orgs-dom',
   'org-sidebar-pages-dom',
   'markdown-table-dom',
+  'reply-file-links-837-dom',
   'browser-components',
   'hub-components',
   'projects-parity-components',

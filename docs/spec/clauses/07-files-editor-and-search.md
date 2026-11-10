@@ -53,6 +53,10 @@ Boundaries:
 | [MUS-SPEC-07-778D](07-files-editor-and-search.md#mus-spec-07-778d) | .cjs, .mjs, .cts and .mts map to JavaScript or TypeScript and every known extension maps to a loadable grammar. | [`.cjs, .mjs, .cts and .mts highlight as JavaScript or TypeScript and every known extension maps to a grammar`](../../../packages/agent-app/tests/syntax-highlight-778.test.ts) |
 | [MUS-SPEC-07-778E](07-files-editor-and-search.md#mus-spec-07-778e) | A 340 KB file is coloured on the mounted rows, near the top and far down, within the windowed budget, and is never sent whole. | [`a file past the old 96 KB colour limit is coloured, and only the mounted rows are coloured and asked for`](../../../packages/agent-app/tests/syntax-highlight-778-dom.tsx) |
 | [MUS-SPEC-07-778F](07-files-editor-and-search.md#mus-spec-07-778f) | The edited-file and blame views of a 340 KB file are windowed and coloured, and an added line keeps its marker. | [`the edited-file and blame views of a file over 256 KB colour their mounted rows`](../../../packages/agent-app/tests/syntax-highlight-778-dom.tsx) |
+| [MUS-SPEC-07-837A](07-files-editor-and-search.md#mus-spec-07-837a) | Absolute and ~/ paths are found in inline code and prose with the ~ kept; inline code that is one absolute or ~/ path links whole with its spaces, prose stops at a space; .doc, .xls, .xlsm, .ppt, .odt, .ods, .odp and .rtf are found; URLs and e-mail addresses are not. | [`absolute, ~/ and spaced paths to office files are found in inline code and prose`](../../../packages/agent-app/tests/markdown-file-links.test.ts) |
+| [MUS-SPEC-07-837B](07-files-editor-and-search.md#mus-spec-07-837b) | An absolute path inside the chat's folder, in inline code and in prose, renders as the file link, and clicking it opens that file, relative to the folder, in a tab. | [`an absolute path inside the chat's folder becomes the file link and opens the file`](../../../packages/agent-app/tests/reply-file-links-837-dom.tsx) |
+| [MUS-SPEC-07-837C](07-files-editor-and-search.md#mus-spec-07-837c) | Existing files outside the chat's folders, named by an absolute path, a ~/ path or an absolute path with spaces, render as the outside-file link for that exact path; each path is checked once. | [`an existing file outside the chat's folders becomes the outside-file link`](../../../packages/agent-app/tests/reply-file-links-837-dom.tsx) |
+| [MUS-SPEC-07-837D](07-files-editor-and-search.md#mus-spec-07-837d) | Absolute and ~/ paths that do not exist stay plain text with no link of either kind, and a relative file name still links through the folder as before. | [`a path that does not exist stays plain text, and a relative name still links in the folder`](../../../packages/agent-app/tests/reply-file-links-837-dom.tsx) |
 
 ### Large files
 
@@ -471,4 +475,50 @@ Boundaries:
 - Test: `packages/agent-app/tests/file-find-dom.tsx::Escape and Close find close the Find bar and show the file as source again`
 - Environment: DOM suite (linkedom) with a stubbed bridge.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### Links to files named in a reply
+
+<a id="mus-spec-07-837a"></a>
+#### MUS-SPEC-07-837A: Absolute, ~/ and spaced paths to office files are found in a reply
+
+- Precondition: Reply text that names files as inline code and in prose: absolute paths, `~/` paths, an absolute path under "Application Support", and files ending in .doc, .xls, .xlsm, .ppt, .odt, .ods, .odp and .rtf, next to a URL and an e-mail address.
+- Action: Parse the inline code values and the prose with the reply's file-link finder.
+- Expected result: Each path is found with its leading `/` or `~/` kept. Inline code that is entirely one absolute or `~/` path with a known extension is found whole, spaces included, with its line number. In prose a path stops at a space. Every listed office, OpenDocument and RTF extension is found. URLs and e-mail addresses are not found.
+- Test: `packages/agent-app/tests/markdown-file-links.test.ts::absolute, ~/ and spaced paths to office files are found in inline code and prose`
+- Environment: Node test runner; no DOM.
+- Known gaps: This is the parser only; whether a found path becomes a link is MUS-SPEC-07-837B to 837D. A prose path with spaces is still cut at the first space, by design.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-07-837b"></a>
+#### MUS-SPEC-07-837B: An absolute path inside the chat's folder opens the file in the pane
+
+- Precondition: A chat whose folder is `/Users/me/work`, holding `out/report.pdf`.
+- Action: Render a reply that names `/Users/me/work/out/report.pdf` in inline code and in prose, then click the link.
+- Expected result: Both mentions render as the file link (the same link a relative mention gets). Clicking one opens a file tab for `out/report.pdf` in that folder.
+- Test: `packages/agent-app/tests/reply-file-links-837-dom.tsx::an absolute path inside the chat's folder becomes the file link and opens the file`
+- Environment: linkedom DOM suite in `scripts/test-renderer.mjs` (`reply-file-links-837-dom`, split build), the real reply renderer and store, with a stubbed bridge that answers the file checks.
+- Known gaps: The host's file check is stubbed; the real check is the `files.external.inspect` handler. The look of the link is unchanged and not checked here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-07-837c"></a>
+#### MUS-SPEC-07-837C: An existing file outside the chat's folders becomes the outside-file link
+
+- Precondition: The same chat. Files exist at `~/.muster-work/x/muster-memory.xlsx` and `/Users/me/Library/Application Support/Muster Agent/out/deck.pptx`, outside its folder.
+- Action: Render a reply that names the `~/` file in inline code and in prose, and the "Application Support" file in inline code.
+- Expected result: Each renders as the outside-file link (the one whose menu offers View read-only, Reveal and Open with), labelled with the exact path, spaces and `~` included. Each distinct path is checked with the host once.
+- Test: `packages/agent-app/tests/reply-file-links-837-dom.tsx::an existing file outside the chat's folders becomes the outside-file link`
+- Environment: linkedom DOM suite in `scripts/test-renderer.mjs` (`reply-file-links-837-dom`, split build), with a stubbed bridge.
+- Known gaps: The menu's actions are covered by the existing outside-file link; this case checks only which link a mention becomes.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-07-837d"></a>
+#### MUS-SPEC-07-837D: A path that does not exist stays plain text
+
+- Precondition: The same chat. Nothing exists at `/Users/me/nowhere/ghost.docx` or `~/gone/old.xls`; `notes.md` exists in the folder.
+- Action: Render a reply that names the two missing paths and the relative name `notes.md`.
+- Expected result: The missing paths render as plain text with no file link and no outside-file link. `notes.md` renders as the file link, found through the folder as before.
+- Test: `packages/agent-app/tests/reply-file-links-837-dom.tsx::a path that does not exist stays plain text, and a relative name still links in the folder`
+- Environment: linkedom DOM suite in `scripts/test-renderer.mjs` (`reply-file-links-837-dom`, split build), with a stubbed bridge.
+- Known gaps: An inline-code mention that resolves to nothing shows its file name, as before this change, not the full path.
 - Evidence: UNVERIFIED
