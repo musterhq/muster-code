@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import type { SecretProposal } from '../../shared/domains/project-governance-protocol';
 import { invoke } from '../bridge';
 import { notifyError, notifySuccess } from '../store';
+import { SecretField } from './SecretField';
 import './governance.css';
 
 export function SecretDecision({ proposal: p, secureStorage, projectId, onChanged }: { proposal: SecretProposal; secureStorage: boolean; projectId: string; onChanged: () => void }): React.ReactElement {
@@ -19,7 +20,7 @@ export function SecretDecision({ proposal: p, secureStorage, projectId, onChange
       notifySuccess(!approve ? 'Declined.' : exists && !withValue ? `${p.name} granted to ${p.memberName}.` : `${p.name} approved for ${p.memberName}.`); onChanged();
     } catch (cause) { notifyError(cause); } finally { setBusy(false); }
   };
-  const field = <input type="password" className="ws-input" autoComplete="off" aria-label={`Value for ${p.name}`} placeholder="Paste the value" value={value} disabled={busy} onChange={e => setValue(e.target.value)}/>;
+  const field = <SecretField label={`Value for ${p.name}`} value={value} disabled={busy} onChange={setValue}/>;
   return <>
     {!secureStorage && <p role="alert" className="gov-result" data-status="refused">This computer has no secure keychain, so Muster cannot store a value.</p>}
     {exists ? <>

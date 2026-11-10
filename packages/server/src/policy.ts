@@ -36,7 +36,7 @@ const HOST_EXACT = new Set([
   'ssh.hosts.list', 'ssh.hosts.save', 'ssh.hosts.remove', 'ssh.hostkey.scan', 'ssh.hostkey.trust', 'ssh.test', 'ssh.chat.set', 'services.save', 'services.remove', 'services.start', 'services.stop',
   'org.export.write', 'backups.settings.set', 'backups.run', 'backups.restore', 'backups.restore.cancel', 'backups.remove',
   'settings.set', 'settings.reset', 'settings.import', 'settings.storage.cleanup', 'settings.folderModel.set',
-  'providers.save', 'providers.remove', 'providers.check', 'providers.cancelCheck', 'providers.secret.set', 'providers.secret.clear',
+  'providers.save', 'providers.remove', 'providers.check', 'providers.cancelCheck', 'providers.acp.save', 'providers.acp.check', 'providers.secret.set', 'providers.secret.clear',
   'providers.cli.update', 'providers.cli.rollback', 'providers.cli.cancel', 'providers.cli.check', 'providers.accounts.add', 'providers.accounts.remove',
   'extensions.sources.add', 'extensions.sources.sync', 'extensions.sources.remove', 'extensions.install', 'extensions.update', 'extensions.rollback',
   'extensions.uninstall', 'extensions.enablement.set', 'extensions.skills.save', 'extensions.skills.restore', 'skills.create',

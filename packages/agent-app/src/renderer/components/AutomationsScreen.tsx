@@ -30,11 +30,11 @@ const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'], DAY_NAMES = ['Sunday', 
 const ACCESS: Record<ChatPermissionMode, string> = { 'read-only': 'Read only', workspace: 'Workspace', auto: 'Auto', full: 'Full access' };
 const STATUS: Record<AutomationRun['status'], string> = { queued: 'Queued', awaiting: 'Waiting for approval', running: 'Running', completed: 'Completed', failed: 'Failed', interrupted: 'Stopped', skipped: 'Skipped', missed: 'Missed' };
 const TRIGGER: Record<AutomationRun['trigger'], string> = { schedule: 'Scheduled', manual: 'Run now', 'catch-up': 'Catch-up', watch: 'Files changed', repo: 'Repository event', webhook: 'Webhook' };
-type Repeat = 'interval' | 'daily' | 'cron' | 'watch' | 'repo';
+type Repeat = 'interval' | 'daily' | 'cron' | 'once' | 'watch' | 'repo';
 const REPO_EVENT_LABEL: Record<RepoTriggerEvent, string> = { 'pr-opened': 'Pull request opened', 'pr-updated': 'Pull request updated', 'check-failed': 'Check failed', push: 'Push to branch' };
 
 interface Draft extends TaskDraftFields {
-  name: string; prompt: string; repeat: Repeat; minutes: number; time: string; days: number[]; expr: string; watchFolderId: string; timezone: string; repoEvents: RepoTriggerEvent[]; repoBranch: string;
+  name: string; prompt: string; repeat: Repeat; minutes: number; time: string; days: number[]; expr: string; onceAt: string; watchFolderId: string; timezone: string; repoEvents: RepoTriggerEvent[]; repoBranch: string;
   targetKind: 'new' | 'chat' | 'task'; folderId: string; projectId: string; model: string; mode: AutomationMode; chatId: string;
   permissionMode: ChatPermissionMode; overlap: AutomationOverlap; catchUp: AutomationCatchUp; acknowledged: boolean;
 }
@@ -44,8 +44,13 @@ const PRESETS: { label: string; apply: Partial<Draft> }[] = [
   { label: 'Weekdays at 9', apply: { repeat: 'daily', time: '09:00', days: [1, 2, 3, 4, 5] } },
   { label: 'Mondays at 10', apply: { repeat: 'daily', time: '10:00', days: [1] } },
 ];
+/** 9:00 tomorrow on this computer, as a datetime-local value: the once trigger's starting point. */
+function tomorrowAtNine(now = new Date()): string {
+  const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1), pad = (n: number) => String(n).padStart(2, '0');
+  return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}T09:00`;
+}
 function blankDraft(folderId = '', projectId = ''): Draft {
-  return { name: '', prompt: '', repeat: 'daily', minutes: 60, time: '09:00', days: [1, 2, 3, 4, 5], expr: '0 9 * * 1-5', watchFolderId: folderId, timezone: LOCAL_TZ, repoEvents: ['check-failed'], repoBranch: '', targetKind: 'new', folderId, projectId, model: '', mode: 'agent', chatId: '', permissionMode: 'workspace', overlap: 'skip', catchUp: 'one', acknowledged: false, ...BLANK_TASK_FIELDS };
+  return { name: '', prompt: '', repeat: 'daily', minutes: 60, time: '09:00', days: [1, 2, 3, 4, 5], expr: '0 9 * * 1-5', onceAt: tomorrowAtNine(), watchFolderId: folderId, timezone: LOCAL_TZ, repoEvents: ['check-failed'], repoBranch: '', targetKind: 'new', folderId, projectId, model: '', mode: 'agent', chatId: '', permissionMode: 'workspace', overlap: 'skip', catchUp: 'one', acknowledged: false, ...BLANK_TASK_FIELDS };
 }
 function draftOf(automation: AutomationView): Draft {
   const draft: Draft = { ...blankDraft(), variables: automation.ext.variables, approval: automation.ext.approval, activityGate: automation.ext.activityGate, webhook: automation.ext.webhook, name: automation.name, prompt: automation.prompt, timezone: automation.timezone, permissionMode: automation.permissionMode, overlap: automation.overlap, catchUp: automation.catchUp };
@@ -53,6 +58,7 @@ function draftOf(automation: AutomationView): Draft {
   if (s.kind === 'interval') Object.assign(draft, { repeat: 'interval', minutes: s.minutes });
   else if (s.kind === 'daily') Object.assign(draft, { repeat: 'daily', time: s.time, days: s.days });
   else if (s.kind === 'cron') Object.assign(draft, { repeat: 'cron', expr: s.expr });
+  else if (s.kind === 'once') Object.assign(draft, { repeat: 'once', onceAt: s.at });
   else if (s.kind === 'repo') Object.assign(draft, { repeat: 'repo', watchFolderId: s.folderId, repoEvents: s.events, repoBranch: s.branch ?? '' });
   else Object.assign(draft, { repeat: 'watch', watchFolderId: s.folderId });
   if (t.kind === 'chat') Object.assign(draft, { targetKind: 'chat', chatId: t.chatId });
@@ -63,6 +69,7 @@ function draftOf(automation: AutomationView): Draft {
 const scheduleOf = (draft: Draft): AutomationSchedule => draft.repeat === 'interval' ? { kind: 'interval', minutes: draft.minutes }
   : draft.repeat === 'daily' ? { kind: 'daily', time: draft.time, days: [...draft.days].sort((a, b) => a - b) }
   : draft.repeat === 'cron' ? { kind: 'cron', expr: draft.expr }
+  : draft.repeat === 'once' ? { kind: 'once', at: draft.onceAt }
   : draft.repeat === 'repo' ? { kind: 'repo', folderId: draft.watchFolderId, events: REPO_TRIGGER_EVENTS.filter(event => draft.repoEvents.includes(event)), ...(draft.repoBranch.trim() ? { branch: draft.repoBranch.trim() } : {}) }
   : { kind: 'watch', folderId: draft.watchFolderId };
 function targetOf(draft: Draft): AutomationSaveInput['target'] {
@@ -129,7 +136,7 @@ function Editor({ editing, onDone, projectId }: { editing: AutomationView | null
     return () => { live = false; clearTimeout(timer); };
   }, [previewKey]);
   const chatAccessNote = draft.targetKind === 'chat' && draft.chatId ? (() => { const chat = chats.find(entry => entry.id === draft.chatId); return chat ? `Runs continue “${chat.title}” in its folder with its model.` : ''; })() : '';
-  const ready = draft.name.trim() && draft.prompt.trim() && (draft.targetKind !== 'chat' || draft.chatId) && (draft.targetKind !== 'task' || draft.projectId) && (draft.repeat !== 'daily' || draft.days.length) && (draft.repeat !== 'watch' || draft.watchFolderId) && (draft.repeat !== 'repo' || (draft.watchFolderId && draft.repoEvents.length)) && (draft.permissionMode !== 'full' || draft.acknowledged) && !previewError;
+  const ready = draft.name.trim() && draft.prompt.trim() && (draft.targetKind !== 'chat' || draft.chatId) && (draft.targetKind !== 'task' || draft.projectId) && (draft.repeat !== 'daily' || draft.days.length) && (draft.repeat !== 'once' || draft.onceAt) && (draft.repeat !== 'watch' || draft.watchFolderId) && (draft.repeat !== 'repo' || (draft.watchFolderId && draft.repoEvents.length)) && (draft.permissionMode !== 'full' || draft.acknowledged) && !previewError;
   const save = async () => {
     if (!ready || busy) return;
     setBusy(true); setError('');
@@ -158,10 +165,11 @@ function Editor({ editing, onDone, projectId }: { editing: AutomationView | null
         </div>
         <div className="automation-row">
           <label>Repeat<select value={draft.repeat} onChange={event => patch({ repeat: event.target.value as Repeat })}>
-            <option value="interval">Every few minutes or hours</option><option value="daily">On days at a time</option><option value="cron">Cron expression</option><option value="watch">When files change</option><option value="repo">On repository or CI events</option>
+            <option value="interval">Every few minutes or hours</option><option value="daily">On days at a time</option><option value="once">Once at a date and time</option><option value="cron">Cron expression</option><option value="watch">When files change</option><option value="repo">On repository or CI events</option>
           </select></label>
           {draft.repeat === 'interval' && <label>Every<span className="automation-inline"><input type="number" min={5} max={10080} step={5} value={draft.minutes} onChange={event => patch({ minutes: Math.round(Number(event.target.value) || 0) })} /><span>minutes</span></span></label>}
           {draft.repeat === 'daily' && <label>At<input type="time" value={draft.time} required onChange={event => patch({ time: event.target.value })} /></label>}
+          {draft.repeat === 'once' && <label>On<input type="datetime-local" value={draft.onceAt} required onChange={event => patch({ onceAt: event.target.value })} /></label>}
           {draft.repeat === 'cron' && <label className="automation-grow">Cron<input type="text" className="automation-mono" value={draft.expr} spellCheck={false} placeholder="minute hour day month weekday" onChange={event => patch({ expr: event.target.value })} /></label>}
           {(draft.repeat === 'watch' || draft.repeat === 'repo') && <label className="automation-grow">{draft.repeat === 'repo' ? 'Repository folder' : 'Folder'}<select value={draft.watchFolderId} onChange={event => patch({ watchFolderId: event.target.value })}><option value="" disabled>Choose a folder</option>{folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>}
           {draft.repeat === 'repo' && draft.repoEvents.includes('push') && <label>Branch<input type="text" className="automation-mono" value={draft.repoBranch} placeholder="default branch" spellCheck={false} onChange={event => patch({ repoBranch: event.target.value })} /></label>}
@@ -175,7 +183,7 @@ function Editor({ editing, onDone, projectId }: { editing: AutomationView | null
         <div className="automation-preview" aria-live="polite">
           {previewError ? <p className="automation-error"><AlertCircle size={13} />{previewError}</p>
             : preview && <>
-              {preview.next.length > 0 && <p><span>Next runs</span>{preview.next.map(time => <time key={time} dateTime={time}>{runTime(time, draft.timezone)}</time>)}</p>}
+              {preview.next.length > 0 && <p><span>{draft.repeat === 'once' ? 'Runs at' : 'Next runs'}</span>{preview.next.map(time => <time key={time} dateTime={time}>{runTime(time, draft.timezone)}</time>)}</p>}
               {preview.issues.map(issue => <p key={issue} className="automation-warning"><AlertCircle size={13} />{issue}</p>)}
             </>}
         </div>
@@ -282,8 +290,8 @@ function AutomationRow({ automation, open, now, onToggle, onEdit }: { automation
     } catch (cause) { notifyError(cause); }
     finally { setBusy(null); setConfirming(false); }
   };
-  const active = automation.activeRun, state = automation.paused ? 'paused' : active ? active.status : automation.issues.length ? 'issue' : 'scheduled';
-  const when = automation.paused ? 'Paused' : active?.status === 'running' ? 'Running now' : active?.status === 'queued' ? 'Queued' : automation.nextRunAt ? `Next ${untilLabel(automation.nextRunAt, now)}` : automation.schedule.kind === 'watch' ? 'Watching for changes' : automation.schedule.kind === 'repo' ? 'Watching the repository' : 'Not scheduled';
+  const active = automation.activeRun, state = automation.paused ? 'paused' : active ? active.status : automation.done ? 'done' : automation.issues.length ? 'issue' : 'scheduled';
+  const when = automation.paused ? 'Paused' : active?.status === 'running' ? 'Running now' : active?.status === 'queued' ? 'Queued' : automation.done ? 'Done' : automation.nextRunAt ? `Next ${untilLabel(automation.nextRunAt, now)}` : automation.schedule.kind === 'watch' ? 'Watching for changes' : automation.schedule.kind === 'repo' ? 'Watching the repository' : 'Not scheduled';
   return (
     <li className="automation-item" data-open={open || undefined} data-state={state}>
       <div className="automation-item-head">
@@ -292,7 +300,7 @@ function AutomationRow({ automation, open, now, onToggle, onEdit }: { automation
           <span className="automation-state" data-state={state} aria-hidden="true" />
           <span className="automation-item-text">
             <span className="automation-item-name">{automation.name}</span>
-            <span className="automation-item-meta">{automation.summary}{automation.nextRunAt && !automation.paused && <> · <time dateTime={automation.nextRunAt} title={exactTime(automation.nextRunAt)}>{runTime(automation.nextRunAt, automation.timezone)}</time></>}</span>
+            <span className="automation-item-meta">{automation.summary}{automation.nextRunAt && !automation.paused && automation.schedule.kind !== 'once' && <> · <time dateTime={automation.nextRunAt} title={exactTime(automation.nextRunAt)}>{runTime(automation.nextRunAt, automation.timezone)}</time></>}</span>
           </span>
           <span className="automation-item-when">{when}</span>
           {automation.lastRun && <span className="automation-run-status" data-status={automation.lastRun.status} title={`Last run ${exactTime(automation.lastRun.endedAt ?? automation.lastRun.scheduledFor)}`}>{STATUS[automation.lastRun.status]} {compactAge(automation.lastRun.endedAt ?? automation.lastRun.scheduledFor, now)}</span>}

@@ -24,7 +24,7 @@ function relativePath(value: unknown): string {
 const exists = (path: string) => fs.stat(path).then(() => true, () => false);
 
 /** Which command is in progress, from the marker files git leaves in .git (worktree-aware via --git-path). */
-async function operationIn(real: string): Promise<GitOperation | null> {
+export async function operationIn(real: string): Promise<GitOperation | null> {
   const paths = (await runGit(real, ['rev-parse', '--path-format=absolute', '--git-path', 'MERGE_HEAD', '--git-path', 'rebase-merge', '--git-path', 'rebase-apply', '--git-path', 'CHERRY_PICK_HEAD', '--git-path', 'REVERT_HEAD'])).trimEnd().split('\n');
   const [mergeHead = '', rebaseMerge = '', rebaseApply = '', cherryPick = '', revert = ''] = paths;
   if (rebaseMerge && await exists(rebaseMerge)) return 'rebase';

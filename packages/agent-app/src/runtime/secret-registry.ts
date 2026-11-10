@@ -16,6 +16,25 @@ export const maskFor = (name: string): string => `••••(${name})`;
 interface Known { name: string; value: string }
 let cache: { generation: number; at: number; known: Known[] } | undefined;
 
+/** #842: values a person typed on a secret or sudo card, for this run of the app only (memory, never disk). Shorter than
+ *  the stored-secret minimum (a password can be short), but never a handful of characters that would mask ordinary words. */
+const REQUESTED_MIN = 4;
+const requested = new Map<string, string>();
+let requestedGeneration = 0;
+export function registerRequestedSecret(name: string, value: string): void {
+  if (value.length < REQUESTED_MIN || requested.get(value) === name) return;
+  requested.delete(value); requested.set(value, name); requestedGeneration++; // the newest name for a value is the one shown
+}
+/** Masks only the values typed on a card: what an HTTP route's model reads of a command it ran (the rest stays as is). */
+export function redactRequestedSecrets(text: string): string {
+  if (!text || !requested.size) return text;
+  let out = text;
+  for (const [value, name] of [...requested].sort((a, b) => b[0].length - a[0].length)) if (out.includes(value)) out = out.split(value).join(maskFor(name));
+  return out;
+}
+/** A remembered card value is stored as `ask--<scope>--NAME`: the mask shows NAME. */
+const displayName = (id: string) => id.startsWith('ask--') ? id.slice(id.lastIndexOf('--') + 2) : id;
+
 function envSecrets(env: NodeJS.ProcessEnv): Known[] {
   const out: Known[] = [];
   for (const [name, value] of Object.entries(env)) {
@@ -29,10 +48,11 @@ function envSecrets(env: NodeJS.ProcessEnv): Known[] {
 
 /** Longest value first, so a value that contains another is masked whole. Refreshed when a store changes, env at most once a second. */
 export function knownSecrets(now = Date.now()): readonly Known[] {
-  const generation = secretStoreGeneration();
+  const generation = secretStoreGeneration() * 100_003 + requestedGeneration;
   if (cache && cache.generation === generation && now - cache.at < ENV_TTL_MS) return cache.known;
   const byValue = new Map<string, string>();
-  for (const store of openSecretStores()) for (const [name, value] of store.entries()) if (value.length >= MIN_LENGTH && !byValue.has(value)) byValue.set(value, name);
+  for (const [value, name] of requested) byValue.set(value, name);
+  for (const store of openSecretStores()) for (const [name, value] of store.entries()) if (value.length >= MIN_LENGTH && !byValue.has(value)) byValue.set(value, displayName(name));
   for (const { name, value } of envSecrets(process.env)) if (!byValue.has(value)) byValue.set(value, name);
   const known = [...byValue].map(([value, name]) => ({ name, value })).sort((a, b) => b.value.length - a.value.length);
   cache = { generation, at: now, known };

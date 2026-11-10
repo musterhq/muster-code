@@ -88,6 +88,24 @@ function nextCron(fields: CronFields, after: number, timeZone: string): number |
   return best;
 }
 
+const ONCE = /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d)$/;
+/** A once time as a naive UTC millisecond value, or null when it is malformed or names a day that does not exist. */
+function onceNaive(at: string): number | null {
+  const m = typeof at === 'string' ? ONCE.exec(at) : null;
+  if (!m) return null;
+  const [year, month, day, hour, minute] = m.slice(1).map(Number) as [number, number, number, number, number];
+  const naive = Date.UTC(year, month - 1, day, hour, minute), date = new Date(naive);
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? naive : null;
+}
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** "Fri, Sep 18, 2026 at 3:00 PM": a once time as written, in its own zone. */
+export function onceLabel(at: string): string {
+  const naive = onceNaive(at);
+  if (naive === null) return at;
+  const date = new Date(naive), time = `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`;
+  return `${DAY_NAMES[date.getUTCDay()]}, ${MONTH_NAMES[date.getUTCMonth()]} ${date.getUTCDate()}, ${date.getUTCFullYear()} at ${TIME(time)}`;
+}
+
 export function cronFor(schedule: AutomationSchedule): string | null {
   if (schedule.kind === 'cron') return schedule.expr;
   if (schedule.kind === 'daily') { const [hour, minute] = schedule.time.split(':').map(Number); return `${minute} ${hour} * * ${schedule.days.length === 7 ? '*' : schedule.days.join(',')}`; }
@@ -110,6 +128,7 @@ export function validateSchedule(schedule: AutomationSchedule): void {
     if (minutes.length > 1 && Math.min(...gaps) < 5) throw new Error('Cron schedules can run at most every 5 minutes.');
     return;
   }
+  if (schedule.kind === 'once') { if (onceNaive(schedule.at) === null) throw new Error('Choose a date and time, like 2026-09-21 09:00.'); return; }
   if (schedule.kind === 'watch') { if (typeof schedule.folderId !== 'string' || !schedule.folderId) throw new Error('Choose a folder to watch.'); return; }
   if (schedule.kind === 'repo') {
     if (typeof schedule.folderId !== 'string' || !schedule.folderId) throw new Error('Choose the folder whose repository to watch.');
@@ -125,6 +144,10 @@ export function nextOccurrence(schedule: AutomationSchedule, timeZone: string, a
   if (schedule.kind === 'interval') {
     const step = schedule.minutes * MINUTE;
     return anchor + (Math.floor((after - anchor) / step) + 1) * step;
+  }
+  if (schedule.kind === 'once') {
+    const naive = onceNaive(schedule.at), instant = naive === null ? null : zonedInstant(naive, timeZone);
+    return instant !== null && instant > after ? instant : null;
   }
   const expr = cronFor(schedule);
   return expr ? nextCron(parseCron(expr), after, timeZone) : null;
@@ -170,8 +193,9 @@ function previousBefore(schedule: AutomationSchedule, timeZone: string, to: numb
 
 const TIME = (time: string) => { const [hour, minute] = time.split(':').map(Number); const h = hour! % 12 || 12; return `${h}:${String(minute).padStart(2, '0')} ${hour! < 12 ? 'AM' : 'PM'}`; };
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-/** "Every hour", "Weekdays at 9:00 AM", "Cron 0 9 * * 1-5". */
-export function describeSchedule(schedule: AutomationSchedule): string {
+/** "Every hour", "Weekdays at 9:00 AM", "Cron 0 9 * * 1-5", "Once on Fri, Sep 18, 2026 at 3:00 PM (America/New_York)". */
+export function describeSchedule(schedule: AutomationSchedule, timeZone?: string): string {
+  if (schedule.kind === 'once') return `Once on ${onceLabel(schedule.at)}${timeZone ? ` (${timeZone})` : ''}`;
   if (schedule.kind === 'interval') {
     const m = schedule.minutes;
     return m === 60 ? 'Every hour' : m % 1440 === 0 ? (m === 1440 ? 'Every day' : `Every ${m / 1440} days`) : m % 60 === 0 ? `Every ${m / 60} hours` : `Every ${m} minutes`;

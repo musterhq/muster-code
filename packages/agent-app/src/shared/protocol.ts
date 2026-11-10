@@ -112,7 +112,9 @@ export interface ProviderInfo { id: string; driver?: string; bindingId?: string;
   /** The route's catalog declares `reports_incremental_input`: its token reports carry only new input tokens. */
   incrementalInput?: boolean;
   /** Agent CLIs (Cursor, Gemini, Grok, Antigravity): where to get the CLI and the command that signs it in. */
-  installUrl?: string; loginCommand?: string }
+  installUrl?: string; loginCommand?: string;
+  /** #160: an ACP agent added in Settings: its command and arguments, and the names (never the values) of its variables. */
+  acp?: { command: string; args: string[]; envNames: string[]; preset?: string } }
 /** Read-only local skill inventory. Skills are inspected, never installed or executed here. */
 export interface SkillEntry { id: string; name: string; provenance: string; path: string; readme: string | null; readError: string | null;
   /** From agents/openai.yaml `interface` or SKILL.md front matter; absent on older runtimes. */
@@ -265,6 +267,11 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  /** Declines the provider request (a cancel, never empty answers). */
  'question.dismiss': { input: {id: string}; output: void };
  'question.respond': { input: {id: string; answers: Record<string, {answers: string[]}>}; output: void };
+ /** #842: answers a private secret or sudo card. The value (or a 1Password op:// reference) goes to the main process only; the card never stores it. */
+ 'secret.answer': { input: {id: string; value?: string; onePassword?: string; remember?: boolean}; output: void };
+ 'secret.decline': { input: {id: string}; output: void };
+ /** Removes the remembered value a secret card used. */
+ 'secret.forget': { input: {id: string}; output: void };
  'project.create': { input: {name: string; goal: string; folderIds: string[]; primaryFolderId?: string | null}; output: Project };
  'project.tasks.list': {input:{projectId:string};output:BoundedList<ProjectTask>};
  'project.tasks.create': {input:{projectId:string;title:string;acceptance:string;dependencies:string[]};output:ProjectTask};
@@ -317,6 +324,9 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'providers.cancelCheck': {input:{id:string};output:void};
  'providers.remove': { input: {id: string}; output: void };
  'providers.check': { input: {id: string}; output: ProviderInfo };
+ /** #160: add or edit an ACP agent (command, arguments, variables). Variables go to the secret store; omit `env` to keep them. */
+ 'providers.acp.save': { input: {id?: string; name: string; command: string; args: string[]; env?: Record<string, string>; preset?: string}; output: ProviderInfo };
+ 'providers.acp.check': { input: {id: string}; output: ProviderInfo };
  'providers.reveal': { input: {id: string}; output: {identity: string} };
   'chat.contextTelemetry': { input: {id: string}; output: ContextTelemetry };
   'plugins.list': { input: { folderPaths?: string[] }; output: SkillEntry[] };

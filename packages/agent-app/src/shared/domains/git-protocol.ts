@@ -40,6 +40,11 @@ export interface GitConflictState {operation:GitOperation|null; currentLabel:str
 /** The three index stages (null when that side has no version: add/add has no base, delete/modify has one missing side) and the working file with markers. */
 export interface GitConflictFile {path:string; status:string; base:string|null; ours:string|null; theirs:string|null; working:string; revision:string; truncated:boolean}
 
+// --- Commit actions from the history graph (#409) ------------------------------------------------
+export type GitCommitAction = 'checkout'|'branch'|'cherry-pick'|'revert';
+/** `conflicts` lists the files a pick or revert left unmerged (git's conflict state, for the resolver); `branch` is the branch `branch` created. */
+export interface GitCommitActionResult {status:GitLocalStatus; conflicts?:string[]; branch?:string}
+
 // --- Clone (GIT-10) ------------------------------------------------------------------------------
 export interface GitCloneStart {id:string; destination:string; name:string}
 
@@ -66,6 +71,10 @@ export interface GitCommands {
   'git.conflictWrite': {input:{folderId:string; path:string; content:string; revision:string; markResolved?:boolean}; output:GitConflictState};
   'git.conflictMarkResolved': {input:{folderId:string; paths:string[]}; output:GitConflictState};
   'git.conflictContinue': {input:{folderId:string; action:'continue'|'abort'}; output:{state:GitConflictState; status:GitLocalStatus}};
+  /** One commit from the history graph: check it out (detached), create a branch there (`checkout` switches to it), cherry-pick it onto
+   *  HEAD or revert it. Refused over tracked uncommitted changes and when the status `revision` is stale. Changing HEAD while a chat
+   *  runs in the folder needs `allowRunning` (the person saw the warning). */
+  'git.commitAction': {input:{folderId:string; sha:string; action:GitCommitAction; revision:string; branch?:string; checkout?:boolean; allowRunning?:boolean}; output:GitCommitActionResult};
   /** Starts a clone; progress and completion arrive as `gitClone` events. The folder is added when the clone finishes. */
   'git.clone.start': {input:{url:string; destination?:string}; output:GitCloneStart};
   'git.clone.cancel': {input:{id:string}; output:void};
@@ -83,5 +92,6 @@ export const GIT_COMMANDS = {
   'git.worktree.create': true, 'git.worktree.list': true, 'git.worktree.remove': true,
   'git.log': true, 'git.commitDetail': true, 'git.compare': true, 'git.refDiff': true, 'git.blame': true,
   'git.conflicts': true, 'git.conflictFile': true, 'git.conflictWrite': true, 'git.conflictMarkResolved': true, 'git.conflictContinue': true,
+  'git.commitAction': true,
   'git.clone.start': true, 'git.clone.cancel': true, 'git.clone.defaultDestination': true, 'git.clone.pickDestination': true,
 } as const satisfies Record<keyof GitCommands, true>;

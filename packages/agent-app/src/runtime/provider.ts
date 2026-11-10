@@ -22,6 +22,7 @@ import {codexWindowOverrides, userCompactionKeys} from './codex-window-overrides
 import {unpackedPath} from './unpacked-path.ts';
 import {BROWSER_MCP, BROWSER_NOTE, browserToolStyle, routeBrowserNote} from '../shared/computer-use.ts';
 import {ASK_USER_METHOD, ASK_USER_RULE} from './ask-user.ts';
+import {REQUEST_SECRET_METHOD, SECRET_RULE} from './secret-requests.ts';
 import {DEVICE_MCP, DEVICE_NOTE} from '../shared/device-protocol.ts';
 import type {McpServerSpec} from './adapters/types.ts';
 import type {RunnableAdapter} from './adapters/types.ts';
@@ -177,7 +178,7 @@ export const FULL_ACCESS_NO_ASKING_RULE = 'Never ask the user for permission or 
 /** Agent mode never ends a turn on a promise: nothing wakes the agent up to keep it. */
 export const NO_PROMISE_RULE = 'Never end a turn promising future work ("I\'ll report back when the build finishes", "I\'ll check once it is done"): nothing wakes you up to keep that promise. If you are waiting on a build, test run, server or other process, wait for it in this turn with a tool call (wait for the process, or sleep and then poll its output or status) and report the result before you end the turn.';
 /** Every route, every mode: the app draws ```mermaid, ```chart and ```html-report fences (shared/rich-block.ts). */
-export const runInstructions = (mode: Chat['mode'], extra?: string, subagents = true, permissionMode?: ChatPermissionMode) => [modeInstructions(mode, subagents), mode === 'agent' ? AGENT_AUTONOMY_RULE : undefined, mode === 'agent' ? ASK_USER_RULE : undefined, mode === 'agent' ? NO_PROMISE_RULE : undefined, mode === 'agent' && permissionMode === 'full' ? FULL_ACCESS_NO_ASKING_RULE : undefined, mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, RICH_CONTENT_GUIDANCE, extra].filter(Boolean).join('\n\n') || undefined;
+export const runInstructions = (mode: Chat['mode'], extra?: string, subagents = true, permissionMode?: ChatPermissionMode) => [modeInstructions(mode, subagents), mode === 'agent' ? AGENT_AUTONOMY_RULE : undefined, mode === 'agent' ? ASK_USER_RULE : undefined, mode === 'agent' && permissionMode !== 'read-only' ? SECRET_RULE : undefined, mode === 'agent' ? NO_PROMISE_RULE : undefined, mode === 'agent' && permissionMode === 'full' ? FULL_ACCESS_NO_ASKING_RULE : undefined, mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, RICH_CONTENT_GUIDANCE, extra].filter(Boolean).join('\n\n') || undefined;
 /** #424: the instructions, Muster's MCP servers and the native browser flag for a non-Codex route. Each route names the
  *  browser tools exactly as its model sees them, or says plainly that it has none; the browser server goes only to routes
  *  that load it (Claude Code, OpenCode, Grok), and HTTP routes get native browser tools wired to the same bridge. */
@@ -292,6 +293,14 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           const answer = requestReply(live() ? await input.onRequest(ASK_USER_METHOD, args).catch(() => undefined) : undefined);
           return typeof answer?.text === 'string' ? answer.text : 'The question could not be shown. Continue with your default.';
         },
+        // #842 request_secret waits for the person's private card; stopping the run stops the wait.
+        ...(access.permissionMode !== 'read-only' ? {requestSecret: async (args: Record<string, unknown>) => {
+          const answer = live() ? await requestWhileOwned(owned.controller.signal, () => input.onRequest(REQUEST_SECRET_METHOD, args)).catch(() => undefined) : undefined;
+          const reply = answer && typeof answer === 'object' ? answer as {text?: unknown; isError?: unknown; env?: unknown} : undefined;
+          if (typeof reply?.text !== 'string') return {text: 'The secret could not be requested. Continue without it.', isError: true};
+          const env = reply.env && typeof reply.env === 'object' ? Object.fromEntries(Object.entries(reply.env as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : undefined;
+          return {text: reply.text, ...(reply.isError === true ? {isError: true} : {}), ...(env && Object.keys(env).length ? {env} : {})};
+        }} : {}),
         onThreadReady: threadId => { if (live()) input.onThreadReady?.(threadId, lane?.driver); },
         onTurnAccepted: identity => { activity = true; if (live()) input.onTurnAccepted?.({...identity, dispatchState: 'dispatched', ...(lane ? {driver: lane.driver} : {})}); },
         // A saved conversation this lane cannot find (a restart that lost it, a first turn that failed before saving): the earlier messages go again as a summary.

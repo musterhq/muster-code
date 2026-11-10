@@ -1,0 +1,9 @@
+/* #409: history-graph commit actions. The menu and dialog reuse the file-action menu and file-dialog styles. */
+.commit-action-dialog form{display:grid;gap:10px}
+.commit-action-dialog .commit-action-check{display:flex;align-items:center;gap:8px;color:var(--text-dim)}
+.commit-action-dialog .commit-action-check input{width:auto;margin:0;padding:0}
+.commit-action-dialog .file-action-error{margin:0}
+.commit-action-warning{display:flex;align-items:flex-start;gap:7px;margin:0;font-size:var(--fs-12);line-height:1.5;color:var(--warn)}
+.commit-action-warning svg{flex:none;margin-top:2px}
+.commit-action-dialog footer{margin-top:10px}
+.commit-action-dialog footer .file-action-destructive{background:rgb(var(--fg-rgb) / 3.1%)}
