@@ -28,6 +28,7 @@ Boundaries:
 | [MUS-SPEC-09-721B](09-browser-and-previews.md#mus-spec-09-721b) | Typing shows a ring around the field; after 1.6 s of quiet the cursor fades out and comes back from the same spot. | [`typing rings the field, and the cursor fades once the agent goes quiet, then returns where it was`](../../../packages/agent-app/tests/agent-cursor.test.ts) |
 | [MUS-SPEC-09-721C](09-browser-and-previews.md#mus-spec-09-721c) | Screenshots the agent takes never include the cursor, and a tab nobody can see gets no cursor at all. | [`the model never sees its own cursor, and a page nobody watches pays nothing`](../../../packages/agent-app/tests/agent-cursor.test.ts) |
 | [MUS-SPEC-09-721D](09-browser-and-previews.md#mus-spec-09-721d) | With Reduce motion on, the cursor moves to each target instantly. | [`with Reduce motion on, the cursor jumps instead of gliding`](../../../packages/agent-app/tests/agent-cursor.test.ts) |
+| [MUS-SPEC-09-147A](09-browser-and-previews.md#mus-spec-09-147a) | Forwarding a host port returns a `http://127.0.0.1:<port>` URL that reaches the host’s server, is listed, and stops working once closed. | [`a port on the SSH host opens on 127.0.0.1 through a forward`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
 
 ### Page background
 
@@ -180,4 +181,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/agent-cursor.test.ts::with Reduce motion on, the cursor jumps instead of gliding`
 - Environment: Node test runner driving a real headless Chrome over the DevTools protocol; skipped locally when Chrome is not installed.
 - Known gaps: Drives the cursor script in a plain Chrome page, not inside the Electron browser pane.
+- Evidence: UNVERIFIED
+
+### Ports on an SSH host (#147)
+
+<a id="mus-spec-09-147a"></a>
+#### MUS-SPEC-09-147A: A port on the SSH host opens on 127.0.0.1 through a forward
+
+- Precondition: A remote folder on a connected host and a web server on the host.
+- Action: Open a forward for the server’s port, fetch the URL, list forwards, close it and fetch again.
+- Expected result: The fetch returns the host server’s page; the list has the forward; after closing, the URL refuses connections.
+- Test: `packages/agent-app/tests/ssh-workspaces-147.test.ts::a port on the SSH host opens on 127.0.0.1 through a forward`
+- Environment: Node test runner with the real agent service, a temp data folder and a temp HOME; a stand-in `ssh` and `ssh-keyscan` on PATH (`tests/fixtures/fake-ssh/`) that run the remote commands under /bin/sh on this machine. No network, no real host.
+- Known gaps: The in-app browser is not opened here; the URL it would load is.
 - Evidence: UNVERIFIED

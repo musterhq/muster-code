@@ -30,6 +30,7 @@ Boundaries:
 | [MUS-SPEC-10-407C](10-terminal-and-processes.md#mus-spec-10-407c) | Startup reaps a saved process only when the recorded start time matches, even if the same command is still at that PID. | [`startup leaves a saved PID alive when its recorded process start time differs`](../../../packages/agent-app/tests/runtime-quality-407.test.ts) |
 | [MUS-SPEC-10-407D](10-terminal-and-processes.md#mus-spec-10-407d) | An oversized stdout line fails a turn instead of forwarding or buffering its payload. | [`an oversized app-server output line fails the turn with a bounded error`](../../../packages/agent-app/tests/runtime-quality-407.test.ts) |
 | [MUS-SPEC-10-407E](10-terminal-and-processes.md#mus-spec-10-407e) | An app-server closing stdin fails the request without an uncaught EPIPE in the host. | [`a closed app-server input fails the request without an uncaught pipe error`](../../../packages/agent-app/tests/runtime-quality-407.test.ts) |
+| [MUS-SPEC-10-147A](10-terminal-and-processes.md#mus-spec-10-147a) | A terminal opened for a remote folder runs `ssh -t` to the host through the shared connection and starts a login shell in the folder. | [`a terminal in a folder on an SSH host opens a shell there`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
 
 ### What the agent may stop
 
@@ -205,3 +206,16 @@ Boundaries:
 - Environment: Node test runner, temporary folders and owned child processes.
 - Known gaps: Separate Node host and fake app-server processes; POSIX file-descriptor close. Windows requires CI.
 - Evidence: local; cd packages/agent-app && node --experimental-transform-types --test tests/runtime-quality-407.test.ts; exit 0; 6 passed, 0 failed, 0 skipped; commit e1d4ec882cfdc8399da27908cdbc9ad3166ac23e
+
+### Terminals on an SSH host (#147)
+
+<a id="mus-spec-10-147a"></a>
+#### MUS-SPEC-10-147A: A terminal in a folder on an SSH host opens a shell there
+
+- Precondition: A remote folder on a connected host and a chat in it.
+- Action: Open a terminal for the chat and type `pwd` and an arithmetic echo.
+- Expected result: The terminal’s output shows the folder’s path on the host and the computed number; the ssh call asked for a TTY.
+- Test: `packages/agent-app/tests/ssh-workspaces-147.test.ts::a terminal in a folder on an SSH host opens a shell there`
+- Environment: Node test runner with the real agent service, a temp data folder and a temp HOME; a stand-in `ssh` and `ssh-keyscan` on PATH (`tests/fixtures/fake-ssh/`) that run the remote commands under /bin/sh on this machine. No network, no real host.
+- Known gaps: The stand-in runs /bin/sh, not the user’s login shell on a real host.
+- Evidence: UNVERIFIED

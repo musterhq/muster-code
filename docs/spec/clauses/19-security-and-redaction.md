@@ -48,6 +48,7 @@ Boundaries:
 | [MUS-SPEC-19-842I](19-security-and-redaction.md#mus-spec-19-842i) | The server lists request_secret and ask_user, not the sudo channel, and the provider tool timeout is at least 300 seconds. | [`the secret request tool sits beside ask_user in the muster_ask server and the run waits long enough for a person`](../../../packages/agent-app/tests/secret-requests-842.test.ts) |
 | [MUS-SPEC-19-842J](19-security-and-redaction.md#mus-spec-19-842j) | The field is a password field with autocomplete off; Remember is unchecked; Send is disabled until a value is typed; one secret.answer call carries the value with remember false; the field is cleared; Decline sends secret.decline. | [`the secret card takes a masked value, sends it once and clears the field`](../../../packages/agent-app/tests/secret-request-card-842-dom.tsx) |
 | [MUS-SPEC-19-842K](19-security-and-redaction.md#mus-spec-19-842k) | The sudo card offers keychain storage; the 1Password reference is sent instead of a value; an answered card says Sent privately with no field; a saved-value card offers Forget; an expired card says No answer in time. | [`a sudo card, a 1Password pick and a settled card read plainly and never show a value`](../../../packages/agent-app/tests/secret-request-card-842-dom.tsx) |
+| [MUS-SPEC-19-147A](19-security-and-redaction.md#mus-spec-19-147a) | Relative paths with `..`, absolute paths, newlines and links that lead out of the folder are refused for reads and writes; names holding quotes, `;` and `$(…)` are written literally and run nothing. | [`remote file paths stay inside the folder and are never run by the shell`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
 
 ### Known secret values
 
@@ -409,4 +410,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/secret-request-card-842-dom.tsx::a sudo card, a 1Password pick and a settled card read plainly and never show a value`
 - Environment: DOM suite (linkedom) with the real PendingQuestion component; stubbed bridge.
 - Known gaps: Does not open the Electron window.
+- Evidence: UNVERIFIED
+
+### SSH workspaces (#147)
+
+<a id="mus-spec-19-147a"></a>
+#### MUS-SPEC-19-147A: Remote file paths stay inside the folder and are never run by the shell
+
+- Precondition: A remote folder with a link to a file outside it and a link to a folder outside it.
+- Action: Read `../outside.txt`, `/etc/passwd`, a name with a newline and the outward links; write through the outward links; create and save files whose names hold shell syntax.
+- Expected result: Every outside read and write is refused with a sentence and the outside files are unchanged; the shell-syntax names exist with their literal names and no marker file was created anywhere.
+- Test: `packages/agent-app/tests/ssh-workspaces-147.test.ts::remote file paths stay inside the folder and are never run by the shell`
+- Environment: Node test runner with the real agent service, a temp data folder and a temp HOME; a stand-in `ssh` and `ssh-keyscan` on PATH (`tests/fixtures/fake-ssh/`) that run the remote commands under /bin/sh on this machine. No network, no real host.
+- Known gaps: The check is done by the host’s /bin/sh (`cd -P`/`pwd -P`); a link swapped in between the check and the write is not covered.
 - Evidence: UNVERIFIED

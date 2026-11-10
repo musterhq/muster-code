@@ -56,6 +56,7 @@ Boundaries:
 | [MUS-SPEC-08-409K](08-git-changes-and-review.md#mus-spec-08-409k) | The dialog names the running chat and its confirm reads “… anyway”; confirming sends `allowRunning`. | [`a running chat in the same folder is named before HEAD changes and the confirm says anyway`](../../../packages/agent-app/tests/git-commit-actions-409-dom.tsx) |
 | [MUS-SPEC-08-409L](08-git-changes-and-review.md#mus-spec-08-409l) | After the action reports conflicts, the Changes tab and a conflict tab for the first file are open. | [`a conflicting cherry-pick opens changes and the conflict view for the first file`](../../../packages/agent-app/tests/git-commit-actions-409-dom.tsx) |
 | [MUS-SPEC-08-409M](08-git-changes-and-review.md#mus-spec-08-409m) | The dialog has a name field and a “Switch to it” option; submit sends the name, the commit and the switch choice. | [`create branch here asks for a name and whether to switch to it`](../../../packages/agent-app/tests/git-commit-actions-409-dom.tsx) |
+| [MUS-SPEC-08-147A](08-git-changes-and-review.md#mus-spec-08-147a) | The Git pane’s status, change list, diff, stage and commit run git on the host, keep the revision check, and pass a commit message with quotes and `$(…)` through literally. | [`git status, diff, stage and commit work in a folder on an SSH host`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
 
 ### Refs, dash-named files and submodules
 
@@ -481,4 +482,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/git-commit-actions-409-dom.tsx::create branch here asks for a name and whether to switch to it`
 - Environment: linkedom DOM; stubbed bridge; no Electron.
 - Known gaps: Name validation is git’s own and is reported by the runtime.
+- Evidence: UNVERIFIED
+
+### Git in a folder on an SSH host (#147)
+
+<a id="mus-spec-08-147a"></a>
+#### MUS-SPEC-08-147A: Git status, diff, stage and commit work in a folder on an SSH host
+
+- Precondition: A remote folder that is a git repository with an edited README.md and a new file.
+- Action: Read status and changes, open README.md’s diff, stage it, commit with a message holding quotes and `$(…)`, then stage with the old revision.
+- Expected result: Status shows the branch, README.md as modified and the new file as untracked; the diff has the old and new text; after staging one file is staged; the commit’s message on the host is exactly what was typed and nothing ran; a stale revision is refused.
+- Test: `packages/agent-app/tests/ssh-workspaces-147.test.ts::git status, diff, stage and commit work in a folder on an SSH host`
+- Environment: Node test runner with the real agent service, a temp data folder and a temp HOME; a stand-in `ssh` and `ssh-keyscan` on PATH (`tests/fixtures/fake-ssh/`) that run the remote commands under /bin/sh on this machine. No network, no real host.
+- Known gaps: Push, branches, log and worktrees for remote folders are not in phase 1; they say so instead of running on this computer.
 - Evidence: UNVERIFIED
