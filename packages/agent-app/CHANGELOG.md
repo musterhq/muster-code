@@ -3,6 +3,10 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Paths to files the agent wrote now become links in its replies: absolute and `~/` paths, paths with spaces (such as under Application Support) written as inline code, and Word, Excel, PowerPoint, OpenDocument and RTF files, including the older `.doc`, `.xls` and `.ppt`. A file inside the chat's folder opens in the file viewer; one outside them gets the outside-file link; a path to nothing stays plain text (#837).
+
 ## 0.3.18
 
 You can edit any visual the agent made, right in the chat, the agent can update a page it showed instead of adding a new one, office previews keep up with the file, and pages the agent showed stay visible when its turn folds.

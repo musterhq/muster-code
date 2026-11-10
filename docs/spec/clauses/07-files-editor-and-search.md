@@ -506,7 +506,7 @@ Boundaries:
 
 - Precondition: The same chat. Files exist at `~/.muster-work/x/muster-memory.xlsx` and `/Users/me/Library/Application Support/Muster Agent/out/deck.pptx`, outside its folder.
 - Action: Render a reply that names the `~/` file in inline code and in prose, and the "Application Support" file in inline code.
-- Expected result: Each renders as the outside-file link (the one whose menu offers View read-only, Reveal and Open with), labelled with the exact path, spaces and `~` included. Each distinct path is checked with the host once.
+- Expected result: Each renders as the outside-file link (the one whose menu offers View read-only, Reveal and Open with), labelled with the full path, spaces included, and a prose mention keeps its `~` in the text. Each distinct path is checked with the host once.
 - Test: `packages/agent-app/tests/reply-file-links-837-dom.tsx::an existing file outside the chat's folders becomes the outside-file link`
 - Environment: linkedom DOM suite in `scripts/test-renderer.mjs` (`reply-file-links-837-dom`, split build), with a stubbed bridge.
 - Known gaps: The menu's actions are covered by the existing outside-file link; this case checks only which link a mention becomes.

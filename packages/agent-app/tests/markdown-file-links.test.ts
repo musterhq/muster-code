@@ -47,5 +47,5 @@ test('absolute, ~/ and spaced paths to office files are found in inline code and
   assert.deepEqual(prose('Wrote /Users/me/work/report.pdf and ~/out/old.xls, plus notes.doc, slides.ppt and letter.rtf.'),['/Users/me/work/report.pdf','~/out/old.xls','notes.doc','slides.ppt','letter.rtf']);
   const spaced=prose('It is in /Users/me/Library/Application Support/Muster Agent/out/deck.pptx now.');
   assert.ok(spaced.every(p=>!p.includes(' ')),`prose stops at a space: ${JSON.stringify(spaced)}`);
-  assert.deepEqual(prose('Mail a@b.doc or open https://x.io/a.docx and file:///tmp/b.xls.'),[]);
+  assert.deepEqual(prose('Mail ana@corp.com or open https://x.io/a.docx and file:///tmp/b.xls.'),[]);
 });
