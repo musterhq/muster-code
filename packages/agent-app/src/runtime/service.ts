@@ -718,7 +718,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     }
     const access = providerAccessPolicy(chat);
     // #841: Auto settles routine requests only on routes whose approvals Muster answers; any other route runs it as Workspace.
-    const autoOn = access.permissionMode === 'auto' && autoApprovalSupported(effectiveDriver(selectedProvider.driver, chat));
+    // The route's own driver decides (the Messages lanes run only in Full access, so a saved lane never applies here).
+    const autoOn = access.permissionMode === 'auto' && autoApprovalSupported(selectedProvider.driver);
     // A fork (or a replaced turn) starts a fresh provider conversation: carry the visible history once, bounded.
     const digest = store.needsDigest(chatId) ? transcriptDigest(store.timeline(chatId), cwd) : '';
     const files = attachments.resolve(chatId, attachmentIds);
