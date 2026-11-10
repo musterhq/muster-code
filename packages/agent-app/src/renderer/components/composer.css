@@ -355,12 +355,15 @@ div.composer .composer-error { padding: 0 16px 10px; color: var(--danger); font-
 /* The quoted message flashes when "Show source" scrolls to it. */
 .timeline-row.is-context-source .msg-assistant { border-radius: var(--radius-8); background: color-mix(in srgb, var(--accent) 12%, transparent); transition: background-color 400ms ease; }
 
-/* Dictation (CMP-14): Codex puts the mic left of send. */
+/* Dictation (CMP-14, #840): the mic sits left of send. */
 .composer-mic { display: inline-grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: var(--text-dim); }
 .composer-mic:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .composer-mic.is-listening { background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--danger); animation: composer-listening 1.4s ease-in-out infinite; }
 @keyframes composer-listening { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 14%, transparent); } }
 .composer-status.is-dictation { color: var(--text-dim); }
+.composer-mic.is-transcribing { color: var(--text); }
+/* #840: a red dot while the microphone is open, so recording is never silent. */
+.composer-status.is-dictation.is-recording::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--danger); vertical-align: middle; }
 
 /* CMP-19 prompt stashes */
 .composer-stash-popover { left: 0; width: min(420px, calc(100vw - 32px)); display: flex; flex-direction: column; max-height: min(380px, 60vh); padding: 0 0 4px; }
