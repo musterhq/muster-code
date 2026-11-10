@@ -26,6 +26,8 @@ if (process.argv[2] === '--muster-fake-relay') {
   const [lp, rp, name] = [Number(process.argv[3]), Number(process.argv[4]), process.argv[5] || `fwd-${process.argv[3]}`];
   const server = net.createServer({ allowHalfOpen: true }, sock => { const up = net.connect({ port: rp, host: '127.0.0.1', allowHalfOpen: true }); sock.pipe(up).pipe(sock); up.on('error', () => sock.destroy()); sock.on('error', () => up.destroy()); });
   server.listen(lp, '127.0.0.1', () => { fs.writeFileSync(path.join(root, `${name}.ready`), String(server.address().port)); });
+  // A test that removed its host folder without `-O exit` leaves no relay behind.
+  setInterval(() => { if (!fs.existsSync(root)) process.exit(0); }, 500);
   return;
 }
 
