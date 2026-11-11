@@ -67,6 +67,9 @@ export function PhoneSettings(): React.ReactElement {
           <input className="ws-input" aria-label="Relay address" value={relay} placeholder="wss://relay.example.com" onChange={event => setRelay(event.target.value)}/>
           <button type="button" className="settings-button secondary" disabled={busy || relay.trim() === (status.relayUrl ?? '')} onClick={() => void run(() => invoke('mobile.relay.set', {url: relay.trim() || null}))}>Save</button>
         </Row>
+        <Row title="On the same network" description={<>A phone on the same Wi-Fi connects to {noun.lower} directly, with the same encryption, and uses the relay everywhere else. {status.lan?.enabled ? status.lan.addresses.length ? <>Phones reach {noun.lower} at <code>{status.lan.addresses.join(', ')}</code>.</> : status.relayUrl ? 'No private network address right now.' : 'Starts with phone access.' : 'Off: phones always use the relay.'}</>}>
+          <button type="button" role="switch" className="preference-switch" aria-label="Connect directly on the same network" aria-checked={status.lan?.enabled !== false} disabled={busy} onClick={() => void run(() => invoke('mobile.lan.set', {enabled: status.lan?.enabled === false}))}><span/></button>
+        </Row>
         <Row title="Pair a phone" description={!status.secureStorage ? `Pairing needs ${noun.secretStore}, which is not available on ${noun.lower}.` : `Shows a code that works once, for 5 minutes. Scan it with the Muster app on the phone.`}>
           {status.pairing
             ? <button type="button" className="settings-button secondary" disabled={busy} onClick={() => void run(() => invoke('mobile.pair.cancel', {}))}>Cancel</button>

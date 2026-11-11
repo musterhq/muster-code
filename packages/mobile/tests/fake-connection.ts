@@ -9,7 +9,7 @@ export interface FakeConnection extends MobileConnection {
 export function fakeConnection(answers: Partial<Record<MobileMethod, unknown | ((params: any) => unknown)>>, access: MobileAccess = 'act'): FakeConnection {
   const listeners = new Set<(event: MobileEvent) => void>();
   const fake: FakeConnection = {
-    desktopName: 'Studio Mac', deviceId: 'device-1', access, closed: false, calls: [],
+    desktopName: 'Studio Mac', deviceId: 'device-1', access, closed: false, via: 'relay', lan: [], calls: [],
     async call(method, params) {
       fake.calls.push({method, params});
       const answer = answers[method];

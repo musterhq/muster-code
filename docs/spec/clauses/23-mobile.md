@@ -7,13 +7,15 @@ What the user can do:
 - see the desktop's chats, open one and watch its turn stream live;
 - send a message, steer a running turn, approve or decline a request and answer a question, once the desktop allows the phone to act;
 - see everything that needs them across chats in one feed;
-- revoke a phone, or change it between read only and act, from the desktop.
+- revoke a phone, or change it between read only and act, from the desktop;
+- start a new chat from the phone in a folder or Project with a provider and model, and send photos and files (phase 2);
+- connect straight to the desktop when both are on the same network, with the relay as the fallback (phase 2).
 
 Boundaries:
-- The phone talks to the desktop through a relay with end-to-end encryption (Noise IK); the relay sees only ciphertext.
+- The phone talks to the desktop through a relay, or directly on the same network, with end-to-end encryption (Noise IK) either way; the relay and the network see only ciphertext.
 - A new phone is read-only. The phone can never raise a chat's access level or approve for a whole session.
 - Pairing needs secure storage on the desktop and a one-time code that expires.
-- Production relay hosting, push notifications, new chats, attachments, Projects, dictation and rich rendering are later phases (see the design).
+- Production relay hosting, push notifications, Projects, dictation and rich rendering are later phases (see the design).
 
 ## Acceptance cases
 
@@ -31,7 +33,7 @@ Boundaries:
 | [MUS-SPEC-23-2E](23-mobile.md#mus-spec-23-2e) | needs.list returns pending approvals and questions across chats with the chat title, and empties when they are answered. | [`the needs-you feed lists pending approvals and questions across chats`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-3A](23-mobile.md#mus-spec-23-3a) | No frame the relay forwards contains chat text, a chat title, a command or JSON. | [`the relay forwards only ciphertext: no chat text, title or command in any frame`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-3B](23-mobile.md#mus-spec-23-3b) | Changing one byte of a frame, or sending an old frame again, fails decryption and closes the session without running the command. | [`a tampered or replayed frame is rejected and closes the session`](../../../packages/agent-app/tests/mobile-326.test.ts) |
-| [MUS-SPEC-23-3C](23-mobile.md#mus-spec-23-3c) | Every mobile.* command, including confirm, reject, link and reset, is desktop only on Muster Server, for every role. | [`phone pairing commands are desktop only on Muster Server, even for the owner`](../../../packages/server/tests/policy.test.ts) |
+| [MUS-SPEC-23-3C](23-mobile.md#mus-spec-23-3c) | Every mobile.* command, including confirm, reject, link, the LAN switch and reset, is desktop only on Muster Server, for every role. | [`phone pairing commands are desktop only on Muster Server, even for the owner`](../../../packages/server/tests/policy.test.ts) |
 | [MUS-SPEC-23-4A](23-mobile.md#mus-spec-23-4a) | Pairing and a session between the phone's noble crypto and the desktop's Node crypto succeed both ways. | [`the phone crypto pairs and talks with the desktop crypto`](../../../packages/mobile/tests/crypto-interop.test.ts) |
 | [MUS-SPEC-23-4B](23-mobile.md#mus-spec-23-4b) | A pasted pairing link pairs, shows the check code and stores the record only once the desktop confirms; a malformed link shows an error and stores nothing. | [`pairs from a pasted link and rejects a malformed one`](../../../packages/mobile/tests/pair-screen.test.tsx) |
 | [MUS-SPEC-23-4C](23-mobile.md#mus-spec-23-4c) | Rows show the title, place and status; a chat waiting on the person shows a needs-you badge; a chats event updates the list. | [`lists chats with status and needs-you, and updates live`](../../../packages/mobile/tests/chats-screen.test.tsx) |
@@ -212,7 +214,7 @@ Boundaries:
 #### MUS-SPEC-23-3C: Muster Server does not pair phones yet
 
 - Precondition: Muster Server's command policy.
-- Action: Classify and authorize each mobile.* command (status, relay, pairing start, link, confirm, reject and cancel, revoke, access and reset) as owner, admin, member and viewer.
+- Action: Classify and authorize each mobile.* command (status, relay, pairing start, link, confirm, reject and cancel, the LAN switch, revoke, access and reset) as owner, admin, member and viewer.
 - Expected result: Each is classed desktop and refused as desktop-only for every role, so no server member can pair a phone with the shared runtime and bypass per-person project access.
 - Test: `packages/server/tests/policy.test.ts::phone pairing commands are desktop only on Muster Server, even for the owner`
 - Environment: Node test runner on the server policy module.

@@ -7,8 +7,9 @@ export const PAIRING_SCHEME = 'muster://pair';
 export type MobileAccess = 'read-only' | 'act';
 export const MOBILE_ACCESS: readonly MobileAccess[] = ['read-only', 'act'];
 
-/** What the desktop's QR holds. Keys and code are base64url. */
-export interface PairingLink { relayUrl: string; route: string; desktopKey: string; code: string; desktopName: string }
+/** What the desktop's QR holds. Keys and code are base64url. `lan`: the desktop's private-network addresses (host:port) the
+ *  phone tries first, before the relay (phase 2). */
+export interface PairingLink { relayUrl: string; route: string; desktopKey: string; code: string; desktopName: string; lan?: string[] }
 
 export class MobileError extends Error {
   constructor(readonly code: MobileErrorCode, message: string) { super(message); this.name = 'MobileError'; }
@@ -36,8 +37,26 @@ export function relayUrlAllowed(url: string): boolean {
   const host = m[2]!.startsWith('[') ? m[2]!.slice(0, m[2]!.indexOf(']') + 1) : m[2]!.replace(/:\d+$/, '');
   return isLocalHost(host);
 }
+/** At most this many LAN addresses travel in a link or a hello. */
+export const MAX_LAN_ADDRESSES = 4;
+/** A direct address on the same network: a literal loopback or private-network address with a port (IPv6 in brackets). Never
+ *  a name (it could resolve anywhere) and never a public address. */
+export function lanAddressAllowed(entry: string): boolean {
+  const m = /^(\[[0-9a-fA-F:]+\]|\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5})$/.exec(entry);
+  if (!m) return false;
+  const port = Number(m[2]);
+  return port >= 1 && port <= 65_535 && isLocalHost(m[1]!) && m[1]!.toLowerCase() !== 'localhost';
+}
+/** The valid LAN addresses of a list (at most four), or undefined when none is left. */
+export function cleanLanAddresses(list: unknown): string[] | undefined {
+  if (!Array.isArray(list)) return undefined;
+  const kept = [...new Set(list.filter((entry): entry is string => typeof entry === 'string' && lanAddressAllowed(entry)))].slice(0, MAX_LAN_ADDRESSES);
+  return kept.length ? kept : undefined;
+}
+export const lanUrl = (address: string, route: string): string => `ws://${address}/v1/phone/${route}`;
 export function formatPairingLink(link: PairingLink): string {
   const query = new URLSearchParams({v: String(MOBILE_PROTOCOL_VERSION), r: link.relayUrl, d: link.route, k: link.desktopKey, c: link.code, n: link.desktopName});
+  if (link.lan?.length) query.set('l', link.lan.join(','));
   return `${PAIRING_SCHEME}?${query.toString()}`;
 }
 export function parsePairingLink(text: string): PairingLink {
@@ -48,7 +67,8 @@ export function parsePairingLink(text: string): PairingLink {
   const relayUrl = query.get('r') ?? '', route = query.get('d') ?? '', desktopKey = query.get('k') ?? '', code = query.get('c') ?? '';
   if (query.get('v') !== String(MOBILE_PROTOCOL_VERSION) || !relayUrlAllowed(relayUrl) || !/^[a-f0-9]{16,64}$/.test(route)
     || !B64URL.test(desktopKey) || desktopKey.length !== 43 || !B64URL.test(code) || code.length !== 43) throw bad();
-  return {relayUrl, route, desktopKey, code, desktopName: (query.get('n') ?? '').slice(0, 80) || 'Muster'};
+  const lan = cleanLanAddresses((query.get('l') ?? '').split(',').filter(Boolean));
+  return {relayUrl, route, desktopKey, code, desktopName: (query.get('n') ?? '').slice(0, 80) || 'Muster', ...(lan ? {lan} : {})};
 }
 
 export type MobileChatStatus = 'idle' | 'running' | 'stopping' | 'completed' | 'failed' | 'interrupted' | 'waiting';
@@ -88,7 +108,8 @@ export interface MobileAttachment { id: string; name: string; mime: string; size
 
 /** Methods the phone may call. Every one is checked on the desktop against the phone's access. */
 export interface MobileMethods {
-  'hello': {params: Record<string, never>; result: {desktopName: string; deviceId: string; access: MobileAccess; protocol: number}};
+  /** `lan`: the desktop's current direct addresses (phase 2), so the phone's record follows network changes. */
+  'hello': {params: Record<string, never>; result: {desktopName: string; deviceId: string; access: MobileAccess; protocol: number; lan?: string[]}};
   'chats.list': {params: Record<string, never>; result: {chats: MobileChat[]}};
   /** Returns the chat and its latest items, and streams its item events to this phone until chat.close or another chat.open. */
   'chat.open': {params: {id: string}; result: {chat: MobileChat; items: MobileItem[]; revision: number}};

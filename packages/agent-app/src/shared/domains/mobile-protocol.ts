@@ -30,6 +30,8 @@ export interface MobileStatus {
   desktopName: string;
   pairing: MobilePairingState | null;
   devices: MobileDeviceView[];
+  /** Direct connections on the same network: on unless turned off, and the private-network addresses phones dial. */
+  lan: {enabled: boolean; addresses: string[]};
 }
 export interface MobileCommands {
   'mobile.status': {input: Record<string, never> | undefined; output: MobileStatus};
@@ -44,6 +46,8 @@ export interface MobileCommands {
   /** Disconnects the waiting phone and ends the pairing. */
   'mobile.pair.reject': {input: Record<string, never> | undefined; output: MobileStatus};
   'mobile.pair.cancel': {input: Record<string, never> | undefined; output: MobileStatus};
+  /** Direct connections from phones on the same network (on by default); off closes the listener and its sessions. */
+  'mobile.lan.set': {input: {enabled: boolean}; output: MobileStatus};
   /** Unpairs the phone and closes its sessions at once. */
   'mobile.devices.revoke': {input: {id: string}; output: MobileStatus};
   'mobile.devices.setAccess': {input: {id: string; access: MobileAccess}; output: MobileStatus};
@@ -51,4 +55,4 @@ export interface MobileCommands {
   'mobile.reset': {input: Record<string, never> | undefined; output: MobileStatus};
 }
 export type MobileDomainEvent = {type: 'mobileChanged'};
-export const MOBILE_COMMANDS = {'mobile.status': true, 'mobile.relay.set': true, 'mobile.pair.start': true, 'mobile.pair.link': true, 'mobile.pair.confirm': true, 'mobile.pair.reject': true, 'mobile.pair.cancel': true, 'mobile.reset': true, 'mobile.devices.revoke': true, 'mobile.devices.setAccess': true} as const satisfies Record<keyof MobileCommands, true>;
+export const MOBILE_COMMANDS = {'mobile.status': true, 'mobile.relay.set': true, 'mobile.pair.start': true, 'mobile.pair.link': true, 'mobile.pair.confirm': true, 'mobile.pair.reject': true, 'mobile.pair.cancel': true, 'mobile.lan.set': true, 'mobile.reset': true, 'mobile.devices.revoke': true, 'mobile.devices.setAccess': true} as const satisfies Record<keyof MobileCommands, true>;

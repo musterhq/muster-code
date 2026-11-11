@@ -1,6 +1,6 @@
 /** The pairing record in secure storage (#326): Keychain on iOS, Keystore-backed storage on Android, via expo-secure-store,
  *  readable only while the phone is unlocked and never in backups. */
-import type {PairedRecord} from '../shared';
+import {cleanLanAddresses, type PairedRecord} from '../shared';
 
 export interface SecureStoreLike {
   getItemAsync(key: string): Promise<string | null>;
@@ -13,7 +13,7 @@ export interface PairingStore {
   clear(): Promise<void>;
 }
 const KEY = 'muster.pairing.v1';
-const FIELDS: Array<keyof PairedRecord> = ['relayUrl', 'route', 'desktopKey', 'desktopName', 'deviceId', 'publicKey', 'privateKey'];
+const FIELDS: Array<Exclude<keyof PairedRecord, 'lan'>> = ['relayUrl', 'route', 'desktopKey', 'desktopName', 'deviceId', 'publicKey', 'privateKey'];
 
 export function createPairingStore(secure: SecureStoreLike): PairingStore {
   return {
@@ -22,7 +22,11 @@ export function createPairingStore(secure: SecureStoreLike): PairingStore {
       if (!raw) return null;
       try {
         const record = JSON.parse(raw) as PairedRecord;
-        return FIELDS.every(field => typeof record[field] === 'string') ? record : null;
+        if (!FIELDS.every(field => typeof record[field] === 'string')) return null;
+        // Direct addresses are optional and re-checked: a record never makes the phone dial anything but a private address.
+        const lan = cleanLanAddresses(record.lan);
+        const {lan: _stored, ...rest} = record;
+        return lan ? {...rest, lan} : rest;
       } catch { return null; }
     },
     save: record => secure.setItemAsync(KEY, JSON.stringify(record)),

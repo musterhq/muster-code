@@ -11,7 +11,8 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "Muster uses the camera to scan the pairing code shown on your computer.",
-        "NSPhotoLibraryUsageDescription": "Muster lets you pick photos to send to an agent on your computer."
+        "NSPhotoLibraryUsageDescription": "Muster lets you pick photos to send to an agent on your computer.",
+        "NSLocalNetworkUsageDescription": "Muster connects straight to your computer when both are on the same Wi-Fi, instead of going through the relay."
       }
     },
     "android": {
@@ -36,6 +37,14 @@
           "photosPermission": "Muster lets you pick photos to send to an agent on your computer.",
           "cameraPermission": "Muster uses the camera to scan the pairing code and to take photos you send to an agent.",
           "microphonePermission": false
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
         }
       ]
     ],

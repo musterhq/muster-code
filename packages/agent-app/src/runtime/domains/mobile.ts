@@ -17,24 +17,29 @@
  */
 import {randomUUID} from 'node:crypto';
 import {chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
-import {hostname} from 'node:os';
+import {hostname, networkInterfaces} from 'node:os';
 import {join} from 'node:path';
 import type {AgentEvent, Snapshot} from '../../shared/protocol.ts';
 import type {MobileDeviceView, MobileStatus} from '../../shared/domains/mobile-protocol.ts';
 import {equalBytes, fromBase64, fromUtf8, toBase64, utf8} from '../../shared/mobile/bytes.ts';
 import {checkCodeOf, keyFingerprint, prologue, SecureChannel, MODE_BYTE, type ChannelMode} from '../../shared/mobile/channel.ts';
 import {Handshake, type KeyPair} from '../../shared/mobile/noise.ts';
-import {CLOSE, formatPairingLink, MOBILE_ACCESS, MOBILE_PROTOCOL_VERSION, MobileError, RELAY_NEEDS_TLS, relayUrlAllowed, type MobileAccess, type MobileEvent, type MobileFrame, type PairRequest, type Welcome} from '../../shared/mobile/protocol.ts';
+import {CLOSE, formatPairingLink, parsePairingLink, MOBILE_ACCESS, MOBILE_PROTOCOL_VERSION, MobileError, RELAY_NEEDS_TLS, relayUrlAllowed, type MobileAccess, type MobileEvent, type MobileFrame, type PairRequest, type Welcome} from '../../shared/mobile/protocol.ts';
 import {device} from '../../shared/device-noun.ts';
 import {activeSecretStore, openSecretStores, type SecretStore} from '../secret-store.ts';
 import {handle, mobileChats, mobileItem, needsList} from '../mobile/bridge.ts';
 import {generateRouteKey, nodeNoiseCrypto, signWithRouteKey, type RouteKey} from '../mobile/node-crypto.ts';
 import {RelayLink} from '../mobile/relay-link.ts';
+import {LanListener, lanHosts} from '../mobile/lan-listener.ts';
 import {PhoneUploads} from '../mobile/uploads.ts';
 import type {DomainContext, DomainModule} from './types.ts';
 
 /** Test seams: the secret store, and shorter or smaller limits. */
-export const mobileSeams: {secrets?: () => SecretStore | undefined; pairingTtlMs?: number; handshakeTimeoutMs?: number; maxPendingSessions?: number} = {};
+export const mobileSeams: {secrets?: () => SecretStore | undefined; pairingTtlMs?: number; handshakeTimeoutMs?: number; maxPendingSessions?: number;
+  /** The hosts the LAN listener binds instead of this computer's private-network addresses ([] for none). */
+  lanHosts?: string[]} = {};
+/** How often the LAN listener follows the computer's addresses (a laptop changes networks). */
+export const LAN_REFRESH_MS = 30_000;
 export const PAIRING_TTL_MS = 5 * 60_000;
 export const HANDSHAKE_TIMEOUT_MS = 10_000;
 export const MAX_PENDING_SESSIONS = 32;
@@ -48,8 +53,10 @@ const LEGACY_ROUTE_SECRET = 'mobile-route-secret';
 interface Device { id: string; name: string; platform: string; publicKey: string; access: MobileAccess; pairedAt: string; lastSeenAt: string | null }
 interface Pending { session: Session; device: Device; checkCode: string; fingerprint: string }
 interface Pairing { code: Uint8Array; link: string; expiresAt: number; pending: Pending | null; timer: ReturnType<typeof setTimeout> }
+/** Where a phone's connection came in: the relay link or the LAN listener. Both carry the same base64 Noise messages. */
+interface Transport { send(conn: number, data: string): void; closePhone(conn: number, code: number, reason: string): void }
 interface Session {
-  conn: number; deviceId: string | null; channel: SecureChannel | null; watching: string | null;
+  conn: number; via: Transport; deviceId: string | null; channel: SecureChannel | null; watching: string | null;
   /** A valid encrypted message arrived: only then is the phone shown as connected. */
   verified: boolean;
   /** Pairing: waits for the owner's confirmation; every request is refused meanwhile. */
@@ -76,13 +83,19 @@ export function createMobileDomain(context: DomainContext): DomainModule {
   const crypto = nodeNoiseCrypto();
   const dir = join(context.dataDir, 'mobile');
   const configPath = join(dir, 'config.json'), devicesPath = join(dir, 'devices.json');
-  let config = readJson<{relayUrl: string | null}>(configPath, {relayUrl: null});
+  /** `lan`: direct connections on the same network (on unless turned off); `lanPort`: kept so phones' saved addresses work after a restart. */
+  let config = readJson<{relayUrl: string | null; lan?: boolean; lanPort?: number}>(configPath, {relayUrl: null});
+  const saveConfig = () => writeJson(configPath, {version: 1, relayUrl: config.relayUrl, ...(config.lan === false ? {lan: false} : {}), ...(config.lanPort ? {lanPort: config.lanPort} : {})});
   let devices = readJson<{devices: Device[]}>(devicesPath, {devices: []}).devices.filter(entry => entry && typeof entry.id === 'string' && typeof entry.publicKey === 'string');
   let pairing: Pairing | null = null;
   /** The last code a phone took, so a second phone using it is told "already used" instead of "wrong code". */
   let usedCode: {code: Uint8Array; until: number} | null = null;
   let failures: number[] = [];
   let link: RelayLink | null = null;
+  let lan: LanListener | null = null;
+  /** Settles once the LAN listener is bound (pairing waits for it, so the link carries its addresses). */
+  let lanReady: Promise<void> = Promise.resolve();
+  let lanRefresh: ReturnType<typeof setInterval> | undefined;
   let identityError: string | null = null;
   let disposed = false;
   const sessions = new Map<number, Session>();
@@ -142,7 +155,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
     const connected = new Set([...sessions.values()].filter(s => s.verified && s.deviceId && !s.pending).map(s => s.deviceId!));
     const views: MobileDeviceView[] = devices.map(d => ({id: d.id, name: d.name, platform: d.platform, fingerprint: keyFingerprint(crypto, fromBase64(d.publicKey)), access: d.access, pairedAt: d.pairedAt, lastSeenAt: d.lastSeenAt, connected: connected.has(d.id)}));
     const pending = open?.pending ? {name: open.pending.device.name, platform: open.pending.device.platform, checkCode: open.pending.checkCode, fingerprint: open.pending.fingerprint} : null;
-    return {relayUrl: config.relayUrl, relay: link ? link.state : 'off', relayError: identityError ?? link?.error ?? null, secureStorage: secure(), desktopName: name,
+    return {relayUrl: config.relayUrl, relay: link ? link.state : 'off', lan: {enabled: config.lan !== false, addresses: lan?.addresses ?? []}, relayError: identityError ?? link?.error ?? null, secureStorage: secure(), desktopName: name,
       pairing: open ? {expiresAt: new Date(open.expiresAt).toISOString(), pending} : null, devices: views};
   }
 
@@ -155,23 +168,58 @@ export function createMobileDomain(context: DomainContext): DomainModule {
     if (!want || !id) { stopLink(); return null; }
     if (link) return link;
     const route = id.route;
-    link = new RelayLink(config.relayUrl!, nonce => ({key: toBase64(route.publicKey), sig: toBase64(signWithRouteKey(route, utf8(`muster-relay/1 register ${nonce}`)))}), {
-      open: conn => {
+    const relay: RelayLink = new RelayLink(config.relayUrl!, nonce => ({key: toBase64(route.publicKey), sig: toBase64(signWithRouteKey(route, utf8(`muster-relay/1 register ${nonce}`)))}), {
+      ...phones(() => relay),
+      state: () => changed(),
+    });
+    link = relay;
+    startLan(id);
+    return link;
+  }
+  /** One phone connection's life, whichever way it came in: the same caps, timeout and session code for both. */
+  function phones(via: () => Transport) {
+    return {
+      open: (conn: number) => {
         const limit = mobileSeams.maxPendingSessions ?? MAX_PENDING_SESSIONS;
-        if ([...sessions.values()].filter(s => !s.channel).length >= limit) { link?.closePhone(conn, CLOSE.busy, 'busy'); return; }
-        const session: Session = {conn, deviceId: null, channel: null, watching: null, verified: false, pending: false, sentChats: '', sentNeeds: '', queue: Promise.resolve(), timer: undefined};
+        if ([...sessions.values()].filter(s => !s.channel).length >= limit) { via().closePhone(conn, CLOSE.busy, 'busy'); return; }
+        const session: Session = {conn, via: via(), deviceId: null, channel: null, watching: null, verified: false, pending: false, sentChats: '', sentNeeds: '', queue: Promise.resolve(), timer: undefined};
         session.timer = setTimeout(() => { if (!session.channel) drop(session, CLOSE.timeout, 'timeout'); }, mobileSeams.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS);
         session.timer.unref?.();
         sessions.set(conn, session);
       },
-      data: (conn, data) => { const session = sessions.get(conn); if (session) session.queue = session.queue.then(() => receive(session, data)).catch(() => drop(session, CLOSE.badFrame, 'error')); },
-      closed: conn => { const session = sessions.get(conn); if (session) forget(session); },
-      state: () => changed(),
-    });
-    return link;
+      data: (conn: number, data: string) => { const session = sessions.get(conn); if (session) session.queue = session.queue.then(() => receive(session, data)).catch(() => drop(session, CLOSE.badFrame, 'error')); },
+      closed: (conn: number) => { const session = sessions.get(conn); if (session) forget(session); },
+    };
+  }
+  /** Direct connections on the same network: on while phone access is on, unless turned off in Settings. */
+  function startLan(id: Identity) {
+    if (lan || config.lan === false || disposed) return;
+    const hosts = () => mobileSeams.lanHosts ?? lanHosts(networkInterfaces());
+    const listener: LanListener = new LanListener(routeOf(id.route.publicKey), phones(() => listener), {hosts: hosts(), port: config.lanPort ?? 0});
+    lan = listener;
+    lanReady = listener.start().then(() => {
+      if (lan !== listener) return;
+      if (listener.addresses.length && listener.port !== config.lanPort) { config.lanPort = listener.port; saveConfig(); }
+      changed();
+    }).catch(() => undefined);
+    lanRefresh = setInterval(() => {
+      if (lan !== listener) return;
+      const before = listener.addresses.join();
+      void listener.update(hosts()).then(() => { if (listener.addresses.join() !== before) changed(); }).catch(() => undefined);
+    }, LAN_REFRESH_MS);
+    lanRefresh.unref?.();
+  }
+  function stopLan() {
+    const current = lan; lan = null;
+    if (lanRefresh) clearInterval(lanRefresh);
+    lanRefresh = undefined;
+    if (!current) return;
+    for (const session of [...sessions.values()]) if (session.via === current) forget(session);
+    current.stop();
   }
   function stopLink() {
     const current = link; link = null;
+    stopLan();
     for (const session of sessions.values()) clearTimeout(session.timer);
     sessions.clear();
     current?.stop();
@@ -186,11 +234,11 @@ export function createMobileDomain(context: DomainContext): DomainModule {
   function drop(session: Session, code: number, reason: string) {
     if (!sessions.has(session.conn)) return;
     forget(session);
-    link?.closePhone(session.conn, code, reason);
+    session.via.closePhone(session.conn, code, reason);
   }
   function send(session: Session, frame: MobileFrame) {
-    if (!session.channel || !link || sessions.get(session.conn) !== session) return;
-    for (const message of session.channel.seal(frame)) link.send(session.conn, message);
+    if (!session.channel || sessions.get(session.conn) !== session) return;
+    for (const message of session.channel.seal(frame)) session.via.send(session.conn, message);
   }
   const sendEvent = (session: Session, event: MobileEvent) => send(session, {t: 'evt', e: event});
   /** Rate limit on failed pairing attempts, across connections; the pairing itself is never ended by them. */
@@ -266,7 +314,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
 
   function openSession(session: Session, noise: Handshake, entry: Device, pending: boolean) {
     const welcome: Welcome = {v: MOBILE_PROTOCOL_VERSION, desktopName: name, deviceId: entry.id, access: entry.access, ...(pending ? {pending: true} : {})};
-    link?.send(session.conn, toBase64(noise.writeMessage(utf8(JSON.stringify(welcome)))));
+    session.via.send(session.conn, toBase64(noise.writeMessage(utf8(JSON.stringify(welcome)))));
     const {send: out, receive: incoming} = noise.split();
     session.channel = new SecureChannel(out, incoming);
     session.deviceId = entry.id;
@@ -280,6 +328,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       access: (): MobileAccess => devices.find(d => d.id === session.deviceId)?.access ?? 'read-only',
       alive: () => sessions.get(session.conn) === session && devices.some(d => d.id === session.deviceId),
       desktopName: name, deviceId: session.deviceId ?? '',
+      lan: () => lan?.addresses ?? [],
       watch: (chatId: string | null) => { session.watching = chatId; },
       ...(session.deviceId ? {uploads: uploadsFor(session.deviceId)} : {}),
     };
@@ -332,8 +381,8 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       'mobile.relay.set': input => {
         const url = input.url === null || input.url === '' ? null : String(input.url ?? '').trim().replace(/\/+$/, '');
         if (url !== null && !relayUrlAllowed(url)) throw new Error(/^ws:\/\//.test(url) ? RELAY_NEEDS_TLS : 'Enter the relay address as wss:// followed by its host.');
-        config = {relayUrl: url};
-        writeJson(configPath, {version: 1, ...config});
+        config = {...config, relayUrl: url};
+        saveConfig();
         stopLink(); syncLink();
         changed();
         return status();
@@ -351,6 +400,13 @@ export function createMobileDomain(context: DomainContext): DomainModule {
         const current = syncLink();
         changed();
         try { await current?.ready(); } catch (error) { throw new Error(`Can’t reach the relay at ${config.relayUrl}: ${(error as Error).message}`); }
+        // The link carries the addresses a phone on the same network dials first.
+        await lanReady;
+        const addresses = lan?.addresses ?? [];
+        if (addresses.length && pairing?.code === code) {
+          pairing.link = formatPairingLink({...parsePairingLink(text), lan: addresses});
+          return {link: pairing.link, expiresAt: new Date(expiresAt).toISOString()};
+        }
         return {link: text, expiresAt: new Date(expiresAt).toISOString()};
       },
       /** The QR panel's own read of the link (mobile.status never carries it). */
@@ -374,6 +430,16 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       },
       'mobile.pair.reject': () => { if (pairing?.pending) usedCode = {code: pairing.code, until: pairing.expiresAt}; endPairing('rejected'); return status(); },
       'mobile.pair.cancel': () => { endPairing('cancelled'); return status(); },
+      /** Direct connections on the same network. Off closes the listener and its sessions; phones then use the relay. */
+      'mobile.lan.set': async input => {
+        if (typeof input.enabled !== 'boolean') throw new Error('Choose on or off.');
+        config = {...config, lan: input.enabled};
+        saveConfig();
+        if (!input.enabled) stopLan();
+        else { let id: Identity | null = null; try { id = link ? identity(false) : null; } catch { /* reported by status */ } if (id) startLan(id); await lanReady; }
+        changed();
+        return status();
+      },
       'mobile.devices.revoke': input => {
         const target = byId(input.id);
         devices = devices.filter(d => d.id !== target.id);

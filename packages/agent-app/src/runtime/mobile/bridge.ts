@@ -82,6 +82,8 @@ export interface BridgeContext {
   watch(chatId: string | null): void;
   /** This phone's uploads and the files it staged (phase 2). */
   uploads?: PhoneUploads;
+  /** The desktop's current direct addresses on its network (phase 2). */
+  lan?(): string[];
 }
 
 export async function needsList(invoke: DomainContext['invoke'], snapshot: Snapshot): Promise<MobileNeed[]> {
@@ -138,7 +140,7 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
   };
   try {
     switch (m) {
-      case 'hello': return {desktopName: ctx.desktopName, deviceId: ctx.deviceId, access: ctx.access(), protocol: MOBILE_PROTOCOL_VERSION} satisfies MobileMethods['hello']['result'];
+      case 'hello': return {desktopName: ctx.desktopName, deviceId: ctx.deviceId, access: ctx.access(), protocol: MOBILE_PROTOCOL_VERSION, lan: ctx.lan?.() ?? []} satisfies MobileMethods['hello']['result'];
       case 'chats.list': return {chats: mobileChats(await ctx.snapshot())} satisfies MobileMethods['chats.list']['result'];
       case 'chat.open': {
         const chatId = id(p.id);

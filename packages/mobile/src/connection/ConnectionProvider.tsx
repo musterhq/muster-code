@@ -32,7 +32,8 @@ export function ConnectionProvider({children}: {children: ReactNode}) {
   const attempt = useRef(0), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined), current = useRef<MobileConnection | null>(null);
 
   const generation = useRef(0);
-  const connect = useCallback((record: PairedRecord) => {
+  const connect = useCallback((saved: PairedRecord) => {
+    let record = saved;
     if (timer.current) clearTimeout(timer.current);
     // A newer connect (pairing again, possibly from a muster://pair link) supersedes this one: its link closes quietly.
     const mine = ++generation.current;
@@ -41,6 +42,12 @@ export function ConnectionProvider({children}: {children: ReactNode}) {
     setState({phase: 'connecting', record});
     connectPhone({record, crypto, socket}).then(connection => {
       if (stale()) { connection.close(); return; }
+      // The desktop's hello names its current direct addresses; keep them so the next connection on its network skips the relay.
+      if (connection.lan.join() !== (record.lan ?? []).join()) {
+        const {lan: _old, ...rest} = record;
+        record = connection.lan.length ? {...rest, lan: connection.lan} : rest;
+        void store.save(record);
+      }
       attempt.current = 0; current.current = connection;
       setState({phase: 'connected', record, connection});
       connection.onClose(reason => {
@@ -57,7 +64,7 @@ export function ConnectionProvider({children}: {children: ReactNode}) {
       setState({phase: 'connecting', record, error: error instanceof MobileError || error instanceof Error ? error.message : String(error)});
       timer.current = setTimeout(() => connect(record), backoff(attempt.current++));
     });
-  }, []);
+  }, [store]);
 
   useEffect(() => {
     void store.load().then(record => { if (record) connect(record); else setState({phase: 'unpaired'}); });
