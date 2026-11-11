@@ -725,3 +725,16 @@ test('the relay closes unregistered and silent sockets and refuses oversized mes
   assert.equal(await code, 1009);
   assert.ok(!d.relay.frames.some(frame => frame.data.length > 87_384), 'nothing oversized was forwarded');
 });
+
+// Spec: MUS-SPEC-23-10G (docs/spec/clauses/23-mobile.md#mus-spec-23-10g)
+test('the desktop pairing handshake and frames work inside Electron, not only in Node', async () => {
+  const {execFile} = await import('node:child_process');
+  const electron = (await import('electron')).default as unknown as string;
+  const probe = join(import.meta.dirname, 'fixtures', 'mobile-electron-crypto-probe.ts');
+  const out = await new Promise<string>((resolve, reject) => execFile(electron, ['--experimental-transform-types', '--no-warnings', probe],
+    {env: {...process.env, ELECTRON_RUN_AS_NODE: '1'}, timeout: 60_000}, (error, stdout) => error ? reject(error) : resolve(stdout)));
+  const result = JSON.parse(out.trim().split('\n').pop()!);
+  assert.notEqual(result.runtime, 'node', 'the probe must run on Electron');
+  assert.deepEqual({ok: result.ok, error: result.error, request: result.request, welcome: result.welcome, transport: result.transport},
+    {ok: true, error: undefined, request: 'pair me', welcome: 'welcome', transport: 'frame'});
+});

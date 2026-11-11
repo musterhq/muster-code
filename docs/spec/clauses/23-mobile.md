@@ -55,6 +55,7 @@ Boundaries:
 | [MUS-SPEC-23-10D](23-mobile.md#mus-spec-23-10d) | A handshake message or transport message over 65,535 bytes throws without any decryption attempt. | [`frames over 65,535 bytes are refused before decrypting`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-10E](23-mobile.md#mus-spec-23-10e) | Approval details reach the phone with the folder name instead of the working directory's full path, and changed files relative to it. | [`the phone gets folder names and relative file paths, never full paths`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-10F](23-mobile.md#mus-spec-23-10f) | The relay closes a desktop that does not register in time and a socket that stops answering pings, and closes a phone that sends a message over 87,384 characters without forwarding it. | [`the relay closes unregistered and silent sockets and refuses oversized messages`](../../../packages/agent-app/tests/mobile-326.test.ts) |
+| [MUS-SPEC-23-10G](23-mobile.md#mus-spec-23-10g) | The desktop completes the pairing handshake and seals and opens frames inside Electron, whose BoringSSL has no ChaCha20-Poly1305. | [`the desktop pairing handshake and frames work inside Electron, not only in Node`](../../packages/agent-app/tests/mobile-326.test.ts) |
 
 ### Pairing, the device registry and access
 
@@ -470,4 +471,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/mobile-326.test.ts::the relay closes unregistered and silent sockets and refuses oversized messages`
 - Environment: Node test runner on the dev relay from packages/relay on 127.0.0.1; raw sockets for the silent peer.
 - Known gaps: The production intervals (10 s to register, 25 s ping, 10 s pong) are not waited out.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-10g"></a>
+#### MUS-SPEC-23-10G: The desktop's phone crypto works inside Electron
+
+- Precondition: The Electron binary the app ships with; Electron's BoringSSL has no chacha20-poly1305 cipher in node:crypto.
+- Action: In Electron's own Node (ELECTRON_RUN_AS_NODE), run an IKpsk1 pairing handshake between two parties using the desktop's nodeNoiseCrypto, then seal and open a transport frame.
+- Expected result: The pairing request and welcome decrypt on the other side and the frame opens; nothing throws "Unknown cipher".
+- Test: `packages/agent-app/tests/mobile-326.test.ts::the desktop pairing handshake and frames work inside Electron, not only in Node`
+- Environment: Node test runner spawning the electron binary from node_modules with ELECTRON_RUN_AS_NODE=1.
+- Known gaps: Runs the crypto in Electron's Node mode, not in the packaged app; a real phone pairing is checked by hand on a Samsung Galaxy S25 through Expo Go.
 - Evidence: UNVERIFIED
