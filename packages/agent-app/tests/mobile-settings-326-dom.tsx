@@ -36,6 +36,7 @@ const changed=()=>{for(const l of listeners)l({type:'mobileChanged'});};
   if(command==='mobile.devices.setAccess'){status={...status,devices:status.devices.map((d:any)=>d.id===input.id?{...d,access:input.access}:d)};return status;}
   if(command==='mobile.devices.revoke'){status={...status,devices:status.devices.filter((d:any)=>d.id!==input.id)};return status;}
   if(command==='mobile.relay.set'){status={...status,relayUrl:input.url};return status;}
+  if(command==='mobile.lan.set'){status={...status,lan:{enabled:input.enabled,addresses:input.enabled?['192.168.1.20:7481']:[]}};return status;}
   return undefined;
 }};
 
@@ -98,6 +99,18 @@ await check('Reset phone access asks first, then rotates the keys',async()=>{
   await click(button('Reset now'));await settle();
   assert.ok(calls.some(c=>c.command==='mobile.reset'));
   assert.equal(host.querySelector('tr[data-phone-id="p1"]'),null);
+});
+// Spec: MUS-SPEC-23-13D (docs/spec/clauses/23-mobile.md#mus-spec-23-13d)
+await check('Phone settings show the addresses phones reach directly on this network and turn it off',async()=>{
+  status={...status,lan:{enabled:true,addresses:['192.168.1.20:7481']}};
+  await act(async()=>{changed();await delay(40);});await settle();
+  assert.match(text(host),/192\.168\.1\.20/);
+  const toggle=host.querySelector('[role=switch][aria-label="Connect directly on the same network"]');
+  assert.equal(toggle?.getAttribute('aria-checked'),'true');
+  await click(toggle);await settle();
+  assert.deepEqual(calls.find(c=>c.command==='mobile.lan.set')?.input,{enabled:false});
+  assert.equal(host.querySelector('[role=switch][aria-label="Connect directly on the same network"]')?.getAttribute('aria-checked'),'false');
+  assert.doesNotMatch(text(host),/192\.168\.1\.20/);
 });
 await act(async()=>{root.unmount();});
 process.exit(0);

@@ -10,6 +10,8 @@ import {tmpdir} from 'node:os';
 import {basename, join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {startRelay, type DevRelay} from '../../relay/src/relay.ts';
+import {acceptUpgrade} from '../../server/src/net/ws.ts';
+import {lanHosts} from '../src/runtime/mobile/lan-listener.ts';
 import {createAgentService} from '../src/runtime/service.ts';
 import type {ProviderAdapter, ProviderInput, ProviderResult} from '../src/runtime/provider.ts';
 import {SecretStore} from '../src/runtime/secret-store.ts';
@@ -24,6 +26,7 @@ import {handle, mobileItem} from '../src/runtime/mobile/bridge.ts';
 import type {AgentEvent, Snapshot, TimelineItem} from '../src/shared/protocol.ts';
 import {createHash, createPrivateKey, sign as edSign} from 'node:crypto';
 import {connect as netConnect} from 'node:net';
+import {createServer as createHttpServer} from 'node:http';
 import {request as httpsRequest} from 'node:https';
 
 /** An OS secret box double; `broken` makes every decryption fail (a keychain that can no longer be read). */
@@ -52,7 +55,7 @@ function scripted(script: (input: ProviderInput, turn: number) => Promise<Provid
 const quick = () => scripted(async input => { input.onDelta?.('ok'); return {status: 'completed', finalMessage: 'ok'}; });
 
 interface Desktop { relay: DevRelay; service: ReturnType<typeof createAgentService>; dataDir: string; box: ReturnType<typeof makeBox>; secrets: SecretStore; events: AgentEvent[] }
-async function desktop(t: TestContext, provider: ProviderAdapter, options: {secure?: boolean; pairingTtlMs?: number; relayTest?: boolean; handshakeTimeoutMs?: number; maxPendingSessions?: number} = {}): Promise<Desktop> {
+async function desktop(t: TestContext, provider: ProviderAdapter, options: {secure?: boolean; pairingTtlMs?: number; relayTest?: boolean; handshakeTimeoutMs?: number; maxPendingSessions?: number; lan?: boolean} = {}): Promise<Desktop> {
   const relay = await startRelay({test: options.relayTest !== false});
   const dataDir = await mkdtemp(join(tmpdir(), 'muster-mobile-326-'));
   const box = makeBox();
@@ -61,6 +64,9 @@ async function desktop(t: TestContext, provider: ProviderAdapter, options: {secu
   if (options.pairingTtlMs) mobileSeams.pairingTtlMs = options.pairingTtlMs;
   if (options.handshakeTimeoutMs) mobileSeams.handshakeTimeoutMs = options.handshakeTimeoutMs;
   if (options.maxPendingSessions) mobileSeams.maxPendingSessions = options.maxPendingSessions;
+  // Direct LAN connections (phase 2) listen on loopback only when a test asks; otherwise none, so the relay tests see every
+  // frame. Production picks the computer's private-network addresses.
+  mobileSeams.lanHosts = options.lan ? ['127.0.0.1'] : [];
   const events: AgentEvent[] = [];
   const service = createAgentService({dataDir, provider, onEvent(event) { events.push(event); }});
   t.after(async () => {
@@ -899,4 +905,147 @@ test('uploads over the size cap, out of order, oversized, short or with a wrong 
   assert.equal((await d.service.invoke('attachments.list', {chatId: chat.id})).length, 1, 'the desktop file stays');
   assert.deepEqual(await userTexts(d, chat.id), []);
   assert.deepEqual(prompts, []);
+});
+
+// ── Phase 2: direct on the same network ──────────────────────────────────────────────────────────────────────────────
+
+/** A WebSocket server at a LAN address that is not the desktop: it accepts and closes as "revoked". */
+async function impostor(t: TestContext): Promise<string> {
+  const server = createHttpServer((_req, res) => res.writeHead(404).end());
+  server.on('upgrade', (req, sock, head) => { const ws = acceptUpgrade(req, sock, head); ws?.close(4403, 'revoked'); });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+  return `127.0.0.1:${(server.address() as {port: number}).port}`;
+}
+/** Sends a raw HTTP upgrade and returns the status line. */
+function upgradeStatus(address: string, path: string, headers: Record<string, string>): Promise<string> {
+  const [host, port] = [address.slice(0, address.lastIndexOf(':')), Number(address.slice(address.lastIndexOf(':') + 1))];
+  return new Promise((resolve, reject) => {
+    const sock = netConnect(port, host, () => sock.write([`GET ${path} HTTP/1.1`, 'Upgrade: websocket', 'Connection: Upgrade', 'Sec-WebSocket-Version: 13', 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==', ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`), '', ''].join('\r\n')));
+    let data = '';
+    sock.on('data', chunk => { data += chunk.toString(); if (data.includes('\r\n')) { resolve(data.split('\r\n')[0]!); sock.destroy(); } });
+    sock.on('error', reject); sock.on('close', () => resolve(data.split('\r\n')[0] ?? ''));
+  });
+}
+const lanStatus = async (d: Desktop) => (await d.service.invoke('mobile.status', {})).lan;
+
+// Spec: MUS-SPEC-23-13A (docs/spec/clauses/23-mobile.md#mus-spec-23-13a)
+test('on the same network the phone connects without the relay, and falls back to the relay when the LAN address fails', async t => {
+  const {provider, prompts} = quick();
+  const d = await desktop(t, provider, {lan: true});
+  const chat = await d.service.invoke('chat.create', {});
+  const {link} = await d.service.invoke('mobile.pair.start', {});
+  const lan = await lanStatus(d);
+  assert.equal(lan.enabled, true);
+  assert.match(lan.addresses[0] ?? '', /^127\.0\.0\.1:\d+$/);
+  assert.deepEqual(parsePairingLink(link).lan, lan.addresses, 'the QR link carries the LAN addresses');
+  const paired = await pairPhone({link, crypto, socket, name: 'LAN phone', platform: 'android'});
+  t.after(() => paired.client.close());
+  await d.service.invoke('mobile.pair.confirm', {checkCode: paired.checkCode});
+  await paired.confirmed;
+  assert.equal(paired.client.via, 'lan');
+  assert.deepEqual(paired.record.lan, lan.addresses);
+  assert.equal(d.relay.frames.length, 0, 'pairing never touched the relay');
+  paired.client.close();
+  const [device] = (await d.service.invoke('mobile.status', {})).devices;
+  await d.service.invoke('mobile.devices.setAccess', {id: device!.id, access: 'act'});
+  const direct = await connectPhone({record: paired.record, crypto, socket});
+  t.after(() => direct.close());
+  assert.equal(direct.via, 'lan');
+  await direct.call('chat.send', {id: chat.id, text: 'over the LAN', requestId: 'lan-1'});
+  await until(() => prompts.length === 1, 'the run started');
+  assert.equal(d.relay.frames.length, 0, 'the relay saw nothing');
+  direct.close();
+  // The LAN address fails (nothing listens there): the phone uses the relay, and hello hands it the current addresses.
+  const fallback = await connectPhone({record: {...paired.record, lan: ['127.0.0.1:1']}, crypto, socket});
+  t.after(() => fallback.close());
+  assert.equal(fallback.via, 'relay');
+  assert.ok(d.relay.frames.length > 0, 'the relay carried the session');
+  assert.deepEqual(fallback.lan, lan.addresses);
+  fallback.close();
+  // Something else answering at the LAN address and claiming the phone was revoked cannot cut it off: only the relay decides.
+  const fooled = await connectPhone({record: {...paired.record, lan: [await impostor(t)]}, crypto, socket});
+  t.after(() => fooled.close());
+  assert.equal(fooled.via, 'relay');
+  fooled.close();
+  // Turned off on the desktop: the listener closes and the phone uses the relay.
+  await d.service.invoke('mobile.lan.set', {enabled: false});
+  assert.deepEqual(await lanStatus(d), {enabled: false, addresses: []});
+  assert.equal(parsePairingLink((await d.service.invoke('mobile.pair.start', {})).link).lan, undefined);
+  const off = await connectPhone({record: paired.record, crypto, socket});
+  t.after(() => off.close());
+  assert.equal(off.via, 'relay');
+});
+
+// Spec: MUS-SPEC-23-13B (docs/spec/clauses/23-mobile.md#mus-spec-23-13b)
+test('the LAN listener takes only this desktop’s route from a matching Host and Origin, runs the same handshake and access checks, and carries only ciphertext', async t => {
+  const d = await desktop(t, quick().provider, {lan: true});
+  const chat = await d.service.invoke('chat.create', {});
+  await d.service.invoke('chat.update', {id: chat.id, title: 'Quarterly numbers'});
+  const {link} = await d.service.invoke('mobile.pair.start', {});
+  const [address] = (await lanStatus(d)).addresses;
+  const route = parsePairingLink(link).route;
+  const ok = {Host: address!};
+  assert.match(await upgradeStatus(address!, `/v1/phone/${route}`, ok), / 101 /);
+  assert.match(await upgradeStatus(address!, `/v1/phone/${'0'.repeat(32)}`, ok), / 404 /, 'another route');
+  assert.match(await upgradeStatus(address!, '/v1/desktop', ok), / 404 /, 'no desktop endpoint');
+  assert.match(await upgradeStatus(address!, `/v1/phone/${route}`, {Host: `evil.example:${address!.split(':')[1]}`}), / 403 /, 'a name, as DNS rebinding would send');
+  assert.match(await upgradeStatus(address!, `/v1/phone/${route}`, {...ok, Origin: 'https://evil.example'}), / 403 /, 'a web page elsewhere');
+  assert.match(await upgradeStatus(address!, `/v1/phone/${route}`, {...ok, Origin: `http://${address}`}), / 101 /, 'the phone’s own WebSocket origin');
+  // Everything on the LAN socket, both ways, is recorded.
+  const wire: string[] = [];
+  const recording = (url: string) => { const ws = new WebSocket(url); const send = ws.send.bind(ws); ws.send = (data: string) => { wire.push(data); send(data); }; ws.addEventListener('message', event => wire.push(String(event.data))); return ws; };
+  const paired = await pairPhone({link, crypto, socket: recording, name: 'Marker phone ZEBRA', platform: 'android'});
+  t.after(() => paired.client.close());
+  await d.service.invoke('mobile.pair.confirm', {checkCode: paired.checkCode});
+  await paired.confirmed;
+  assert.equal(paired.client.via, 'lan');
+  const refused = await rejection(paired.client.call('chat.send', {id: chat.id, text: 'secret marker GIRAFFE', requestId: 'lan-2'}));
+  assert.equal(refused.code, 'read-only', 'the same access checks as over the relay');
+  await paired.client.call('chat.open', {id: chat.id});
+  assert.ok(wire.length >= 4 && wire.join('').length > 300, 'traffic flowed');
+  for (const frame of wire) {
+    assert.match(frame, /^[A-Za-z0-9+/=_-]+$/, 'base64 only');
+    const plain = Buffer.from(frame, 'base64').toString('latin1');
+    for (const marker of ['ZEBRA', 'GIRAFFE', 'Quarterly numbers', '{"']) assert.ok(!plain.includes(marker), `no ${marker} on the wire`);
+  }
+  // An unknown phone key gets the same answer as through the relay.
+  const stranger = crypto.generateKeyPair();
+  const noise = new Handshake(crypto, {pattern: 'IK', initiator: true, s: stranger, rs: fromBase64(paired.record.desktopKey), prologue: prologue('session')});
+  const ws = new WebSocket(`ws://${address}/v1/phone/${route}`);
+  const closed = new Promise<number>(resolve => { ws.onclose = event => resolve(event.code); });
+  await new Promise<void>(resolve => { ws.onopen = () => resolve(); });
+  ws.send(toBase64(Uint8Array.from([MODE_BYTE.session, ...noise.writeMessage(utf8('{"v":1}'))])));
+  assert.equal(await closed, 4403);
+  // A message larger than one Noise message is refused before it reaches the session.
+  const big = new WebSocket(`ws://${address}/v1/phone/${route}`);
+  const bigClosed = new Promise<number>(resolve => { big.onclose = event => resolve(event.code); });
+  await new Promise<void>(resolve => { big.onopen = () => resolve(); });
+  big.send('A'.repeat(87_385));
+  assert.equal(await bigClosed, 1009);
+  // Phone access off: nothing listens on the LAN port any more.
+  await d.service.invoke('mobile.relay.set', {url: null});
+  await assert.rejects(new Promise((resolve, reject) => { const sock = netConnect(Number(address!.split(':')[1]), '127.0.0.1', () => { sock.destroy(); resolve(null); }); sock.on('error', reject); }), /ECONNREFUSED/);
+});
+
+// Spec: MUS-SPEC-23-13C (docs/spec/clauses/23-mobile.md#mus-spec-23-13c)
+test('the LAN listener binds only private-network addresses, and the link carries only those', () => {
+  const nic = (address: string, family: 'IPv4' | 'IPv6', internal = false) => ({address, family, internal, netmask: '', mac: '', cidr: null}) as never;
+  const interfaces = {
+    lo0: [nic('127.0.0.1', 'IPv4', true), nic('::1', 'IPv6', true)],
+    en0: [nic('192.168.1.20', 'IPv4'), nic('fe80::1c2a', 'IPv6'), nic('fd12:3456::5', 'IPv6')],
+    en1: [nic('203.0.113.5', 'IPv4')],
+    utun3: [nic('100.72.1.9', 'IPv4')],
+    docker0: [nic('172.17.0.1', 'IPv4')],
+    bridge100: [nic('192.168.64.1', 'IPv4')],
+    en5: [nic('10.0.4.7', 'IPv4')],
+  };
+  assert.deepEqual(lanHosts(interfaces), ['192.168.1.20', '10.0.4.7', 'fd12:3456::5'], 'private IPv4 first, then unique-local IPv6; never loopback, public, link-local, carrier-grade NAT or container and VM bridges');
+  const base = {relayUrl: 'wss://relay.example.com', route: 'a'.repeat(32), desktopKey: 'k'.repeat(43), code: 'c'.repeat(43), desktopName: 'Studio'};
+  const parsed = parsePairingLink(formatPairingLink({...base, lan: ['192.168.1.20:7481', '[fd12:3456::5]:7481']}));
+  assert.deepEqual(parsed.lan, ['192.168.1.20:7481', '[fd12:3456::5]:7481']);
+  for (const bad of [['203.0.113.5:7481'], ['studio.local:7481'], ['192.168.1.20'], ['192.168.1.20:99999']]) {
+    assert.equal(parsePairingLink(formatPairingLink({...base, lan: bad})).lan, undefined, `${bad} is dropped`);
+  }
+  assert.equal(parsePairingLink(formatPairingLink({...base, lan: Array.from({length: 6}, (_, i) => `10.0.0.${i + 1}:7481`)})).lan?.length, 4, 'at most four addresses');
 });

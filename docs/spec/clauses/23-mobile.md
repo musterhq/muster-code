@@ -62,6 +62,10 @@ Boundaries:
 | [MUS-SPEC-23-12A](23-mobile.md#mus-spec-23-12a) | A PNG several chunks long, uploaded from the phone through the session, is staged as an image and reaches the agent as an image input, byte for byte; a text file is staged as a file and named in the prompt; the desktop's user message lists both. | [`a photo sent from the phone reaches the agent as an image, uploaded in chunks through the session`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-12B](23-mobile.md#mus-spec-23-12b) | A read-only phone cannot upload. Over 20 MB, empty, out-of-order, over-long, past-the-end, short and wrong-hash uploads are refused, a refused chunk ends its upload, a non-image named .png is refused, a third upload at once is refused, a file the phone removes from its composer is discarded, and a file staged on the desktop can be neither sent nor removed from the phone; nothing else is staged or sent. | [`uploads over the size cap, out of order, oversized, short or with a wrong hash are refused and stage nothing`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-12C](23-mobile.md#mus-spec-23-12c) | Attach › Photo uploads the picked photo in chunks, shows it in the composer, and Send carries its attachment id; the composer is cleared after sending. | [`attaches a photo from the composer, uploads it in chunks and sends it with the message`](../../../packages/mobile/tests/chat-screen.test.tsx) |
+| [MUS-SPEC-23-13A](23-mobile.md#mus-spec-23-13a) | The pairing link carries the desktop's LAN addresses; pairing and a later session from the same network go direct and the relay forwards nothing; a dead LAN address or an impostor that closes as revoked falls back to the relay (and hello hands back the current addresses); turned off on the desktop, the link has no LAN addresses and the phone uses the relay. | [`on the same network the phone connects without the relay, and falls back to the relay when the LAN address fails`](../../../packages/agent-app/tests/mobile-326.test.ts) |
+| [MUS-SPEC-23-13B](23-mobile.md#mus-spec-23-13b) | The LAN listener answers 101 only for this desktop's phone route with a literal-address Host and no foreign Origin (404 for other paths, 403 for a name or a foreign Origin); a read-only phone is refused over it as over the relay; nothing on its socket is plaintext; an unknown key closes 4403; an oversized message closes 1009; with phone access off nothing listens. | [`the LAN listener takes only this desktop’s route from a matching Host and Origin, runs the same handshake and access checks, and carries only ciphertext`](../../../packages/agent-app/tests/mobile-326.test.ts) |
+| [MUS-SPEC-23-13C](23-mobile.md#mus-spec-23-13c) | Of a computer's interfaces only private IPv4 and unique-local IPv6 addresses are used (no loopback, public, link-local, carrier-grade NAT, container or VM bridge); the link parser keeps at most four private literal host:port entries and drops the rest. | [`the LAN listener binds only private-network addresses, and the link carries only those`](../../../packages/agent-app/tests/mobile-326.test.ts) |
+| [MUS-SPEC-23-13D](23-mobile.md#mus-spec-23-13d) | Settings › Phone lists the LAN addresses and its switch calls mobile.lan.set to turn direct connections off. | [`Phone settings show the addresses phones reach directly on this network and turn it off`](../../../packages/agent-app/tests/mobile-settings-326-dom.tsx) |
 | [MUS-SPEC-23-14A](23-mobile.md#mus-spec-23-14a) | While a pairing is in flight the scanner is hidden and the field and Pair button do nothing, so a second attempt never starts; the check code stays on screen with no error; when the attempt itself ends its error shows and pairing can start again. | [`a second scan or Pair press while pairing is in flight is ignored and never hides the check code`](../../../packages/mobile/tests/pair-screen.test.tsx) |
 | [MUS-SPEC-23-14B](23-mobile.md#mus-spec-23-14b) | Every text on the pair screen and the camera prompt has at least 4.5:1 contrast with what is behind it, and the Allow camera and Pair buttons have edges of at least 3:1. | [`the pair screen text and the camera prompt meet WCAG AA contrast`](../../../packages/mobile/tests/pair-contrast.test.tsx) |
 | [MUS-SPEC-23-14C](23-mobile.md#mus-spec-23-14c) | Opening muster://pair?… lands on the pair route with the link in the field, and pairing starts once with the parsed link. | [`a muster://pair deep link fills in the link and starts pairing`](../../../packages/mobile/tests/deep-link.test.tsx) |
@@ -596,4 +600,50 @@ Boundaries:
 - Test: `packages/mobile/tests/chat-screen.test.tsx::attaches a photo from the composer, uploads it in chunks and sends it with the message`
 - Environment: jest (jest-expo preset) in Node with @testing-library/react-native; the screen is given a fake connection with the MobileClient interface and a picker double.
 - Known gaps: The system photo library, camera and file picker are not rendered in jest; they are checked by hand on a device.
+- Evidence: UNVERIFIED
+
+### Direct on the same network, with relay fallback (phase 2)
+
+<a id="mus-spec-23-13a"></a>
+#### MUS-SPEC-23-13A: On the same network the phone connects without the relay, and falls back when the LAN address fails
+
+- Precondition: A desktop with the relay set and its LAN listener on; a chat; a fake provider.
+- Action: Start pairing and read mobile.status; pair a phone with the link and confirm it; allow it to act; reconnect with its record and send a message; reconnect with the record's LAN address replaced by a port nothing listens on; reconnect with it replaced by an impostor that accepts and closes with 4403; turn direct connections off (mobile.lan.set) and start pairing and reconnect again.
+- Expected result: mobile.status shows the LAN on with one 127.0.0.1 address, and the link carries the same addresses. Pairing goes over the LAN, its record keeps the addresses, and the relay has forwarded nothing. The reconnect is over the LAN, the message starts a run, and the relay still has forwarded nothing. With the dead address the phone connects through the relay, which now carries frames, and the connection reports the desktop's current LAN addresses. The impostor's "revoked" close does not stop the phone: it connects through the relay. Turned off, mobile.status shows no addresses, the new link has no LAN addresses, and the reconnect uses the relay.
+- Test: `packages/agent-app/tests/mobile-326.test.ts::on the same network the phone connects without the relay, and falls back to the relay when the LAN address fails`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and a Node phone built from the same MobileClient and Noise code the app uses, with Node crypto. The LAN listener is bound to 127.0.0.1 through a test seam (production binds only private-network addresses, 13C).
+- Known gaps: A real Wi-Fi network (two devices, client isolation, a sleeping laptop) is checked by hand on the Galaxy S25: same network direct, then mobile data through the relay.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-13b"></a>
+#### MUS-SPEC-23-13B: The LAN listener keeps the relay path's security
+
+- Precondition: A desktop with the LAN listener on and pairing started; a chat titled "Quarterly numbers".
+- Action: Send raw WebSocket upgrades: to the phone route with Host set to the listener's address; to another route; to /v1/desktop; with Host set to a name; with a foreign Origin; with an Origin naming the listener's own address. Pair a phone named with a marker over the LAN while recording every message on its socket, try to send a marked message while read-only, and open the chat. Run a session handshake from a key that was never paired; send one message of 87,385 characters; turn phone access off and connect to the LAN port.
+- Expected result: 101 for the route with a literal Host and for the phone's own origin; 404 for the other route and the desktop endpoint; 403 for the name and the foreign Origin. The pairing is over the LAN; the send is refused as read only. Every recorded message is base64, and none decodes to the markers, the chat title or a JSON brace-quote. The unknown key is closed with 4403 and the oversized message with 1009. With phone access off the connection is refused.
+- Test: `packages/agent-app/tests/mobile-326.test.ts::the LAN listener takes only this desktop’s route from a matching Host and Origin, runs the same handshake and access checks, and carries only ciphertext`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and a Node phone built from the same MobileClient and Noise code the app uses, with Node crypto. The LAN listener is bound to 127.0.0.1 through a test seam (production binds only private-network addresses, 13C).
+- Known gaps: Traffic analysis on the LAN (sizes and timing) is visible to anyone on the network, as it is to a relay.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-13c"></a>
+#### MUS-SPEC-23-13C: Only private-network addresses are bound and shared
+
+- Precondition: A list of interfaces with loopback, a private IPv4, an IPv6 link-local and unique-local address, a public address, a carrier-grade NAT VPN address, a Docker bridge, a macOS VM bridge and a second private IPv4.
+- Action: Pick the LAN hosts from it; format and parse pairing links with private, public, named, portless and out-of-range LAN entries, and with six entries.
+- Expected result: The hosts are 192.168.1.20, 10.0.4.7 and fd12:3456::5, in that order. The parser keeps private literal host:port entries (IPv6 in brackets), drops the public, named, portless and out-of-range ones (no LAN at all when none is left) and keeps at most four.
+- Test: `packages/agent-app/tests/mobile-326.test.ts::the LAN listener binds only private-network addresses, and the link carries only those`
+- Environment: Node test runner; the shared modules are called directly.
+- Known gaps: A private address on an interface the phone can't reach (another VM bridge name) is still offered; the phone then falls back to the relay (13A).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-13d"></a>
+#### MUS-SPEC-23-13D: Settings shows the LAN addresses and turns direct connections off
+
+- Precondition: The Phone panel with a stubbed bridge whose status has the LAN on at 192.168.1.20:7481.
+- Action: Render; press the "Connect directly on the same network" switch.
+- Expected result: The address shows and the switch is on; pressing it calls mobile.lan.set with enabled false, after which the switch is off and the address is gone.
+- Test: `packages/agent-app/tests/mobile-settings-326-dom.tsx::Phone settings show the addresses phones reach directly on this network and turn it off`
+- Environment: DOM suite (linkedom) with a stubbed window.muster bridge; no runtime.
+- Known gaps: None known.
 - Evidence: UNVERIFIED
