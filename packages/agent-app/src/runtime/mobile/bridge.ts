@@ -4,8 +4,9 @@
  */
 import type {ApprovalData, Chat, PendingQuestion, ProviderInfo, Snapshot, TimelineItem} from '../../shared/protocol.ts';
 import {device} from '../../shared/device-noun.ts';
-import {ACTING_METHODS, MOBILE_METHODS, MOBILE_PROTOCOL_VERSION, MobileError, type MobileAccess, type MobileApproval, type MobileChat, type MobileChatStatus, type MobileItem, type MobileMethod, type MobileMethods, type MobileNeed, type MobilePlace, type MobileProvider, type MobileQuestion} from '../../shared/mobile/protocol.ts';
+import {ACTING_METHODS, MAX_SEND_ATTACHMENTS, MOBILE_METHODS, MOBILE_PROTOCOL_VERSION, MobileError, type MobileAccess, type MobileApproval, type MobileChat, type MobileChatStatus, type MobileItem, type MobileMethod, type MobileMethods, type MobileNeed, type MobilePlace, type MobileProvider, type MobileQuestion} from '../../shared/mobile/protocol.ts';
 import type {DomainContext} from '../domains/types.ts';
+import type {PhoneUploads} from './uploads.ts';
 
 const MAX_ITEM_TEXT = 64 * 1024;
 const OPEN_ITEMS = 200;
@@ -79,6 +80,8 @@ export interface BridgeContext {
   deviceId: string;
   /** Streams this chat's item events to the session (null stops). */
   watch(chatId: string | null): void;
+  /** This phone's uploads and the files it staged (phase 2). */
+  uploads?: PhoneUploads;
 }
 
 export async function needsList(invoke: DomainContext['invoke'], snapshot: Snapshot): Promise<MobileNeed[]> {
@@ -114,6 +117,8 @@ const text = (value: unknown, name: string, max = MAX_MESSAGE): string => {
 };
 const id = (value: unknown, name = 'id'): string => { if (typeof value !== 'string' || !ID.test(value)) throw new MobileError('bad-request', `Missing or invalid ${name}.`); return value; };
 
+const uploadsOf = (ctx: BridgeContext): PhoneUploads => { if (!ctx.uploads) throw new MobileError('refused', 'Files can’t be sent from this phone yet.'); return ctx.uploads; };
+
 /** Runs one phone request. Throws MobileError for anything the phone should see. */
 export async function handle(ctx: BridgeContext, method: unknown, rawParams: unknown): Promise<unknown> {
   if (typeof method !== 'string' || !(MOBILE_METHODS as readonly string[]).includes(method)) throw new MobileError('bad-request', 'Unknown request.');
@@ -147,8 +152,12 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
       case 'chat.send': {
         const chatId = id(p.id); await chatOf(chatId);
         const message = text(p.text, 'message'), requestId = id(p.requestId, 'requestId');
+        const attachmentIds = p.attachmentIds === undefined ? [] : Array.isArray(p.attachmentIds) && p.attachmentIds.length <= MAX_SEND_ATTACHMENTS ? p.attachmentIds.map(value => id(value, 'attachment id')) : null;
+        // Only files this phone uploaded to this chat: never one staged on the desktop or by another phone.
+        if (!attachmentIds || (attachmentIds.length && !ctx.uploads?.owns(chatId, attachmentIds))) throw new MobileError('bad-request', 'That file was not sent from this phone. Attach it again.');
         recheck();
-        const result = await ctx.invoke('chat.send', {id: chatId, text: message, requestId});
+        const result = await ctx.invoke('chat.send', {id: chatId, text: message, requestId, ...(attachmentIds.length ? {attachmentIds} : {})});
+        ctx.uploads?.sent(attachmentIds);
         return {runId: result.runId} satisfies MobileMethods['chat.send']['result'];
       }
       case 'chat.steer': {
@@ -198,6 +207,28 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
         const chat = mobileChats(await ctx.snapshot()).find(entry => entry.id === created.id);
         if (!chat) throw new MobileError('failed', 'The chat was not created.');
         return {chat} satisfies MobileMethods['chat.create']['result'];
+      }
+      case 'upload.start': {
+        const uploads = uploadsOf(ctx), chatId = id(p.chatId, 'chatId'); await chatOf(chatId);
+        return uploads.start({chatId, name: p.name, mime: p.mime, size: p.size, sha256: p.sha256}) satisfies MobileMethods['upload.start']['result'];
+      }
+      case 'upload.chunk': return uploadsOf(ctx).chunk(p.uploadId, p.offset, p.data) satisfies MobileMethods['upload.chunk']['result'];
+      case 'upload.cancel': uploadsOf(ctx).cancel(p.uploadId); return {};
+      case 'upload.discard': {
+        const uploads = uploadsOf(ctx), chatId = id(p.chatId, 'chatId'), attachmentId = id(p.attachmentId, 'attachment id');
+        if (!uploads.owns(chatId, [attachmentId])) throw new MobileError('bad-request', 'That file was not sent from this phone.');
+        recheck();
+        await ctx.invoke('attachments.discard', {chatId, id: attachmentId});
+        uploads.sent([attachmentId]);
+        return {};
+      }
+      case 'upload.finish': {
+        const uploads = uploadsOf(ctx), file = uploads.finish(p.uploadId);
+        await chatOf(file.chatId);
+        recheck();
+        const ref = await ctx.invoke('attachments.stage', file);
+        uploads.own(ref.id, file.chatId);
+        return {attachment: {id: ref.id, name: ref.name, mime: ref.mime, size: ref.size, kind: ref.kind}} satisfies MobileMethods['upload.finish']['result'];
       }
       case 'needs.list': return {needs: await needsList(ctx.invoke, await ctx.snapshot())} satisfies MobileMethods['needs.list']['result'];
     }

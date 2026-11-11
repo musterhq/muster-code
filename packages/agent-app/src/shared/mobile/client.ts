@@ -6,7 +6,7 @@
 import {concat, fromBase64, fromUtf8, toBase64, utf8} from './bytes.ts';
 import {Handshake, type NoiseCrypto} from './noise.ts';
 import {checkCodeOf, MODE_BYTE, prologue, SecureChannel, type ChannelMode} from './channel.ts';
-import {CLOSE_REASON, MOBILE_PROTOCOL_VERSION, MobileError, parsePairingLink, type MobileAccess, type MobileEvent, type MobileFrame, type MobileMethod, type MobileMethods, type PairingLink, type PairRequest, type Welcome} from './protocol.ts';
+import {CLOSE_REASON, MOBILE_PROTOCOL_VERSION, MobileError, parsePairingLink, UPLOAD_CHUNK_BYTES, UPLOAD_MAX_BYTES, type MobileAttachment, type MobileAccess, type MobileEvent, type MobileFrame, type MobileMethod, type MobileMethods, type PairingLink, type PairRequest, type Welcome} from './protocol.ts';
 
 export {MobileError} from './protocol.ts';
 
@@ -170,4 +170,32 @@ export async function connectPhone(options: ConnectOptions): Promise<MobileConne
   const hello = await connection.call('hello', {});
   connection.access = hello.access;
   return connection;
+}
+
+export interface UploadOptions {
+  chatId: string; name: string; mime: string; bytes: Uint8Array;
+  /** SHA-256 of the bytes (the phone's noble or the desktop's Node hash). */
+  sha256(bytes: Uint8Array): Uint8Array;
+  /** Bytes the desktop has received so far, after each chunk. */
+  onProgress?(sent: number): void;
+}
+/** Sends a photo or file to a chat on the desktop through the encrypted session, in order, one chunk at a time; the desktop
+ *  checks the length and hash and stages it. Pass the returned id in chat.send's attachmentIds. */
+export async function uploadAttachment(connection: MobileConnection, options: UploadOptions): Promise<MobileAttachment> {
+  const {bytes} = options;
+  if (!bytes.length) throw new MobileError('bad-request', 'This file is empty.');
+  if (bytes.length > UPLOAD_MAX_BYTES) throw new MobileError('bad-request', `${options.name} is larger than 20 MB.`);
+  const sha256 = Array.from(options.sha256(bytes), byte => byte.toString(16).padStart(2, '0')).join('');
+  const {uploadId, chunkBytes} = await connection.call('upload.start', {chatId: options.chatId, name: options.name, mime: options.mime, size: bytes.length, sha256});
+  const step = Math.max(1, Math.min(chunkBytes || UPLOAD_CHUNK_BYTES, UPLOAD_CHUNK_BYTES));
+  try {
+    for (let offset = 0; offset < bytes.length; offset += step) {
+      const {received} = await connection.call('upload.chunk', {uploadId, offset, data: toBase64(bytes.subarray(offset, offset + step))});
+      options.onProgress?.(received);
+    }
+    return (await connection.call('upload.finish', {uploadId})).attachment;
+  } catch (error) {
+    void connection.call('upload.cancel', {uploadId}).catch(() => undefined);
+    throw error;
+  }
 }

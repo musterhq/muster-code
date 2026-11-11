@@ -888,9 +888,15 @@ test('uploads over the size cap, out of order, oversized, short or with a wrong 
   assert.equal((await rejection(start())).code, 'refused');
   for (const entry of open) await client.call('upload.cancel', {uploadId: entry.uploadId});
   assert.deepEqual(await d.service.invoke('attachments.list', {chatId: chat.id}), [], 'nothing was staged');
+  // A file the phone uploaded and then took out of its composer is removed on the desktop too.
+  const removed = await uploadAttachment(client, {chatId: chat.id, name: 'draft.txt', mime: 'text/plain', bytes: utf8('draft'), sha256});
+  await client.call('upload.discard', {chatId: chat.id, attachmentId: removed.id});
+  assert.deepEqual(await d.service.invoke('attachments.list', {chatId: chat.id}), [], 'the removed file is gone');
   // A file staged on the desktop is not the phone's to send.
   const desktopFile = await d.service.invoke('attachments.stage', {chatId: chat.id, name: 'secret.txt', mime: 'text/plain', dataBase64: Buffer.from('desktop only').toString('base64')});
   assert.equal((await rejection(client.call('chat.send', {id: chat.id, text: 'send it', requestId: 'att-2', attachmentIds: [desktopFile.id]}))).code, 'bad-request');
+  assert.equal((await rejection(client.call('upload.discard', {chatId: chat.id, attachmentId: desktopFile.id}))).code, 'bad-request');
+  assert.equal((await d.service.invoke('attachments.list', {chatId: chat.id})).length, 1, 'the desktop file stays');
   assert.deepEqual(await userTexts(d, chat.id), []);
   assert.deepEqual(prompts, []);
 });

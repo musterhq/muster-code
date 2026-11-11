@@ -52,7 +52,6 @@ test('approves or declines in place, and read-only hides the actions', async () 
 
 // Spec: MUS-SPEC-23-12C (docs/spec/clauses/23-mobile.md#mus-spec-23-12c)
 test('attaches a photo from the composer, uploads it in chunks and sends it with the message', async () => {
-  const {toBase64} = require('../../agent-app/src/shared/mobile/bytes.ts');
   const photo = new Uint8Array(70_000).map((_, index) => index % 251);
   const received: number[] = [];
   const connection = fakeConnection({
@@ -61,7 +60,7 @@ test('attaches a photo from the composer, uploads it in chunks and sends it with
     'upload.chunk': (params: {offset: number; data: string}) => { received.push(params.offset); return {received: params.offset + Buffer.from(params.data, 'base64').length}; },
     'upload.finish': {attachment: {id: 'att-1', name: 'IMG_0042.jpg', mime: 'image/jpeg', size: photo.length, kind: 'image'}},
   });
-  const pickAttachment = jest.fn(async (_source: 'photo' | 'camera' | 'file') => ({name: 'IMG_0042.jpg', mime: 'image/jpeg', base64: toBase64(photo)}));
+  const pickAttachment = jest.fn(async (_source: 'photo' | 'camera' | 'file') => ({name: 'IMG_0042.jpg', mime: 'image/jpeg', bytes: photo}));
   await render(<ChatScreen connection={connection} chatId="c1" pickAttachment={pickAttachment} />);
   expect(await screen.findByText('Release notes')).toBeTruthy();
   await fireEvent.press(screen.getByLabelText('Attach'));

@@ -9,17 +9,38 @@
     "ios": {
       "bundleIdentifier": "dev.muster.mobile",
       "supportsTablet": true,
-      "infoPlist": {"NSCameraUsageDescription": "Muster uses the camera to scan the pairing code shown on your computer."}
+      "infoPlist": {
+        "NSCameraUsageDescription": "Muster uses the camera to scan the pairing code shown on your computer.",
+        "NSPhotoLibraryUsageDescription": "Muster lets you pick photos to send to an agent on your computer."
+      }
     },
     "android": {
       "package": "dev.muster.mobile",
-      "permissions": ["android.permission.CAMERA"]
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
     },
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      ["expo-camera", {"cameraPermission": "Muster uses the camera to scan the pairing code shown on your computer.", "recordAudioAndroid": false}]
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Muster uses the camera to scan the pairing code shown on your computer.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Muster lets you pick photos to send to an agent on your computer.",
+          "cameraPermission": "Muster uses the camera to scan the pairing code and to take photos you send to an agent.",
+          "microphonePermission": false
+        }
+      ]
     ],
-    "experiments": {"typedRoutes": false}
+    "experiments": {
+      "typedRoutes": false
+    }
   }
 }

@@ -30,6 +30,7 @@ import {activeSecretStore, openSecretStores, type SecretStore} from '../secret-s
 import {handle, mobileChats, mobileItem, needsList} from '../mobile/bridge.ts';
 import {generateRouteKey, nodeNoiseCrypto, signWithRouteKey, type RouteKey} from '../mobile/node-crypto.ts';
 import {RelayLink} from '../mobile/relay-link.ts';
+import {PhoneUploads} from '../mobile/uploads.ts';
 import type {DomainContext, DomainModule} from './types.ts';
 
 /** Test seams: the secret store, and shorter or smaller limits. */
@@ -85,6 +86,17 @@ export function createMobileDomain(context: DomainContext): DomainModule {
   let identityError: string | null = null;
   let disposed = false;
   const sessions = new Map<number, Session>();
+  /** Each paired phone's uploads and unsent files, kept across its sessions (a phone reconnects while composing). */
+  const uploads = new Map<string, PhoneUploads>();
+  const uploadsFor = (deviceId: string) => { let entry = uploads.get(deviceId); if (!entry) { entry = new PhoneUploads(); uploads.set(deviceId, entry); } return entry; };
+  /** A revoked or reset phone's open uploads go, and the files it staged but never sent are discarded. */
+  const dropUploads = (deviceId: string) => {
+    const entry = uploads.get(deviceId);
+    if (!entry) return;
+    uploads.delete(deviceId);
+    for (const file of entry.unsent()) void context.invoke('attachments.discard', {chatId: file.chatId, id: file.id}).catch(() => undefined);
+    entry.dispose();
+  };
   const name = desktopName();
 
   const secrets = (): SecretStore | undefined => mobileSeams.secrets ? mobileSeams.secrets() : openSecretStores().findLast(store => store.secureStorage()) ?? activeSecretStore();
@@ -269,6 +281,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       alive: () => sessions.get(session.conn) === session && devices.some(d => d.id === session.deviceId),
       desktopName: name, deviceId: session.deviceId ?? '',
       watch: (chatId: string | null) => { session.watching = chatId; },
+      ...(session.deviceId ? {uploads: uploadsFor(session.deviceId)} : {}),
     };
   }
 
@@ -366,6 +379,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
         devices = devices.filter(d => d.id !== target.id);
         saveDevices();
         for (const session of [...sessions.values()]) if (session.deviceId === target.id) drop(session, CLOSE.revoked, 'revoked');
+        dropUploads(target.id);
         changed();
         return status();
       },
@@ -383,6 +397,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
         endPairing('cancelled');
         for (const session of [...sessions.values()]) drop(session, CLOSE.revoked, 'revoked');
         stopLink();
+        for (const deviceId of [...uploads.keys()]) dropUploads(deviceId);
         devices = []; saveDevices();
         usedCode = null; failures = [];
         const store = secrets();
@@ -399,6 +414,8 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       if (pairing) clearTimeout(pairing.timer);
       for (const session of [...sessions.values()]) drop(session, CLOSE.gone, 'closed');
       stopLink();
+      for (const entry of uploads.values()) entry.dispose();
+      uploads.clear();
     },
   };
 }
