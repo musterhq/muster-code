@@ -1,5 +1,7 @@
-/** Noise primitives from Node's built-in crypto (#326): X25519, ChaCha20-Poly1305, SHA-256. No new dependency. */
-import {createCipheriv, createDecipheriv, createHash, createHmac, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, randomBytes, sign} from 'node:crypto';
+/** Noise primitives for the desktop (#326): X25519 and SHA-256 from Node's built-in crypto; ChaCha20-Poly1305 from
+ *  @noble/ciphers (the phone's library), because Electron's BoringSSL has no chacha20-poly1305 cipher (MUS-SPEC-23-10G). */
+import {chacha20poly1305} from '@noble/ciphers/chacha.js';
+import {createHash, createHmac, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, randomBytes, sign} from 'node:crypto';
 import type {KeyPair, NoiseCrypto} from '../../shared/mobile/noise.ts';
 
 // DER wrappers for raw 32-byte X25519 keys (RFC 8410).
@@ -24,17 +26,10 @@ export function nodeNoiseCrypto(): NoiseCrypto {
       if (shared.every(byte => byte === 0)) throw new Error('Invalid public key.');
       return shared;
     },
-    encrypt(key, nonce, ad, plaintext) {
-      const cipher = createCipheriv('chacha20-poly1305', key, nonce, {authTagLength: 16});
-      cipher.setAAD(ad, {plaintextLength: plaintext.length});
-      return bytes(Buffer.concat([cipher.update(plaintext), cipher.final(), cipher.getAuthTag()]));
-    },
+    encrypt: (key, nonce, ad, plaintext) => chacha20poly1305(key, nonce, ad).encrypt(plaintext),
     decrypt(key, nonce, ad, ciphertext) {
       if (ciphertext.length < 16) throw new Error('Ciphertext too short.');
-      const decipher = createDecipheriv('chacha20-poly1305', key, nonce, {authTagLength: 16});
-      decipher.setAAD(ad, {plaintextLength: ciphertext.length - 16});
-      decipher.setAuthTag(ciphertext.subarray(ciphertext.length - 16));
-      return bytes(Buffer.concat([decipher.update(ciphertext.subarray(0, ciphertext.length - 16)), decipher.final()]));
+      return chacha20poly1305(key, nonce, ad).decrypt(ciphertext);
     },
     sha256: data => bytes(createHash('sha256').update(data).digest()),
     hmacSha256: (key, data) => bytes(createHmac('sha256', key).update(data).digest()),

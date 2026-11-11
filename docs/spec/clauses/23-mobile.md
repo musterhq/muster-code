@@ -55,7 +55,7 @@ Boundaries:
 | [MUS-SPEC-23-10D](23-mobile.md#mus-spec-23-10d) | A handshake message or transport message over 65,535 bytes throws without any decryption attempt. | [`frames over 65,535 bytes are refused before decrypting`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-10E](23-mobile.md#mus-spec-23-10e) | Approval details reach the phone with the folder name instead of the working directory's full path, and changed files relative to it. | [`the phone gets folder names and relative file paths, never full paths`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-10F](23-mobile.md#mus-spec-23-10f) | The relay closes a desktop that does not register in time and a socket that stops answering pings, and closes a phone that sends a message over 87,384 characters without forwarding it. | [`the relay closes unregistered and silent sockets and refuses oversized messages`](../../../packages/agent-app/tests/mobile-326.test.ts) |
-| [MUS-SPEC-23-10G](23-mobile.md#mus-spec-23-10g) | The desktop completes the pairing handshake and seals and opens frames inside Electron, whose BoringSSL has no ChaCha20-Poly1305. | [`the desktop pairing handshake and frames work inside Electron, not only in Node`](../../packages/agent-app/tests/mobile-326.test.ts) |
+| [MUS-SPEC-23-10G](23-mobile.md#mus-spec-23-10g) | The desktop completes the pairing handshake and seals and opens frames inside Electron, whose BoringSSL has no ChaCha20-Poly1305. | [`the desktop pairing handshake and frames work inside Electron, not only in Node`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 
 ### Pairing, the device registry and access
 
