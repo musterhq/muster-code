@@ -649,18 +649,18 @@ test('the phone gets folder names and relative file paths, never full paths', ()
 
 /** A self-signed certificate for 127.0.0.1, for the relay's TLS listener in tests only. */
 const TEST_CERT = `-----BEGIN CERTIFICATE-----
-MIICDzCCAbQCCQCd2QsJHdX4eTAKBggqhkjOPQQDAjAUMRIwEAYDVQQDDAkxMjcu
-MC4wLjEwIBcNMjYxMTEwMTQzMTM2WhgPMjEyNjEwMTcxNDMxMzZaMBQxEjAQBgNV
-BAMMCTEyNy4wLjAuMTCCAUswggEDBgcqhkjOPQIBMIH3AgEBMCwGByqGSM49AQEC
-IQD/////AAAAAQAAAAAAAAAAAAAAAP///////////////zBbBCD/////AAAAAQAA
-AAAAAAAAAAAAAP///////////////AQgWsY12Ko6k+ez671VdpiGvGUdBrDMU7D2
-O848PifSYEsDFQDEnTYIhucEk2pmeOETnSa3gZ9+kARBBGsX0fLhLEJH+Lzm5WOk
-QPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/
-UfUCIQD/////AAAAAP//////////vOb6racXnoTzucrC/GMlUQIBAQNCAAT1+3q/
-2YbYGZ3QXCIKaO4UpyYSXhyqbPj8LIMVHojIsATKXoE6v0JODi+X7VRo9tYWFgHQ
-fCdy3OB20MxX7Pf+MAoGCCqGSM49BAMCA0kAMEYCIQDeT8PlDou6YONHATiPfoO+
-xkfpxKGXqipUIAB+hn1q8AIhAK97txPcnAB+iRVqnajyWWHujOr8/iya5HKB6YR7
-HWH8
+MIICJzCCAc6gAwIBAgIJAPreMTaESzK/MAoGCCqGSM49BAMCMBQxEjAQBgNVBAMM
+CTEyNy4wLjAuMTAgFw0yNjExMTExMzU3NTZaGA8yMTI2MTAxODEzNTc1NlowFDES
+MBAGA1UEAwwJMTI3LjAuMC4xMIIBSzCCAQMGByqGSM49AgEwgfcCAQEwLAYHKoZI
+zj0BAQIhAP////8AAAABAAAAAAAAAAAAAAAA////////////////MFsEIP////8A
+AAABAAAAAAAAAAAAAAAA///////////////8BCBaxjXYqjqT57PrvVV2mIa8ZR0G
+sMxTsPY7zjw+J9JgSwMVAMSdNgiG5wSTamZ44ROdJreBn36QBEEEaxfR8uEsQkf4
+vOblY6RA8ncDfYEt6zOg9KE5RdiYwpZP40Li/hp/m47n60p8D54WK84zV2sxXs7L
+tkBoN79R9QIhAP////8AAAAA//////////+85vqtpxeehPO5ysL8YyVRAgEBA0IA
+BGOX4iEM1ktD940+JK3S3wGMAzSOvi/Ar3zajgTZ9XRp3mKnUbTNoGIj/5QkavF9
+8vD/jymkhGlzXGRPqgsSUfGjEzARMA8GA1UdEQQIMAaHBH8AAAEwCgYIKoZIzj0E
+AwIDRwAwRAIgbvCX9mSc8La9+N0qUGXEBgxs5gqQqi0jYlib/7OSIeMCIHYMuNaR
+Je2xQlRciPWRJ+ffChBZVOljTEzA6klpziTT
 -----END CERTIFICATE-----`;
 const TEST_KEY = `-----BEGIN PRIVATE KEY-----
 MIIBeQIBADCCAQMGByqGSM49AgEwgfcCAQEwLAYHKoZIzj0BAQIhAP////8AAAAB
@@ -668,9 +668,9 @@ AAAAAAAAAAAAAAAA////////////////MFsEIP////8AAAABAAAAAAAAAAAAAAAA
 ///////////////8BCBaxjXYqjqT57PrvVV2mIa8ZR0GsMxTsPY7zjw+J9JgSwMV
 AMSdNgiG5wSTamZ44ROdJreBn36QBEEEaxfR8uEsQkf4vOblY6RA8ncDfYEt6zOg
 9KE5RdiYwpZP40Li/hp/m47n60p8D54WK84zV2sxXs7LtkBoN79R9QIhAP////8A
-AAAA//////////+85vqtpxeehPO5ysL8YyVRAgEBBG0wawIBAQQgDuYMbokcMGd9
-afYeQLOfiaw1kLSzGZ6IRNtBMow01ZOhRANCAAT1+3q/2YbYGZ3QXCIKaO4UpyYS
-XhyqbPj8LIMVHojIsATKXoE6v0JODi+X7VRo9tYWFgHQfCdy3OB20MxX7Pf+
+AAAA//////////+85vqtpxeehPO5ysL8YyVRAgEBBG0wawIBAQQgKqYyUkPqgOqP
+MAK5g4jAQInLP73sM/aMV0x9DxaMWymhRANCAARjl+IhDNZLQ/eNPiSt0t8BjAM0
+jr4vwK982o4E2fV0ad5ip1G0zaBiI/+UJGrxffLw/48ppIRpc1xkT6oLElHx
 -----END PRIVATE KEY-----`;
 
 // Spec: MUS-SPEC-23-6C (docs/spec/clauses/23-mobile.md#mus-spec-23-6c)
@@ -683,7 +683,7 @@ test('the relay serves plain ws:// only on loopback unless it is a test relay, a
   t.after(() => secure.close());
   assert.match(secure.url, /^wss:\/\/127\.0\.0\.1:\d+$/);
   const status = await new Promise<number>((resolve, reject) => {
-    const req = httpsRequest(`${secure.url.replace(/^wss/, 'https')}/nothing`, {rejectUnauthorized: false}, res => { res.resume(); resolve(res.statusCode ?? 0); });
+    const req = httpsRequest(`${secure.url.replace(/^wss/, 'https')}/nothing`, {ca: TEST_CERT}, res => { res.resume(); resolve(res.statusCode ?? 0); });
     req.on('error', reject); req.end();
   });
   assert.equal(status, 404, 'answers over TLS');
