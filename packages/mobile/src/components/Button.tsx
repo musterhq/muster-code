@@ -5,15 +5,16 @@ export function Button({label, onPress, kind = 'secondary', disabled = false}: {
   return (
     <Pressable accessibilityRole="button" accessibilityState={{disabled}} disabled={disabled} onPress={onPress}
       style={({pressed}) => [styles.base, kind === 'primary' && styles.primary, kind === 'danger' && styles.danger, (pressed || disabled) && styles.dim]}>
-      <Text style={[styles.label, kind !== 'secondary' && styles.strong]}>{label}</Text>
+      <Text style={[styles.label, kind === 'primary' && styles.onAccent, kind !== 'secondary' && styles.strong]}>{label}</Text>
     </Pressable>
   );
 }
 const styles = StyleSheet.create({
-  base: {paddingVertical: space.s, paddingHorizontal: space.l, borderRadius: radius.s, backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.border, alignItems: 'center'},
-  primary: {backgroundColor: colors.accent, borderColor: colors.accent},
+  base: {paddingVertical: space.s, paddingHorizontal: space.l, borderRadius: radius.s, backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.control, alignItems: 'center'},
+  primary: {backgroundColor: colors.accentFill, borderColor: colors.accentFill},
   danger: {borderColor: colors.danger},
   dim: {opacity: 0.6},
   label: {color: colors.text, fontSize: font.body},
+  onAccent: {color: colors.onAccent},
   strong: {fontWeight: '600'},
 });

@@ -12,7 +12,7 @@ export function QrScanner({onScan}: {onScan(text: string): void}) {
   if (!permission.granted) return (
     <View style={styles.ask}>
       <Text style={styles.muted}>Muster needs the camera to scan the pairing code.</Text>
-      <Button label="Allow camera" onPress={() => void request()} />
+      <Button label="Allow camera" kind="primary" onPress={() => void request()} />
     </View>
   );
   return <CameraView style={StyleSheet.absoluteFill} barcodeScannerSettings={{barcodeTypes: ['qr']}}
@@ -20,5 +20,5 @@ export function QrScanner({onScan}: {onScan(text: string): void}) {
 }
 const styles = StyleSheet.create({
   ask: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.m, padding: space.l},
-  muted: {color: colors.muted, textAlign: 'center'},
+  muted: {color: colors.text, textAlign: 'center'},
 });

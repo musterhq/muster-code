@@ -31,13 +31,20 @@ export function ConnectionProvider({children}: {children: ReactNode}) {
   const [state, setState] = useState<LinkState>({phase: 'loading'});
   const attempt = useRef(0), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined), current = useRef<MobileConnection | null>(null);
 
+  const generation = useRef(0);
   const connect = useCallback((record: PairedRecord) => {
     if (timer.current) clearTimeout(timer.current);
+    // A newer connect (pairing again, possibly from a muster://pair link) supersedes this one: its link closes quietly.
+    const mine = ++generation.current;
+    const stale = () => generation.current !== mine;
+    current.current?.close(); current.current = null;
     setState({phase: 'connecting', record});
     connectPhone({record, crypto, socket}).then(connection => {
+      if (stale()) { connection.close(); return; }
       attempt.current = 0; current.current = connection;
       setState({phase: 'connected', record, connection});
       connection.onClose(reason => {
+        if (stale()) return;
         current.current = null;
         // Only the desktop's revoked close shows revoked; a network error or bad frame reconnects. The record is kept.
         if (afterLinkClose(reason) === 'revoked') { setState({phase: 'revoked', record}); return; }
@@ -45,6 +52,7 @@ export function ConnectionProvider({children}: {children: ReactNode}) {
         timer.current = setTimeout(() => connect(record), backoff(attempt.current++));
       });
     }, (error: unknown) => {
+      if (stale()) return;
       if (afterLinkFailure(error) === 'revoked') { setState({phase: 'revoked', record}); return; }
       setState({phase: 'connecting', record, error: error instanceof MobileError || error instanceof Error ? error.message : String(error)});
       timer.current = setTimeout(() => connect(record), backoff(attempt.current++));
@@ -69,7 +77,7 @@ export function ConnectionProvider({children}: {children: ReactNode}) {
       done.catch(() => undefined);
       return {record, checkCode, confirmed: done};
     },
-    async unpair() { current.current?.close(); current.current = null; if (timer.current) clearTimeout(timer.current); await store.clear(); setState({phase: 'unpaired'}); },
+    async unpair() { generation.current++; current.current?.close(); current.current = null; if (timer.current) clearTimeout(timer.current); await store.clear(); setState({phase: 'unpaired'}); },
     retry() { void store.load().then(record => { if (record) { attempt.current = 0; connect(record); } }); },
   }), [state, store, connect]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
