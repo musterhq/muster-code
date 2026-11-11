@@ -1,6 +1,6 @@
 # Muster mobile app: design
 
-Status: phase 1 built (issue #326); later phases planned below. This document is the plan of record for the phone app: how a phone reaches the
+Status: phases 1 and 2 built (issue #326); later phases planned below. This document is the plan of record for the phone app: how a phone reaches the
 person's desktop Muster from anywhere, how the traffic is protected, which stack the app uses, the screens, the phases and the
 threat model. The acceptance cases live in [docs/spec/clauses/23-mobile.md](../spec/clauses/23-mobile.md).
 
@@ -59,10 +59,48 @@ Non-goals for now:
 - **Muster Server is still a path.** A phone signed in to a Muster Server through the existing web UI keeps working. When a
   server is in the desktop's list (#808), it can also *host the relay* (`/relay/v1/...`), which is how a team avoids a third
   party (phase 3).
+- **On the same network, no relay hop** (phase 2, §2.3).
 - **Not on a shared server yet.** On Muster Server the `mobile.*` commands are desktop-only for every role (MUS-SPEC-23-3C):
   a phone paired with the shared runtime would bypass per-person project access. Per-person pairing on a server is phase 3.
 - **The desktop is the source of truth.** The phone holds no chat database: it caches the last chat list and the open chat
   for display while offline, and the desktop's runtime decides every command.
+
+### 2.3 Direct on the same network, with relay fallback (phase 2)
+
+```
+ phone ── ws://192.168.1.20:<port>/v1/phone/<route> ──▶ desktop LAN listener ─┐
+   │        (same base64 Noise messages as the relay)                         ├─▶ the same session code: handshake,
+   └──────── wss://relay/v1/phone/<route> ─────────────▶ relay ─▶ relay link ──┘    registry, access checks, allowlist
+```
+
+- **The desktop listens** on its private-network addresses while phone access is on, on one port it keeps across restarts
+  (so a phone's saved addresses still work), and follows the computer's addresses every 30 seconds as networks change.
+  Settings › Integrations › Phone shows the addresses and turns this off (`mobile.lan.set`).
+- **The phone learns the addresses** from the pairing link (`l=host:port,…`, at most four) and from every `hello`, which
+  carries the desktop's current list, so the saved record follows DHCP and network changes.
+- **The phone tries the LAN first.** Reconnecting, it races a whole session (socket, Noise handshake, hello) on each LAN
+  address for up to 3 seconds and uses the first that finishes; otherwise the relay. Pairing races only the socket (1.5 s):
+  once message 1 is sent the one-time code may be taken, so a pairing never retries on the relay after that.
+- **Any LAN failure means "use the relay"**, a 4403 "revoked" close included: something else may be answering at that
+  address, and only a desktop that proved its static key in the handshake may say anything about this phone. The relay
+  path's own rules (4403 shows revoked, MUS-SPEC-23-9B) are unchanged.
+
+**Binding, and why the listener does not weaken §8.** The listener carries exactly the relay's payloads into the same session
+code, so the handshake, the registry, the per-command access checks and the allowlist are not duplicated anywhere. What it
+adds is a socket on the local network, and that socket is narrowed as far as it goes:
+
+| Choice | Why |
+|---|---|
+| One listener per **literal private-network address** of a real interface: RFC 1918 IPv4, then unique-local IPv6, at most four | Never `0.0.0.0`/`::` (that would include public and VPN interfaces), never a public address, never loopback, link-local (a phone can't use our zone id), carrier-grade NAT (VPN overlays such as Tailscale) or container and VM bridges (`docker0`, `br-*`, `vmnet*`, `bridge*`…) |
+| Off while phone access is off, and switchable | Nothing listens on a computer that never paired a phone, or whose owner turned it off |
+| Only `GET /v1/phone/<this desktop's route>` upgrades; everything else is 404 | No other endpoint, no desktop registration, no HTTP content |
+| `Host` must be the literal address it was reached on; an `Origin`, if sent, must be that same address | A DNS-rebinding page sends a name; a web page on another site sends its own origin. React Native sends the target as its origin |
+| Messages over one Noise message (87,384 base64 characters) close the socket (1009); missed pongs drop it; 64 sockets at most | The relay's own limits; the session code still caps unauthenticated connections (32) and times out stalled handshakes (10 s) for both paths |
+| Plain `ws://` | Everything inside is Noise ciphertext, the same reason a `ws://` relay is allowed on a private network (MUS-SPEC-23-6B). A LAN attacker gets what a malicious relay gets: sizes, timing and the power to drop. The phone accepts LAN addresses only as literal private addresses (from the QR or a verified hello), so it never dials a name or a public host in clear |
+
+On the phone, Android needs cleartext allowed for `ws://` (`expo-build-properties`, `usesCleartextTraffic`) and iOS asks
+for local-network access (`NSLocalNetworkUsageDescription`); the only cleartext the app ever opens is `ws://` to a literal
+private address, which the link parser and the stored record both enforce.
 
 ## 3. End-to-end encryption
 
@@ -186,7 +224,8 @@ path alias (`@muster/shared/mobile/*`), resolved by TypeScript `paths`, jest `mo
 | `expo-camera` | QR scanning (its built-in barcode scanner) | 1 |
 | `react-native-webview` | Rich rendering bundle (§5.4) | 4 |
 | `expo-notifications` | APNs / FCM tokens and notification taps | 3 |
-| `expo-image-picker`, `expo-document-picker` | Attach photos and files | 2 |
+| `expo-image-picker`, `expo-document-picker`, `expo-file-system` | Attach photos and files (read as bytes, uploaded through the session) | 2 |
+| `expo-build-properties` | Android: allow `ws://` to the desktop's private address (§2.3) | 2 |
 | `expo-audio` | Dictation recording (#840) | 4 |
 
 ### 5.4 Rendering replies
@@ -245,11 +284,13 @@ approve/decline, answer questions, needs-you feed, settings with unpair. CI type
 Acceptance: MUS-SPEC-23-1A..1E (pairing, registry, revocation, read-only), 2A..2E (chats, stream, send, steer, approve,
 answer through the relay), 3A (relay sees only ciphertext), 4A..4D (mobile screens).
 
-**Phase 2: start work from the phone.** New chat in a folder or project with provider and model; attachments (photos, files,
-chunked upload through the session); direct LAN connection with relay fallback (desktop listens on a LAN port with the same
-Noise transport; the QR carries LAN addresses). Acceptance: a new chat started on the phone appears on the desktop with the
-chosen model; a photo sent from the phone reaches the agent as an image; on the same network the phone connects without the
-relay and falls back when the LAN address fails.
+**Phase 2: start work from the phone (built).** New chat in a folder or project with provider and model (`chat.options`,
+`chat.create`: act only, the place, provider and model re-checked on the desktop and access checked again right before the
+chat is made); attachments (photos, camera and files, chunked upload through the session: `upload.start`, `upload.chunk`,
+`upload.finish`, `upload.cancel`, `upload.discard`, then `chat.send` with the attachment ids; staged on the desktop like its
+own attachments, so a photo reaches the agent as an image input); direct LAN connection with relay fallback (§2.3).
+Acceptance: MUS-SPEC-23-11A..11C (new chat), 12A..12C (attachments), 13A..13D (LAN), plus 14A..14C (pairing fixes found on a
+Galaxy S25: one attempt at a time, AA contrast, `muster://pair` deep links).
 
 **Phase 3: needs-you everywhere.** Push relay and generic pushes; Projects (tasks, runs, Inbox) read and act; a relay mounted
 in Muster Server. Acceptance: an approval on the desktop produces exactly one generic push whose payload holds no chat text;
@@ -274,7 +315,9 @@ store listings. Acceptance: a signed build installs from TestFlight and Play int
 | **Lost or stolen phone** | The device, maybe unlocked | Keys are in Keychain/Keystore, this-device-only and only when unlocked, never in backups. The phone is read-only unless the person granted `act`. Revoke from desktop Settings ends its sessions and future handshakes. Phase 3 adds an optional app lock (Face ID / biometric) before `act` commands. |
 | **Malicious phone app build / modified client** | A paired key pair | The desktop enforces access per command with an allowlist; the phone can't reach any runtime command outside it, can't raise access, and can't approve for a session. |
 | **Push provider (Apple/Google) or push relay** | Push payloads | Payloads are generic ("An agent needs you" + random id); the content is fetched over the E2E session. |
-| **Network attacker on the LAN path** | LAN traffic | The same Noise session as over the relay. |
+| **Network attacker on the LAN path** | LAN traffic, and the ability to answer at the desktop's LAN address | The same Noise session as over the relay (§2.3): it can read nothing and can't finish a handshake without the desktop's key. A fake answer or a forged "revoked" close at the LAN address only makes the phone use the relay. Tested: MUS-SPEC-23-13A, 13B. |
+| **Someone else on the same network** | The desktop's LAN port | It answers only the phone route of this desktop, with a literal Host and no foreign Origin, behind the same handshake, registry and caps as the relay; off when phone access is off or the switch is off. Tested: MUS-SPEC-23-13B, 13C. |
+| **A phone uploading too much or out of order** | A paired phone with act access | Uploads are capped at 20 MB, two at a time, in order, each chunk at most 32 KB and never past the declared size, checked against a SHA-256 before staging; only files that phone uploaded can be sent or removed from it. Tested: MUS-SPEC-23-12B. |
 
 ### 8.2 Rules
 
