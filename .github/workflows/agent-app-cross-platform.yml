@@ -53,9 +53,10 @@ jobs:
       - name: Linux build tools
         if: matrix.os == 'linux'
         working-directory: .
-        # The runner image points apt at an Azure mirror list that sometimes stops resolving; use Ubuntu's own servers and retry.
+        # The runner's apt mirror list (Azure, then *.ubuntu.com) can stop resolving while other hosts work: try the
+        # kernel.org Ubuntu mirror first, keep Ubuntu's own archive as the fallback, and retry.
         run: |
-          sudo sed -i 's#mirror+file:/etc/apt/apt-mirrors.txt#http://archive.ubuntu.com/ubuntu/#' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+          printf 'http://mirrors.edge.kernel.org/ubuntu/\tpriority:1\nhttp://archive.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
           sudo apt-get -o Acquire::Retries=5 update && sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends build-essential python3 xvfb libgtk-3-0 libnss3 libxss1 libgbm1 libasound2t64 rpm fakeroot desktop-file-utils xdg-utils
 
       - id: electron
