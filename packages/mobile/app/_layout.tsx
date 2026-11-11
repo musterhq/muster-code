@@ -11,6 +11,7 @@ export default function Layout() {
         <Stack.Screen name="index" options={{title: 'Chats'}} />
         <Stack.Screen name="pair" options={{title: 'Pair'}} />
         <Stack.Screen name="chat/[id]" options={{title: ''}} />
+        <Stack.Screen name="new-chat" options={{title: 'New chat', presentation: 'modal'}} />
         <Stack.Screen name="needs-you" options={{title: 'Needs you'}} />
         <Stack.Screen name="settings" options={{title: 'Settings'}} />
       </Stack>

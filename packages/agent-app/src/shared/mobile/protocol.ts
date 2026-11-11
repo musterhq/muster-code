@@ -71,6 +71,11 @@ export interface MobileNeed {
   approval?: MobileApproval; questions?: MobileQuestion[];
 }
 
+/** Where a new chat can start: a folder or a Project, by name only. */
+export interface MobilePlace { kind: 'folder' | 'project'; id: string; name: string }
+export interface MobileModel { id: string; name: string; /** Takes image input. */ images: boolean }
+export interface MobileProvider { id: string; name: string; models: MobileModel[] }
+
 /** Methods the phone may call. Every one is checked on the desktop against the phone's access. */
 export interface MobileMethods {
   'hello': {params: Record<string, never>; result: {desktopName: string; deviceId: string; access: MobileAccess; protocol: number}};
@@ -84,11 +89,15 @@ export interface MobileMethods {
   'approval.respond': {params: {itemId: string; decision: 'accept' | 'decline'}; result: Record<string, never>};
   'question.respond': {params: {itemId: string; answers: Record<string, string[]>}; result: Record<string, never>};
   'needs.list': {params: Record<string, never>; result: {needs: MobileNeed[]}};
+  /** What a new chat can start in and with: folders and Projects by name, the desktop's ready providers and their models. */
+  'chat.options': {params: Record<string, never>; result: {places: MobilePlace[]; providers: MobileProvider[]}};
+  /** Starts a chat in one folder or Project (or neither) with that provider and model; the desktop's other defaults apply. */
+  'chat.create': {params: {folderId?: string; projectId?: string; providerId: string; model: string}; result: {chat: MobileChat}};
 }
 export type MobileMethod = keyof MobileMethods;
-export const MOBILE_METHODS: readonly MobileMethod[] = ['hello', 'chats.list', 'chat.open', 'chat.close', 'chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'needs.list'];
-/** Methods a read-only phone may not call. */
-export const ACTING_METHODS: ReadonlySet<MobileMethod> = new Set(['chat.send', 'chat.steer', 'approval.respond', 'question.respond']);
+export const MOBILE_METHODS: readonly MobileMethod[] = ['hello', 'chats.list', 'chat.open', 'chat.close', 'chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'needs.list', 'chat.options', 'chat.create'];
+/** Methods a read-only phone may not call. chat.options is only for starting a chat, so it is acting too. */
+export const ACTING_METHODS: ReadonlySet<MobileMethod> = new Set(['chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'chat.options', 'chat.create']);
 
 export type MobileEvent =
   | {type: 'chats'; chats: MobileChat[]}

@@ -10,7 +10,7 @@ export default function Index() {
   const router = useRouter();
   if (state.phase === 'loading') return <View style={styles.center} />;
   if (state.phase === 'unpaired') return <Redirect href="/pair" />;
-  const actions = <View style={styles.actions}><Text style={styles.link} onPress={() => router.push('/needs-you')}>Needs you</Text><Text style={styles.link} onPress={() => router.push('/settings')}>Settings</Text></View>;
+  const actions = <View style={styles.actions}>{state.phase === 'connected' ? <Text style={styles.link} onPress={() => router.push('/new-chat')}>New chat</Text> : null}<Text style={styles.link} onPress={() => router.push('/needs-you')}>Needs you</Text><Text style={styles.link} onPress={() => router.push('/settings')}>Settings</Text></View>;
   if (state.phase !== 'connected') return (
     <View style={styles.center}>
       <Stack.Screen options={{headerRight: () => actions}} />

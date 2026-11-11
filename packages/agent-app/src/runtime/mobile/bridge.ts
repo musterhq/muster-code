@@ -2,9 +2,9 @@
  * What a phone may do (#326): the method allowlist, its access checks, and the mapping from the runtime's own types to the
  * slim wire types. The desktop decides everything here; nothing the phone's UI hides is trusted.
  */
-import type {ApprovalData, Chat, PendingQuestion, Snapshot, TimelineItem} from '../../shared/protocol.ts';
+import type {ApprovalData, Chat, PendingQuestion, ProviderInfo, Snapshot, TimelineItem} from '../../shared/protocol.ts';
 import {device} from '../../shared/device-noun.ts';
-import {ACTING_METHODS, MOBILE_METHODS, MOBILE_PROTOCOL_VERSION, MobileError, type MobileAccess, type MobileApproval, type MobileChat, type MobileChatStatus, type MobileItem, type MobileMethod, type MobileMethods, type MobileNeed, type MobileQuestion} from '../../shared/mobile/protocol.ts';
+import {ACTING_METHODS, MOBILE_METHODS, MOBILE_PROTOCOL_VERSION, MobileError, type MobileAccess, type MobileApproval, type MobileChat, type MobileChatStatus, type MobileItem, type MobileMethod, type MobileMethods, type MobileNeed, type MobilePlace, type MobileProvider, type MobileQuestion} from '../../shared/mobile/protocol.ts';
 import type {DomainContext} from '../domains/types.ts';
 
 const MAX_ITEM_TEXT = 64 * 1024;
@@ -97,6 +97,17 @@ export async function needsList(invoke: DomainContext['invoke'], snapshot: Snaps
   return out;
 }
 
+/** The desktop's ready providers and the models it offers in the picker, without accounts, endpoints or keys. */
+export function mobileProviders(list: ProviderInfo[]): MobileProvider[] {
+  return list.filter(entry => entry.available && entry.models.length).map(entry => ({id: entry.id, name: entry.name,
+    models: entry.models.filter(model => !model.hiddenByDefault).map(model => ({id: model.id, name: model.name || model.id, images: model.images !== false}))}))
+    .filter(entry => entry.models.length);
+}
+export function mobilePlaces(snapshot: Snapshot): MobilePlace[] {
+  return [...snapshot.projects.filter(project => !project.archived).map(project => ({kind: 'project' as const, id: project.id, name: project.name})),
+    ...snapshot.folders.filter(folder => !folder.missing).map(folder => ({kind: 'folder' as const, id: folder.id, name: folder.name || baseName(folder.path)}))];
+}
+
 const text = (value: unknown, name: string, max = MAX_MESSAGE): string => {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw new MobileError('bad-request', `Missing or invalid ${name}.`);
   return value;
@@ -166,6 +177,27 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
         recheck();
         await ctx.invoke('question.respond', {id: itemId, answers: shaped});
         return {};
+      }
+      case 'chat.options': {
+        const [snapshot, providers] = [await ctx.snapshot(), await ctx.invoke('providers.list', {})];
+        return {places: mobilePlaces(snapshot), providers: mobileProviders(providers)} satisfies MobileMethods['chat.options']['result'];
+      }
+      case 'chat.create': {
+        const folderId = p.folderId === undefined ? undefined : id(p.folderId, 'folderId'), projectId = p.projectId === undefined ? undefined : id(p.projectId, 'projectId');
+        if (folderId && projectId) throw new MobileError('bad-request', 'Choose a folder or a Project, not both.');
+        const providerId = id(p.providerId, 'providerId'), model = text(p.model, 'model', 256);
+        const snapshot = await ctx.snapshot();
+        if (folderId && !snapshot.folders.some(folder => folder.id === folderId && !folder.missing)) throw new MobileError('not-found', 'That folder is not on this computer any more.');
+        if (projectId && !snapshot.projects.some(project => project.id === projectId && !project.archived)) throw new MobileError('not-found', 'That Project is not on this computer any more.');
+        const offered = mobileProviders(await ctx.invoke('providers.list', {})).find(entry => entry.id === providerId);
+        if (!offered || !offered.models.some(entry => entry.id === model)) throw new MobileError('bad-request', 'That model is not available on this computer.');
+        recheck();
+        const created = await ctx.invoke('chat.create', {...(folderId ? {folderId} : {}), ...(projectId ? {projectId} : {})});
+        try { await ctx.invoke('chat.selectProvider', {id: created.id, providerId, model}); }
+        catch (error) { await ctx.invoke('chat.delete', {id: created.id, force: true}).catch(() => undefined); throw error; }
+        const chat = mobileChats(await ctx.snapshot()).find(entry => entry.id === created.id);
+        if (!chat) throw new MobileError('failed', 'The chat was not created.');
+        return {chat} satisfies MobileMethods['chat.create']['result'];
       }
       case 'needs.list': return {needs: await needsList(ctx.invoke, await ctx.snapshot())} satisfies MobileMethods['needs.list']['result'];
     }
