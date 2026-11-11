@@ -56,6 +56,9 @@ Boundaries:
 | [MUS-SPEC-23-10E](23-mobile.md#mus-spec-23-10e) | Approval details reach the phone with the folder name instead of the working directory's full path, and changed files relative to it. | [`the phone gets folder names and relative file paths, never full paths`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-10F](23-mobile.md#mus-spec-23-10f) | The relay closes a desktop that does not register in time and a socket that stops answering pings, and closes a phone that sends a message over 87,384 characters without forwarding it. | [`the relay closes unregistered and silent sockets and refuses oversized messages`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-10G](23-mobile.md#mus-spec-23-10g) | The desktop completes the pairing handshake and seals and opens frames inside Electron, whose BoringSSL has no ChaCha20-Poly1305. | [`the desktop pairing handshake and frames work inside Electron, not only in Node`](../../../packages/agent-app/tests/mobile-326.test.ts) |
+| [MUS-SPEC-23-14A](23-mobile.md#mus-spec-23-14a) | While a pairing is in flight the scanner is hidden and the field and Pair button do nothing, so a second attempt never starts; the check code stays on screen with no error; when the attempt itself ends its error shows and pairing can start again. | [`a second scan or Pair press while pairing is in flight is ignored and never hides the check code`](../../../packages/mobile/tests/pair-screen.test.tsx) |
+| [MUS-SPEC-23-14B](23-mobile.md#mus-spec-23-14b) | Every text on the pair screen and the camera prompt has at least 4.5:1 contrast with what is behind it, and the Allow camera and Pair buttons have edges of at least 3:1. | [`the pair screen text and the camera prompt meet WCAG AA contrast`](../../../packages/mobile/tests/pair-contrast.test.tsx) |
+| [MUS-SPEC-23-14C](23-mobile.md#mus-spec-23-14c) | Opening muster://pair?… lands on the pair route with the link in the field, and pairing starts once with the parsed link. | [`a muster://pair deep link fills in the link and starts pairing`](../../../packages/mobile/tests/deep-link.test.tsx) |
 
 ### Pairing, the device registry and access
 
@@ -482,4 +485,39 @@ Boundaries:
 - Test: `packages/agent-app/tests/mobile-326.test.ts::the desktop pairing handshake and frames work inside Electron, not only in Node`
 - Environment: Node test runner spawning the electron binary from node_modules with ELECTRON_RUN_AS_NODE=1.
 - Known gaps: Runs the crypto in Electron's Node mode, not in the packaged app; a real phone pairing is checked by hand on a Samsung Galaxy S25 through Expo Go.
+- Evidence: UNVERIFIED
+
+### Pairing on a real phone (phase 2, found on a Samsung Galaxy S25)
+
+<a id="mus-spec-23-14a"></a>
+#### MUS-SPEC-23-14A: A second pairing attempt while one is in flight is ignored
+
+- Precondition: The pair screen with a scanner double, an in-memory secure store, and a pairing function whose first call waits and whose later calls fail with "code already used" (what the desktop answers to a second phone using a taken code).
+- Action: The scanner reports the link; press Pair before the first attempt answers; let it answer with check code 123456; press Pair again; then end the attempt with a rejection.
+- Expected result: The scanner is hidden and the field is not editable as soon as pairing starts. The pairing function is called once. "123 456" shows and stays, and no "already used" error appears. Nothing is stored. When the attempt is rejected, its own error shows, the check code goes away, and the scanner and Pair are back.
+- Test: `packages/mobile/tests/pair-screen.test.tsx::a second scan or Pair press while pairing is in flight is ignored and never hides the check code`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; the screen is given a scanner double and a fake pairing function.
+- Known gaps: The real camera's repeated barcode callbacks are not rendered; the scanner double reports the same thing the camera does. Checked by hand on the Galaxy S25.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-14b"></a>
+#### MUS-SPEC-23-14B: The pair screen meets WCAG AA contrast
+
+- Precondition: The pair screen with the real camera prompt (QrScanner) while camera permission is not granted.
+- Action: Render it and read the colours from the rendered styles: each text's colour and the nearest painted background behind it, and each button's fill and border against what surrounds it.
+- Expected result: The instructions, the camera prompt, the note about read-only phones and the Allow camera and Pair labels all have at least 4.5:1 contrast. The Allow camera and Pair buttons have a fill or border with at least 3:1 contrast against their surroundings (WCAG 1.4.11).
+- Test: `packages/mobile/tests/pair-contrast.test.tsx::the pair screen text and the camera prompt meet WCAG AA contrast`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; expo-camera is replaced by a double that reports no permission.
+- Known gaps: Screen brightness and glare are not modelled; the ratios are computed with the WCAG 2.2 relative-luminance formula.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-14c"></a>
+#### MUS-SPEC-23-14C: A muster://pair link opens the pair screen and starts pairing
+
+- Precondition: The app's pair route, with expo-router giving it the decoded query of a muster://pair link (what it does for a deep link on the app's own scheme), and a pairing function that answers with check code 654321.
+- Action: Render the route.
+- Expected result: The field holds the pairing link, the pairing function is called once with the parsed link, and "654 321" shows.
+- Test: `packages/mobile/tests/deep-link.test.tsx::a muster://pair deep link fills in the link and starts pairing`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; expo-router and the connection provider are replaced by doubles.
+- Known gaps: The Android intent filter and iOS URL type that hand the link to the app are generated by Expo from app.json's scheme; that hand-off is checked by hand with adb (am start -a android.intent.action.VIEW -d "muster://pair?...").
 - Evidence: UNVERIFIED
