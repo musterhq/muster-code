@@ -15,8 +15,8 @@ import type {ProviderAdapter, ProviderInput, ProviderResult} from '../src/runtim
 import {SecretStore} from '../src/runtime/secret-store.ts';
 import {mobileSeams} from '../src/runtime/domains/mobile.ts';
 import {nodeNoiseCrypto} from '../src/runtime/mobile/node-crypto.ts';
-import {connectPhone, pairPhone, MobileError, type MobileConnection, type PairedRecord} from '../src/shared/mobile/client.ts';
-import {parsePairingLink, formatPairingLink, type MobileEvent} from '../src/shared/mobile/protocol.ts';
+import {connectPhone, pairPhone, uploadAttachment, MobileError, type MobileConnection, type PairedRecord} from '../src/shared/mobile/client.ts';
+import {parsePairingLink, formatPairingLink, UPLOAD_CHUNK_BYTES, UPLOAD_MAX_BYTES, type MobileEvent} from '../src/shared/mobile/protocol.ts';
 import {MODE_BYTE, prologue, SecureChannel} from '../src/shared/mobile/channel.ts';
 import {Handshake, NOISE_MAX_MESSAGE, type NoiseCrypto} from '../src/shared/mobile/noise.ts';
 import {fromBase64, toBase64, utf8} from '../src/shared/mobile/bytes.ts';
@@ -807,4 +807,90 @@ test('starting a chat re-checks access right before it runs and refuses unknown 
   ctx.snapshot = async () => { access = 'read-only'; return place; };
   assert.equal((await create({folderId: 'f1', providerId: 'fake', model: 'fake-model'})).code, 'read-only');
   assert.ok(!invoked.includes('chat.create') && !invoked.includes('chat.selectProvider'), `no chat was made: ${invoked}`);
+});
+
+/** A real PNG (random pixels, so it does not compress) of `side`×`side`: several upload chunks long. */
+async function png(side: number): Promise<Uint8Array> {
+  const {deflateSync, crc32} = await import('node:zlib');
+  const {randomBytes} = await import('node:crypto');
+  const chunk = (type: string, data: Buffer) => { const head = Buffer.alloc(8); head.writeUInt32BE(data.length); head.write(type, 4, 'ascii'); const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(Buffer.concat([Buffer.from(type, 'ascii'), data]))); return Buffer.concat([head, data, crc]); };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(side, 0); ihdr.writeUInt32BE(side, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const rows = Buffer.concat(Array.from({length: side}, () => Buffer.concat([Buffer.of(0), randomBytes(side * 3)])));
+  return new Uint8Array(Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]));
+}
+const sha256 = (bytes: Uint8Array) => crypto.sha256(bytes);
+const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
+
+// Spec: MUS-SPEC-23-12A (docs/spec/clauses/23-mobile.md#mus-spec-23-12a)
+test('a photo sent from the phone reaches the agent as an image, uploaded in chunks through the session', async t => {
+  const seen: Array<{images: string[]; prompt: string}> = [];
+  const {provider} = scripted(async input => { seen.push({images: [...(input.images ?? [])], prompt: input.prompt}); return {status: 'completed', finalMessage: 'a photo'}; });
+  const d = await desktop(t, provider);
+  const chat = await d.service.invoke('chat.create', {});
+  const {client} = await pair(t, d);
+  await allowAct(d, client);
+  const photo = await png(160);
+  assert.ok(photo.length > UPLOAD_CHUNK_BYTES * 2, `the photo spans several chunks (${photo.length} bytes)`);
+  const progress: number[] = [];
+  const attachment = await uploadAttachment(client, {chatId: chat.id, name: 'IMG_0042.png', mime: 'image/png', bytes: photo, sha256, onProgress: sent => progress.push(sent)});
+  assert.deepEqual({name: attachment.name, mime: attachment.mime, size: attachment.size, kind: attachment.kind}, {name: 'IMG_0042.png', mime: 'image/png', size: photo.length, kind: 'image'});
+  assert.ok(progress.length >= 3 && progress.at(-1) === photo.length, `progress ${progress}`);
+  const notes = utf8('Release checklist\n- tag\n- notes\n');
+  const file = await uploadAttachment(client, {chatId: chat.id, name: 'checklist.txt', mime: 'text/plain', bytes: notes, sha256});
+  assert.equal(file.kind, 'file');
+  await client.call('chat.send', {id: chat.id, text: 'what is in this photo?', requestId: 'att-1', attachmentIds: [attachment.id, file.id]});
+  await until(() => seen.length === 1, 'run');
+  assert.equal(seen[0]!.images.length, 1, 'the photo is an image input');
+  assert.deepEqual(new Uint8Array(await readFile(seen[0]!.images[0]!)), photo, 'byte for byte');
+  assert.match(seen[0]!.prompt, /Attached file: .*checklist\.txt \(text\/plain/);
+  const user = (await d.service.invoke('chat.timeline', {id: chat.id})).items.find(item => item.kind === 'user');
+  const sent = (user?.data as {attachments?: Array<{name: string; kind: string}>} | undefined)?.attachments ?? [];
+  assert.deepEqual(sent.map(entry => [entry.name, entry.kind]), [['IMG_0042.png', 'image'], ['checklist.txt', 'file']]);
+});
+
+// Spec: MUS-SPEC-23-12B (docs/spec/clauses/23-mobile.md#mus-spec-23-12b)
+test('uploads over the size cap, out of order, oversized, short or with a wrong hash are refused and stage nothing', async t => {
+  const {provider, prompts} = quick();
+  const d = await desktop(t, provider);
+  const chat = await d.service.invoke('chat.create', {});
+  const {client} = await pair(t, d);
+  const start = (params: Partial<{chatId: string; name: string; mime: string; size: number; sha256: string}> = {}) => client.call('upload.start', {chatId: chat.id, name: 'a.bin', mime: 'application/octet-stream', size: 10, sha256: '0'.repeat(64), ...params});
+  assert.equal((await rejection(start())).code, 'read-only');
+  await allowAct(d, client);
+  const big = await rejection(start({size: UPLOAD_MAX_BYTES + 1}));
+  assert.equal(big.code, 'bad-request'); assert.match(big.message, /20 MB/);
+  assert.equal((await rejection(start({size: 0}))).code, 'bad-request');
+  const bytes = new Uint8Array(UPLOAD_CHUNK_BYTES + 100).fill(7);
+  const b64 = (data: Uint8Array) => toBase64(data);
+  // Out of order: the second chunk first. The upload is dropped.
+  const first = await start({size: bytes.length, sha256: hex(sha256(bytes))});
+  assert.equal(first.chunkBytes, UPLOAD_CHUNK_BYTES);
+  assert.equal((await rejection(client.call('upload.chunk', {uploadId: first.uploadId, offset: UPLOAD_CHUNK_BYTES, data: b64(bytes.subarray(UPLOAD_CHUNK_BYTES))}))).code, 'bad-request');
+  assert.equal((await rejection(client.call('upload.chunk', {uploadId: first.uploadId, offset: 0, data: b64(bytes.subarray(0, UPLOAD_CHUNK_BYTES))}))).code, 'not-found', 'a refused chunk ends the upload');
+  // A chunk larger than the chunk size, and one past the declared size.
+  const second = await start({size: bytes.length, sha256: hex(sha256(bytes))});
+  assert.equal((await rejection(client.call('upload.chunk', {uploadId: second.uploadId, offset: 0, data: b64(bytes)}))).code, 'bad-request');
+  const third = await start({size: 50, sha256: hex(sha256(bytes.subarray(0, 50)))});
+  assert.equal((await rejection(client.call('upload.chunk', {uploadId: third.uploadId, offset: 0, data: b64(bytes.subarray(0, 60))}))).code, 'bad-request');
+  // Finishing early, and a hash that does not match the bytes.
+  const fourth = await start({size: 50, sha256: hex(sha256(bytes.subarray(0, 50)))});
+  await client.call('upload.chunk', {uploadId: fourth.uploadId, offset: 0, data: b64(bytes.subarray(0, 20))});
+  assert.equal((await rejection(client.call('upload.finish', {uploadId: fourth.uploadId}))).code, 'bad-request');
+  const fifth = await start({size: 50, sha256: hex(sha256(bytes.subarray(0, 49)))});
+  await client.call('upload.chunk', {uploadId: fifth.uploadId, offset: 0, data: b64(bytes.subarray(0, 50))});
+  assert.equal((await rejection(client.call('upload.finish', {uploadId: fifth.uploadId}))).code, 'bad-request');
+  // A "photo" that is not an image is not passed off as one.
+  const fake = utf8('not really a png');
+  const notImage = await rejection(uploadAttachment(client, {chatId: chat.id, name: 'x.png', mime: 'image/png', bytes: fake, sha256}));
+  assert.match(notImage.message, /not a readable PNG image/);
+  // Only a few uploads at once per phone.
+  const open = [await start(), await start()];
+  assert.equal((await rejection(start())).code, 'refused');
+  for (const entry of open) await client.call('upload.cancel', {uploadId: entry.uploadId});
+  assert.deepEqual(await d.service.invoke('attachments.list', {chatId: chat.id}), [], 'nothing was staged');
+  // A file staged on the desktop is not the phone's to send.
+  const desktopFile = await d.service.invoke('attachments.stage', {chatId: chat.id, name: 'secret.txt', mime: 'text/plain', dataBase64: Buffer.from('desktop only').toString('base64')});
+  assert.equal((await rejection(client.call('chat.send', {id: chat.id, text: 'send it', requestId: 'att-2', attachmentIds: [desktopFile.id]}))).code, 'bad-request');
+  assert.deepEqual(await userTexts(d, chat.id), []);
+  assert.deepEqual(prompts, []);
 });

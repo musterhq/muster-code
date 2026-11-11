@@ -59,6 +59,9 @@ Boundaries:
 | [MUS-SPEC-23-11A](23-mobile.md#mus-spec-23-11a) | A read-only phone can neither list the new-chat options nor start a chat. An act phone gets folder and project names (no paths) and the desktop's providers and models; the chat it starts is on the desktop in that folder or project with the chosen provider and model, reaches the phone's list, and its first run uses that model. | [`a phone starts a new chat in a folder or project with the chosen provider and model, and it appears on the desktop`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-11B](23-mobile.md#mus-spec-23-11b) | An unknown folder, an unknown provider or model, and a folder and project together are refused; a phone switched to read-only while the request reads the desktop's state is refused; in each case no chat is created. | [`starting a chat re-checks access right before it runs and refuses unknown places and models`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-11C](23-mobile.md#mus-spec-23-11c) | The new chat sheet lists folders and projects, the provider's own models, and Start chat calls chat.create with the choices and opens the new chat; a read-only phone sees why and no Start chat. | [`the new chat sheet picks a folder or project, a provider and a model, and opens the chat it made`](../../../packages/mobile/tests/new-chat-screen.test.tsx) |
+| [MUS-SPEC-23-12A](23-mobile.md#mus-spec-23-12a) | A PNG several chunks long, uploaded from the phone through the session, is staged as an image and reaches the agent as an image input, byte for byte; a text file is staged as a file and named in the prompt; the desktop's user message lists both. | [`a photo sent from the phone reaches the agent as an image, uploaded in chunks through the session`](../../../packages/agent-app/tests/mobile-326.test.ts) |
+| [MUS-SPEC-23-12B](23-mobile.md#mus-spec-23-12b) | A read-only phone cannot upload. Over 20 MB, empty, out-of-order, over-long, past-the-end, short and wrong-hash uploads are refused, a refused chunk ends its upload, a non-image named .png is refused, a third upload at once is refused, and a file staged on the desktop cannot be sent from the phone; nothing is staged or sent. | [`uploads over the size cap, out of order, oversized, short or with a wrong hash are refused and stage nothing`](../../../packages/agent-app/tests/mobile-326.test.ts) |
+| [MUS-SPEC-23-12C](23-mobile.md#mus-spec-23-12c) | Attach › Photo uploads the picked photo in chunks, shows it in the composer, and Send carries its attachment id; the composer is cleared after sending. | [`attaches a photo from the composer, uploads it in chunks and sends it with the message`](../../../packages/mobile/tests/chat-screen.test.tsx) |
 | [MUS-SPEC-23-14A](23-mobile.md#mus-spec-23-14a) | While a pairing is in flight the scanner is hidden and the field and Pair button do nothing, so a second attempt never starts; the check code stays on screen with no error; when the attempt itself ends its error shows and pairing can start again. | [`a second scan or Pair press while pairing is in flight is ignored and never hides the check code`](../../../packages/mobile/tests/pair-screen.test.tsx) |
 | [MUS-SPEC-23-14B](23-mobile.md#mus-spec-23-14b) | Every text on the pair screen and the camera prompt has at least 4.5:1 contrast with what is behind it, and the Allow camera and Pair buttons have edges of at least 3:1. | [`the pair screen text and the camera prompt meet WCAG AA contrast`](../../../packages/mobile/tests/pair-contrast.test.tsx) |
 | [MUS-SPEC-23-14C](23-mobile.md#mus-spec-23-14c) | Opening muster://pair?… lands on the pair route with the link in the field, and pairing starts once with the parsed link. | [`a muster://pair deep link fills in the link and starts pairing`](../../../packages/mobile/tests/deep-link.test.tsx) |
@@ -558,4 +561,39 @@ Boundaries:
 - Test: `packages/mobile/tests/new-chat-screen.test.tsx::the new chat sheet picks a folder or project, a provider and a model, and opens the chat it made`
 - Environment: jest (jest-expo preset) in Node with @testing-library/react-native; the screen is given a fake connection with the MobileClient interface.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### Photos and files from the phone (phase 2)
+
+<a id="mus-spec-23-12a"></a>
+#### MUS-SPEC-23-12A: A photo from the phone reaches the agent as an image
+
+- Precondition: A paired phone with act access and a chat whose fake provider records the image paths and the prompt of each run.
+- Action: Upload a 160×160 PNG of random pixels (several 32 KB chunks) with uploadAttachment, the same client code the app uses, then a small text file; send a message with both attachment ids.
+- Expected result: The photo comes back as an image attachment of the same size and the progress callback reaches its full length in three or more steps; the text file is a file attachment. The run gets exactly one image input whose file equals the PNG byte for byte, and its prompt names the text file as an attached file. The desktop's user message lists the photo as an image and the text file as a file.
+- Test: `packages/agent-app/tests/mobile-326.test.ts::a photo sent from the phone reaches the agent as an image, uploaded in chunks through the session`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and a Node phone built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: Photos come from the phone's picker as JPEG on a device; the test uses a PNG (the desktop reads both the same way). HEIC is not accepted by the desktop and is converted by the picker on iOS; checked by hand.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-12b"></a>
+#### MUS-SPEC-23-12B: Oversized and mismatched uploads are refused
+
+- Precondition: A paired phone, first read-only, and one chat.
+- Action: Start an upload while read-only. With act: start one over 20 MB and one of 0 bytes; send the second chunk of an upload first, then its first chunk; send a chunk larger than the chunk size; send more bytes than declared; finish an upload that is short; finish one whose hash does not match; upload text named x.png as image/png; open two uploads and start a third; cancel the open ones. Then stage a file on the desktop and try to send it from the phone.
+- Expected result: Read-only is refused as read only. The 20 MB and empty uploads, the out-of-order chunk, the long chunk, the past-the-end chunk, the short finish and the wrong hash are each a bad request, and after the refused out-of-order chunk the upload is gone (not found). The fake PNG is refused as not a readable PNG image. The third upload at once is refused. The chat has no staged attachments. Sending the desktop's file from the phone is a bad request; no user message is added and no run starts.
+- Test: `packages/agent-app/tests/mobile-326.test.ts::uploads over the size cap, out of order, oversized, short or with a wrong hash are refused and stage nothing`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and a Node phone built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: The idle timeout that drops an abandoned upload (2 minutes) is not waited out.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-12c"></a>
+#### MUS-SPEC-23-12C: The composer attaches a photo and sends it
+
+- Precondition: The chat screen for an idle chat with a fake connection (access act) that answers upload.start, upload.chunk and upload.finish, and a picker double that returns a 70,000-byte JPEG.
+- Action: Press Attach, then Photo; type a message and press Send.
+- Expected result: The picker is asked for a photo; upload.start names the chat, file name, type and size; the chunks start at 0, 32 KB and 64 KB; the photo's name shows in the composer; chat.send carries the text and the attachment id; after sending the name is gone.
+- Test: `packages/mobile/tests/chat-screen.test.tsx::attaches a photo from the composer, uploads it in chunks and sends it with the message`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; the screen is given a fake connection with the MobileClient interface and a picker double.
+- Known gaps: The system photo library, camera and file picker are not rendered in jest; they are checked by hand on a device.
 - Evidence: UNVERIFIED

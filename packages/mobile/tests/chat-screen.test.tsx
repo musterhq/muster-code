@@ -49,3 +49,30 @@ test('approves or declines in place, and read-only hides the actions', async () 
   expect(screen.queryByText('Approve')).toBeNull();
   expect(screen.getByPlaceholderText('Message').props.editable).toBe(false);
 });
+
+// Spec: MUS-SPEC-23-12C (docs/spec/clauses/23-mobile.md#mus-spec-23-12c)
+test('attaches a photo from the composer, uploads it in chunks and sends it with the message', async () => {
+  const {toBase64} = require('../../agent-app/src/shared/mobile/bytes.ts');
+  const photo = new Uint8Array(70_000).map((_, index) => index % 251);
+  const received: number[] = [];
+  const connection = fakeConnection({
+    'chat.open': {chat: chat(), items: [], revision: 1}, 'chat.send': {runId: 'r1'},
+    'upload.start': {uploadId: 'u1', chunkBytes: 32 * 1024},
+    'upload.chunk': (params: {offset: number; data: string}) => { received.push(params.offset); return {received: params.offset + Buffer.from(params.data, 'base64').length}; },
+    'upload.finish': {attachment: {id: 'att-1', name: 'IMG_0042.jpg', mime: 'image/jpeg', size: photo.length, kind: 'image'}},
+  });
+  const pickAttachment = jest.fn(async (_source: 'photo' | 'camera' | 'file') => ({name: 'IMG_0042.jpg', mime: 'image/jpeg', base64: toBase64(photo)}));
+  await render(<ChatScreen connection={connection} chatId="c1" pickAttachment={pickAttachment} />);
+  expect(await screen.findByText('Release notes')).toBeTruthy();
+  await fireEvent.press(screen.getByLabelText('Attach'));
+  await fireEvent.press(screen.getByText('Photo'));
+  expect(await screen.findByText('IMG_0042.jpg')).toBeTruthy();
+  expect(pickAttachment).toHaveBeenCalledWith('photo');
+  expect(connection.calls.find(call => call.method === 'upload.start')?.params).toMatchObject({chatId: 'c1', name: 'IMG_0042.jpg', mime: 'image/jpeg', size: photo.length});
+  expect(received).toEqual([0, 32 * 1024, 64 * 1024]);
+  await fireEvent.changeText(screen.getByPlaceholderText('Message'), 'what is this?');
+  await fireEvent.press(screen.getByText('Send'));
+  await act(async () => undefined);
+  expect(connection.calls.find(call => call.method === 'chat.send')?.params).toMatchObject({id: 'c1', text: 'what is this?', attachmentIds: ['att-1']});
+  expect(screen.queryByText('IMG_0042.jpg')).toBeNull();
+});
