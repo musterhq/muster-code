@@ -29,6 +29,7 @@ const support = {
   'tests/helpers/user-facing-strings.ts': 'string extraction helper',
   'tests/tools/paperclip-upgrade-probe.ts': 'manual migration probe; permanent checks live in paperclip-import.test.ts',
   'tests/fixtures/tmp-dir.ts': 'temporary directory fixture',
+  'tests/fixtures/mobile-electron-crypto-probe.ts': 'Electron subprocess probe for the phone crypto workflow (MUS-SPEC-23-10G)',
   'tests/fixtures/fake-codex-app-server.cjs': 'subprocess fixture for provider workflows',
   'tests/fixtures/acp/fake-acp-agent.cjs': 'subprocess fixture for ACP agent workflows',
   'tests/fixtures/mcp-apps-server.mjs': 'subprocess MCP server fixture for MCP Apps workflows',
