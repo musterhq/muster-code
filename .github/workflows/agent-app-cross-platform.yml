@@ -53,7 +53,10 @@ jobs:
       - name: Linux build tools
         if: matrix.os == 'linux'
         working-directory: .
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3 xvfb libgtk-3-0 libnss3 libxss1 libgbm1 libasound2t64 rpm fakeroot desktop-file-utils xdg-utils
+        # The runner image points apt at an Azure mirror list that sometimes stops resolving; use Ubuntu's own servers and retry.
+        run: |
+          sudo sed -i 's#mirror+file:/etc/apt/apt-mirrors.txt#http://archive.ubuntu.com/ubuntu/#' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+          sudo apt-get -o Acquire::Retries=5 update && sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends build-essential python3 xvfb libgtk-3-0 libnss3 libxss1 libgbm1 libasound2t64 rpm fakeroot desktop-file-utils xdg-utils
 
       - id: electron
         # Download caches only (never node_modules): keyed on OS, CPU and the locked Electron version.
