@@ -7,7 +7,7 @@ import {test, type TestContext} from 'node:test';
 import {mkdtemp, rm, readFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {basename, join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {startRelay, type DevRelay} from '../../relay/src/relay.ts';
 import {createAgentService} from '../src/runtime/service.ts';
@@ -737,4 +737,74 @@ test('the desktop pairing handshake and frames work inside Electron, not only in
   assert.notEqual(result.runtime, 'node', 'the probe must run on Electron');
   assert.deepEqual({ok: result.ok, error: result.error, request: result.request, welcome: result.welcome, transport: result.transport},
     {ok: true, error: undefined, request: 'pair me', welcome: 'welcome', transport: 'frame'});
+});
+
+// ── Phase 2: starting work from the phone ────────────────────────────────────────────────────────────────────────────────
+
+/** A provider with two models, so a test can tell the chosen one from the default. Records the model of every run. */
+function twoModels() {
+  const base = quick();
+  const models: string[] = [];
+  const provider: ProviderAdapter = {...base.provider,
+    info: () => [{id: 'fake', name: 'Fake', available: true, identityMasked: 'Hidden', models: [{id: 'fake-model', name: 'Fake model'}, {id: 'fake-pro', name: 'Fake Pro', images: true}]}],
+    async run(input) { models.push(input.chat.model); return base.provider.run(input); }};
+  return {...base, provider, models};
+}
+const snapshot = (d: Desktop) => d.service.invoke('app.snapshot', undefined);
+
+// Spec: MUS-SPEC-23-11A (docs/spec/clauses/23-mobile.md#mus-spec-23-11a)
+test('a phone starts a new chat in a folder or project with the chosen provider and model, and it appears on the desktop', async t => {
+  const {provider, models} = twoModels();
+  const d = await desktop(t, provider);
+  const work = await mkdtemp(join(tmpdir(), 'muster-mobile-place-'));
+  t.after(() => rm(work, {recursive: true, force: true}));
+  const folder = await d.service.invoke('folder.add', {path: work});
+  const project = await d.service.invoke('project.create', {name: 'Launch', goal: 'Ship it', folderIds: [folder.id]});
+  const {client} = await pair(t, d);
+  const before = (await snapshot(d)).chats.length;
+  for (const [method, params] of [['chat.options', {}], ['chat.create', {folderId: folder.id, providerId: 'fake', model: 'fake-pro'}]] as const) {
+    assert.equal((await rejection(client.call(method as 'chat.create', params as never))).code, 'read-only', method);
+  }
+  assert.equal((await snapshot(d)).chats.length, before, 'a read-only phone creates nothing');
+  await allowAct(d, client);
+  const options = await client.call('chat.options', {});
+  assert.deepEqual(new Set(options.places.map(place => `${place.kind}:${place.id}:${place.name}`)), new Set([`folder:${folder.id}:${basename(work)}`, `project:${project.id}:Launch`]));
+  assert.ok(!JSON.stringify(options).includes(work), 'folder names only, never paths');
+  assert.deepEqual(options.providers.map(entry => [entry.id, entry.name, entry.models.map(model => model.id)]), [['fake', 'Fake', ['fake-model', 'fake-pro']]]);
+  const events = collect(client);
+  const {chat} = await client.call('chat.create', {folderId: folder.id, providerId: 'fake', model: 'fake-pro'});
+  const made = (await snapshot(d)).chats.find(entry => entry.id === chat.id);
+  assert.deepEqual({folderId: made?.folderId, providerId: made?.providerId, model: made?.model}, {folderId: folder.id, providerId: 'fake', model: 'fake-pro'});
+  assert.equal(chat.place, basename(work));
+  await until(() => events.some(event => event.type === 'chats' && event.chats.some(entry => entry.id === chat.id)), 'the new chat reaches the phone list');
+  await client.call('chat.send', {id: chat.id, text: 'start here', requestId: 'n1'});
+  await until(() => models.length === 1, 'run');
+  assert.deepEqual(models, ['fake-pro'], 'the run uses the chosen model');
+  const second = await client.call('chat.create', {projectId: project.id, providerId: 'fake', model: 'fake-model'});
+  const inProject = (await snapshot(d)).chats.find(entry => entry.id === second.chat.id);
+  assert.deepEqual({projectId: inProject?.projectId, model: inProject?.model}, {projectId: project.id, model: 'fake-model'});
+  assert.equal(second.chat.place, 'Launch');
+});
+
+// Spec: MUS-SPEC-23-11B (docs/spec/clauses/23-mobile.md#mus-spec-23-11b)
+test('starting a chat re-checks access right before it runs and refuses unknown places and models', async () => {
+  const invoked: string[] = [];
+  let access: 'act' | 'read-only' = 'act';
+  const providers = [{id: 'fake', name: 'Fake', available: true, identityMasked: 'Hidden', models: [{id: 'fake-model', name: 'Fake model'}]}];
+  const base = snapshotOf([]);
+  const place: Snapshot = {...base, folders: [{id: 'f1', path: '/Users/someone/work/site', name: 'site'}]};
+  const ctx = {
+    invoke: (async (command: string) => { invoked.push(command); if (command === 'providers.list') return providers; return {id: 'c-new', title: 'New chat', status: 'idle', updatedAt: new Date().toISOString(), archived: false}; }) as never,
+    snapshot: async () => place,
+    access: () => access, alive: () => true, desktopName: 'Studio', deviceId: 'p1', watch() {},
+  };
+  const create = (params: object) => rejection(handle(ctx, 'chat.create', params) as Promise<unknown>);
+  assert.equal((await create({folderId: 'nope', providerId: 'fake', model: 'fake-model'})).code, 'not-found');
+  assert.equal((await create({folderId: 'f1', providerId: 'fake', model: 'gpt-imaginary'})).code, 'bad-request');
+  assert.equal((await create({folderId: 'f1', providerId: 'other', model: 'fake-model'})).code, 'bad-request');
+  assert.equal((await create({folderId: 'f1', projectId: 'p1', providerId: 'fake', model: 'fake-model'})).code, 'bad-request');
+  // The phone is switched to read-only while the request reads the desktop's state.
+  ctx.snapshot = async () => { access = 'read-only'; return place; };
+  assert.equal((await create({folderId: 'f1', providerId: 'fake', model: 'fake-model'})).code, 'read-only');
+  assert.ok(!invoked.includes('chat.create') && !invoked.includes('chat.selectProvider'), `no chat was made: ${invoked}`);
 });
