@@ -24,6 +24,7 @@ Boundaries:
 | [MUS-SPEC-15-147B](15-settings-and-themes.md#mus-spec-15-147b) | The first connect stops at `hostkey-unknown` with the SHA256 fingerprint and writes no known_hosts line; a wrong fingerprint is refused; the right one is written to Muster’s own known_hosts (the user’s file is untouched) and the connection then works; a changed key is reported as changed and cannot be trusted with one click. | [`first connect shows the host key fingerprint and trusts it only after confirmation`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
 | [MUS-SPEC-15-147C](15-settings-and-themes.md#mus-spec-15-147c) | When the host refuses every key, the state is `auth` and the message tells the user to run `ssh-add`; every ssh Muster starts runs with BatchMode=yes and StrictHostKeyChecking=yes. | [`a host that wants a passphrase or password asks for ssh-add and never prompts`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
 | [MUS-SPEC-15-147D](15-settings-and-themes.md#mus-spec-15-147d) | Settings › Environments lists the config hosts with an Add button, shows a host waiting for its key with the fingerprint and a Trust button, sends the shown fingerprint, and offers a folder path field for a connected host. | [`the SSH workspaces panel adds a config host and shows the fingerprint before trusting`](../../../packages/agent-app/tests/ssh-workspaces-147-dom.tsx) |
+| [MUS-SPEC-15-147E](15-settings-and-themes.md#mus-spec-15-147e) | Trust asks ssh again before writing anything: a changed key is refused after a disconnect and after a restart, Muster’s known_hosts keeps the old key and nothing connects; a host behind a jump host is refused instead of scanned directly. | [`a changed host key is refused after a disconnect or a restart, and a jump host is never scanned directly`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
 
 ### Built-in themes
 
@@ -126,4 +127,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/ssh-workspaces-147-dom.tsx::the SSH workspaces panel adds a config host and shows the fingerprint before trusting`
 - Environment: linkedom DOM suite in `scripts/test-renderer.mjs` with the real Settings panel and a stubbed bridge. No Electron, no ssh.
 - Known gaps: Stubbed bridge: the runtime side is covered by the other #147 cases. Layout is not checked.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-15-147e"></a>
+#### MUS-SPEC-15-147E: A changed host key is never trusted from a stale state
+
+- Precondition: A config host whose key the user trusted in Muster; the host then offers another key.
+- Action: Disconnect, then trust the new fingerprint; start Muster again on the same data folder and trust the new fingerprint again; separately, trust a host reached through a jump host.
+- Expected result: Both trusts are refused as a changed key, Muster’s known_hosts still holds only the old key, the saved trusted fingerprint is the old one, and no command ran on the host with the new key. The jump-host trust is refused with the "connect once in a terminal" sentence and ssh-keyscan is never run for it.
+- Test: `packages/agent-app/tests/ssh-workspaces-147.test.ts::a changed host key is refused after a disconnect or a restart, and a jump host is never scanned directly`
+- Environment: Node test runner with the real agent service, a temp data folder and a temp HOME; a stand-in `ssh` and `ssh-keyscan` on PATH (`tests/fixtures/fake-ssh/`). The service is disposed and created again on the same data folder. No network, no real host.
+- Known gaps: Real OpenSSH accepts a host when any known_hosts file holds a matching key; the stand-in models that rule, it is not checked against a real sshd here.
 - Evidence: UNVERIFIED
