@@ -21,10 +21,14 @@
  * Offscreen frames are not mounted (`lazy`): the page is registered and its frame created only when it comes near the
  * viewport, and its last height is remembered so a remount (virtualized transcript) never jumps.
  *
+ * An MCP app (#844, `mcpApp`) is served the same way, scripts-only and unthemed; every JSON-RPC message from its frame goes to
+ * `onFrameMessage` (the MCP Apps bridge), which answers through `reply`, to that frame only.
+ *
  * Muster Server's web UI has no desktop shell to serve a separate origin: there the page is shown as before, in a sandboxed
  * `srcdoc` frame under the page's own CSP (no scripts of its own origin, no network).
  */
 import React, {useEffect, useLayoutEffect, useRef, useState} from 'react';
+import type {McpAppView} from '../../shared/mcp-apps';
 import {htmlRenderThemeFragment, htmlRenderThemeMessage, readReportHeight, readReportLink, type HtmlRenderView} from '../../shared/html-render';
 import {invoke} from '../bridge';
 import {useHtmlRenderTheme} from '../htmlRenderTheme';
@@ -58,6 +62,14 @@ export interface SandboxedHtmlProps {
   revision?: number;
   /** With scripts off: let Muster's own height reporter run (and nothing else), so `onHeight` fits the frame to the page. */
   measure?: boolean;
+  /** #844: an MCP app row; main reads it through the runtime and decides its network. `html` is then unused. */
+  mcpApp?: {chatId: string; itemId: string};
+  /** Called with the app once main has opened it. */
+  onApp?(app: McpAppView): void;
+  /** Every other message from this frame (never another window's), with a way to answer it and whether the person just used the frame. */
+  onFrameMessage?(data: unknown, context: {userActive: boolean; reply(message: unknown): void}): void;
+  /** With this set, a failed open is handed to the caller (which shows its own fallback) instead of the retry card. */
+  onError?(message: string): void;
 }
 
 const REGISTER_DEBOUNCE_MS = 250;
@@ -82,7 +94,7 @@ export function linkAllowed(frame: HTMLIFrameElement | null, source: MessageEven
   return !!frame && !!frame.contentWindow && source === frame.contentWindow && activeElement === frame && userActive !== false;
 }
 
-export function SandboxedHtml({html, scripts = false, title, storeKey, className, onHeight, onToken, debounceMs = REGISTER_DEBOUNCE_MS, themed = false, renderId, onPage, lazy = false, revision = 0, measure = false}: SandboxedHtmlProps): React.ReactElement {
+export function SandboxedHtml({html, scripts = false, title, storeKey, className, onHeight, onToken, debounceMs = REGISTER_DEBOUNCE_MS, themed = false, renderId, onPage, lazy = false, revision = 0, measure = false, mcpApp, onApp, onFrameMessage, onError}: SandboxedHtmlProps): React.ReactElement {
   const web = isWebHost();
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -91,12 +103,13 @@ export function SandboxedHtml({html, scripts = false, title, storeKey, className
   const box = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const first = useRef(true);
-  const heightCallback = useRef(onHeight), tokenCallback = useRef(onToken), pageCallback = useRef(onPage);
-  heightCallback.current = onHeight; tokenCallback.current = onToken; pageCallback.current = onPage;
+  const heightCallback = useRef(onHeight), tokenCallback = useRef(onToken), pageCallback = useRef(onPage), appCallback = useRef(onApp), frameCallback = useRef(onFrameMessage), errorCallback = useRef(onError);
+  heightCallback.current = onHeight; tokenCallback.current = onToken; pageCallback.current = onPage; appCallback.current = onApp; frameCallback.current = onFrameMessage; errorCallback.current = onError;
+  const appChat = mcpApp?.chatId, appItem = mcpApp?.itemId;
   const near = useNearViewport(box, lazy);
   const theme = useHtmlRenderTheme();
   const themeRef = useRef(theme); themeRef.current = theme;
-  const runScripts = scripts || !!renderId;
+  const runScripts = scripts || !!renderId || !!appItem;
   const isThemed = themed || !!renderId;
   const measured = measure && !runScripts;
 
@@ -104,19 +117,21 @@ export function SandboxedHtml({html, scripts = false, title, storeKey, className
     if (web || !near) return;
     let live = true;
     const run = () => {
-      const request = renderId
+      const request = appChat && appItem
+        ? invoke('mcpApps.open', {chatId: appChat, itemId: appItem}).then(result => { if (live) appCallback.current?.(result.app); return result; })
+        : renderId
         ? invoke('htmlRenders.open', {id: renderId}).then(result => { if (live) pageCallback.current?.(result.page); return result; })
         : invoke('reports.open', {html, scripts, ...(storeKey ? {key: storeKey} : {}), ...(themed ? {themed: true} : {}), ...(measured ? {measure: true} : {})});
       void request.then(result => {
         if (!live) return;
         // The first paint is already themed: the theme rides in the fragment, which the page reads and then drops.
         setError(null); setUrl(isThemed ? `${result.url}${htmlRenderThemeFragment(themeRef.current)}` : result.url); tokenCallback.current?.(result.token);
-      }, cause => { if (live) setError(cause instanceof Error ? cause.message : String(cause)); });
+      }, cause => { if (!live) return; const message = cause instanceof Error ? cause.message : String(cause); if (errorCallback.current) errorCallback.current(message); else setError(message); });
     };
     if (first.current) { first.current = false; run(); return () => { live = false; }; }
     const timer = setTimeout(run, debounceMs);
     return () => { live = false; clearTimeout(timer); };
-  }, [web, near, html, scripts, storeKey, attempt, debounceMs, themed, renderId, revision, isThemed, measured]);
+  }, [web, near, html, scripts, storeKey, attempt, debounceMs, themed, renderId, revision, isThemed, measured, appChat, appItem]);
 
   // Theme changes reach a loaded page as one message; the frame is never reloaded for them.
   useEffect(() => {
@@ -136,6 +151,11 @@ export function SandboxedHtml({html, scripts = false, title, storeKey, className
         // One layout write per frame however often the page reports.
         latest = height;
         if (pending === undefined) pending = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(flush) : (flush(), undefined);
+        return;
+      }
+      if (frameCallback.current) {
+        const source = event.source as Window;
+        frameCallback.current(event.data, {userActive: linkAllowed(frame.current, event.source, document.activeElement, navigator.userActivation?.isActive), reply: message => { if (frame.current?.contentWindow === source) source.postMessage(message, '*'); }});
         return;
       }
       if (!isThemed) return;

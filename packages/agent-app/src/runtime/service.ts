@@ -18,6 +18,7 @@ import { discoverLocalProviders } from './provider-discovery.ts';
 import { homedir } from 'node:os';
 import { absentCliAgentRows } from './adapters/cli-agents.ts';
 import { CustomProviders } from './custom-providers.ts';
+import { AcpAgents } from './acp-agents.ts';
 import { AgentStore } from './store.ts';
 import { applyFolderAliases, canonicalFolderPath } from './folder-merge.ts';
 import { WorkspaceWatchService } from './workspace-watch.ts';
@@ -47,6 +48,7 @@ import { onBrandWanted, refreshRemotePluginIcons, setRemoteIconStore, type Remot
 import { CLAUDE_COMMAND_EVENT } from './adapters/claude-code.ts';
 import { cleanSuggestion } from './adapters/follow-up.ts';
 import {providerAccessPolicy} from './provider-run-lifecycle.ts';
+import {appCallDecision} from '../shared/mcp-apps.ts';
 import {parseKillIntent, userProcessThreat, type UserProcessTarget, type UserProcessThreat} from './user-process-guard.ts';
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
 import { ProjectTaskStore, type TaskStatus } from './project-tasks.ts';
@@ -176,6 +178,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const contextLedger = new ContextLedger();
   const projectTasks = new ProjectTaskStore(options.dataDir);
   const customProviders = new CustomProviders(options.dataDir);
+  /** #160: ACP agents added in Settings › Providers. */
+  const acpAgents = new AcpAgents(options.dataDir);
   const annotations = new FileAnnotations(options.dataDir);
   const provider = options.provider ?? createProviderAdapter();
   /** R5: whether an agent command would stop a process the user started in Muster (terminal shell or Commands-tab command). */
@@ -458,6 +462,27 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const toolItemId = typeof item?.data?.toolItemId === 'string' ? item.data.toolItemId : undefined, tool = toolItemId ? store.item(toolItemId) : undefined;
     if (tool?.data?.awaitingApproval === itemId) { const {awaitingApproval: _cleared, ...rest} = tool.data; store.updateItem(tool.id, tool.text, tool.status, {...rest, ...(status === 'declined' ? {executionDenied:true} : status === 'expired' ? {executionDenied:true, deniedReason:'timeout'} : {})}); }
     timeline(pending.chatId); state(); pending.resolve(decision);
+  }
+  /** #844: an MCP app's own tool call. The chat's access level and the Project tool rules decide; a change in an asking
+   *  mode waits on the same approval card the agent's MCP calls get. Never tied to a run: the app can ask after the turn. */
+  async function appToolApproval(chatId: string, request: {server: string; tool: string; arguments: Record<string, unknown>; readOnly: boolean; app: string}): Promise<{allowed: true} | {allowed: false; reason: string}> {
+    const chat = store.chat(chatId);
+    if (disposed || closing || !chat || chat.archived) return {allowed: false, reason: 'This chat is no longer available.'};
+    const params = {server: request.server, tool: request.tool, arguments: request.arguments, reason: `The app from ${request.server} / ${request.app} wants to run this.`};
+    const policy = domainHooks.toolPolicy(chat, 'item/mcpToolCall/requestApproval', params);
+    const decision = appCallDecision({mode: providerAccessPolicy(chat).permissionMode, readOnly: request.readOnly, policy: policy?.effect ?? null});
+    if (decision === 'refuse') return {allowed: false, reason: policy?.effect === 'deny' ? policy.message : 'This chat is read-only, so the app cannot run a tool that changes things. Change the chat’s access to let it.'};
+    if (decision === 'allow') return {allowed: true};
+    const expiresAt = attentionDeadline(Date.now(), await mutedUntilMs());
+    const item = store.appendItem(chatId, 'approval', detail(request.tool), 'pending', {...approvalData('item/mcpToolCall/requestApproval', params), expiresAt: new Date(expiresAt).toISOString()});
+    timeline(chatId);
+    const answer = await new Promise<ApprovalDecision>(resolve => {
+      let pending!: PendingApproval;
+      pending = {chatId, createdAt: item.createdAt, expiresAt, resolve, timer: undefined as never};
+      armExpiry(item.id, pending, () => approvals.get(item.id) === pending, () => finishApproval(item.id, pending, 'decline', 'expired'));
+      approvals.set(item.id, pending); wakeForAttention(chatId); state();
+    });
+    return answer === 'decline' ? {allowed: false, reason: 'You declined this tool call, so it was not approved.'} : {allowed: true};
   }
   function finishQuestion(itemId: string, pending: PendingQuestionRequest, answers: QuestionAnswers, status: string, receiptAnswers?: Record<string, {answers:string[]}>, reason?: 'stale') {
     if (questions.get(itemId) !== pending) return;
@@ -1776,7 +1801,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         ...detected.filter(entry=>!runtime.some(runnable=>runnable.id===entry.id||(runnable.codex?.kind==='gateway'&&runnable.codex.modelProvider===entry.id&&!runnable.codex.account))&&shown(entry)).map(({identity,credentialPresent,...entry})=>({...entry,available:false,models:[],canReveal:Boolean(identity),source:'Local configuration discovery',detail:`${entry.detail}. No runnable adapter is enabled for this entry.`})),
         // Agent CLIs that are not installed: listed (with How to install) but never offered in the model picker.
         ...(process.env.NODE_TEST_CONTEXT && process.env.MUSTER_PROVIDER_ADAPTERS !== '1' ? [] : absentCliAgentRows(process.env, homedir()).filter(row => !runtime.some(entry => entry.id === row.id))),
-        ...customProviders.list()];
+        ...customProviders.list(), ...acpAgents.list()];
     }
     if (command === 'plugins.inventory') return discoverPlugins();
     const p = input === undefined && domains.handlers.has(command) ? {} : object(input);
@@ -2437,7 +2462,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'git.diff': { const root = folderFor(p.folderId).path; const result = await new AgentModeReviewHost(() => root).readChange(text(p.path,'path')); if (result.error) throw new Error(result.error); return {path: result.path, before: result.before, after: result.after, truncated: result.truncated}; }
       case 'providers.save': return customProviders.save({id:p.id,name:p.name,endpoint:p.endpoint,apiKeyEnv:p.apiKeyEnv});
       case 'providers.cancelCheck': customProviders.cancel(id(p.id)); return;
-      case 'providers.remove': { const key=id(p.id); if(!key.startsWith('custom_')) throw new Error('Discovered connections are managed in their original app.'); customProviders.remove(key); return; }
+      case 'providers.remove': { const key=id(p.id); if(key.startsWith('acp_')&&acpAgents.has(key)){acpAgents.remove(key);return;} if(!key.startsWith('custom_')) throw new Error('Discovered connections are managed in their original app.'); customProviders.remove(key); return; }
+      case 'providers.acp.save': return acpAgents.save({id:p.id,name:p.name,command:p.command,args:p.args,env:p.env,preset:p.preset});
+      case 'providers.acp.check': return acpAgents.check(id(p.id));
       case 'providers.check': return customProviders.check(id(p.id));
       case 'providers.reveal': { const key=id(p.id), source=key==='openai-direct'?'codex':key; const info=(await discoverLocalProviders()).find(row=>row.id===source); if(!info?.identity) throw new Error('This connection has no account label to reveal.'); return {identity:info.identity}; }
       case 'memory.list': { const context = memoryContext(p.folderId); const objects = await listMemory(context.cwd); return new MemoryTombstones(options.dataDir).filter(objects.filter(object => isVisibleInScopes(object, context.scopes))); }
@@ -2518,6 +2545,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const domains = createDomains({
     dataDir: options.dataDir, store, db: () => store.database(), emit, emitSnapshot: state,
     folderFor: folderId => folderFor(folderId), invoke, hooks: domainHooks.hooks,
+    appToolApproval,
     modelCatalog: () => { const providers = provider.info(); return {providers, builtin: firstReadyModel(providers)}; },
     modelCatalogReady: firstProviderProbe,
     providersSettled: () => Promise.resolve(provider.ready?.()).catch(() => undefined),
@@ -2624,7 +2652,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       await Promise.allSettled([...invocations,...[...runs.values()].flatMap(run => run.promise ? [run.promise] : [])]);
       await domains.dispose();
       await toolOutputLog.flush().catch(() => {});
-      disposed = true; snapshots.dispose(); for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); annotations.close(); projectTasks.close(); store.close();
+      disposed = true; snapshots.dispose(); for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); acpAgents.close(); annotations.close(); projectTasks.close(); store.close();
     })();
     return disposal;
   }};

@@ -30,6 +30,8 @@ const support = {
   'tests/tools/paperclip-upgrade-probe.ts': 'manual migration probe; permanent checks live in paperclip-import.test.ts',
   'tests/fixtures/tmp-dir.ts': 'temporary directory fixture',
   'tests/fixtures/fake-codex-app-server.cjs': 'subprocess fixture for provider workflows',
+  'tests/fixtures/acp/fake-acp-agent.cjs': 'subprocess fixture for ACP agent workflows',
+  'tests/fixtures/mcp-apps-server.mjs': 'subprocess MCP server fixture for MCP Apps workflows',
   'tests/fixtures/cli-agents/fake-cursor.cjs': 'subprocess fixture for CLI workflows',
   'tests/fixtures/cli-agents/fake-grok.cjs': 'subprocess fixture for CLI workflows',
   'tests/fixtures/cli-agents/fake-gemini.cjs': 'subprocess fixture for CLI workflows',
