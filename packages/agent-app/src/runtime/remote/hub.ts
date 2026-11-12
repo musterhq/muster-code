@@ -158,9 +158,19 @@ export class RemoteHub {
   /** Trusts the key whose fingerprint the user saw, after reading it again. A changed key is never trusted here. */
   async trust(id: string, fingerprint: unknown): Promise<RemoteStatus> {
     const h = this.host(id), seen = typeof fingerprint === 'string' ? fingerprint.trim() : '';
-    if (this.state(h.id).state === 'hostkey-changed') throw new Error(`${h.name}’s host key changed since it was trusted; Muster will not replace it with one click. If the host was rebuilt, run ssh-keygen -R for it and connect again.`);
+    const changed = () => new Error(`${h.name}’s host key changed since it was trusted; Muster will not replace it with one click. If the host was rebuilt, run ssh-keygen -R for it and connect again.`);
+    if (this.state(h.id).state === 'hostkey-changed') throw changed();
     if (!/^SHA256:[A-Za-z0-9+/]{43}$/.test(seen)) throw new Error('Confirm the fingerprint exactly as shown (SHA256:…).');
-    const r = await this.resolve(h), key = await scanHostKey(r);
+    // The remembered state can be stale (after a disconnect or a restart it is `idle`), and ssh accepts a host when any
+    // known_hosts file matches, so writing a new key here would silently override a changed-key warning. Ask ssh now.
+    const now = await this.connect(h.id);
+    if (now.state === 'connected') return now;
+    if (now.state === 'hostkey-changed') throw changed();
+    if (now.state !== 'hostkey-unknown') throw new Error(now.detail);
+    const r = await this.resolve(h);
+    // ssh-keyscan cannot go through a jump host: it would read the key of whatever answers to that name from here.
+    if (r.proxied) throw new Error(now.detail);
+    const key = await scanHostKey(r);
     if (key.fingerprint !== seen) throw new Error('The host now offers a key that is not the one you saw. Connect again and compare.');
     addKnownHost(this.knownHostsFile, knownHostName(r), key.line);
     this.hosts = this.hosts.map(x => x.id === h.id ? { ...x, trusted: { type: key.type, fingerprint: key.fingerprint, at: new Date().toISOString() } } : x); this.save();

@@ -101,7 +101,7 @@ test('first connect shows the host key fingerprint and trusts it only after conf
   await assert.rejects(h.invoke('remote.hosts.trust', { id: host.id, fingerprint: `SHA256:${'A'.repeat(43)}` }), /not the one you saw/);
   const trusted = await h.invoke('remote.hosts.trust', { id: host.id, fingerprint: first.hostKey.fingerprint });
   assert.equal(trusted.state, 'connected', trusted.detail);
-  assert.match(readFileSync(join(h.dataDir, 'remote', 'known_hosts'), 'utf8'), new RegExp(`^10\\.0\\.0\\.5 ${h.hostKey.replace(/[+/]/g, '\\$&')}$`, 'm'));
+  assert.ok(readFileSync(join(h.dataDir, 'remote', 'known_hosts'), 'utf8').split('\n').includes(`10.0.0.5 ${h.hostKey}`), 'the scanned key is written to Muster’s known_hosts');
   assert.equal(readFileSync(join(h.root, 'user_known_hosts'), 'utf8'), '', 'the user’s own known_hosts is untouched');
   assert.equal((await h.invoke('remote.hosts.list', {})).hosts[0].trusted.fingerprint, first.hostKey.fingerprint);
   // The host now offers another key: reported as changed, never trusted with one click.
@@ -110,6 +110,39 @@ test('first connect shows the host key fingerprint and trusts it only after conf
   const changed = await h.invoke('remote.hosts.connect', { id: host.id });
   assert.equal(changed.state, 'hostkey-changed'); assert.match(changed.detail, /changed/i);
   await assert.rejects(h.invoke('remote.hosts.trust', { id: host.id, fingerprint: fingerprint(other) }), /changed/i);
+});
+
+// Spec: MUS-SPEC-15-147E (docs/spec/clauses/15-settings-and-themes.md#mus-spec-15-147e)
+test('a changed host key is refused after a disconnect or a restart, and a jump host is never scanned directly', async t => {
+  const h = await setup(t);
+  const host = await h.invoke('remote.hosts.save', { source: 'config', host: 'devbox' });
+  const first = await h.invoke('remote.hosts.connect', { id: host.id });
+  assert.equal((await h.invoke('remote.hosts.trust', { id: host.id, fingerprint: first.hostKey.fingerprint })).state, 'connected');
+  const knownFile = join(h.dataDir, 'remote', 'known_hosts'), oldKnown = readFileSync(knownFile, 'utf8');
+  // The host now offers another key, and Muster no longer remembers having seen the warning.
+  const other = keyLine(); writeFileSync(join(h.root, 'host_key'), other);
+  const marker = h.log().length;
+  await h.invoke('remote.hosts.disconnect', { id: host.id });
+  assert.equal((await h.invoke('remote.hosts.list', {})).status[0].state, 'idle');
+  await assert.rejects(h.invoke('remote.hosts.trust', { id: host.id, fingerprint: fingerprint(other) }), /changed/i);
+  assert.equal(readFileSync(knownFile, 'utf8'), oldKnown, 'Muster’s known_hosts keeps the old key after a disconnect');
+  // A restart on the same data folder: a fresh runtime with no state in memory.
+  await h.s.dispose();
+  const again = createAgentService({ dataDir: h.dataDir, provider: { info: () => [], stop: async () => true, dispose() {}, run: async () => ({ status: 'completed' as const, finalMessage: '', dispatchState: 'dispatched' as const }) } as unknown as ProviderAdapter, onEvent() {} });
+  t.after(() => again.dispose());
+  await assert.rejects(again.invoke('remote.hosts.trust' as never, { id: host.id, fingerprint: fingerprint(other) } as never), /changed/i);
+  assert.equal(readFileSync(knownFile, 'utf8'), oldKnown, 'Muster’s known_hosts keeps the old key after a restart');
+  assert.equal(((await again.invoke('remote.hosts.list' as never, {} as never)) as any).hosts[0].trusted.fingerprint, first.hostKey.fingerprint);
+  for (const l of h.log().slice(marker).filter(l => l.kind === 'exec')) assert.ok(l.refused, `nothing ran on the host with the new key: ${l.argv.join(' ')}`);
+  // A host behind a jump host: ssh-keyscan would reach some other machine by that name, so trust is refused, not scanned.
+  writeFileSync(join(h.root, 'config.json'), JSON.stringify({ aliases: { devbox: { hostname: '10.0.0.5' }, jumpy: { hostname: '10.0.0.9', proxyjump: 'bastion' } } }));
+  writeFileSync(join(HOME, '.ssh', 'config'), 'Host devbox\n  HostName 10.0.0.5\n\nHost jumpy\n  HostName 10.0.0.9\n  ProxyJump bastion\n');
+  const jumpy = (await again.invoke('remote.hosts.save' as never, { source: 'config', host: 'jumpy' } as never)) as { id: string };
+  assert.match(((await again.invoke('remote.hosts.connect' as never, { id: jumpy.id } as never)) as any).detail, /jump host/);
+  const scans = h.log().filter(l => l.kind === 'keyscan').length;
+  await assert.rejects(again.invoke('remote.hosts.trust' as never, { id: jumpy.id, fingerprint: fingerprint(other) } as never), /terminal/);
+  assert.equal(h.log().filter(l => l.kind === 'keyscan').length, scans, 'ssh-keyscan never runs for a host behind a jump host');
+  assert.ok(!readFileSync(knownFile, 'utf8').includes('10.0.0.9'));
 });
 
 // Spec: MUS-SPEC-15-147C (docs/spec/clauses/15-settings-and-themes.md#mus-spec-15-147c)

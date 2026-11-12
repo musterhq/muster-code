@@ -9,7 +9,7 @@ import { runMenuAction } from '../menuActions';
 import { discardAttachment, listAttachments, previewAttachment, readFileBase64, runtimeMessage, stageAttachment } from '../composerBridge';
 import { ModelPicker } from './ModelPicker';
 import { isCompactCommand } from '../../shared/compact-command';
-import { createChat, flushComposerDraft, getState, loadPlugins, loadProviders, loadSkills, refreshProvidersQuietly, notifyError, notifySuccess, openAppSettings, openBrowserTab, openFile, openPluginsScreen, openProjectsScreen, openTab, selectChat, sendMessage, setComposerDraft, setFollowUpMode, snapshotRevision, stopChat, updateChat } from '../store';
+import { createChat, flushComposerDraft, getState, openCompareScreen, loadPlugins, loadProviders, loadSkills, refreshProvidersQuietly, notifyError, notifySuccess, openAppSettings, openBrowserTab, openFile, openPluginsScreen, openProjectsScreen, openTab, selectChat, sendMessage, setComposerDraft, setFollowUpMode, snapshotRevision, stopChat, updateChat } from '../store';
 import { ADD_CONTEXT_EVENT, loadComposerMemory, normalizeContextChip, saveComposerMemory, serializeContext, type ContextChip } from '../composerContext';
 import { setTerminalDock, setTerminalPaneView, terminalDock } from '../processSummary';
 import { ChipMirror, ContextStrip, TokenCard } from './ComposerTokens';
@@ -39,6 +39,7 @@ import { COMPOSER_COMMANDS, EFFORT_LABELS, SKILL_RECORDER_PROMPT, followUpAction
 import { QueuedMessages } from './QueuedMessages';
 import { CheckoutQueueBanner, isCheckoutQueued, sendWithCheckoutGuard } from './ParallelRunGuard';
 import { StashesPopover, usePromptStash } from './PromptStashes';
+import { CompareSendPicker } from './CompareSendPicker';
 import './composer.css';
 import './composer-s3a.css';
 import { plural } from '../../shared/wording.ts';
@@ -241,6 +242,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const [contextChips, setContextState] = useState<ContextChip[]>(() => loadComposerMemory(chat.id).context);
   const setContext = (update: (current: ContextChip[]) => ContextChip[]) => setContextState(current => { const next = update(current); saveComposerMemory(chat.id, { context: next }); return next; });
   const backgroundPending = useRef(false);
+  /** #175: the Send to several picker is open. */
+  const [comparing, setComparing] = useState(false);
   const backgroundAttempt = useRef<{ key: string; chatId: string; requestId: string } | null>(null);
   const [chipHover, setChipHover] = useState<{ index: number; left: number; top: number; start: number } | null>(null);
   const [fullConfirm, setFullConfirm] = useState(false);
@@ -1009,6 +1012,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     onSketch: () => openSketch(), sketchDisabled: chat.archived,
     onMention: () => { const range = currentRange(); setMenu(null); savedSelection.current = null; const lead = range.start > 0 && !/\s/.test(text[range.start - 1]) ? ' ' : ''; setDismissed(null); replaceRange(range.start, range.end, `${lead}@`); },
     backgroundDescription: hasPayload ? 'Send this as a new chat and stay here · ⌥Enter' : 'Write a message first · ⌥Enter', backgroundDisabled: !hasPayload || chat.archived || attachments.length > 0, onBackground: () => void startInBackground(),
+    compareDescription: !chat.folderId ? 'Open a chat in a Git folder first' : staging ? 'Waiting for attachments' : hasPayload ? 'Run this on 2–4 models, each in its own worktree' : 'Write a message first',
+    compareDisabled: !hasPayload || chat.archived || !chat.folderId || staging || recoveryNeeded, onCompare: () => { setMenu(null); setComparing(true); },
     onStash: () => { setMenu(null); void promptStash.stash(); }, stashDisabled: chat.archived || !hasPayload, onStashes: () => { setMenu(null); promptStash.setOpen(true); },
     plugins, onPlugin: plugin => invokePlugin(plugin), onBrowsePlugins: () => { setMenu(null); openPluginsScreen('plugins'); },
     skills, onSkill: skill => insertChip(skillChip(skill)),
@@ -1199,6 +1204,13 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
       {plusQuery && <p className="composer-plus-filter"><Search size={12} aria-hidden="true" />{plusQuery}</p>}
       <ComposerMenuList id="composer-plus-options" label="Add" rows={plusRows} active={plusIndex} onActive={setPlusActive} empty="Nothing matches." />
     </div>}
+    {comparing && <CompareSendPicker chatId={chat.id} text={outgoing(text)} attachmentIds={readyIds} providers={providers} {...chipExtras()}
+      onCancel={() => { setComparing(false); restoreCaret(); }}
+      onDone={comparison => {
+        setComparing(false);
+        if (currentDraft.current.chatId === chat.id) { recall.current = null; clearIfUnchanged(text); setChips(() => []); setContext(() => []); for (const id of readyIds) void discardAttachment(chat.id, id).catch(() => undefined); dropSent(readyIds); }
+        notifySuccess(`Sent to ${comparison.runs.length} models`, { label: 'Compare', run: () => openCompareScreen(comparison.id) });
+      }} />}
     {promptStash.open && <StashesPopover onRestore={promptStash.restore} onClose={() => { promptStash.setOpen(false); restoreCaret(); }} />}
     {menu === 'project' && <ProjectPicker projects={projects} currentId={chat.projectId} moves={movesToProject} onChoose={next => void chooseProject(next)}
       onCreate={() => { setMenu(null); openProjectsScreen(); }} onClose={() => { setMenu(null); restoreCaret(); }} />}

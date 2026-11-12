@@ -63,7 +63,7 @@ await check('the SSH workspaces panel adds a config host and shows the fingerpri
   await click(button(/Open folder/),120);
   assert.deepEqual(last('remote.folder.add')!.input,{hostId:'h1',path:'~/app'});
 });
-// Spec: MUS-SPEC-15-147E (docs/spec/clauses/15-settings-and-themes.md#mus-spec-15-147e)
+// Spec: MUS-SPEC-15-147F (docs/spec/clauses/15-settings-and-themes.md#mus-spec-15-147f)
 await check('agents on a host sign in with the host’s own login unless you choose to pass your key', async () => {
   const select=document.querySelector('[aria-label="Agent sign-in on devbox"]') as any;
   assert.ok(select,'the sign-in choice is shown for the host');

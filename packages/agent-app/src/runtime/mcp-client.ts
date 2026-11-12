@@ -6,7 +6,7 @@ export const MCP_PROTOCOL_VERSION = '2025-06-18';
 export const MCP_TEST_TIMEOUT_MS = 10_000;
 const MAX_TOOLS = 500, MAX_PAGES = 10, MAX_LINE = 4 * 1024 * 1024;
 type Log = (stream: McpLogLine['stream'], text: string) => void;
-type Rpc = { id?: number | string; result?: Record<string, unknown>; error?: { code?: number; message?: string } };
+export type Rpc = { id?: number | string; result?: Record<string, unknown>; error?: { code?: number; message?: string } };
 const CLIENT = { name: 'muster', version: '1.0.0' };
 const initializeParams = { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: CLIENT };
 
@@ -102,7 +102,7 @@ export async function testStdio(target: StdioTarget): Promise<McpTestResult> {
 }
 
 /** Finds the JSON-RPC reply with `id` in a JSON or SSE body, reading an SSE stream only until it arrives. */
-async function readReply(response: Response, id: number): Promise<Rpc> {
+export async function readReply(response: Response, id: number): Promise<Rpc> {
   const type = response.headers.get('content-type') ?? '';
   if (!type.includes('text/event-stream')) return await response.json() as Rpc;
   const reader = response.body!.getReader(), decoder = new TextDecoder();
