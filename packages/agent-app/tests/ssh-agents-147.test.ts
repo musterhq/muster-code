@@ -223,6 +223,9 @@ test('the host signs in itself by default; a key Muster holds goes only when cho
   assert.equal(saved.agentCredentials, 'muster');
   await r.send(chatId, 'two'); await r.settled(chatId);
   assert.equal(r.jsonl('claude-log.jsonl').filter(l => l.argv)[1]!.anthropicKey, 'set', 'passed for this run');
+  // The chat says where this run's sign-in comes from: never "the host's own sign-in" while Muster passes the person's key.
+  const notices = (await r.items(chatId)).filter(i => i.kind === 'notice' && i.data?.kind === 'remote-run').map(i => i.text);
+  assert.match(notices.at(-1) ?? '', /Runs on devbox in .*project, with your Anthropic API key from this computer/, notices.join(' | '));
   for (const l of r.sshLog()) assert.ok(!l.argv.join(' ').includes(MUSTER_KEY), 'never on an ssh command line');
   // grep exits 1 when no file holds the key. The fake CLI's own log records only whether the variable was set.
   let files = '';

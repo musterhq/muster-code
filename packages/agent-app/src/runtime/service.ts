@@ -885,8 +885,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         if (run.remote) {
           const tools = run.remote.tools(runOptions.configOverrides, chatId); remoteTools = tools;
           runOptions = {...runOptions, configOverrides: tools.overrides, developerInstructions: [runOptions.developerInstructions, run.remote.note].filter(Boolean).join('\n\n')};
-          if (!store.noticesOfKind(chatId, 'remote-run').some(item => item.data?.host === run.remote!.run.host && item.data?.root === run.remote!.run.root))
-            store.appendItem(chatId, 'notice', `Runs on ${run.remote.run.host} in ${run.remote.run.root}, with the host’s own sign-in.${tools.dropped.length ? ' Computer use, terminal and background tools stay on this computer and are not offered here.' : ''}`, 'completed', {kind: 'remote-run', host: run.remote.run.host, root: run.remote.run.root});
+          // A new notice when the host, the folder or the sign-in changes (the person may switch to passing their key).
+          const {host, root} = run.remote.run, signIn = run.remote.signIn, last = store.noticesOfKind(chatId, 'remote-run').at(-1);
+          if (!last || last.data?.host !== host || last.data?.root !== root || last.data?.signIn !== signIn)
+            store.appendItem(chatId, 'notice', `Runs on ${host} in ${root}, with ${signIn}.${tools.dropped.length ? ' Computer use, terminal and background tools stay on this computer and are not offered here.' : ''}`, 'completed', {kind: 'remote-run', host, root, signIn});
         }
         if (hooked) await domainHooks.runStarted({chat, runId: accepted.runId, cwd});
         if (disposed) return;

@@ -35,6 +35,8 @@ export interface RemoteAgentRun {
   tools(overrides: Record<string, unknown> | undefined, chatId: string): { overrides: Record<string, unknown>; dropped: string[]; close(): void };
   /** A line for the agent's instructions: where it runs and which of Muster's tools it lacks there. */
   note: string;
+  /** How the CLI signs in for this run, for the chat's notice: the host's own login, or the person's key passed by Muster. */
+  signIn: string;
   /** A failed run's message in plain words (the CLI's sign-in on the host), or undefined to keep the provider's. */
   failure(message: string): string | undefined;
   /** The connection to the host dropped while the run was going. */

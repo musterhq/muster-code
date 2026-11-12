@@ -77,6 +77,7 @@ export function createRemoteDomain(ctx: DomainContext): DomainModule {
     const prepared = await agents.prepare({ host, root, chatId: chat.id, cli, ...(key ? { key } : {}), tokenInEnv: provider.driver === 'claude-code-cli' });
     return {
       run: prepared.run, tools: prepared.tools, dropped: prepared.dropped, dispose: prepared.dispose,
+      signIn: key && cli.key ? `your ${cli.key.label} from this computer` : 'the host’s own sign-in',
       note: `This chat’s folder is on the SSH host ${host.name}. You run there, in ${root}: every command you run and every file you change is on that host. Muster’s computer-use, in-app terminal, background-process and sandbox tools act on the person’s own computer, so they are not offered here; use your own shell on the host.`,
       failure: message => remoteFailure(message, { host: host.name, cli, dropped: prepared.dropped() }),
     };
