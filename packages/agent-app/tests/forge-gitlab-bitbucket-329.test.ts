@@ -207,7 +207,7 @@ test('GitLab through a signed-in glab: no token is stored or sent, and a self-ho
   assert.deepEqual(argv.at(-1), ['api', '--hostname', 'gitlab.com', '--include', '--method', 'GET', 'projects/group%2Fsub%2Fapp/merge_requests/5']);
   const accounts = await call('forge.accounts', {});
   assert.deepEqual(accounts.accounts, []);
-  assert.equal(accounts.glab.hosts.includes('gitlab.com'), true, 'Settings shows that glab is signed in to gitlab.com');
+  assert.ok(accounts.glab.hosts.some((host: string) => host === 'gitlab.com'), 'Settings shows that glab is signed in to gitlab.com');
 
   // Self-hosted: glab is not signed in there; a token saved for that host is used.
   setGlabCommand([process.execPath, FAKE_GLAB]);
