@@ -48,6 +48,7 @@ import { onBrandWanted, refreshRemotePluginIcons, setRemoteIconStore, type Remot
 import { CLAUDE_COMMAND_EVENT } from './adapters/claude-code.ts';
 import { cleanSuggestion } from './adapters/follow-up.ts';
 import {providerAccessPolicy} from './provider-run-lifecycle.ts';
+import {appCallDecision} from '../shared/mcp-apps.ts';
 import {parseKillIntent, userProcessThreat, type UserProcessTarget, type UserProcessThreat} from './user-process-guard.ts';
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
 import { ProjectTaskStore, type TaskStatus } from './project-tasks.ts';
@@ -457,6 +458,27 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const toolItemId = typeof item?.data?.toolItemId === 'string' ? item.data.toolItemId : undefined, tool = toolItemId ? store.item(toolItemId) : undefined;
     if (tool?.data?.awaitingApproval === itemId) { const {awaitingApproval: _cleared, ...rest} = tool.data; store.updateItem(tool.id, tool.text, tool.status, {...rest, ...(status === 'declined' ? {executionDenied:true} : status === 'expired' ? {executionDenied:true, deniedReason:'timeout'} : {})}); }
     timeline(pending.chatId); state(); pending.resolve(decision);
+  }
+  /** #844: an MCP app's own tool call. The chat's access level and the Project tool rules decide; a change in an asking
+   *  mode waits on the same approval card the agent's MCP calls get. Never tied to a run: the app can ask after the turn. */
+  async function appToolApproval(chatId: string, request: {server: string; tool: string; arguments: Record<string, unknown>; readOnly: boolean; app: string}): Promise<{allowed: true} | {allowed: false; reason: string}> {
+    const chat = store.chat(chatId);
+    if (disposed || closing || !chat || chat.archived) return {allowed: false, reason: 'This chat is no longer available.'};
+    const params = {server: request.server, tool: request.tool, arguments: request.arguments, reason: `The app from ${request.server} / ${request.app} wants to run this.`};
+    const policy = domainHooks.toolPolicy(chat, 'item/mcpToolCall/requestApproval', params);
+    const decision = appCallDecision({mode: providerAccessPolicy(chat).permissionMode, readOnly: request.readOnly, policy: policy?.effect ?? null});
+    if (decision === 'refuse') return {allowed: false, reason: policy?.effect === 'deny' ? policy.message : 'This chat is read-only, so the app cannot run a tool that changes things. Change the chat’s access to let it.'};
+    if (decision === 'allow') return {allowed: true};
+    const expiresAt = attentionDeadline(Date.now(), await mutedUntilMs());
+    const item = store.appendItem(chatId, 'approval', detail(request.tool), 'pending', {...approvalData('item/mcpToolCall/requestApproval', params), expiresAt: new Date(expiresAt).toISOString()});
+    timeline(chatId);
+    const answer = await new Promise<ApprovalDecision>(resolve => {
+      let pending!: PendingApproval;
+      pending = {chatId, createdAt: item.createdAt, expiresAt, resolve, timer: undefined as never};
+      armExpiry(item.id, pending, () => approvals.get(item.id) === pending, () => finishApproval(item.id, pending, 'decline', 'expired'));
+      approvals.set(item.id, pending); wakeForAttention(chatId); state();
+    });
+    return answer === 'decline' ? {allowed: false, reason: 'You declined this tool call, so it was not approved.'} : {allowed: true};
   }
   function finishQuestion(itemId: string, pending: PendingQuestionRequest, answers: QuestionAnswers, status: string, receiptAnswers?: Record<string, {answers:string[]}>, reason?: 'stale') {
     if (questions.get(itemId) !== pending) return;
@@ -2512,6 +2534,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const domains = createDomains({
     dataDir: options.dataDir, store, db: () => store.database(), emit, emitSnapshot: state,
     folderFor: folderId => folderFor(folderId), invoke, hooks: domainHooks.hooks,
+    appToolApproval,
     modelCatalog: () => { const providers = provider.info(); return {providers, builtin: firstReadyModel(providers)}; },
     modelCatalogReady: firstProviderProbe,
     providersSettled: () => Promise.resolve(provider.ready?.()).catch(() => undefined),

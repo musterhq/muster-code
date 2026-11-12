@@ -7,8 +7,8 @@
  *  Only a prefix in one of these is a command label to peel; `package.json: Unexpected token` is a file
  *  name and part of the message. Keep in step with src/main/commands.ts (tests/resource-errors checks). */
 export const COMMAND_NAMESPACES: ReadonlySet<string> = new Set([
-  'app', 'approval', 'artifacts', 'attachments', 'attention', 'automations', 'browser', 'chat', 'ci', 'clipboard', 'computer', 'devices', 'dictation', 'extensions', 'files', 'folder', 'forge',
-  'git', 'github', 'goals', 'hindsight', 'image', 'import', 'link', 'mailbox', 'mcp', 'memory', 'models', 'musterServer', 'paperclip', 'plugins', 'processes', 'project', 'providers', 'question', 'reports', 'htmlRenders', 'previews',
+  'app', 'approval', 'artifacts', 'attachments', 'attention', 'automations', 'browser', 'chat', 'ci', 'clipboard', 'compare', 'computer', 'devices', 'dictation', 'extensions', 'files', 'folder', 'forge',
+  'git', 'github', 'goals', 'hindsight', 'image', 'import', 'link', 'mailbox', 'mcp', 'mcpApps', 'memory', 'models', 'musterServer', 'paperclip', 'plugins', 'processes', 'project', 'providers', 'question', 'reports', 'htmlRenders', 'previews',
   'backups', 'checkout', 'insight', 'office', 'org', 'orgs', 'review', 'sandbox', 'search', 'secret', 'services', 'settings', 'setup', 'skills', 'ssh', 'stashes', 'studio', 'subagents', 'terminal', 'terminalAccess', 'updates', 'work', 'workspace',
 ]);
 const COMMAND_PREFIX = /^([a-z][a-zA-Z]*)(?:\.[a-zA-Z][\w-]*)+:\s*/;

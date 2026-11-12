@@ -86,6 +86,9 @@ export interface DomainContext {
   providersSettled?(): Promise<void>;
   /** Codex app-server native thread APIs (goals, queue, projects) behind a capability probe. Absent in bare test contexts. */
   native?: NativeThreadBridge;
+  /** #844: whether an MCP app's own tool call may run: the chat's access level, the Project tool rules and, when needed, the
+   *  approval card (waits for the answer). Absent in bare test contexts, where only read-only tools run. */
+  appToolApproval?(chatId: string, request: { server: string; tool: string; arguments: Record<string, unknown>; readOnly: boolean; app: string }): Promise<{ allowed: true } | { allowed: false; reason: string }>;
 }
 
 export type DomainHandler = (input: Record<string, unknown>) => unknown;
