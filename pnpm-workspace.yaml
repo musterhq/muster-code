@@ -9,3 +9,9 @@ packages:
   # Muster Paperclip plugin (packages/paperclip-plugin-muster) is a standalone npm project with its own
   # package-lock.json and CI (.github/workflows/paperclip-plugin-muster-ci.yml). Keep it out of the IDE workspace.
   - "!packages/paperclip-plugin-muster"
+  # Muster phone relay (packages/relay, #326) has no dependencies and imports Muster Server's WebSocket code; its tests run
+  # with the agent-app. Development and tests only.
+  - "!packages/relay"
+  # Muster mobile app (packages/mobile, #326) is a standalone pnpm project with its own lockfile and CI
+  # (.github/workflows/mobile-ci.yml), so React Native's dependency tree stays out of the IDE workspace.
+  - "!packages/mobile"

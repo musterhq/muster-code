@@ -53,3 +53,7 @@ Every model under `tests/fixtures/model-fixtures.ts` and `tests/fixtures/compres
 
 ## Diagrams, charts and HTML sanitizing
 Mermaid (https://github.com/mermaid-js/mermaid, MIT) draws diagram fences and loads only when one is shown; its layout engines include elkjs (https://github.com/kieler/elkjs, Eclipse Public License 2.0, bundled unmodified, source in the published npm package). Vega, Vega-Lite and vega-interpreter (https://github.com/vega, BSD-3-Clause) draw chart fences and load only when one is shown. DOMPurify (https://github.com/cure53/DOMPurify, "MPL-2.0 OR Apache-2.0", used under Apache-2.0) sanitizes diagram SVG. Full license texts are in `dist/renderer/THIRD-PARTY-LICENSES.txt`.
+
+## QR Code generator library (Project Nayuki)
+
+`src/renderer/vendor/qrcodegen.ts` draws the phone pairing QR code in Settings › Integrations › Phone (#326). Copyright (c) Project Nayuki, MIT License, from https://github.com/nayuki/QR-Code-generator. The copyright and permission notice are kept at the top of the file.

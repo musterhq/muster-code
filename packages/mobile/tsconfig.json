@@ -1,0 +1,25 @@
+{
+  "extends": "expo/tsconfig.base.json",
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "types": [
+      "jest",
+      "node"
+    ],
+    "paths": {
+      "@noble/ciphers/*": [
+        "./node_modules/@noble/ciphers/*"
+      ]
+    }
+  },
+  "include": [
+    "app",
+    "src",
+    "tests",
+    "../agent-app/src/shared/mobile",
+    "../agent-app/src/runtime/mobile/node-crypto.ts"
+  ]
+}
