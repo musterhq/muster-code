@@ -13,7 +13,9 @@ import { ProviderLogo, providerBrand } from './ProviderLogo';
 import './providers-screen.css';
 import { CliMaintenance } from './CliMaintenance';
 import { device } from '../../shared/device-noun.ts';
+import { joinArgs } from '../../shared/acp-agents';
 import { AddProviderPanel } from './AddProviderPanel';
+import { AcpAgentSheet } from './AcpAgentSheet';
 
 const gatewayUnchecked = (p: ProviderInfo) => p.available && p.codex?.kind === 'gateway' && !p.checkedAt;
 const statusLabel = (p: ProviderInfo) => gatewayUnchecked(p) ? 'Not checked yet' : p.available ? 'Ready for chats' : p.status === 'configured' ? 'Profile detected · unavailable for chats' : p.status === 'installed' ? 'Installed · sign-in not detected' : p.status === 'error' ? 'Needs attention' : p.status === 'not-detected' ? 'Not detected' : 'Unavailable';
@@ -235,7 +237,7 @@ function ProviderCard({ provider: p }: {provider: ProviderInfo}) {
   const kind = identityKind(p);
   const defaultModel = useStoreSelector(state => state.settings['general.defaultModel']);
   useEffect(()=>()=>{if(checking.current)void invoke('providers.cancelCheck',{id:p.id}).catch(()=>{});},[p.id]);
-  async function check() {if(checking.current)return;checking.current=true;setBusy(true);setError('');try {await invoke('providers.check',{id:p.id}); await loadProviders(true);} catch(e) {setError(errorText(e,'Connection check failed.'));} finally {checking.current=false;setBusy(false);}}
+  async function check() {if(checking.current)return;checking.current=true;setBusy(true);setError('');try {if(p.acp)await invoke('providers.acp.check',{id:p.id});else await invoke('providers.check',{id:p.id}); await loadProviders(true);} catch(e) {setError(errorText(e,'Connection check failed.'));} finally {checking.current=false;setBusy(false);}}
   async function remove() {setBusy(true);setError('');try {await invoke('providers.remove',{id:p.id}); await loadProviders(true);} catch(e) {setError(errorText(e,'Could not remove connection.'));} finally {setBusy(false);}}
   return <article className="settings-provider">
     <div className="settings-provider-top"><div className="provider-symbol" aria-hidden="true">{providerIcon(p)}</div><div className="provider-heading"><h2>{p.name}</h2><span className="provider-source">{p.source ?? 'Local configuration'}{defaultModel?.providerId === p.id ? ' · default for new chats' : ''}</span></div><span className={`connection-status ${p.available && !gatewayUnchecked(p) ? 'is-ready' : ''}`}>{statusLabel(p)}</span></div>
@@ -248,10 +250,10 @@ function ProviderCard({ provider: p }: {provider: ProviderInfo}) {
     {!!p.excludedModels?.length && <p className="provider-source">Excluded from chats: {p.excludedModels.map(model => model.name).join(' · ')}</p>}
     {p.installUrl && !p.available && <div className="provider-actions"><button type="button" className="settings-button secondary" onClick={()=>void invoke('link.open',{url:p.installUrl!}).catch(e=>setError(errorText(e,'Could not open the link.')))}><ExternalLink size={13}/>How to install</button>{p.loginCommand && p.status!=='not-detected' && <span className="provider-source">Sign in: <code>{p.loginCommand}</code></span>}</div>}
     {reportsUsage(p) && p.status !== 'not-detected' && <UsageSection provider={p}/>}
-    {p.custom && <SecretField provider={p}/>}
-    <Diagnosis provider={p} auto={p.status !== 'not-detected'}/>
-    {editing && <AddConnection provider={p} onClose={()=>{setEditing(false);requestAnimationFrame(()=>editButton.current?.focus());}}/>}
-    {p.custom && <div className="provider-actions"><button ref={editButton} className="settings-button secondary" disabled={busy || editing} onClick={()=>{setEditing(true);setConfirmRemove(false);}}>Edit</button><button className="settings-button" disabled={busy || editing} onClick={()=>void check()}>{busy ? 'Working…' : 'Check connection'}</button>{busy && checking.current && <button className="settings-button secondary" onClick={()=>void invoke('providers.cancelCheck',{id:p.id}).catch(e=>setError(String(e)))}>Cancel check</button>}{!confirmRemove ? <button className="settings-button secondary" disabled={busy || editing} onClick={()=>setConfirmRemove(true)}>Remove</button> : <><span>Remove from Muster?</span><button className="settings-button secondary" disabled={busy} onClick={()=>void remove()}>Remove connection</button><button className="settings-button secondary" onClick={()=>setConfirmRemove(false)}>Cancel</button></>}</div>}
+    {p.custom && !p.acp && <SecretField provider={p}/>}
+    {p.acp ? <p className="provider-source">Command: <code>{[p.acp.command, joinArgs(p.acp.args)].filter(Boolean).join(' ')}</code>{p.acp.envNames.length ? <> · variables {p.acp.envNames.join(', ')} stored securely</> : null}</p> : <Diagnosis provider={p} auto={p.status !== 'not-detected'}/>}
+    {editing && (p.acp ? <AcpAgentSheet provider={p} onClose={()=>{setEditing(false);requestAnimationFrame(()=>editButton.current?.focus());}} onBack={()=>{setEditing(false);requestAnimationFrame(()=>editButton.current?.focus());}}/> : <AddConnection provider={p} onClose={()=>{setEditing(false);requestAnimationFrame(()=>editButton.current?.focus());}}/>)}
+    {p.custom && <div className="provider-actions"><button ref={editButton} className="settings-button secondary" disabled={busy || editing} onClick={()=>{setEditing(true);setConfirmRemove(false);}}>Edit</button><button className="settings-button" disabled={busy || editing} onClick={()=>void check()}>{busy ? 'Working…' : p.acp ? 'Check agent' : 'Check connection'}</button>{busy && checking.current && !p.acp && <button className="settings-button secondary" onClick={()=>void invoke('providers.cancelCheck',{id:p.id}).catch(e=>setError(String(e)))}>Cancel check</button>}{!confirmRemove ? <button className="settings-button secondary" disabled={busy || editing} onClick={()=>setConfirmRemove(true)}>Remove</button> : <><span>Remove from Muster?</span><button className="settings-button secondary" disabled={busy} onClick={()=>void remove()}>{p.acp ? 'Remove agent' : 'Remove connection'}</button><button className="settings-button secondary" onClick={()=>setConfirmRemove(false)}>Cancel</button></>}</div>}
     {error && <p className="settings-error" role="alert">{error}</p>}
   </article>;
 }
@@ -275,7 +277,7 @@ export function ProvidersScreen() {
   useEffect(()=>{launcher.current=document.activeElement;back.current?.focus();void loadProviders();},[]);
   const leave=()=>{closeSettings();restoreFocus(launcher.current);};
   useEffect(()=>{const onKey=(e:KeyboardEvent)=>{if(e.key==='Escape'){e.preventDefault();if(adding)setAdding(false);else leave();}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[adding]);
-  const list=providers.value ?? [];const ready=list.filter(p=>p.available);const localProfiles=list.filter(p=>!p.custom&&!p.available&&p.status!=='not-detected');const custom=list.filter(p=>p.custom&&!p.available);const absent=list.filter(p=>!p.custom&&p.status==='not-detected');
+  const list=providers.value ?? [];const ready=list.filter(p=>p.available);const localProfiles=list.filter(p=>!p.custom&&!p.available&&p.status!=='not-detected');const custom=list.filter(p=>p.custom&&!p.acp&&!p.available);const acpAgents=list.filter(p=>p.acp&&!p.available);const absent=list.filter(p=>!p.custom&&p.status==='not-detected');
   return <section className="settings-screen" aria-label="Providers settings"><header className="settings-topbar"><button ref={back} className="settings-back" onClick={leave}><ArrowLeft size={15}/>Back to app</button><span>Settings</span></header><div className="settings-scroll"><div className="settings-content"><div className="settings-title"><div><h1>Accounts &amp; providers</h1><p>Local sign-ins, provider profiles, and compatible model endpoints.</p></div><button className="settings-button" onClick={()=>setAdding(true)}><Plus size={14}/>Add provider</button></div>
     <div className="discovery-bar"><p>Muster detects supported local sign-ins and configuration. A detected login does not verify a paid subscription or its remaining limits.</p><button className="settings-button secondary" disabled={providers.phase==='loading'} onClick={()=>void loadProviders(true,true)}><RefreshCw size={14}/>{providers.phase==='loading'?'Scanning…':'Scan again'}</button></div>
     {adding && <AddProviderPanel providers={list} onClose={()=>setAdding(false)} KeyField={KeyInput} openTerminal={openCommandInTerminal}/>}
@@ -285,6 +287,7 @@ export function ProvidersScreen() {
     {ready.length>0 && <div className="provider-group"><h2 className="settings-section-label">Configured for chats</h2>{ready.map(p=><ProviderCard key={p.id} provider={p}/>)}</div>}
     {localProfiles.length>0 && <div className="provider-group"><h2 className="settings-section-label">Detected accounts and profiles</h2>{localProfiles.map(p=><ProviderCard key={p.id} provider={p}/>)}</div>}
     {custom.length>0 && <div className="provider-group"><h2 className="settings-section-label">Compatible endpoints</h2>{custom.map(p=><ProviderCard key={p.id} provider={p}/>)}</div>}
+    {acpAgents.length>0 && <div className="provider-group"><h2 className="settings-section-label">ACP agents</h2>{acpAgents.map(p=><ProviderCard key={p.id} provider={p}/>)}</div>}
     {absent.length>0 && <div className="provider-group"><h2 className="settings-section-label">Supported providers not detected</h2><p className="provider-group-help">These options are shown for clarity. They are not signed in or connected on {device().lower}.</p>{absent.map(p=><ProviderCard key={p.id} provider={p}/>)}</div>}
     <CliMaintenance/>
     <p className="settings-footnote">ChatGPT accounts are detected through their Codex sign-in. API keys entered here are encrypted with {device().secretStore} and never shown again. Muster does not copy credentials from other apps’ stores.</p>

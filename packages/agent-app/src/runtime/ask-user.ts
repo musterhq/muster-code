@@ -9,6 +9,7 @@
  */
 import type { PendingQuestion, PendingQuestionData } from '../shared/protocol.ts';
 import type { ToolSpec } from './governance/tool-host.ts';
+import { ASK_TOOL_TIMEOUT_SEC } from './secret-requests.ts';
 
 export const ASK_MCP = 'muster_ask';
 export const ASK_MCP_LAUNCHER_ENV = 'MUSTER_ASK_MCP_LAUNCHER';
@@ -56,5 +57,5 @@ export const isNonBlockingQuestion = (data: Record<string, unknown> | undefined 
 /** The muster_ask server for a run, once the host is listening. */
 export function askUserRunOverrides(chatId: string, launcher: string | undefined, chatToken: string): Record<string, string | number> {
   if (!launcher) return {};
-  return { [`mcp_servers.${ASK_MCP}.command`]: launcher, [`mcp_servers.${ASK_MCP}.env.MUSTER_CHAT_ID`]: chatId, [`mcp_servers.${ASK_MCP}.env.MUSTER_CHAT_TOKEN`]: chatToken, [`mcp_servers.${ASK_MCP}.tool_timeout_sec`]: 30 };
+  return { [`mcp_servers.${ASK_MCP}.command`]: launcher, [`mcp_servers.${ASK_MCP}.env.MUSTER_CHAT_ID`]: chatId, [`mcp_servers.${ASK_MCP}.env.MUSTER_CHAT_TOKEN`]: chatToken, [`mcp_servers.${ASK_MCP}.tool_timeout_sec`]: ASK_TOOL_TIMEOUT_SEC };
 }

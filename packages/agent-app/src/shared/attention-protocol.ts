@@ -5,7 +5,7 @@ export interface AttentionRequest {
   createdAt: string;
   /** ISO deadline; the request is closed after this. */
   expiresAt?: string;
-  sourceLabel: 'Provider approval' | 'Provider question';
+  sourceLabel: 'Provider approval' | 'Provider question' | 'Secret request';
 }
 export interface ChatAttention {
   chatId: string;

@@ -4,6 +4,7 @@ import { respondQuestion } from '../store';
 import { invoke } from '../bridge';
 import './pending-question.css';
 import { useQuestionHosted } from './ComposerQuestionPanel';
+import { SecretPrompt } from './SecretPrompt';
 import { DelegatedAsk } from './DelegationRows';
 
 function questionData(item: TimelineItem): PendingQuestionData | null {
@@ -40,6 +41,12 @@ function answerValues(answers: Record<string, string[]>, id: string): string[] {
 }
 
 export function PendingQuestion({ item }: { item: TimelineItem }): React.ReactElement {
+  // #842: an agent's private secret or sudo request has its own card (a masked field; the value never reaches the timeline).
+  if (item.data?.method === 'muster/secretRequest') return <SecretPrompt item={item}/>;
+  return <ProviderQuestion item={item}/>;
+}
+
+function ProviderQuestion({ item }: { item: TimelineItem }): React.ReactElement {
   const data = questionData(item);
   const [answers, setAnswers] = useState<Record<string, string[]>>(() => storedAnswers(item));
   const [error, setError] = useState('');

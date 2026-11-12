@@ -99,6 +99,11 @@
 .provider-sheet label { display: block; margin-top: 16px; font-size: var(--fs-12); }
 .provider-sheet input { display: block; width: 100%; min-height: var(--control-standard); margin-top: 7px; padding: 9px 10px; border: 1px solid var(--hairline); border-radius: var(--radius-8); background: var(--bg); color: var(--text); font: inherit; }
 .provider-sheet input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.provider-sheet select, .provider-sheet textarea { display: block; width: 100%; margin-top: 7px; padding: 9px 10px; border: 1px solid var(--hairline); border-radius: var(--radius-8); background: var(--bg); color: var(--text); font: inherit; }
+.provider-sheet select { min-height: var(--control-standard); }
+.provider-sheet textarea { resize: vertical; font-family: var(--mono); font-size: var(--fs-12); }
+.provider-sheet select:focus-visible, .provider-sheet textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.acp-install .provider-command { display: block; margin-top: 6px; }
 .provider-sheet .provider-key-input input { margin-top: 0; }
 .sheet-block { margin-top: 14px; }
 .sheet-note { display: flex; align-items: center; gap: 6px; margin: 14px 0 0; color: var(--text-dim); }

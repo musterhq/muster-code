@@ -57,10 +57,18 @@ export class ToolHost {
   private binding = new ChatBinding(this.token);
   private queues = new Map<string, Promise<unknown>>();
   private disposed = false;
-  constructor(private options: { dir: string; name: string; title: string; specs: readonly ToolSpec[]; execPath: string; run: ToolRunner; /** How long the MCP process waits for one call (default 60 s). Match the provider's tool timeout. */ timeoutMs?: number; /** Largest call body (default 256 KB). */ maxBody?: number }) {
+  /** Presented by Muster's own helpers (the sudo askpass) for tools the model is not offered. */
+  private readonly helperKey = randomBytes(32);
+  private readonly hidden: Set<string>;
+  constructor(private options: { dir: string; name: string; title: string; specs: readonly ToolSpec[]; execPath: string; run: ToolRunner; /** Tools only Muster's helpers may call (never listed to the model; the caller presents helperKey()). */ hidden?: readonly string[]; /** How long the MCP process waits for one call (default 60 s). Match the provider's tool timeout. */ timeoutMs?: number; /** Largest call body (default 256 KB). */ maxBody?: number }) {
     this.launcher = launcherFile(path.join(options.dir, `${options.name}-mcp`));
     this.names = new Set(options.specs.map(s => s.name));
+    this.hidden = new Set(options.hidden ?? []);
   }
+  /** The key a helper presents in `x-muster-helper-key` to call a hidden tool. */
+  helperToken(): string { return this.helperKey.toString('hex'); }
+  /** The loopback endpoint file the MCP processes and helpers read (after start()). */
+  get endpointFile(): string { return path.join(this.options.dir, `${this.options.name}-endpoint.json`); }
   start(): Promise<string> { return this.starting ??= this.listen(); }
   private async listen(): Promise<string> {
     const { dir, name } = this.options;
@@ -92,12 +100,16 @@ export class ToolHost {
     let body: { chatId?: unknown; tool?: unknown; arguments?: unknown };
     try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { reply(400, { error: 'Invalid JSON' }); return; }
     if (!this.binding.verify(body.chatId, request.headers[CHAT_TOKEN_HEADER])) { reply(403, { error: 'Forbidden' }); return; }
-    reply(200, await this.call(body.chatId, body.tool, body.arguments));
+    const helper = Buffer.from(String(request.headers['x-muster-helper-key'] ?? ''), 'hex');
+    const helperOk = helper.length === this.helperKey.length && timingSafeEqual(helper, this.helperKey);
+    reply(200, await this.call(body.chatId, body.tool, body.arguments, helperOk));
   }
   /** Calls for one chat run one at a time, so a retry never races its first attempt. */
-  call(chatId: unknown, tool: unknown, args: unknown): Promise<McpToolResult> {
+  call(chatId: unknown, tool: unknown, args: unknown, helper = false): Promise<McpToolResult> {
     if (typeof chatId !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(chatId)) return Promise.resolve(toolText('These tools were started without a chat.', true));
-    if (typeof tool !== 'string' || !this.names.has(tool)) return Promise.resolve(toolText(`Unknown tool ${String(tool)}.`, true));
+    if (typeof tool !== 'string' || !(this.names.has(tool) || (helper && this.hidden.has(tool)))) return Promise.resolve(toolText(`Unknown tool ${String(tool)}.`, true));
+    // A helper call (sudo asking for a password) never queues behind a tool call that is itself waiting for the person.
+    if (helper) return Promise.resolve().then(() => this.disposed ? toolText('Muster is closing.', true) : this.options.run(chatId, tool, args && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : {})).catch(error => toolText(error instanceof Error ? error.message : String(error), true));
     const input = args && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : {};
     const previous = this.queues.get(chatId) ?? Promise.resolve();
     const next = previous.catch(() => {}).then(async () => {

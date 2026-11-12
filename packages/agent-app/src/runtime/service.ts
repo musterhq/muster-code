@@ -17,6 +17,7 @@ import { discoverLocalProviders } from './provider-discovery.ts';
 import { homedir } from 'node:os';
 import { absentCliAgentRows } from './adapters/cli-agents.ts';
 import { CustomProviders } from './custom-providers.ts';
+import { AcpAgents } from './acp-agents.ts';
 import { AgentStore } from './store.ts';
 import { applyFolderAliases, canonicalFolderPath } from './folder-merge.ts';
 import { WorkspaceWatchService } from './workspace-watch.ts';
@@ -46,6 +47,7 @@ import { onBrandWanted, refreshRemotePluginIcons, setRemoteIconStore, type Remot
 import { CLAUDE_COMMAND_EVENT } from './adapters/claude-code.ts';
 import { cleanSuggestion } from './adapters/follow-up.ts';
 import {providerAccessPolicy} from './provider-run-lifecycle.ts';
+import {appCallDecision} from '../shared/mcp-apps.ts';
 import {parseKillIntent, userProcessThreat, type UserProcessTarget, type UserProcessThreat} from './user-process-guard.ts';
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
 import { ProjectTaskStore, type TaskStatus } from './project-tasks.ts';
@@ -82,6 +84,8 @@ import type { ReviewBaselineInfo } from '../shared/domains/review-protocol.ts';
 import type { EditRestorePreview } from '../shared/protocol.ts';
 import { randomUUID } from 'node:crypto';
 import { ToolHost, toolText } from './governance/tool-host.ts';
+import { createSecretRequests, REQUEST_SECRET_METHOD, REQUEST_SECRET_SPEC, REQUEST_SECRET_TOOL, SUDO_ASKPASS_ENV, SUDO_PASSWORD_TOOL, ASK_TOOL_TIMEOUT_SEC, writeAskpass } from './secret-requests.ts';
+import { findBinary } from './adapters/shared.ts';
 import { ASK_MCP, ASK_USER_METHOD, ASK_USER_SPEC, ASK_QUESTION_ID, askUserAnswerMessage, askUserCard, askUserReply, askUserRunOverrides, isNonBlockingQuestion, parseAskUser } from './ask-user.ts';
 import { plural } from '../shared/wording.ts';
 import { device } from '../shared/device-noun.ts';
@@ -148,6 +152,8 @@ export function userProcessNote(groups: readonly UserProcessGroup[], cwd: string
 const PROVIDER_LISTING_WAIT_MS = 15_000;
 export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; userProcesses?: () => readonly UserProcessGroup[]; userProcessTargets?: () => Promise<readonly UserProcessTarget[]>; provider?: ProviderAdapter; reconcileProvider?: (input: ReconciliationInput) => Promise<ReconciliationResult>; domains?: readonly DomainFactory[];
   /** Serve the ask_user MCP server to CLI routes (default: on outside tests). */ askUserTools?: boolean;
+  /** #842: how long a secret or sudo card waits for the person (tests shorten it). */ secretWaitMs?: number; sudoWaitMs?: number;
+  /** #842: the 1Password CLI; null turns it off, undefined finds `op` on PATH. */ onePasswordCli?: string | null;
   /** #729: scales plugin logos that are over the icon budget (the app passes Electron's nativeImage). */ downscaleIcon?: IconDownscaler;
   /** #729: fetch logos Codex lists for remote plugins that ship none (default: on outside tests). */ remotePluginIcons?: RemoteIconOptions | false }) {
   setIconDownscaler(options.downscaleIcon);
@@ -169,6 +175,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const contextLedger = new ContextLedger();
   const projectTasks = new ProjectTaskStore(options.dataDir);
   const customProviders = new CustomProviders(options.dataDir);
+  /** #160: ACP agents added in Settings › Providers. */
+  const acpAgents = new AcpAgents(options.dataDir);
   const annotations = new FileAnnotations(options.dataDir);
   const provider = options.provider ?? createProviderAdapter();
   /** R5: whether an agent command would stop a process the user started in Muster (terminal shell or Commands-tab command). */
@@ -310,6 +318,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     // copy provider payloads, question options, commands, or answers here.
     for (const [itemId, pending] of approvals) add(pending.chatId, {itemId, kind:'approval', createdAt:pending.createdAt, expiresAt:new Date(pending.expiresAt).toISOString(), sourceLabel:'Provider approval'});
     for (const [itemId, pending] of questions) add(pending.chatId, {itemId, kind:'question', createdAt:pending.createdAt, expiresAt:new Date(pending.expiresAt).toISOString(), sourceLabel:'Provider question'});
+    for (const request of secretRequests.pendingRequests()) add(request.chatId, {itemId:request.itemId, kind:'question', createdAt:request.createdAt, expiresAt:request.expiresAt, sourceLabel:'Secret request'});
     const attention: PendingAttentionSummary = {totalRequests:0, chats:[]};
     for (const chat of current.chats) {
       const items = requests.get(chat.id); if (!items?.length) continue;
@@ -450,6 +459,27 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     timeline(pending.chatId); state(); pending.resolve(decision);
     domainHooks.attention({chatId: pending.chatId, itemId, state: 'settled'});
   }
+  /** #844: an MCP app's own tool call. The chat's access level and the Project tool rules decide; a change in an asking
+   *  mode waits on the same approval card the agent's MCP calls get. Never tied to a run: the app can ask after the turn. */
+  async function appToolApproval(chatId: string, request: {server: string; tool: string; arguments: Record<string, unknown>; readOnly: boolean; app: string}): Promise<{allowed: true} | {allowed: false; reason: string}> {
+    const chat = store.chat(chatId);
+    if (disposed || closing || !chat || chat.archived) return {allowed: false, reason: 'This chat is no longer available.'};
+    const params = {server: request.server, tool: request.tool, arguments: request.arguments, reason: `The app from ${request.server} / ${request.app} wants to run this.`};
+    const policy = domainHooks.toolPolicy(chat, 'item/mcpToolCall/requestApproval', params);
+    const decision = appCallDecision({mode: providerAccessPolicy(chat).permissionMode, readOnly: request.readOnly, policy: policy?.effect ?? null});
+    if (decision === 'refuse') return {allowed: false, reason: policy?.effect === 'deny' ? policy.message : 'This chat is read-only, so the app cannot run a tool that changes things. Change the chat’s access to let it.'};
+    if (decision === 'allow') return {allowed: true};
+    const expiresAt = attentionDeadline(Date.now(), await mutedUntilMs());
+    const item = store.appendItem(chatId, 'approval', detail(request.tool), 'pending', {...approvalData('item/mcpToolCall/requestApproval', params), expiresAt: new Date(expiresAt).toISOString()});
+    timeline(chatId);
+    const answer = await new Promise<ApprovalDecision>(resolve => {
+      let pending!: PendingApproval;
+      pending = {chatId, createdAt: item.createdAt, expiresAt, resolve, timer: undefined as never};
+      armExpiry(item.id, pending, () => approvals.get(item.id) === pending, () => finishApproval(item.id, pending, 'decline', 'expired'));
+      approvals.set(item.id, pending); wakeForAttention(chatId); state();
+    });
+    return answer === 'decline' ? {allowed: false, reason: 'You declined this tool call, so it was not approved.'} : {allowed: true};
+  }
   function finishQuestion(itemId: string, pending: PendingQuestionRequest, answers: QuestionAnswers, status: string, receiptAnswers?: Record<string, {answers:string[]}>, reason?: 'stale') {
     if (questions.get(itemId) !== pending) return;
     clearTimeout(pending.timer); questions.delete(itemId);
@@ -473,15 +503,40 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     timeline(chatId); state(); domainHooks.attention({chatId, itemId: asked.id, state: 'pending'});
     return reply(askUserReply(input));
   }
+  // ── #842: private secret and sudo requests ──────────────────────────────
+  let onePassword: {at: number; value: string | undefined} | undefined;
+  const secretRequests = createSecretRequests({
+    dataDir: options.dataDir, store, changed: chatId => { timeline(chatId); state(); },
+    requester: chatId => { const chat = store.chat(chatId); return provider.info().find(entry => entry.id === chat?.providerId)?.name ?? 'The agent'; },
+    readOnly: chatId => { const chat = store.chat(chatId); return !chat || providerAccessPolicy(chat).permissionMode === 'read-only'; },
+    live: chatId => runs.has(chatId) && !disposed && !closing,
+    scope: chatId => { const chat = store.chat(chatId); if (chat?.projectId) return {key: `project:${chat.projectId}`, label: 'this project'}; if (chat?.folderId) return {key: `folder:${chat.folderId}`, label: 'this folder'}; return null; },
+    onePassword: () => {
+      if (options.onePasswordCli !== undefined) return options.onePasswordCli ?? undefined;
+      if (process.platform === 'win32') return undefined;
+      if (!onePassword || Date.now() - onePassword.at > 60_000) onePassword = {at: Date.now(), value: findBinary('op', process.env, homedir(), ['/opt/homebrew/bin/op', '/usr/local/bin/op'])};
+      return onePassword.value;
+    },
+    ...(options.secretWaitMs ? {secretWaitMs: options.secretWaitMs} : {}), ...(options.sudoWaitMs ? {sudoWaitMs: options.sudoWaitMs} : {}),
+  });
   let askHost: ToolHost | undefined, askLauncher: string | undefined;
   if (options.askUserTools ?? !process.env.NODE_TEST_CONTEXT) {
-    askHost = new ToolHost({dir: join(options.dataDir, 'agent-tools', 'ask'), name: ASK_MCP, title: 'Muster questions', specs: [ASK_USER_SPEC], execPath: process.execPath, timeoutMs: 30_000,
-      run: (chatId, _tool, args) => { const {text: _text, ...result} = askUser(chatId, args); return result; }});
+    askHost = new ToolHost({dir: join(options.dataDir, 'agent-tools', 'ask'), name: ASK_MCP, title: 'Muster questions', specs: [ASK_USER_SPEC, REQUEST_SECRET_SPEC], hidden: [SUDO_PASSWORD_TOOL], execPath: process.execPath, timeoutMs: (ASK_TOOL_TIMEOUT_SEC + 10) * 1000,
+      run: async (chatId, tool, args) => {
+        if (tool === REQUEST_SECRET_TOOL || tool === SUDO_PASSWORD_TOOL) { const reply = tool === SUDO_PASSWORD_TOOL ? await secretRequests.sudo(chatId, args) : await secretRequests.request(chatId, args, 'file'); return toolText(reply.text, reply.isError === true); }
+        const {text: _text, ...result} = askUser(chatId, args); return result;
+      }});
     void askHost.start().then(launcher => { askLauncher = launcher; }, error => console.warn(`Agent question tool unavailable: ${error instanceof Error ? error.message : String(error)}`));
   }
   /** Adds the muster_ask MCP server to a run (CLI routes load it; HTTP routes offer ask_user natively instead). */
   function withAskUser<T extends {configOverrides?: Record<string, unknown>}>(chatId: string, runOptions: T): T {
-    const extra = askHost && askLauncher ? askUserRunOverrides(chatId, askLauncher, askHost.chatToken(chatId)) : {};
+    const extra: Record<string, string | number> = askHost && askLauncher ? askUserRunOverrides(chatId, askLauncher, askHost.chatToken(chatId)) : {};
+    // #842: `sudo -A` in the agent's shell asks through the secret card (never in a read-only chat; no sudo on Windows).
+    const chat = store.chat(chatId);
+    if (askHost && askLauncher && process.platform !== 'win32' && chat && providerAccessPolicy(chat).permissionMode !== 'read-only') {
+      try { extra[`shell_environment_policy.set.${SUDO_ASKPASS_ENV}`] = writeAskpass(join(options.dataDir, 'agent-tools', 'askpass'), process.execPath, askHost.endpointFile, chatId, askHost.chatToken(chatId), askHost.helperToken()); }
+      catch { /* sudo then fails without a terminal, as before */ }
+    }
     return Object.keys(extra).length ? {...runOptions, configOverrides: {...runOptions.configOverrides, ...extra}} : runOptions;
   }
   /** A later answer: recorded on the card at once (so a second answer is a no-op), then delivered as a steer while the
@@ -1035,6 +1090,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             seal();
             // ask_user from an HTTP route: the card is posted and the run continues with the default, in every access mode.
             if (method === ASK_USER_METHOD) return askUser(chatId, params);
+            // #842: request_secret from an HTTP route waits for the card; the value comes back as run environment only.
+            if (method === REQUEST_SECRET_METHOD) return {...await secretRequests.request(chatId, params, 'env')};
             // Muster's own ask_user MCP server never needs a card: calling it only posts a question.
             if ((/^item\/mcpToolCall\/requestApproval$/.test(method) || isElicitationRequest(method)) && (params.server === ASK_MCP || params.serverName === ASK_MCP || elicitationServer(params) === ASK_MCP)) return isElicitationRequest(method) ? elicitationResult(true) : {decision: 'accept'};
             if (method === 'item/tool/requestUserInput') {
@@ -1276,7 +1333,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       } finally {
         // Background sub-agents can still be waiting on a card after the parent turn ended: keep it answerable.
         const settled = run.stopped || disposed || !provider.hasActiveWork?.(chatId);
-        if (settled) { settleApprovals(chatId); settleQuestions(chatId); seal(); }
+        if (settled) { settleApprovals(chatId); settleQuestions(chatId); secretRequests.settle(chatId); seal(); }
         flushSegment(); if (segmentFlushes.get(chatId) === flushSegment) segmentFlushes.delete(chatId);
         // Stop can close the provider before it sends item/completed, and a completed or failed turn can end with a tool the
         // provider never closed (#387). Persist the terminal state once, keeping completed tools and partial output intact.
@@ -1746,7 +1803,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         ...detected.filter(entry=>!runtime.some(runnable=>runnable.id===entry.id||(runnable.codex?.kind==='gateway'&&runnable.codex.modelProvider===entry.id&&!runnable.codex.account))&&shown(entry)).map(({identity,credentialPresent,...entry})=>({...entry,available:false,models:[],canReveal:Boolean(identity),source:'Local configuration discovery',detail:`${entry.detail}. No runnable adapter is enabled for this entry.`})),
         // Agent CLIs that are not installed: listed (with How to install) but never offered in the model picker.
         ...(process.env.NODE_TEST_CONTEXT && process.env.MUSTER_PROVIDER_ADAPTERS !== '1' ? [] : absentCliAgentRows(process.env, homedir()).filter(row => !runtime.some(entry => entry.id === row.id))),
-        ...customProviders.list()];
+        ...customProviders.list(), ...acpAgents.list()];
     }
     if (command === 'plugins.inventory') return discoverPlugins();
     const p = input === undefined && domains.handlers.has(command) ? {} : object(input);
@@ -2261,6 +2318,13 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       }
       case 'question.dismiss': { const questionId = attentionTarget(id(p.id)); if (!questions.has(questionId) && isNonBlockingQuestion(store.item(questionId)?.data)) return dismissAsked(questionId); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.'); finishQuestion(questionId, pending, null, 'dismissed'); return; }
       case 'chat.compact': await compactChat(id(p.id), {fresh: p.fresh === true}); return;
+      case 'secret.answer': {
+        if (p.value !== undefined && typeof p.value !== 'string') throw new Error('Enter the value.');
+        if (p.remember !== undefined && typeof p.remember !== 'boolean') throw new Error('Invalid remember choice.');
+        return secretRequests.answer(id(p.id), {...(p.value !== undefined ? {value: p.value} : {}), ...(p.onePassword !== undefined ? {onePassword: p.onePassword} : {}), remember: p.remember === true});
+      }
+      case 'secret.decline': secretRequests.decline(id(p.id)); return;
+      case 'secret.forget': secretRequests.forget(id(p.id)); return;
       case 'question.respond': {
         const questionId = attentionTarget(id(p.id));
         if (!questions.has(questionId) && isNonBlockingQuestion(store.item(questionId)?.data)) return answerAsked(questionId, p.answers);
@@ -2395,7 +2459,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'git.diff': { const root = folderFor(p.folderId).path; const result = await new AgentModeReviewHost(() => root).readChange(text(p.path,'path')); if (result.error) throw new Error(result.error); return {path: result.path, before: result.before, after: result.after, truncated: result.truncated}; }
       case 'providers.save': return customProviders.save({id:p.id,name:p.name,endpoint:p.endpoint,apiKeyEnv:p.apiKeyEnv});
       case 'providers.cancelCheck': customProviders.cancel(id(p.id)); return;
-      case 'providers.remove': { const key=id(p.id); if(!key.startsWith('custom_')) throw new Error('Discovered connections are managed in their original app.'); customProviders.remove(key); return; }
+      case 'providers.remove': { const key=id(p.id); if(key.startsWith('acp_')&&acpAgents.has(key)){acpAgents.remove(key);return;} if(!key.startsWith('custom_')) throw new Error('Discovered connections are managed in their original app.'); customProviders.remove(key); return; }
+      case 'providers.acp.save': return acpAgents.save({id:p.id,name:p.name,command:p.command,args:p.args,env:p.env,preset:p.preset});
+      case 'providers.acp.check': return acpAgents.check(id(p.id));
       case 'providers.check': return customProviders.check(id(p.id));
       case 'providers.reveal': { const key=id(p.id), source=key==='openai-direct'?'codex':key; const info=(await discoverLocalProviders()).find(row=>row.id===source); if(!info?.identity) throw new Error('This connection has no account label to reveal.'); return {identity:info.identity}; }
       case 'memory.list': { const context = memoryContext(p.folderId); const objects = await listMemory(context.cwd); return new MemoryTombstones(options.dataDir).filter(objects.filter(object => isVisibleInScopes(object, context.scopes))); }
@@ -2476,6 +2542,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const domains = createDomains({
     dataDir: options.dataDir, store, db: () => store.database(), emit, emitSnapshot: state,
     folderFor: folderId => folderFor(folderId), invoke, hooks: domainHooks.hooks,
+    appToolApproval,
     modelCatalog: () => { const providers = provider.info(); return {providers, builtin: firstReadyModel(providers)}; },
     modelCatalogReady: firstProviderProbe,
     providersSettled: () => Promise.resolve(provider.ready?.()).catch(() => undefined),
@@ -2574,7 +2641,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         }
         run.stopped = true; run.retry.abort(); settleApprovals(chatId); settleQuestions(chatId);
       }
-      offIdleEvents?.(); offQueueEvents(); offInstalls?.(); nativeTurns.dispose(); askHost?.dispose();
+      offIdleEvents?.(); offQueueEvents(); offInstalls?.(); nativeTurns.dispose(); secretRequests.dispose(); askHost?.dispose();
       provider.dispose();
       // Main owns the user-visible deadline. Keep the database open until all
       // tracked callbacks settle, even if main times out and keeps the app open.
@@ -2582,7 +2649,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       await Promise.allSettled([...invocations,...[...runs.values()].flatMap(run => run.promise ? [run.promise] : [])]);
       await domains.dispose();
       await toolOutputLog.flush().catch(() => {});
-      disposed = true; snapshots.dispose(); for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); annotations.close(); projectTasks.close(); store.close();
+      disposed = true; snapshots.dispose(); for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); acpAgents.close(); annotations.close(); projectTasks.close(); store.close();
     })();
     return disposal;
   }};

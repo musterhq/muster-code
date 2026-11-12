@@ -1,4 +1,5 @@
 import { ArrowUp, Check, FileText, Folder, X } from 'lucide-react';
+import {CompareChip} from './CompareChip';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import React, {
   useCallback,
@@ -498,6 +499,7 @@ export function ChatView(): React.ReactElement {
           {chat.title}
         </span>
         {folder && <span className="chat-head-folder" title={folder.path}><Folder size={12} aria-hidden="true"/>{folder.name}</span>}
+        <CompareChip chatId={chat.id}/>
         {(headStatus==='reconnecting'||stream.transport!=='connected')&&<ReconnectingPill/>}
       </header>
       {chat.originChatId&&(()=>{const origin=state.snapshot?.chats.find(c=>c.id===chat.originChatId);return <ForkOrigin title={origin?.title} onOpen={origin?()=>void selectChat(origin.id):undefined}/>;})()}
