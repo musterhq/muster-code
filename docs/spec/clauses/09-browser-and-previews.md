@@ -228,8 +228,8 @@ Boundaries:
 #### MUS-SPEC-09-843D: A fill is refused for another site or a changed page
 
 - Precondition: The fake `op` has a login saved for `other.invalid`. The browser page is `example.test/login` over https.
-- Action: Fill the `other.invalid` login; then fill a matching login while the page navigates to `evil.invalid` during the `op` call; then fill on a page with no password or username field.
-- Expected result: The first is refused as not saved for this site; the second is refused because the page changed and nothing is typed; the third says no sign-in form was found. No text is typed into the page in any of them.
+- Action: Fill the `other.invalid` login; then fill a matching login while the page navigates to `evil.invalid` during the `op` call; then fill a matching login on a page that moves to `evil.invalid` as soon as the username is typed; then fill on a page with no password or username field.
+- Expected result: The first is refused as not saved for this site; the second is refused because the page changed and nothing is typed; the third types the username only, never the password, and is refused because the page changed; the fourth says no sign-in form was found. The password is never typed into a page of another origin.
 - Test: `packages/agent-app/tests/browser-passwords-843.test.ts::a fill is refused when the login is for another site or the page changed meanwhile`
 - Environment: Node test runner; fake page contents that record typed text; fake `op` script.
 - Known gaps: The page change check compares origins, so a single-page app that changes path keeps the fill.
