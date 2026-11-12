@@ -487,6 +487,34 @@ function toolTarget(overrides: Partial<DeviceToolTarget> = {}): DeviceToolTarget
 }
 const textOf = (result: {content: {type: string; text?: string}[]}) => result.content.filter(part => part.type === 'text').map(part => part.text).join(' ');
 
+// Spec: MUS-SPEC-21-363P (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-363p)
+test('agent tools never list, open, watch or drive a phone connected over USB', async () => {
+  const phone = {id: 'R5CX10ABCDE', name: 'Samsung SM-S921B', platform: 'android', osVersion: 'Android 15', state: 'booted', physical: true};
+  const emulator = {id: 'emulator-5554', name: 'Pixel_9', platform: 'android', osVersion: 'Android 16', state: 'booted'};
+  const reached: string[] = [];
+  const userSession = {deviceId: phone.id, name: phone.name, platform: 'android' as const, formFactor: 'phone' as const, physical: true, openedBy: 'user' as const, control: 'agent' as const, state: 'live' as const, inputReady: true, openedAt: 0};
+  const target = toolTarget({
+    list: async () => [emulator, phone],
+    session: id => id === phone.id ? userSession : undefined,
+    open: async id => { reached.push(`open ${id}`); return {...userSession, deviceId: id, chatId: 'c1', openedBy: 'agent'}; },
+    screenshot: async id => { reached.push(`screenshot ${id}`); const png = Buffer.alloc(24); png.writeUInt32BE(1080, 16); png.writeUInt32BE(2400, 20); return {png, width: 1080, height: 2400}; },
+    tap: async id => { reached.push(`tap ${id}`); return true; },
+    type: id => { reached.push(`type ${id}`); return true; },
+  });
+  const listed = textOf(await runDeviceTool(target, 'c1', 'device_list', {}));
+  assert.match(listed, /emulator-5554 · Pixel_9/);
+  assert.ok(!listed.includes(phone.id), listed);
+  assert.match(listed, /connected over USB is the person’s own/);
+  for (const [tool, args] of [['device_open', {}], ['device_screenshot', {}], ['device_tap', {x: 10, y: 10}], ['device_type', {text: 'hi'}]] as const) {
+    const result = await runDeviceTool(target, 'c1', tool, {device: phone.id, ...args});
+    assert.equal(result.isError, true, tool);
+    assert.match(textOf(result), /connected over USB is the person’s own/, tool);
+  }
+  assert.deepEqual(reached, [], 'nothing reached the phone');
+  assert.equal((await runDeviceTool(target, 'c1', 'device_open', {device: emulator.id})).isError, undefined);
+  assert.deepEqual(reached, ['open emulator-5554']);
+});
+
 // Spec: MUS-SPEC-21-363H (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-363h)
 test('agent tools: consent re-checked per call, read-only chats look only, user control stops input, taps scaled from the screenshot', async () => {
   const off = await runDeviceTool(toolTarget({agentAccess: () => false}), 'c1', 'device_list', {});

@@ -109,6 +109,7 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-363M](21-visuals-and-artifacts.md#mus-spec-21-363m) | USB Android phones are listed from adb devices -l by model with a generic frame; an unauthorized one is listed with a fix line. | [`physical Android: adb devices -l lists USB phones by model with a generic frame, and an unauthorized one with a fix`](../../../packages/agent-app/tests/devices.test.ts) |
 | [MUS-SPEC-21-363N](21-visuals-and-artifacts.md#mus-spec-21-363n) | Without an Android SDK, adb from PATH or Homebrew lists USB phones and goes on the helper's PATH; the emulator is never run. | [`physical Android: without an SDK, adb from PATH or Homebrew serves USB phones and the emulator is never run`](../../../packages/agent-app/tests/devices.test.ts) |
 | [MUS-SPEC-21-363O](21-visuals-and-artifacts.md#mus-spec-21-363o) | A USB phone opens through the helper's stream without a boot, shut down and rotate are refused, and Install APK runs adb install -r on a chosen .apk only. | [`physical Android: opens without booting, streams through the helper, refuses shutdown, and Install APK runs adb install -r`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363P](21-visuals-and-artifacts.md#mus-spec-21-363p) | device_list leaves the USB phone out and says why; device_open, device_screenshot, device_tap and device_type on it are refused with that reason and nothing reaches the phone; the emulator still works. | [`agent tools never list, open, watch or drive a phone connected over USB`](../../../packages/agent-app/tests/devices.test.ts) |
 | [MUS-SPEC-21-785A](21-visuals-and-artifacts.md#mus-spec-21-785a) | Inline and display formulas typeset with their labels; display maths scrolls sideways; prices, shell variables, code and links stay as written. | [`a reply typesets inline and display maths, labelled, with display maths scrolling sideways`](../../../packages/agent-app/tests/markdown-math-dom.tsx) |
 | [MUS-SPEC-21-785B](21-visuals-and-artifacts.md#mus-spec-21-785b) | Prices and shell variables stay plain text; code spans, code blocks and links are untouched. | [`maths parsing: prices, shell variables, code, escapes and links stay text`](../../../packages/agent-app/tests/markdown-math.test.ts) |
 | [MUS-SPEC-21-785C](21-visuals-and-artifacts.md#mus-spec-21-785c) | The four delimiters typeset as inline or display formulas. | [`maths parsing: the four delimiters, display blocks and source offsets`](../../../packages/agent-app/tests/markdown-math.test.ts) |
@@ -883,6 +884,17 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/devices.test.ts::physical Android: opens without booting, streams through the helper, refuses shutdown, and Install APK runs adb install -r`
 - Environment: Node test with fakes for adb, the helper process and its sockets; no phone, emulator or network.
 - Known gaps: Electron's file chooser and the Devices tab's Install APK button are not driven here; a real Samsung over USB is checked by hand.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363p"></a>
+#### MUS-SPEC-21-363P: Agents never use a phone connected over USB
+
+- Precondition: "Let agents use devices" on; a Workspace chat; a running emulator and a USB phone listed, the phone with a live session the person opened.
+- Action: The agent lists devices, then calls device_open, device_screenshot, device_tap and device_type on the phone, then device_open on the emulator.
+- Expected result: The list shows the emulator and not the phone, with a line saying a phone connected over USB is the person's own and agents do not use it. Every call on the phone is refused with that reason, and no open, screenshot, tap or text reaches it. The emulator opens as before.
+- Test: `packages/agent-app/tests/devices.test.ts::agent tools never list, open, watch or drive a phone connected over USB`
+- Environment: Node test of the device tool runner with a fake device target; no phone, emulator or network.
+- Known gaps: Whether agents may ever drive a real phone (an explicit opt-in) is a product decision not made here.
 - Evidence: UNVERIFIED
 
 ### Maths in replies
