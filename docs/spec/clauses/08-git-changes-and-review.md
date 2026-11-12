@@ -70,6 +70,14 @@ Boundaries:
 | [MUS-SPEC-08-175G](08-git-changes-and-review.md#mus-spec-08-175g) | The comparison is listed with the same runs, branches, start commit and state, and its compare view still shows each run's time and changed files. | [`a comparison and its runs survive a restart`](../../../packages/agent-app/tests/compare-agents-175.test.ts) |
 | [MUS-SPEC-08-175H](08-git-changes-and-review.md#mus-spec-08-175h) | One column per run with model, status, time, tokens, reply, files with counts and tests; a selected file's diff shows per run; Use this one confirms with Keep branch choices and sends them. | [`the compare view shows each run side by side and the diff of one file across runs`](../../../packages/agent-app/tests/compare-agents-175-dom.tsx) |
 | [MUS-SPEC-08-175I](08-git-changes-and-review.md#mus-spec-08-175i) | Send stays off until two models are picked and no more than four can be picked. | [`send to several picks two to four models and starts one comparison`](../../../packages/agent-app/tests/compare-agents-175-dom.tsx) |
+| [MUS-SPEC-08-329A](08-git-changes-and-review.md#mus-spec-08-329a) | ssh, scp-style and https remotes for gitlab.com, a gitlab.* host, a saved self-hosted host and bitbucket.org give the right kind, host, project path and web link; an unknown host and a local path are no forge; `remoteUrl` stays GitHub-only; GitLab reads MR, merge request and `!`. | [`GitLab and Bitbucket remotes are recognised from every git URL syntax, and a self-hosted GitLab once it has an account`](../../../packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts) |
+| [MUS-SPEC-08-329B](08-git-changes-and-review.md#mus-spec-08-329b) | With a token saved for gitlab.com, the repository, the open MR list, the create draft, create (pushed first, title prefixed Draft:), the MR view and merge (squash, head SHA sent, a stale SHA refused, rebase refused) map to the shared shapes; every request carries the token and goes only to gitlab.com. | [`GitLab with a token from Settings: list, create (pushing first), view and merge a merge request`](../../../packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts) |
+| [MUS-SPEC-08-329C](08-git-changes-and-review.md#mus-spec-08-329c) | The head pipeline’s jobs map to checks named stage / job with durations; a failed job fails, an allowed failure is neutral, a manual job is skipped, a running job is pending; the failed job’s trace becomes the log excerpt with section markers, colours and tokens removed. | [`GitLab pipelines: the head pipeline’s jobs are the checks, a failed job’s trace is the log, and CI repair can read it`](../../../packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts) |
+| [MUS-SPEC-08-329D](08-git-changes-and-review.md#mus-spec-08-329d) | With a fake glab signed in to gitlab.com and no token saved, requests go through `glab api --hostname gitlab.com` with no token from Muster, Settings lists glab as signed in there, and a self-hosted host glab is not signed in to uses the token saved for it. | [`GitLab through a signed-in glab: no token is stored or sent, and a self-hosted host with a saved account works`](../../../packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts) |
+| [MUS-SPEC-08-329E](08-git-changes-and-review.md#mus-spec-08-329e) | A token saved for git.acme.test is never sent to gitlab.com; the 401 says to sign in with glab or add a gitlab.com token in Settings › Integrations; a URL is refused as a host name; removing the account clears it. | [`a GitLab token is sent only to the host it was saved for; signed out says how to sign in`](../../../packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts) |
+| [MUS-SPEC-08-329F](08-git-changes-and-review.md#mus-spec-08-329f) | With a username and app password saved, the repository, PR list, create draft, create, PR view, build-status checks, conversation (inline and deleted comments left out, approvals as reviews), comment and merge (stale head refused before merging, squash strategy) work and every request uses basic auth. | [`Bitbucket Cloud with an app password: list, create, view, comment and merge a pull request; build statuses are its checks`](../../../packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts) |
+| [MUS-SPEC-08-329G](08-git-changes-and-review.md#mus-spec-08-329g) | Review threads, line comments, replies, resolve, reviews, reviewer requests and mark-ready each fail on GitLab and Bitbucket with a message naming the service, the noun and “GitHub-only”, and no request is sent. | [`GitHub-only review features say so on GitLab and Bitbucket, and send nothing`](../../../packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts) |
+| [MUS-SPEC-08-329H](08-git-changes-and-review.md#mus-spec-08-329h) | The summary card shows “Create merge request”, a “Merge requests” section with `!5` and “Review merge request”; the PR tab titles `!5`, has Merge but no Request review or Review, and a note says those are GitHub-only with “Open on GitLab”. | [`a GitLab remote is labelled merge request with ! numbers, and its PR tab hides the GitHub-only review controls`](../../../packages/agent-app/tests/forge-labels-329-dom.tsx) |
 
 ### Refs, dash-named files and submodules
 
@@ -596,4 +604,94 @@ Boundaries:
 - Test: `packages/agent-app/tests/compare-agents-175-dom.tsx::send to several picks two to four models and starts one comparison`
 - Environment: linkedom DOM suite; the real picker; a fake bridge.
 - Known gaps: The + menu row that opens the picker is checked in the real app.
+- Evidence: UNVERIFIED
+
+### GitLab merge requests and Bitbucket pull requests (#329)
+
+<a id="mus-spec-08-329a"></a>
+#### MUS-SPEC-08-329A: GitLab and Bitbucket remotes are recognised from every git URL syntax, and a self-hosted GitLab once it has an account
+
+- Precondition: Remote URLs in each git syntax, with and without credentials; a repository whose origin is on gitlab.com.
+- Action: Detect the forge of each URL, read the repository status, and read the labels for each forge.
+- Expected result: GitLab and Bitbucket remotes are recognised with a lower-case host, no credentials and an https web link; a host with a saved GitLab account is GitLab, an unknown one is not guessed; the status carries `forge` and `forgeUrl` while `remoteUrl` stays empty; GitLab is labelled MR / merge request / `!`, the others PR / pull request / `#`.
+- Test: `packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts::GitLab and Bitbucket remotes are recognised from every git URL syntax, and a self-hosted GitLab once it has an account`
+- Environment: Node test runner; git on PATH; a real repository in a temp folder.
+- Known gaps: Self-hosted GitLab on a host not named gitlab.* is recognised only after a token is saved for it in Settings; Bitbucket Server / Data Center is not recognised.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-329b"></a>
+#### MUS-SPEC-08-329B: GitLab with a token from Settings: list, create (pushing first), view and merge a merge request
+
+- Precondition: A local fake GitLab API; a repository whose origin is on gitlab.com and pushes to a local bare repository, on an unpublished `feature/widget` branch; a GitLab token saved in Settings › Integrations; no glab.
+- Action: Save the token, then read the repository, list merge requests, prefill and create a draft merge request, open it, merge with a stale head, with squash, and with rebase.
+- Expected result: The token never comes back to the UI; the list and the MR read like a GitHub PR (state, branches, head SHA, mergeability, reviewers); create pushes the branch then posts `Draft: Add widget`; the stale merge is refused, squash merges with the head SHA, rebase is refused as not allowed; every request has the token and goes to gitlab.com only.
+- Test: `packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts::GitLab with a token from Settings: list, create (pushing first), view and merge a merge request`
+- Environment: Node test runner; git on PATH; a local HTTP server standing in for GitLab; an in-memory secret box.
+- Known gaps: Forks (an MR from a fork project into its parent) are not created from here; GitLab’s rebase and fast-forward merge are the project’s setting and not chosen per merge.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-329c"></a>
+#### MUS-SPEC-08-329C: GitLab pipelines: the head pipeline’s jobs are the checks, and a failed job’s trace is its log
+
+- Precondition: A local fake GitLab API with an MR whose head pipeline has passed, failed, allowed-to-fail, manual and running jobs, and the failed job’s raw trace.
+- Action: Read the MR’s checks, then the log of the failed job, then ask for a GitHub-style check id.
+- Expected result: Five checks with the right states and summary (1 passed, 1 failing, 1 running, 2 skipped), failures first; the log excerpt shows the failing test and exit line with no section markers, ANSI codes or the printed token; a non-job id is refused.
+- Test: `packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts::GitLab pipelines: the head pipeline’s jobs are the checks, a failed job’s trace is the log, and CI repair can read it`
+- Environment: Node test runner; git on PATH; a local HTTP server standing in for GitLab; an in-memory secret box.
+- Known gaps: Only the head pipeline is read (child pipelines and bridge jobs are not followed); “Fix failing checks” uses the same log reader but its agent loop is covered only by the GitHub cases.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-329d"></a>
+#### MUS-SPEC-08-329D: GitLab through a signed-in glab, and a self-hosted host with a saved account
+
+- Precondition: A fake glab signed in to gitlab.com only; a local fake GitLab API; one repository on gitlab.com and one on git.acme.test.
+- Action: Open MR !5 on the gitlab.com repository, list the accounts, save a token for git.acme.test, then open MR !8 on that repository.
+- Expected result: The first MR is read through glab (auth status, then api with the URL-encoded project path) and carries no token; accounts are empty and glab lists gitlab.com; git.acme.test reads as GitLab once its token is saved and its request carries that token.
+- Test: `packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts::GitLab through a signed-in glab: no token is stored or sent, and a self-hosted host with a saved account works`
+- Environment: Node test runner; git on PATH; a fake glab script and a local HTTP server standing in for GitLab; an in-memory secret box.
+- Known gaps: The fake glab copies `glab api --include` output (status line, headers, body); a real glab release should be checked once.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-329e"></a>
+#### MUS-SPEC-08-329E: A GitLab token is sent only to the host it was saved for
+
+- Precondition: A token saved for git.acme.test; a repository on gitlab.com; no glab; a local fake GitLab that answers 401 without a token.
+- Action: Open an MR on the gitlab.com repository, try to save an account with a URL as its host, then remove the saved account.
+- Expected result: The read fails naming glab auth login, Settings › Integrations and gitlab.com; no request carried a token; the URL host is refused; the account list is empty after removal.
+- Test: `packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts::a GitLab token is sent only to the host it was saved for; signed out says how to sign in`
+- Environment: Node test runner; git on PATH; a local HTTP server standing in for GitLab; an in-memory secret box.
+- Known gaps: One token per host; several GitLab accounts on the same host are not supported.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-329f"></a>
+#### MUS-SPEC-08-329F: Bitbucket Cloud with an app password: list, create, view, comment and merge a pull request
+
+- Precondition: A local fake Bitbucket API; a repository whose origin is on bitbucket.org and pushes to a local bare repository, on an unpublished `feature/widget` branch; a username and app password saved in Settings › Integrations.
+- Action: Read the repository, list, prefill and create a PR, open it, read its checks and a failed build’s log, read and add comments, merge with a stale head and then with squash.
+- Expected result: All shapes match the GitHub surfaces; checks are 1 passed, 1 failing, 1 running; the failed build’s log says Bitbucket logs are not read yet and to open the build page; the stale merge is refused with nothing sent; squash sends `merge_strategy: squash`; every request has the basic auth header.
+- Test: `packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts::Bitbucket Cloud with an app password: list, create, view, comment and merge a pull request; build statuses are its checks`
+- Environment: Node test runner; git on PATH; a local HTTP server standing in for Bitbucket Cloud; an in-memory secret box.
+- Known gaps: Bitbucket Pipelines step logs are not read (follow-up); the head-SHA guard is checked just before the merge call, not atomically by Bitbucket; Bitbucket Server / Data Center is not supported.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-329g"></a>
+#### MUS-SPEC-08-329G: GitHub-only review features say so on GitLab and Bitbucket, and send nothing
+
+- Precondition: A repository on gitlab.com and one on bitbucket.org; local fake APIs with no routes.
+- Action: Call each GitHub-only review command on each repository.
+- Expected result: Every call is refused with “… GitHub-only …” naming GitLab / merge request or Bitbucket / pull request; the fake servers saw no request.
+- Test: `packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts::GitHub-only review features say so on GitLab and Bitbucket, and send nothing`
+- Environment: Node test runner; git on PATH; local HTTP servers standing in for GitLab and Bitbucket.
+- Known gaps: The PR tab hiding these controls is MUS-SPEC-08-329H.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-08-329h"></a>
+#### MUS-SPEC-08-329H: A GitLab remote is labelled merge request, and the PR tab hides GitHub-only review controls
+
+- Precondition: A folder whose status reports a GitLab remote (no GitHub `remoteUrl`) and one open merge request !5 on another branch.
+- Action: Render the summary card, expand the merge request row, then render the PR tab for !5.
+- Expected result: The card offers “Create merge request”, heads its list “Merge requests”, numbers the row `!5` and offers “Review merge request”; the PR tab titles it `!5`, keeps Merge, shows no Request review or Review button, and a note says reviews are GitHub-only with an “Open on GitLab” link.
+- Test: `packages/agent-app/tests/forge-labels-329-dom.tsx::a GitLab remote is labelled merge request with ! numbers, and its PR tab hides the GitHub-only review controls`
+- Environment: linkedom DOM; stubbed bridge; no Electron.
+- Known gaps: Bitbucket uses the GitHub words (pull request, `#`) and the same hidden controls; it has no separate DOM case. The Settings › Integrations Git hosts card has no DOM case.
 - Evidence: UNVERIFIED

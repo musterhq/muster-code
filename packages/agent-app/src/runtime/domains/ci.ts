@@ -1,8 +1,8 @@
 import {randomUUID} from 'node:crypto';
 import type {Folder} from '../../shared/protocol.ts';
 import {CI_REPAIR_DEFAULT_ATTEMPTS, CI_REPAIR_MAX_ATTEMPTS, ciRepairActive, type CiRepair} from '../../shared/domains/ci-protocol.ts';
-import {abortableSleep, checkLog, REPAIR_TIMING, runRepairLoop, type RepairTiming} from '../github-ci.ts';
-import {getPullRequest, listChecks} from '../github.ts';
+import {abortableSleep, REPAIR_TIMING, runRepairLoop, type RepairTiming} from '../github-ci.ts';
+import {forgeFor} from '../forge/index.ts';
 import {gitStatus} from '../git-local.ts';
 import type {DomainContext, DomainModule} from './types.ts';
 
@@ -55,13 +55,15 @@ export function createCiDomain(context: DomainContext): DomainModule {
 
   return {
     handlers: {
-      'ci.checkLog': input => checkLog(folder(input.folderId).path, prNumber(input.number), input.checkId, input.refresh === true),
+      'ci.checkLog': async input => { const path = folder(input.folderId).path; return (await forgeFor(path)).checkLog(path, prNumber(input.number), input.checkId, input.refresh === true); },
       'ci.repair.start': async input => {
         const target = folder(input.folderId), number = prNumber(input.number);
         for (const entry of repairs.values()) if (entry.state.folderId === target.id && entry.state.number === number && ciRepairActive(entry.state)) throw new Error(`A repair is already running for #${number}. Stop it first.`);
         const requested = input.maxAttempts === undefined ? CI_REPAIR_DEFAULT_ATTEMPTS : Number(input.maxAttempts);
         if (!Number.isInteger(requested) || requested < 1 || requested > CI_REPAIR_MAX_ATTEMPTS) throw new Error(`Choose between 1 and ${CI_REPAIR_MAX_ATTEMPTS} attempts.`);
-        const pr = await getPullRequest(target.path, number, true);
+        // #329: the folder's forge (GitHub, GitLab or Bitbucket) reads the PR/MR, its checks and their logs.
+        const forge = await forgeFor(target.path);
+        const pr = await forge.get(target.path, number, true);
         if (pr.state !== 'open') throw new Error(`#${number} is ${pr.state}; only open pull requests can be repaired.`);
         // The agent commits in this folder, so it has to be on the PR's branch.
         const local = await gitStatus(target.path);
@@ -78,8 +80,8 @@ export function createCiDomain(context: DomainContext): DomainModule {
         trim();
         publish({...state, attempts: []});
         void runRepairLoop(state, {
-          checks: refresh => listChecks(target.path, number, refresh),
-          logs: async failing => (await Promise.all(failing.slice(0, 6).map(check => checkLog(target.path, number, check.id).catch(() => null)))).filter(log => log !== null),
+          checks: refresh => forge.checks(target.path, number, refresh),
+          logs: async failing => (await Promise.all(failing.slice(0, 6).map(check => forge.checkLog(target.path, number, check.id).catch(() => null)))).filter(log => log !== null),
           runAgent: async (prompt, attempt) => {
             if (!state.chatId) {
               const chat = await context.invoke('chat.create', {folderId: target.id});

@@ -23,6 +23,7 @@ import {CheckLogDisclosure, CiRepairControls, useCiRepair} from './CiRepair';
 import {useStoreSelector} from '../useStore';
 import { plural } from '../../shared/wording.ts';
 import {Tip} from './Tooltip';
+import {forgeFeatures, forgeTerms, type ForgeTerms} from '../../shared/forge';
 
 // ---------------------------------------------------------------------------
 // Data
@@ -78,6 +79,8 @@ function leaveCreate(tabId: string, folderId: string, number: number, title: str
 // Create (GIT-07)
 
 function CreatePullRequest({folderId, tabId}: {folderId: string; tabId: string}): React.ReactElement {
+  const repoInfo = useQuery<GitHubRepo>(`repo:${folderId}`, refresh => invoke('github.repo', {folderId, refresh}));
+  const terms = forgeTerms(repoInfo.value?.forge);
   const [base, setBase] = useState<string>();
   const draft = useQuery<GitHubCreateDraft>(`draft:${folderId}:${base ?? ''}`, () => invoke('github.pr.draft', {folderId, ...(base ? {base} : {})}));
   const [title, setTitle] = useState(''), [body, setBody] = useState(''), [isDraft, setIsDraft] = useState(false);
@@ -101,10 +104,10 @@ function CreatePullRequest({folderId, tabId}: {folderId: string; tabId: string})
     } catch (cause) { setError(cleanIpcError(cause)); }
     finally { setBusy(false); }
   };
-  return <form className="pr-create" onSubmit={event => void submit(event)} aria-label="Create pull request">
-    <header className="pr-create-head"><GitPullRequest size={16} aria-hidden="true"/><h2>New pull request</h2></header>
+  return <form className="pr-create" onSubmit={event => void submit(event)} aria-label={`Create ${terms.noun}`}>
+    <header className="pr-create-head"><GitPullRequest size={16} aria-hidden="true"/><h2>New {terms.noun}</h2></header>
     {value.existing && <div className="pr-notice" role="status">
-      <span>This branch already has an open pull request: #{value.existing.number} {value.existing.title}</span>
+      <span>This branch already has an open {terms.noun}: {terms.sigil}{value.existing.number} {value.existing.title}</span>
       <button type="button" onClick={() => leaveCreate(tabId, folderId, value.existing!.number, value.existing!.title)}>Open it</button>
     </div>}
     <div className="pr-branches">
@@ -127,7 +130,7 @@ function CreatePullRequest({folderId, tabId}: {folderId: string; tabId: string})
     {error && <p className="pr-error" role="alert">{error}</p>}
     <div className="pr-form-actions">
       {value.compareUrl && <button type="button" className="pr-button is-quiet" onClick={() => openBrowserTab(value.compareUrl!)}><ArrowUpRight size={12} aria-hidden="true"/>Open in browser</button>}
-      <button type="submit" className="pr-button is-primary" disabled={busy || !title.trim()}>{busy ? <><Loader2 size={12} className="pr-spin" aria-hidden="true"/>{value.needsPush ? 'Pushing…' : 'Creating…'}</> : isDraft ? 'Create draft pull request' : 'Create pull request'}</button>
+      <button type="submit" className="pr-button is-primary" disabled={busy || !title.trim()}>{busy ? <><Loader2 size={12} className="pr-spin" aria-hidden="true"/>{value.needsPush ? 'Pushing…' : 'Creating…'}</> : isDraft ? `Create draft ${terms.noun}` : `Create ${terms.noun}`}</button>
     </div>
   </form>;
 }
@@ -139,6 +142,8 @@ type Section = 'conversation' | 'checks' | 'files';
 
 function mergeability(pr: GitHubPullRequest): {label: string; tone: 'ok' | 'warn' | 'bad' | 'muted'} {
   if (pr.state !== 'open') return {label: pr.state === 'merged' ? 'Merged' : 'Closed', tone: 'muted'};
+  // #329: Bitbucket reports conflicts only when you merge.
+  if (pr.mergeableState === 'unreported') return {label: 'Conflicts are checked when you merge', tone: 'muted'};
   if (pr.mergeable === null) return {label: 'Checking mergeability…', tone: 'muted'};
   if (pr.mergeable === false || pr.mergeableState === 'dirty') return {label: 'Has conflicts with the base branch', tone: 'bad'};
   switch (pr.mergeableState) {
@@ -155,6 +160,7 @@ const METHOD_LABEL: Record<GitHubMergeMethod, string> = {merge: 'Create a merge 
 function PullRequestView({folderId, number, jump}: {folderId: string; number: number; jump?: {section: Section; n: number}}): React.ReactElement {
   const pr = useQuery<GitHubPullRequest>(`pr:${folderId}:${number}`, refresh => invoke('github.pr.get', {folderId, number, refresh}));
   const repo = useQuery<GitHubRepo>(`repo:${folderId}`, refresh => invoke('github.repo', {folderId, refresh}));
+  const terms = forgeTerms(repo.value?.forge);
   const checks = useQuery<GitHubChecks>(`checks:${folderId}:${number}:${pr.value?.headSha ?? ''}`, refresh => invoke('github.pr.checks', {folderId, number, refresh}));
   const [section, setSection] = useState<Section>(jump?.section ?? 'conversation');
   useEffect(() => { if (jump) setSection(jump.section); }, [jump?.n]);
@@ -178,16 +184,16 @@ function PullRequestView({folderId, number, jump}: {folderId: string; number: nu
     void reloadChecks();
     if (shownHead && repair.headSha && repair.headSha !== shownHead) void reloadPr();
   }, [repair?.headSha, repair?.phase, repair?.checks?.pending, repair?.checks?.failed]);
-  if (!pr.value) return pr.error ? <ResourceState kind="error" message={pr.error} onRetry={() => void pr.reload()}/> : <ResourceState kind="loading" label="Loading pull request" rows={5}/>;
+  if (!pr.value) return pr.error ? <ResourceState kind="error" message={pr.error} onRetry={() => void pr.reload()}/> : <ResourceState kind="loading" label={`Loading ${terms.noun}`} rows={5}/>;
   const value = pr.value;
   const merge = mergeability(value);
   const summary = checks.value?.summary;
   return <div className="pr-view">
     <header className="pr-header">
       <div className="pr-title-row">
-        <h2 className="pr-title">{value.title || `Pull request #${value.number}`} <span className="pr-muted">#{value.number}</span></h2>
-        <Tip label="Refresh"><button type="button" className="icon-button" aria-label="Refresh pull request" disabled={pr.loading} onClick={refreshAll}><RefreshCw size={13} className={pr.loading ? 'pr-spin' : undefined}/></button></Tip>
-        <button type="button" className="pr-button is-quiet" onClick={() => openBrowserTab(value.url)} title="Open on GitHub"><ArrowUpRight size={12} aria-hidden="true"/>Open in browser</button>
+        <h2 className="pr-title">{value.title || `${terms.Noun} ${terms.sigil}${value.number}`} <span className="pr-muted">{terms.sigil}{value.number}</span></h2>
+        <Tip label="Refresh"><button type="button" className="icon-button" aria-label={`Refresh ${terms.noun}`} disabled={pr.loading} onClick={refreshAll}><RefreshCw size={13} className={pr.loading ? 'pr-spin' : undefined}/></button></Tip>
+        <button type="button" className="pr-button is-quiet" onClick={() => openBrowserTab(value.url)} title={`Open on ${terms.label}`}><ArrowUpRight size={12} aria-hidden="true"/>Open in browser</button>
       </div>
       <div className="pr-meta">
         <PrStatePill state={value.state} draft={value.draft}/>
@@ -198,21 +204,22 @@ function PullRequestView({folderId, number, jump}: {folderId: string; number: nu
         {value.requestedReviewers.length > 0 && <span className="pr-muted">Review requested from {value.requestedReviewers.join(', ')}</span>}
       </div>
       {pr.error && <p className="pr-error" role="alert">{pr.error}</p>}
-      <PullRequestActions folderId={folderId} pr={value} repo={repo.value} checks={checks.value} onChanged={next => { if (next) void pr.reload(); else refreshAll(); }}/>
+      <PullRequestActions folderId={folderId} pr={value} repo={repo.value} terms={terms} checks={checks.value} onChanged={next => { if (next) void pr.reload(); else refreshAll(); }}/>
     </header>
-    <nav className="pr-sections" role="tablist" aria-label="Pull request sections">
+    <nav className="pr-sections" role="tablist" aria-label={`${terms.Noun} sections`}>
       {([['conversation', 'Conversation'], ['checks', summary ? `Checks ${summary.failed ? `· ${summary.failed} failing` : summary.pending ? `· ${summary.pending} running` : `· ${summary.passed} passed`}` : 'Checks'], ['files', `Files changed · ${value.changedFiles}`]] as const).map(([id, label]) =>
         <button key={id} type="button" role="tab" aria-selected={section === id} className="pr-section-tab" onClick={() => setSection(id)}>{id === 'checks' && checksTone(summary) && <CheckStateIcon tone={checksTone(summary)} size={12}/>}{label}</button>)}
     </nav>
     <div className="pr-section-body" role="tabpanel">
       {section === 'conversation' && <ConversationSection folderId={folderId} pr={value}/>}
       {section === 'checks' && <ChecksSection checks={checks} folderId={folderId} pr={value}/>}
-      {section === 'files' && <FilesSection key={threadsKey} folderId={folderId} pr={value}/>}
+      {section === 'files' && <FilesSection key={threadsKey} folderId={folderId} pr={value} terms={terms} threadsSupported={forgeFeatures(repo.value?.forge).reviewThreads}/>}
     </div>
   </div>;
 }
 
-function PullRequestActions({folderId, pr, repo, checks, onChanged}: {folderId: string; pr: GitHubPullRequest; repo?: GitHubRepo; checks?: GitHubChecks; onChanged: (pr?: GitHubPullRequest) => void}): React.ReactElement | null {
+function PullRequestActions({folderId, pr, repo, checks, onChanged, terms}: {folderId: string; pr: GitHubPullRequest; repo?: GitHubRepo; checks?: GitHubChecks; onChanged: (pr?: GitHubPullRequest) => void; terms: ForgeTerms}): React.ReactElement | null {
+  const features = forgeFeatures(repo?.forge);
   const [busy, setBusy] = useState<string>();
   const [panel, setPanel] = useState<'review' | 'reviewers' | null>(null);
   const [reviewers, setReviewers] = useState('');
@@ -234,14 +241,14 @@ function PullRequestActions({folderId, pr, repo, checks, onChanged}: {folderId: 
   const mergeBlocked = pr.draft || pr.mergeable === false;
   return <div className="pr-actions">
     <div className="pr-action-row">
-      {pr.draft && <button type="button" className="pr-button" disabled={!!busy} onClick={() => void run('ready', () => invoke('github.pr.ready', {folderId, number: pr.number}), 'Marked ready for review')}>{busy === 'ready' ? 'Marking…' : 'Mark ready for review'}</button>}
-      <button type="button" className="pr-button" aria-expanded={panel === 'reviewers'} disabled={!!busy} onClick={() => setPanel(value => value === 'reviewers' ? null : 'reviewers')}>Request review</button>
-      <button type="button" className="pr-button" aria-expanded={panel === 'review'} disabled={!!busy} onClick={() => setPanel(value => value === 'review' ? null : 'review')}>Review<ChevronDown size={12} aria-hidden="true"/></button>
+      {pr.draft && features.markReady && <button type="button" className="pr-button" disabled={!!busy} onClick={() => void run('ready', () => invoke('github.pr.ready', {folderId, number: pr.number}), 'Marked ready for review')}>{busy === 'ready' ? 'Marking…' : 'Mark ready for review'}</button>}
+      {features.reviewers && <button type="button" className="pr-button" aria-expanded={panel === 'reviewers'} disabled={!!busy} onClick={() => setPanel(value => value === 'reviewers' ? null : 'reviewers')}>Request review</button>}
+      {features.reviews && <button type="button" className="pr-button" aria-expanded={panel === 'review'} disabled={!!busy} onClick={() => setPanel(value => value === 'review' ? null : 'review')}>Review<ChevronDown size={12} aria-hidden="true"/></button>}
       <span className="pr-merge-group">
         <select value={chosen} aria-label="Merge method" disabled={!!busy || mergeBlocked} onChange={event => setMethod(event.target.value as GitHubMergeMethod)}>
           {methods.map(name => <option key={name} value={name}>{METHOD_LABEL[name]}</option>)}
         </select>
-        <button type="button" className="pr-button is-primary" disabled={!!busy || mergeBlocked} title={pr.draft ? 'Mark the pull request ready first' : pr.mergeable === false ? 'Resolve conflicts first' : undefined} onClick={() => setConfirming(true)}>{busy === 'merge' ? 'Merging…' : 'Merge'}</button>
+        <button type="button" className="pr-button is-primary" disabled={!!busy || mergeBlocked} title={pr.draft ? `Mark the ${terms.noun} ready first` : pr.mergeable === false ? 'Resolve conflicts first' : undefined} onClick={() => setConfirming(true)}>{busy === 'merge' ? 'Merging…' : 'Merge'}</button>
       </span>
     </div>
     {panel === 'reviewers' && <form className="pr-inline-form" onSubmit={event => { event.preventDefault(); const names = reviewers.split(/[\s,]+/).filter(Boolean); void run('reviewers', () => invoke('github.pr.requestReview', {folderId, number: pr.number, reviewers: names}), `Requested review from ${names.join(', ')}`).then(ok => { if (ok) { setReviewers(''); setPanel(null); } }); }}>
@@ -256,12 +263,13 @@ function PullRequestActions({folderId, pr, repo, checks, onChanged}: {folderId: 
       </fieldset>
       <button type="submit" className="pr-button is-primary" disabled={!!busy || (reviewEvent !== 'APPROVE' && !reviewBody.trim())}>{busy === 'review' ? 'Submitting…' : 'Submit review'}</button>
     </form>}
+    {(!features.reviews || !features.markReady) && <p className="pr-muted" role="note">Reviews, reviewer requests{pr.draft ? ', marking ready' : ''} and line comments are GitHub-only in Muster for now. <button type="button" className="pr-link" onClick={() => openBrowserTab(pr.url)}>Open on {terms.label}<ArrowUpRight size={11} aria-hidden="true"/></button></p>}
     {error && <p className="pr-error" role="alert">{error}</p>}
-    <ConfirmSheet open={confirming} busy={busy === 'merge'} title={`${METHOD_LABEL[chosen]} #${pr.number}?`}
-      description={`Merges ${pr.headRef} into ${pr.baseRef} on GitHub.${failing ? ` ${failing} check${failing === 1 ? ' is' : 's are'} failing.` : running ? ` ${running} check${running === 1 ? ' is' : 's are'} still running.` : ''} This can’t be undone from here.`}
+    <ConfirmSheet open={confirming} busy={busy === 'merge'} title={`${METHOD_LABEL[chosen]} ${terms.sigil}${pr.number}?`}
+      description={`Merges ${pr.headRef} into ${pr.baseRef} on ${terms.label}.${failing ? ` ${failing} check${failing === 1 ? ' is' : 's are'} failing.` : running ? ` ${running} check${running === 1 ? ' is' : 's are'} still running.` : ''} This can’t be undone from here.`}
       onCancel={() => setConfirming(false)}
       actions={[{label: 'Cancel', run: () => setConfirming(false)}, {label: 'Merge', primary: true, run: () => {
-        void run('merge', () => invoke('github.pr.merge', {folderId, number: pr.number, method: chosen, expectedHeadSha: pr.headSha}), `Merged #${pr.number}`).finally(() => setConfirming(false));
+        void run('merge', () => invoke('github.pr.merge', {folderId, number: pr.number, method: chosen, expectedHeadSha: pr.headSha}), `Merged ${terms.sigil}${pr.number}`).finally(() => setConfirming(false));
       }}]}/>
   </div>;
 }
@@ -333,9 +341,10 @@ type LineTarget = {path: string; line: number; side: 'LEFT' | 'RIGHT'};
 const lineKey = (path: string, side: string, line: number | null) => `${path}\0${side}\0${line ?? ''}`;
 const rowTarget = (path: string, row: EditorLine): LineTarget | undefined => row.line == null ? undefined : {path, line: row.line, side: row.kind === 'deleted' ? 'LEFT' : 'RIGHT'};
 
-function FilesSection({folderId, pr}: {folderId: string; pr: GitHubPullRequest}): React.ReactElement {
+function FilesSection({folderId, pr, terms, threadsSupported = true}: {folderId: string; pr: GitHubPullRequest; terms?: ForgeTerms; threadsSupported?: boolean}): React.ReactElement {
   const files = useQuery<GitHubPullFiles>(`files:${folderId}:${pr.number}:${pr.headSha}`, refresh => invoke('github.pr.files', {folderId, number: pr.number, refresh}));
-  const threads = useQuery<{items: GitHubReviewThread[]}>(`threads:${folderId}:${pr.number}`, refresh => invoke('github.pr.threads', {folderId, number: pr.number, refresh}));
+  // #329: line threads are GitHub-only; other hosts show the diff without them (and say so).
+  const threads = useQuery<{items: GitHubReviewThread[]}>(`threads:${folderId}:${pr.number}:${threadsSupported}`, refresh => threadsSupported ? invoke('github.pr.threads', {folderId, number: pr.number, refresh}) : Promise.resolve({items: []}));
   const byLine = useMemo(() => {
     const map = new Map<string, GitHubReviewThread[]>();
     for (const thread of threads.value?.items ?? []) { const key = lineKey(thread.path, thread.side, thread.line); map.set(key, [...(map.get(key) ?? []), thread]); }
@@ -350,20 +359,21 @@ function FilesSection({folderId, pr}: {folderId: string; pr: GitHubPullRequest})
       <button type="button" className="pr-link" onClick={() => setBulk(value => ({open: true, n: (value?.n ?? 0) + 1}))}>Expand all</button>
     </div>}
     {threads.error && <p className="pr-error" role="alert">Review comments couldn’t load: {threads.error}</p>}
-    {files.value.truncated && <p className="pr-muted" role="note">Showing the first {files.value.items.length} files. Open the pull request in the browser for the rest.</p>}
-    {files.value.items.map(file => <PullFile key={file.path} folderId={folderId} pr={pr} file={file} byLine={byLine} bulk={bulk}
+    {!threadsSupported && <p className="pr-muted" role="note">Line comments are GitHub-only in Muster for now; open this {terms?.noun ?? 'pull request'} on {terms?.label ?? 'its host'} to comment on a line.</p>}
+    {files.value.truncated && <p className="pr-muted" role="note">Showing the first {files.value.items.length} files. Open the {terms?.noun ?? 'pull request'} in the browser for the rest.</p>}
+    {files.value.items.map(file => <PullFile key={file.path} folderId={folderId} pr={pr} file={file} byLine={byLine} bulk={bulk} canComment={threadsSupported}
       outdated={(threads.value?.items ?? []).filter(thread => thread.path === file.path && (thread.line == null || thread.isOutdated))} onThreadsChanged={() => void threads.reload()}/>)}
   </div>;
 }
 
-function PullFile({folderId, pr, file, byLine, outdated, onThreadsChanged, bulk}: {folderId: string; pr: GitHubPullRequest; file: GitHubPullFile; byLine: Map<string, GitHubReviewThread[]>; outdated: GitHubReviewThread[]; onThreadsChanged: () => void; bulk?: {open: boolean; n: number}}): React.ReactElement {
+function PullFile({folderId, pr, file, byLine, outdated, onThreadsChanged, bulk, canComment = true}: {canComment?: boolean; folderId: string; pr: GitHubPullRequest; file: GitHubPullFile; byLine: Map<string, GitHubReviewThread[]>; outdated: GitHubReviewThread[]; onThreadsChanged: () => void; bulk?: {open: boolean; n: number}}): React.ReactElement {
   const [open, setOpen] = useState(true);
   useEffect(() => { if (bulk) setOpen(bulk.open); }, [bulk?.n]);
   const [composing, setComposing] = useState<LineTarget>();
   const model = useMemo(() => file.patch ? patchEditorModel(file.patch, file.path) : undefined, [file.patch, file.path]);
   const extras: DiffLineExtras = {
     addLabel: 'Comment on line',
-    onAdd: pr.state === 'open' ? row => setComposing(rowTarget(file.path, row)) : undefined,
+    onAdd: pr.state === 'open' && canComment ? row => setComposing(rowTarget(file.path, row)) : undefined,
     render: row => {
       const target = rowTarget(file.path, row); if (!target) return null;
       const list = (byLine.get(lineKey(file.path, target.side, target.line)) ?? []).filter(thread => !thread.isOutdated);
