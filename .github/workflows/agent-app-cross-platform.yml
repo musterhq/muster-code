@@ -53,9 +53,10 @@ jobs:
       - name: Linux build tools
         if: matrix.os == 'linux'
         working-directory: .
-        # The runner image points apt at an Azure mirror list that sometimes stops resolving; use Ubuntu's own servers and retry.
+        # The runner's apt mirror list (Azure, then *.ubuntu.com) can stop resolving while other hosts work: try the
+        # kernel.org Ubuntu mirror first, keep Ubuntu's own archive as the fallback, and retry.
         run: |
-          sudo sed -i 's#mirror+file:/etc/apt/apt-mirrors.txt#http://archive.ubuntu.com/ubuntu/#' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+          printf 'http://mirrors.edge.kernel.org/ubuntu/\tpriority:1\nhttp://archive.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
           sudo apt-get -o Acquire::Retries=5 update && sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends build-essential python3 xvfb libgtk-3-0 libnss3 libxss1 libgbm1 libasound2t64 rpm fakeroot desktop-file-utils xdg-utils
 
       - id: electron
@@ -226,8 +227,10 @@ jobs:
           path: packages/agent-app/release-dist
       - name: Install the deb with apt
         run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb xauth desktop-file-utils ./release-dist/Muster-Agent-*-linux-amd64.deb
+          # *.ubuntu.com can stop resolving on the runners while other hosts work: use the kernel.org Ubuntu mirror.
+          sed -i -E 's#http://(archive|security)\.ubuntu\.com/ubuntu/?#http://mirrors.edge.kernel.org/ubuntu/#' /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list 2>/dev/null || true
+          apt-get -o Acquire::Retries=5 update
+          DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends xvfb xauth desktop-file-utils ./release-dist/Muster-Agent-*-linux-amd64.deb
           ! dpkg -s libfuse2t64 >/dev/null 2>&1 && ! dpkg -s libfuse2 >/dev/null 2>&1 && echo "libfuse2 is not installed"
           bash scripts/test-linux-install.sh
       - name: Launch the installed app (as a regular user)
