@@ -11,7 +11,7 @@ import {basename, join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {startRelay, type DevRelay} from '../../relay/src/relay.ts';
 import {acceptUpgrade} from '../../server/src/net/ws.ts';
-import {lanHosts} from '../src/runtime/mobile/lan-listener.ts';
+import {LanListener, lanHosts} from '../src/runtime/mobile/lan-listener.ts';
 import {createAgentService} from '../src/runtime/service.ts';
 import type {ProviderAdapter, ProviderInput, ProviderResult} from '../src/runtime/provider.ts';
 import {SecretStore} from '../src/runtime/secret-store.ts';
@@ -1048,7 +1048,8 @@ test('the LAN listener takes only this desktop’s route from a matching Host an
   for (const frame of wire) {
     assert.match(frame, /^[A-Za-z0-9+/=_-]+$/, 'base64 only');
     const plain = Buffer.from(frame, 'base64').toString('latin1');
-    for (const marker of ['ZEBRA', 'GIRAFFE', 'Quarterly numbers', '{"']) assert.ok(!plain.includes(marker), `no ${marker} on the wire`);
+    // A frame's JSON would start with {"t": (two bytes such as {" turn up in random ciphertext about once in 65,536 places).
+    for (const marker of ['ZEBRA', 'GIRAFFE', 'Quarterly numbers', '{"t":']) assert.ok(!plain.includes(marker), `no ${marker} on the wire`);
   }
   // An unknown phone key gets the same answer as through the relay.
   const stranger = crypto.generateKeyPair();
@@ -1067,6 +1068,31 @@ test('the LAN listener takes only this desktop’s route from a matching Host an
   // Phone access off: nothing listens on the LAN port any more.
   await d.service.invoke('mobile.relay.set', {url: null});
   await assert.rejects(new Promise((resolve, reject) => { const sock = netConnect(Number(address!.split(':')[1]), '127.0.0.1', () => { sock.destroy(); resolve(null); }); sock.on('error', reject); }), /ECONNREFUSED/);
+});
+
+// Spec: MUS-SPEC-23-13E (docs/spec/clauses/23-mobile.md#mus-spec-23-13e)
+test('a LAN phone that stops reading is cut off at the buffer cap instead of the desktop holding everything sent to it', async t => {
+  const route = 'ab'.repeat(16), cap = 256 * 1024;
+  const opened: number[] = [], closed: number[] = [];
+  const listener = new LanListener(route, {open: conn => opened.push(conn), data: () => undefined, closed: conn => closed.push(conn)}, {hosts: ['127.0.0.1'], port: 0, maxBufferedBytes: cap});
+  await listener.start();
+  t.after(() => listener.stop());
+  const [address] = listener.addresses;
+  // A phone that upgrades, then stops reading: its TCP window fills and everything else waits on the desktop.
+  const stalled = netConnect(listener.port, '127.0.0.1');
+  t.after(() => stalled.destroy());
+  await new Promise<void>(resolve => stalled.once('connect', () => resolve()));
+  stalled.write([`GET /v1/phone/${route} HTTP/1.1`, `Host: ${address}`, 'Upgrade: websocket', 'Connection: Upgrade', 'Sec-WebSocket-Version: 13', 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==', '', ''].join('\r\n'));
+  await until(() => opened.length === 1, 'the upgrade');
+  stalled.pause();
+  const conn = opened[0]!;
+  const message = 'A'.repeat(60_000);
+  let sent = 0;
+  for (; sent < 2000 && !closed.includes(conn); sent++) { listener.send(conn, message); if (sent % 20 === 0) await delay(1); }
+  assert.ok(closed.includes(conn), `the stalled phone was cut off (after ${sent} messages, ${sent * 60_000} bytes)`);
+  assert.ok(sent * 60_000 < 64 * 1024 * 1024, 'long before the desktop held everything sent to it');
+  // The listener still serves other phones.
+  assert.match(await upgradeStatus(address!, `/v1/phone/${route}`, {Host: address!}), / 101 /);
 });
 
 // Spec: MUS-SPEC-23-13C (docs/spec/clauses/23-mobile.md#mus-spec-23-13c)

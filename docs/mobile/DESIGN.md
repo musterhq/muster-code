@@ -95,7 +95,7 @@ adds is a socket on the local network, and that socket is narrowed as far as it 
 | Off while phone access is off, and switchable | Nothing listens on a computer that never paired a phone, or whose owner turned it off |
 | Only `GET /v1/phone/<this desktop's route>` upgrades; everything else is 404 | No other endpoint, no desktop registration, no HTTP content |
 | `Host` must be the literal address it was reached on; an `Origin`, if sent, must be that same address | A DNS-rebinding page sends a name; a web page on another site sends its own origin. React Native sends the target as its origin |
-| Messages over one Noise message (87,384 base64 characters) close the socket (1009); missed pongs drop it; 64 sockets at most | The relay's own limits; the session code still caps unauthenticated connections (32) and times out stalled handshakes (10 s) for both paths |
+| Messages over one Noise message (87,384 base64 characters) close the socket (1009); missed pongs drop it, and so does a phone that stops reading while 8 MB waits for it; 64 sockets at most | The relay's own limits; the session code still caps unauthenticated connections (32) and times out stalled handshakes (10 s) for both paths |
 | Plain `ws://` | Everything inside is Noise ciphertext, the same reason a `ws://` relay is allowed on a private network (MUS-SPEC-23-6B). A LAN attacker gets what a malicious relay gets: sizes, timing and the power to drop. The phone accepts LAN addresses only as literal private addresses (from the QR or a verified hello), so it never dials a name or a public host in clear |
 
 On the phone, Android needs cleartext allowed for `ws://` (`expo-build-properties`, `usesCleartextTraffic`) and iOS asks

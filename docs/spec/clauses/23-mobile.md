@@ -69,6 +69,7 @@ Boundaries:
 | [MUS-SPEC-23-13B](23-mobile.md#mus-spec-23-13b) | The LAN listener answers 101 only for this desktop's phone route with a literal-address Host and no foreign Origin (404 for other paths, 403 for a name or a foreign Origin); a read-only phone is refused over it as over the relay; nothing on its socket is plaintext; an unknown key closes 4403; an oversized message closes 1009; with phone access off nothing listens. | [`the LAN listener takes only this desktop’s route from a matching Host and Origin, runs the same handshake and access checks, and carries only ciphertext`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-13C](23-mobile.md#mus-spec-23-13c) | Of a computer's interfaces only private IPv4 and unique-local IPv6 addresses are used (no loopback, public, link-local, carrier-grade NAT, container or VM bridge); the link parser keeps at most four private literal host:port entries and drops the rest. | [`the LAN listener binds only private-network addresses, and the link carries only those`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-13D](23-mobile.md#mus-spec-23-13d) | Settings › Phone lists the LAN addresses and its switch calls mobile.lan.set to turn direct connections off. | [`Phone settings show the addresses phones reach directly on this network and turn it off`](../../../packages/agent-app/tests/mobile-settings-326-dom.tsx) |
+| [MUS-SPEC-23-13E](23-mobile.md#mus-spec-23-13e) | A phone on the same network that stops reading is cut off once the data waiting for it passes the cap, instead of the desktop holding everything it sends; the listener keeps serving other phones. | [`a LAN phone that stops reading is cut off at the buffer cap instead of the desktop holding everything sent to it`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-14A](23-mobile.md#mus-spec-23-14a) | While a pairing is in flight the scanner is hidden and the field and Pair button do nothing, so a second attempt never starts; the check code stays on screen with no error; when the attempt itself ends its error shows and pairing can start again. | [`a second scan or Pair press while pairing is in flight is ignored and never hides the check code`](../../../packages/mobile/tests/pair-screen.test.tsx) |
 | [MUS-SPEC-23-14B](23-mobile.md#mus-spec-23-14b) | Every text on the pair screen and the camera prompt has at least 4.5:1 contrast with what is behind it, and the Allow camera and Pair buttons have edges of at least 3:1. | [`the pair screen text and the camera prompt meet WCAG AA contrast`](../../../packages/mobile/tests/pair-contrast.test.tsx) |
 | [MUS-SPEC-23-14C](23-mobile.md#mus-spec-23-14c) | Opening muster://pair?… lands on the pair route with the link in the field, and pairing starts once with the parsed link. | [`a muster://pair deep link fills in the link and starts pairing`](../../../packages/mobile/tests/deep-link.test.tsx) |
@@ -660,4 +661,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/mobile-settings-326-dom.tsx::Phone settings show the addresses phones reach directly on this network and turn it off`
 - Environment: DOM suite (linkedom) with a stubbed window.muster bridge; no runtime.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-13e"></a>
+#### MUS-SPEC-23-13E: A LAN phone that stops reading is cut off at the buffer cap
+
+- Precondition: The LAN listener on 127.0.0.1 with its per-socket buffer cap lowered by a test option; a phone socket that completed the WebSocket upgrade.
+- Action: The phone stops reading (a phone on a flaky network during a streaming reply) while the desktop keeps sending it messages; then a second phone connects.
+- Expected result: The listener closes the stalled socket and reports it closed once the bytes waiting for it pass the cap; the bytes the desktop held for it never go much past the cap; the second phone's upgrade still answers 101.
+- Test: `packages/agent-app/tests/mobile-326.test.ts::a LAN phone that stops reading is cut off at the buffer cap instead of the desktop holding everything sent to it`
+- Environment: Node test runner; the real LanListener on 127.0.0.1 and raw TCP sockets as the phones.
+- Known gaps: The production cap (8 MB) is not filled. The relay path's own buffering is the relay's to bound; the dev relay does not.
 - Evidence: UNVERIFIED

@@ -11,7 +11,7 @@
  * - Host must be the literal address it was reached on (a DNS-rebinding page sends a name), and an Origin, if any, must be that
  *   same address (React Native sends its own; a browser page elsewhere sends its own origin). Otherwise 403.
  * - Messages larger than one Noise message (87,384 base64 characters) close the socket, the same cap as the relay, and a
- *   socket that stops answering pings is dropped. At most 64 sockets at once; the session code also caps unauthenticated
+ *   socket that stops answering pings, or stops reading while 8 MB waits for it, is dropped. At most 64 sockets at once; the session code also caps unauthenticated
  *   ones and times out stalled handshakes, for both paths.
  * - Plain ws:// is fine here for the same reason a ws:// relay on a private network is: everything inside is Noise ciphertext,
  *   and a LAN attacker gets what a malicious relay gets (sizes and timing, the power to drop). The phone only treats a LAN
@@ -26,6 +26,9 @@ import type {Duplex} from 'node:stream';
 /** One Noise message (65,535 bytes plus the handshake's mode byte) as base64; nothing larger is a valid message. */
 export const MAX_LAN_MESSAGE = 87_384;
 export const MAX_LAN_SOCKETS = 64;
+/** Bytes the desktop holds for one phone that is not reading (a flaky network during a streaming reply). Past it the socket is
+ *  dropped and the phone reconnects and re-reads, instead of the desktop holding everything sent to it (MUS-SPEC-23-13E). */
+export const MAX_LAN_BUFFERED = 8 * 1024 * 1024;
 /** LAN connection ids are far from the relay's, so both can share the session table. */
 const LAN_CONN_BASE = 1_000_000_000;
 const MAX_LAN_HOSTS = 4;
@@ -62,7 +65,7 @@ export interface LanHandlers {
   data(conn: number, data: string): void;
   closed(conn: number): void;
 }
-export interface LanOptions { hosts: string[]; port: number; keepAlive?: {intervalMs: number; timeoutMs: number} }
+export interface LanOptions { hosts: string[]; port: number; keepAlive?: {intervalMs: number; timeoutMs: number}; maxBufferedBytes?: number }
 
 /** A minimal server-side RFC 6455 connection: text frames, ping/pong, close, fragmentation, a message cap. */
 class LanSocket {
@@ -72,7 +75,7 @@ class LanSocket {
   lastPongAt = Date.now();
   onMessage: (text: string) => void = () => undefined;
   onClose: () => void = () => undefined;
-  constructor(private readonly socket: Duplex) {
+  constructor(private readonly socket: Duplex, private readonly maxBuffered = MAX_LAN_BUFFERED) {
     socket.on('data', chunk => this.read(chunk as Buffer));
     socket.on('close', () => this.finish());
     socket.on('end', () => this.finish());
@@ -116,6 +119,7 @@ class LanSocket {
     const length = payload.length;
     const head = length < 126 ? Buffer.of(0x80 | opcode, length) : length < 65_536 ? Buffer.of(0x80 | opcode, 126, length >> 8, length & 0xff) : (() => { const h = Buffer.alloc(10); h[0] = 0x80 | opcode; h[1] = 127; h.writeBigUInt64BE(BigInt(length), 2); return h; })();
     this.socket.write(Buffer.concat([head, payload]));
+    if (this.socket.writableLength > this.maxBuffered) this.finish();
   }
   get open() { return !this.closed; }
   send(text: string) { if (!this.closed) this.write(0x1, Buffer.from(text, 'utf8')); }
@@ -204,7 +208,7 @@ export class LanListener {
     if (req.headers.upgrade?.toLowerCase() !== 'websocket' || typeof key !== 'string' || req.headers['sec-websocket-version'] !== '13') return refuse('400 Bad Request');
     if (this.sockets.size >= MAX_LAN_SOCKETS) return refuse('503 Service Unavailable');
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${createHash('sha1').update(key + GUID).digest('base64')}\r\n\r\n`);
-    const ws = new LanSocket(socket);
+    const ws = new LanSocket(socket, this.options.maxBufferedBytes);
     if (head.length) socket.unshift(head);
     const conn = this.nextConn++;
     this.sockets.set(conn, {socket: ws, host});
