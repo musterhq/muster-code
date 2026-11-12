@@ -181,9 +181,11 @@ export function createMobileDomain(context: DomainContext): DomainModule {
     return {
       open: (conn: number) => {
         const limit = mobileSeams.maxPendingSessions ?? MAX_PENDING_SESSIONS;
-        if ([...sessions.values()].filter(s => !s.channel).length >= limit) { via().closePhone(conn, CLOSE.busy, 'busy'); return; }
+        // Unauthenticated: no valid encrypted message yet. A replayed first message gets a handshake answer but never a
+        // valid frame, so it counts here and times out like a stalled handshake (MUS-SPEC-23-10H).
+        if ([...sessions.values()].filter(s => !s.verified).length >= limit) { via().closePhone(conn, CLOSE.busy, 'busy'); return; }
         const session: Session = {conn, via: via(), deviceId: null, channel: null, watching: null, verified: false, pending: false, sentChats: '', sentNeeds: '', queue: Promise.resolve(), timer: undefined};
-        session.timer = setTimeout(() => { if (!session.channel) drop(session, CLOSE.timeout, 'timeout'); }, mobileSeams.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS);
+        session.timer = setTimeout(() => { if (!session.verified && !session.pending) drop(session, CLOSE.timeout, 'timeout'); }, mobileSeams.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS);
         session.timer.unref?.();
         sessions.set(conn, session);
       },
@@ -251,6 +253,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       if (!frame) return;
       if (!session.verified && !session.pending) {
         session.verified = true;
+        clearTimeout(session.timer); session.timer = undefined;
         const entry = devices.find(d => d.id === session.deviceId);
         if (entry) { entry.lastSeenAt = new Date().toISOString(); saveDevices(); }
         changed();
@@ -318,7 +321,8 @@ export function createMobileDomain(context: DomainContext): DomainModule {
     const {send: out, receive: incoming} = noise.split();
     session.channel = new SecureChannel(out, incoming);
     session.deviceId = entry.id;
-    clearTimeout(session.timer); session.timer = undefined;
+    // A pairing waits for the owner; a session keeps its handshake timeout until its first valid encrypted message.
+    if (pending) { clearTimeout(session.timer); session.timer = undefined; }
   }
 
   function bridgeFor(session: Session) {
@@ -336,7 +340,8 @@ export function createMobileDomain(context: DomainContext): DomainModule {
 
   // Chat changes → open sessions.
   let lastAttention = '';
-  const ready = () => [...sessions.values()].filter(s => s.channel && !s.pending);
+  /** Sessions that proved they hold the phone's keys (a replayed first message never does). */
+  const ready = () => [...sessions.values()].filter(s => s.channel && s.verified && !s.pending);
   function fanOut(event: AgentEvent) {
     if (disposed) return;
     const live = ready();

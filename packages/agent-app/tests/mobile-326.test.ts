@@ -606,6 +606,47 @@ test('stalled handshakes time out, pending connections are capped, and wrong cod
   assert.equal((await d.service.invoke('mobile.status', {})).pairing?.pending?.name, 'Mine');
 });
 
+// Spec: MUS-SPEC-23-10H (docs/spec/clauses/23-mobile.md#mus-spec-23-10h)
+test('a replayed first session message gets no chat events, is closed after the handshake timeout and counts against the cap', async t => {
+  const d = await desktop(t, quick().provider, {handshakeTimeoutMs: 400, maxPendingSessions: 3});
+  const {client, record} = await pair(t, d);
+  client.close();
+  // What the relay (or anyone watching the phone's traffic) saw: the first message of a real session.
+  const session = await connectPhone({record, crypto, socket});
+  t.after(() => session.close());
+  const recorded = d.relay.frames.find(frame => frame.from === 'phone' && fromBase64(frame.data)[0] === MODE_BYTE.session);
+  assert.ok(recorded, 'a session message 1 went through the relay');
+  const replay = () => {
+    const ws = new WebSocket(`${record.relayUrl}/v1/phone/${record.route}`);
+    const received: string[] = [];
+    const closed = new Promise<number>(resolve => { ws.onclose = event => resolve(event.code); });
+    ws.onopen = () => ws.send(recorded!.data);
+    ws.onmessage = event => received.push(String(event.data));
+    return {ws, received, closed, at: Date.now()};
+  };
+  const first = replay();
+  t.after(() => first.ws.close());
+  await until(() => first.received.length === 1, 'the handshake answer');
+  // A chat changes on the desktop while the replayed connection is open: the real phone hears it, the replay must not.
+  const events = collect(session);
+  await d.service.invoke('chat.create', {});
+  await until(() => events.some(event => event.type === 'chats'), 'the phone gets the chat list');
+  await delay(50);
+  assert.equal(first.received.length, 1, 'only the handshake answer reached the replayed connection');
+  const code = await Promise.race([first.closed, delay(2000).then(() => 0)]);
+  assert.equal(code, 4408, 'the replayed connection is closed after the handshake timeout');
+  assert.ok(Date.now() - first.at >= 350, 'not before the timeout');
+  // Replays are unauthenticated connections: over the cap they are closed at once.
+  const crowd = [replay(), replay(), replay()];
+  t.after(() => { for (const c of crowd) c.ws.close(); });
+  await until(() => crowd.every(c => c.received.length === 1), 'the crowd got handshake answers');
+  const extra = replay();
+  t.after(() => extra.ws.close());
+  const extraCode = await Promise.race([extra.closed, delay(250).then(() => 0)]);
+  assert.equal(extraCode, 4429, 'the replay over the cap closes at once');
+  assert.equal((await session.call('hello', {})).deviceId, record.deviceId, 'the phone itself is unaffected');
+});
+
 const snapshotOf = (chats: Array<{id: string}>): Snapshot => ({folders: [], projects: [], version: 1, chats: chats.map(chat => ({id: chat.id, title: 'T', pinned: false, archived: false, draft: '', status: 'idle', updatedAt: new Date().toISOString()})) as Snapshot['chats']});
 
 // Spec: MUS-SPEC-23-10C (docs/spec/clauses/23-mobile.md#mus-spec-23-10c)

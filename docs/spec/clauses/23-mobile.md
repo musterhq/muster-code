@@ -58,6 +58,7 @@ Boundaries:
 | [MUS-SPEC-23-10E](23-mobile.md#mus-spec-23-10e) | Approval details reach the phone with the folder name instead of the working directory's full path, and changed files relative to it. | [`the phone gets folder names and relative file paths, never full paths`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-10F](23-mobile.md#mus-spec-23-10f) | The relay closes a desktop that does not register in time and a socket that stops answering pings, and closes a phone that sends a message over 87,384 characters without forwarding it. | [`the relay closes unregistered and silent sockets and refuses oversized messages`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-10G](23-mobile.md#mus-spec-23-10g) | The desktop completes the pairing handshake and seals and opens frames inside Electron, whose BoringSSL has no ChaCha20-Poly1305. | [`the desktop pairing handshake and frames work inside Electron, not only in Node`](../../../packages/agent-app/tests/mobile-326.test.ts) |
+| [MUS-SPEC-23-10H](23-mobile.md#mus-spec-23-10h) | A recorded first session message sent again opens no lasting session: the desktop sends it no chat events, closes it after the handshake timeout, and counts it against the cap on unauthenticated connections. | [`a replayed first session message gets no chat events, is closed after the handshake timeout and counts against the cap`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-11A](23-mobile.md#mus-spec-23-11a) | A read-only phone can neither list the new-chat options nor start a chat. An act phone gets folder and project names (no paths) and the desktop's providers and models; the chat it starts is on the desktop in that folder or project with the chosen provider and model, reaches the phone's list, and its first run uses that model. | [`a phone starts a new chat in a folder or project with the chosen provider and model, and it appears on the desktop`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-11B](23-mobile.md#mus-spec-23-11b) | An unknown folder, an unknown provider or model, and a folder and project together are refused; a phone switched to read-only while the request reads the desktop's state is refused; in each case no chat is created. | [`starting a chat re-checks access right before it runs and refuses unknown places and models`](../../../packages/agent-app/tests/mobile-326.test.ts) |
 | [MUS-SPEC-23-11C](23-mobile.md#mus-spec-23-11c) | The new chat sheet lists folders and projects, the provider's own models, and Start chat calls chat.create with the choices and opens the new chat; a read-only phone sees why and no Start chat. | [`the new chat sheet picks a folder or project, a provider and a model, and opens the chat it made`](../../../packages/mobile/tests/new-chat-screen.test.tsx) |
@@ -497,6 +498,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/mobile-326.test.ts::the desktop pairing handshake and frames work inside Electron, not only in Node`
 - Environment: Node test runner spawning the electron binary from node_modules with ELECTRON_RUN_AS_NODE=1.
 - Known gaps: Runs the crypto in Electron's Node mode, not in the packaged app; a real phone pairing is checked by hand on a Samsung Galaxy S25 through Expo Go.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-10h"></a>
+#### MUS-SPEC-23-10H: A replayed first session message opens no lasting session
+
+- Precondition: A paired phone; test seams shorten the handshake timeout and lower the cap on unauthenticated connections. Someone who can see the phone's traffic (the relay, or the same network on the direct path) recorded the first message of one of its sessions.
+- Action: Send that recorded message again on new connections, without the phone's keys, while a chat changes on the desktop; then open more replayed connections than the cap.
+- Expected result: Each replayed connection gets the desktop's handshake answer and nothing else (no chat list or item events); it is closed after the handshake timeout because no valid encrypted message follows; replayed connections over the cap are closed at once; the phone itself still connects.
+- Test: `packages/agent-app/tests/mobile-326.test.ts::a replayed first session message gets no chat events, is closed after the handshake timeout and counts against the cap`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and a Node phone built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: The production values (10 s, 32 connections) are not waited out.
 - Evidence: UNVERIFIED
 
 ### Pairing on a real phone (phase 2, found on a Samsung Galaxy S25)
