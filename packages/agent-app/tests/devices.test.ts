@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
-import {androidFormFactor, androidSdkRoot, checkAndroid, checkIos, checkNode, parseAdbDevices, parseAdbPackages, parseAvdList, parseSimctlApps, parseSimctlDevices, listAndroid, type ProbeDeps} from '../src/main/devices/discovery.ts';
+import {androidFormFactor, androidSdkRoot, androidTools, checkAndroid, checkIos, checkNode, parseAdbDevices, parseAdbPackages, parseAvdList, parseSimctlApps, parseSimctlDevices, listAndroid, type ProbeDeps} from '../src/main/devices/discovery.ts';
 import {FrameGate, hasIdr, iosPacket, IOS_TAG, MjpegParser, semuInfo, SEMU_MAGIC} from '../src/main/devices/frames.ts';
 import {hidForChar, hidUsageForCode, androidKeycode} from '../src/main/devices/keys.ts';
 import {deviceButton, deviceId, parseDeviceInput, DEVICE_COMMANDS} from '../src/shared/device-protocol.ts';
@@ -59,6 +59,59 @@ test('adb and AVD listings, SDK location and form factors', async () => {
   const list = await listAndroid(deps);
   assert.deepEqual(list.map(d => [d.id, d.name, d.state, d.osVersion]), [['emulator-5554', 'Pixel_9', 'booted', 'Android 16'], ['avd:Pixel_Fold', 'Pixel_Fold', 'shutdown', 'Android']]);
   assert.ok(calls.every(call => call[0].startsWith('/sdk')), 'adb and emulator come from the SDK');
+});
+
+const ADB_LONG = 'List of devices attached\nemulator-5554          device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emu64a transport_id:1\nR5CX10ABCDE            device usb:1-1 product:e1qxxx model:SM_S921B device:e1q transport_id:2\nRZ8N20XYZ              unauthorized usb:1-2 transport_id:3\n';
+
+// Spec: MUS-SPEC-21-363M (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-363m)
+test('physical Android: adb devices -l lists USB phones by model with a generic frame, and an unauthorized one with a fix', async () => {
+  const calls: string[][] = [];
+  const deps: ProbeDeps = {env: {ANDROID_HOME: '/sdk'}, home: '/h', platform: 'linux', exists: () => true, run: async (file, args) => {
+    calls.push([file, ...args]);
+    if (args.join(' ') === 'devices -l') return ADB_LONG;
+    if (args[0] === '-list-avds') return 'Pixel_9\n';
+    if (args.includes('avd')) return 'Pixel_9\nOK\n';
+    if (args.includes('ro.build.version.release')) return args[1] === 'R5CX10ABCDE' ? '15\n' : '16\n';
+    if (args.includes('ro.product.manufacturer')) return 'samsung\n';
+    if (args.includes('ro.product.model')) return 'SM-S921B\n';
+    if (args.includes('sys.boot_completed')) return '1\n';
+    if (args.includes('size')) return 'Physical size: 1080x2340\n';
+    return '';
+  }};
+  const list = await listAndroid(deps);
+  const samsung = list.find(d => d.id === 'R5CX10ABCDE')!;
+  assert.deepEqual([samsung.name, samsung.state, samsung.osVersion, samsung.physical, samsung.formFactor], ['Samsung SM-S921B', 'booted', 'Android 15', true, 'phone']);
+  assert.ok(samsung.frame, 'a generic Android frame');
+  const emulator = list.find(d => d.id === 'emulator-5554')!;
+  assert.equal(emulator.name, 'Pixel_9');assert.equal(emulator.physical, undefined);
+  assert.equal(list.filter(d => d.name === 'Pixel_9').length, 1, 'the running AVD is listed once');
+  const locked = list.find(d => d.id === 'RZ8N20XYZ')!;
+  assert.equal(locked.state, 'unauthorized');assert.equal(locked.physical, true);assert.match(locked.fix!, /Allow USB debugging/);
+  assert.ok(!calls.some(c => (c[2] === 'R5CX10ABCDE' || c[2] === 'RZ8N20XYZ') && c.includes('emu')), 'no emulator console command reaches a USB phone');
+  assert.ok(!calls.some(c => c[2] === 'RZ8N20XYZ' && c.includes('shell')), 'nothing runs on an unauthorized phone');
+});
+
+// Spec: MUS-SPEC-21-363N (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-363n)
+test('physical Android: without an SDK, adb from PATH or Homebrew serves USB phones and the emulator is never run', async () => {
+  const brew = '/opt/homebrew/bin/adb';
+  const runs: string[][] = [];
+  const base: ProbeDeps = {env: {PATH: '/usr/bin:/bin'}, home: '/Users/u', platform: 'darwin', exists: file => file === brew, run: async (file, args) => {
+    runs.push([file, ...args]);
+    if (args.join(' ') === 'devices -l') return 'List of devices attached\nR5CX10ABCDE device usb:1-1 model:SM_S921B transport_id:2\n';
+    return args.includes('sys.boot_completed') ? '1\n' : '';
+  }};
+  assert.equal(androidTools(base).adb, brew);
+  const check = await checkAndroid(base);
+  assert.equal(check.available, true);assert.match(check.detail!, /\/opt\/homebrew\/bin\/adb/);assert.match(check.detail!, /emulators need the Android SDK/i);
+  const list = await listAndroid(base);
+  assert.deepEqual(list.map(d => d.id), ['R5CX10ABCDE']);
+  assert.ok(runs.length > 0 && runs.every(run => run[0] === brew), 'only that adb runs, never the emulator');
+  const env = hubEnv({PATH: '/usr/bin'}, tmp(), androidTools(base).sdk, 'darwin', path.dirname(brew));
+  assert.equal(env.PATH!.split(':')[0], '/opt/homebrew/bin');
+  const onPath: ProbeDeps = {...base, env: {PATH: '/usr/bin:/custom/tools'}, exists: file => file === '/custom/tools/adb'};
+  assert.equal(androidTools(onPath).adb, '/custom/tools/adb');
+  assert.equal((await checkAndroid(onPath)).available, true);
+  assert.match((await checkAndroid({...base, exists: () => false})).reason!, /Android SDK not found/);
 });
 
 test('platform checks explain what is missing with fix steps', async () => {
@@ -246,6 +299,65 @@ class FakeSocket {
 }
 const hub = async () => ({origin: 'http://127.0.0.1:5555', token: 'tok', pid: 1});
 
+// Spec: MUS-SPEC-21-363O (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-363o)
+test('physical Android: opens without booting, streams through the helper, refuses shutdown, and Install APK runs adb install -r', async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'devices.json'), JSON.stringify({enabled: true, agentControl: false}));
+  const installed = helperPaths(path.join(dir, 'tools'));
+  fs.mkdirSync(path.dirname(installed.entry), {recursive: true});fs.writeFileSync(installed.entry, '');fs.writeFileSync(installed.sentinel, '0.15.3\n');
+  const apk = path.join(dir, 'app.apk'), notApk = path.join(dir, 'notes.txt');
+  fs.writeFileSync(apk, 'PK');fs.writeFileSync(notApk, 'x');
+  const adb = path.join(dir, 'sdk', 'platform-tools', 'adb');
+  let installOutput = 'Performing Streamed Install\nSuccess\n';
+  const runs: string[][] = [], fetched: string[] = [], spawned: {env: NodeJS.ProcessEnv}[] = [];
+  FakeSocket.all = [];
+  const {manager} = managerFixture({userData: dir, env: {ANDROID_HOME: path.join(dir, 'sdk')}, exists: file => !file.startsWith('/nowhere'),
+    run: async (file, args) => {
+      runs.push([file, ...args]);
+      if (args[0] === '--version') return 'v24.0.0';
+      if (args[0] === '-p') throw new Error('no Xcode');
+      if (args.join(' ') === 'devices -l') return 'List of devices attached\nR5CX10ABCDE device usb:1-1 product:e1qxxx model:SM_S921B device:e1q transport_id:2\nRZ8N20XYZ unauthorized usb:1-2 transport_id:3\n';
+      if (args.includes('sys.boot_completed')) return '1\n';
+      if (args.includes('ro.build.version.release')) return '15\n';
+      if (args.includes('ro.product.manufacturer')) return 'samsung\n';
+      if (args.includes('ro.product.model')) return 'SM-S921B\n';
+    if (args.includes('ro.product.model')) return 'SM-S921B\n';
+      if (args[2] === 'install') { if (/Failure/.test(installOutput)) throw new Error(installOutput); return installOutput; }
+      return '';
+    },
+    spawn: ((_command: string, _args: string[], options: {env: NodeJS.ProcessEnv}) => {
+      spawned.push(options);
+      const child = Object.assign(new EventEmitter(), {stdout: new PassThrough(), stderr: new PassThrough(), pid: 42, kill: () => true});
+      setTimeout(() => child.stdout.write('Local:   http://localhost:5555/?token=abcdefghijklmnopqrstuvwx\n'), 5);
+      return child;
+    }) as never,
+    fetch: (async (url: string) => { fetched.push(String(url)); return new Response('{"ok":true}'); }) as unknown as typeof fetch,
+    socket: (url: string, headers: Record<string, string>) => new FakeSocket(url, headers) as never,
+  });
+  const list = await manager.devices(true);
+  assert.ok(list.devices.some(d => d.id === 'R5CX10ABCDE' && d.physical && d.state === 'booted'));
+  const session = await manager.open('R5CX10ABCDE');
+  assert.equal(session.platform, 'android');
+  assert.ok(!fetched.some(url => /boot/.test(url)), 'no boot request');
+  assert.ok(!runs.some(run => run.includes('emu')), 'no emulator console command');
+  assert.match(FakeSocket.all[0]!.url, /serve-emu\/ws\?device=R5CX10ABCDE/);
+  assert.ok(spawned[0]!.env.PATH!.split(':').includes(path.dirname(adb)), 'the helper finds adb');
+  await assert.rejects(manager.shutdown('R5CX10ABCDE'), /USB/);
+  await assert.rejects(manager.rotate('R5CX10ABCDE'), /USB/);
+  assert.ok(manager.liveSession('R5CX10ABCDE'), 'a refused shutdown leaves the session open');
+  await assert.rejects(manager.open('RZ8N20XYZ'), /Allow USB debugging/);
+  assert.deepEqual(await manager.installApk('R5CX10ABCDE', apk), {installed: true});
+  assert.deepEqual(runs.at(-1), [adb, '-s', 'R5CX10ABCDE', 'install', '-r', apk]);
+  await assert.rejects(manager.installApk('R5CX10ABCDE', notApk), /\.apk/);
+  await assert.rejects(manager.installApk('R5CX10ABCDE', '/nowhere/app.apk'), /not found/i);
+  await assert.rejects(manager.installApk('R5CX10ABCDE', '-r'), /\.apk/);
+  assert.equal(runs.filter(run => run.includes('install')).length, 1, 'refused files never reach adb');
+  installOutput = 'adb: failed to install app.apk: Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]';
+  await assert.rejects(manager.installApk('R5CX10ABCDE', apk), /INSTALL_FAILED_UPDATE_INCOMPATIBLE/);
+  await manager.close('R5CX10ABCDE');
+  fs.rmSync(dir, {recursive: true, force: true});
+});
+
 test('iOS link: attaches the helper with the bearer token, streams MJPEG (a helper without H.264) only while viewed, flow-controlled', async () => {
   FakeSocket.all = [];
   const requests: {url: string; auth: string | null}[] = [];
@@ -374,6 +486,34 @@ function toolTarget(overrides: Partial<DeviceToolTarget> = {}): DeviceToolTarget
     tap: async (_id, x, y) => { taps.push([x, y]); return true; }, type: () => true, ...overrides};
 }
 const textOf = (result: {content: {type: string; text?: string}[]}) => result.content.filter(part => part.type === 'text').map(part => part.text).join(' ');
+
+// Spec: MUS-SPEC-21-363P (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-363p)
+test('agent tools never list, open, watch or drive a phone connected over USB', async () => {
+  const phone = {id: 'R5CX10ABCDE', name: 'Samsung SM-S921B', platform: 'android', osVersion: 'Android 15', state: 'booted', physical: true};
+  const emulator = {id: 'emulator-5554', name: 'Pixel_9', platform: 'android', osVersion: 'Android 16', state: 'booted'};
+  const reached: string[] = [];
+  const userSession = {deviceId: phone.id, name: phone.name, platform: 'android' as const, formFactor: 'phone' as const, physical: true, openedBy: 'user' as const, control: 'agent' as const, state: 'live' as const, inputReady: true, openedAt: 0};
+  const target = toolTarget({
+    list: async () => [emulator, phone],
+    session: id => id === phone.id ? userSession : undefined,
+    open: async id => { reached.push(`open ${id}`); return {...userSession, deviceId: id, chatId: 'c1', openedBy: 'agent'}; },
+    screenshot: async id => { reached.push(`screenshot ${id}`); const png = Buffer.alloc(24); png.writeUInt32BE(1080, 16); png.writeUInt32BE(2400, 20); return {png, width: 1080, height: 2400}; },
+    tap: async id => { reached.push(`tap ${id}`); return true; },
+    type: id => { reached.push(`type ${id}`); return true; },
+  });
+  const listed = textOf(await runDeviceTool(target, 'c1', 'device_list', {}));
+  assert.match(listed, /emulator-5554 · Pixel_9/);
+  assert.ok(!listed.includes(phone.id), listed);
+  assert.match(listed, /connected over USB is the person’s own/);
+  for (const [tool, args] of [['device_open', {}], ['device_screenshot', {}], ['device_tap', {x: 10, y: 10}], ['device_type', {text: 'hi'}]] as const) {
+    const result = await runDeviceTool(target, 'c1', tool, {device: phone.id, ...args});
+    assert.equal(result.isError, true, tool);
+    assert.match(textOf(result), /connected over USB is the person’s own/, tool);
+  }
+  assert.deepEqual(reached, [], 'nothing reached the phone');
+  assert.equal((await runDeviceTool(target, 'c1', 'device_open', {device: emulator.id})).isError, undefined);
+  assert.deepEqual(reached, ['open emulator-5554']);
+});
 
 // Spec: MUS-SPEC-21-363H (docs/spec/clauses/21-visuals-and-artifacts.md#mus-spec-21-363h)
 test('agent tools: consent re-checked per call, read-only chats look only, user control stops input, taps scaled from the screenshot', async () => {

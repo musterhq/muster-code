@@ -106,6 +106,10 @@ A PR that changes this area adds its cases here first: one row in this table, th
 | [MUS-SPEC-21-363J](21-visuals-and-artifacts.md#mus-spec-21-363j) | A checksum mismatch is refused. A match is cached with its source and licence noted, and offline keeps Muster's own body. | [`realistic models: SHA-256 mismatch refused, cache hit, offline fallback, metadata records source and no licence`](../../../packages/agent-app/tests/devices.test.ts) |
 | [MUS-SPEC-21-363K](21-visuals-and-artifacts.md#mus-spec-21-363k) | The DeviceKit descriptor is read and checked through the read-only route, and sliced chromes fall back to Muster's frame. | [`real frames, iOS: the helper's DeviceKit descriptor is read and validated; images come from its read-only route; sliced chromes fall back`](../../../packages/agent-app/tests/devices.test.ts) |
 | [MUS-SPEC-21-363L](21-visuals-and-artifacts.md#mus-spec-21-363l) | Discovery lists both platforms. A failed boot gives a plain-English reason and resets the state. | [`manager: discovery lists devices; a failed boot says why in plain English and resets the state`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363M](21-visuals-and-artifacts.md#mus-spec-21-363m) | USB Android phones are listed from adb devices -l by model with a generic frame; an unauthorized one is listed with a fix line. | [`physical Android: adb devices -l lists USB phones by model with a generic frame, and an unauthorized one with a fix`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363N](21-visuals-and-artifacts.md#mus-spec-21-363n) | Without an Android SDK, adb from PATH or Homebrew lists USB phones and goes on the helper's PATH; the emulator is never run. | [`physical Android: without an SDK, adb from PATH or Homebrew serves USB phones and the emulator is never run`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363O](21-visuals-and-artifacts.md#mus-spec-21-363o) | A USB phone opens through the helper's stream without a boot, shut down and rotate are refused, and Install APK runs adb install -r on a chosen .apk only. | [`physical Android: opens without booting, streams through the helper, refuses shutdown, and Install APK runs adb install -r`](../../../packages/agent-app/tests/devices.test.ts) |
+| [MUS-SPEC-21-363P](21-visuals-and-artifacts.md#mus-spec-21-363p) | device_list leaves the USB phone out and says why; device_open, device_screenshot, device_tap and device_type on it are refused with that reason and nothing reaches the phone; the emulator still works. | [`agent tools never list, open, watch or drive a phone connected over USB`](../../../packages/agent-app/tests/devices.test.ts) |
 | [MUS-SPEC-21-785A](21-visuals-and-artifacts.md#mus-spec-21-785a) | Inline and display formulas typeset with their labels; display maths scrolls sideways; prices, shell variables, code and links stay as written. | [`a reply typesets inline and display maths, labelled, with display maths scrolling sideways`](../../../packages/agent-app/tests/markdown-math-dom.tsx) |
 | [MUS-SPEC-21-785B](21-visuals-and-artifacts.md#mus-spec-21-785b) | Prices and shell variables stay plain text; code spans, code blocks and links are untouched. | [`maths parsing: prices, shell variables, code, escapes and links stay text`](../../../packages/agent-app/tests/markdown-math.test.ts) |
 | [MUS-SPEC-21-785C](21-visuals-and-artifacts.md#mus-spec-21-785c) | The four delimiters typeset as inline or display formulas. | [`maths parsing: the four delimiters, display blocks and source offsets`](../../../packages/agent-app/tests/markdown-math.test.ts) |
@@ -847,6 +851,50 @@ A PR that changes this area adds its cases here first: one row in this table, th
 - Test: `packages/agent-app/tests/devices.test.ts::manager: discovery lists devices; a failed boot says why in plain English and resets the state`
 - Environment: Node test with fakes for simctl, adb and the helper; no simulator, emulator or network.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363m"></a>
+#### MUS-SPEC-21-363M: USB Android phones are listed, and an unauthorized one says how to fix it
+
+- Precondition: The Android SDK is present; `adb devices -l` reports a running emulator, a Samsung phone connected over USB (state device, model SM_S921B), and a second phone that has not allowed USB debugging (state unauthorized).
+- Action: List Android devices.
+- Expected result: The emulator is listed under its AVD name as before. The Samsung is listed by its id with the name "Samsung SM-S921B", marked physical, running, with its Android version, a phone form factor and a generic Android frame. The unauthorized phone is listed with state unauthorized and a fix line telling the user to unlock the phone and accept the "Allow USB debugging?" prompt. No emulator console command (`emu`) is sent to a USB phone.
+- Test: `packages/agent-app/tests/devices.test.ts::physical Android: adb devices -l lists USB phones by model with a generic frame, and an unauthorized one with a fix`
+- Environment: Node test with fakes for adb, the helper process and its sockets; no phone, emulator or network.
+- Known gaps: A real Samsung is checked by hand (PR notes); phones on Wi-Fi debugging are listed the same way but not tested.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363n"></a>
+#### MUS-SPEC-21-363N: Without the Android SDK, adb on PATH serves USB phones
+
+- Precondition: No Android SDK folder; adb only at /opt/homebrew/bin/adb (Homebrew), and in a second run only in a folder on PATH.
+- Action: Run the Android check, list Android devices and build the helper's environment.
+- Expected result: The check is available and its detail names that adb and says emulators need the Android SDK. Listing calls that adb (with `devices -l`) and never runs the emulator. The helper's PATH starts with adb's folder. With no SDK and no adb anywhere, the check still says the Android SDK was not found.
+- Test: `packages/agent-app/tests/devices.test.ts::physical Android: without an SDK, adb from PATH or Homebrew serves USB phones and the emulator is never run`
+- Environment: Node test with fakes for adb, the helper process and its sockets; no phone, emulator or network.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363o"></a>
+#### MUS-SPEC-21-363O: A USB phone streams through the helper, is never powered by Muster, and can install an APK
+
+- Precondition: Devices on and the helper installed; a USB Samsung and an unauthorized phone listed.
+- Action: Open the Samsung; try to shut it down and rotate it; open the unauthorized phone; install an APK on the Samsung from a chosen file, then from a file that is not an .apk, then from one adb refuses.
+- Expected result: The Samsung opens without any boot request, and its stream and input go through the helper's serve-emu socket for its serial (the pinned scrcpy-server path). Shut down and rotate are refused with a reason and no adb command. The unauthorized phone is refused with the USB debugging fix. Install runs exactly `adb -s <serial> install -r <file>` and reports success. A file that is not an existing .apk is refused with no adb call, and adb's Failure line is reported.
+- Test: `packages/agent-app/tests/devices.test.ts::physical Android: opens without booting, streams through the helper, refuses shutdown, and Install APK runs adb install -r`
+- Environment: Node test with fakes for adb, the helper process and its sockets; no phone, emulator or network.
+- Known gaps: Electron's file chooser and the Devices tab's Install APK button are not driven here; a real Samsung over USB is checked by hand.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-21-363p"></a>
+#### MUS-SPEC-21-363P: Agents never use a phone connected over USB
+
+- Precondition: "Let agents use devices" on; a Workspace chat; a running emulator and a USB phone listed, the phone with a live session the person opened.
+- Action: The agent lists devices, then calls device_open, device_screenshot, device_tap and device_type on the phone, then device_open on the emulator.
+- Expected result: The list shows the emulator and not the phone, with a line saying a phone connected over USB is the person's own and agents do not use it. Every call on the phone is refused with that reason, and no open, screenshot, tap or text reaches it. The emulator opens as before.
+- Test: `packages/agent-app/tests/devices.test.ts::agent tools never list, open, watch or drive a phone connected over USB`
+- Environment: Node test of the device tool runner with a fake device target; no phone, emulator or network.
+- Known gaps: Whether agents may ever drive a real phone (an explicit opt-in) is a product decision not made here.
 - Evidence: UNVERIFIED
 
 ### Maths in replies

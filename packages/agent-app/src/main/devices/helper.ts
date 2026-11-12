@@ -116,12 +116,14 @@ export function hubArgs(entry: string): string[] {
 }
 /** Only what the helper needs reaches it: no API keys, tokens or Muster internals from the app's own environment. */
 const HUB_ENV_ALLOW = /^(PATH|Path|HOME|USER|LOGNAME|SHELL|LANG|LC_[A-Z]+|TZ|DEVELOPER_DIR|XDG_RUNTIME_DIR|XDG_CONFIG_HOME|ANDROID_AVD_HOME|ANDROID_EMULATOR_HOME|ANDROID_USER_HOME|JAVA_HOME|SystemRoot|SYSTEMROOT|windir|WINDIR|ComSpec|COMSPEC|PATHEXT|USERPROFILE|LOCALAPPDATA|APPDATA|ProgramData|ProgramFiles|ProgramFiles\(x86\)|SystemDrive|HOMEDRIVE|HOMEPATH|NUMBER_OF_PROCESSORS|PROCESSOR_ARCHITECTURE)$/;
-export function hubEnv(base: NodeJS.ProcessEnv, stateDir: string, androidSdk: string, platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv {
+/** `adbDir`: the folder of the adb Muster uses when it is not the SDK's (Homebrew, PATH), so the helper finds the same one. */
+export function hubEnv(base: NodeJS.ProcessEnv, stateDir: string, androidSdk: string, platform: NodeJS.Platform = process.platform, adbDir?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(base)) if (value !== undefined && HUB_ENV_ALLOW.test(key)) env[key] = value;
   // The helper calls `adb` and `emulator` by name; the SDK's own copies come first (Android Studio does not put them on PATH).
   const sep = platform === 'win32' ? ';' : ':', pathKey = platform === 'win32' ? Object.keys(env).find(key => key.toUpperCase() === 'PATH') ?? 'Path' : 'PATH';
-  env[pathKey] = [path.join(androidSdk, 'platform-tools'), path.join(androidSdk, 'emulator'), env[pathKey] ?? ''].filter(Boolean).join(sep);
+  const sdkTools = path.join(androidSdk, 'platform-tools');
+  env[pathKey] = [...(adbDir && adbDir !== sdkTools ? [adbDir] : []), sdkTools, path.join(androidSdk, 'emulator'), env[pathKey] ?? ''].filter(Boolean).join(sep);
   Object.assign(env, {NO_COLOR: '1', FORCE_COLOR: '0', ANDROID_HOME: androidSdk, ANDROID_SDK_ROOT: androidSdk});
   // macOS only (serve-sim): its helper state lives under TMPDIR, so a private TMPDIR keeps `--kill` to Muster's own helpers.
   // Elsewhere TMPDIR stays the user's: the emulator publishes its gRPC discovery file there.

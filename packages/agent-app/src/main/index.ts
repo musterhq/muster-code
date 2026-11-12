@@ -587,7 +587,8 @@ async function main(): Promise<void> {
   const devices = wireDevices({ipcMain, window:()=>window, trusted:event=>isTrustedSender(event.senderFrame,event.sender.id),
     userData:app.getPath('userData'), manifestDir:unpackedPath(path.join(__dirname,'device-helper')), toolsDir:path.join(dataDir,'agent-tools','devices'), execPath:process.execPath,
     emit:onEvent,
-    chat:async chatId=>{const chat=(await loaded.service.invoke('app.snapshot',undefined)).chats.find(item=>item.id===chatId);return chat?{mode:chat.mode,...(chat.permissionMode?{permissionMode:chat.permissionMode}:{})}:undefined;}});
+    chat:async chatId=>{const chat=(await loaded.service.invoke('app.snapshot',undefined)).chats.find(item=>item.id===chatId);return chat?{mode:chat.mode,...(chat.permissionMode?{permissionMode:chat.permissionMode}:{})}:undefined;},
+    chooseApk:async()=>{const options={title:'Install an APK',buttonLabel:'Install',properties:['openFile'] as Array<'openFile'>,filters:[{name:'Android app',extensions:['apk']}]};const result=window?await dialog.showOpenDialog(window,options):await dialog.showOpenDialog(options);return result.canceled?null:result.filePaths[0]??null;}});
 
   ipcMain.handle('muster:invoke', async (event, command: unknown, input: unknown) => {
     if (!isTrustedSender(event.senderFrame, event.sender.id)) {
