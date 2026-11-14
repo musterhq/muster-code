@@ -19,7 +19,7 @@ import {TimelineRow} from './TimelineRow';
 /** How close to the end (points) still counts as "reading the newest". */
 export const NEAR_END = 120;
 
-export function ChatTimeline({store, connection, canAct}: {store: TimelineStore; connection: MobileConnection; canAct: boolean}) {
+export function ChatTimeline({store, connection, canAct, offline}: {store: TimelineStore; connection: MobileConnection; canAct: boolean; /** The computer's name while it is offline: cards wait for it. */ offline?: string}) {
   const styles = useStyles();
   const ids = useTimelineIds(store);
   // The window's size stands in until the list is measured, so the newest rows paint in the first frame.
@@ -55,7 +55,7 @@ export function ChatTimeline({store, connection, canAct}: {store: TimelineStore;
         onScroll={onScroll}
         scrollEventThrottle={32}
         contentContainerStyle={styles.content}
-        renderItem={({item: id}) => <View style={styles.row}><TimelineRow store={store} id={id} connection={connection} canAct={canAct} /></View>}
+        renderItem={({item: id}) => <View style={styles.row}><TimelineRow store={store} id={id} connection={connection} canAct={canAct} {...(offline ? {offline} : {})} /></View>}
       />
       {unseen ? (
         <Animated.View entering={floatEnter} exiting={floatExit} style={styles.pillWrap} pointerEvents="box-none">

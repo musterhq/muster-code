@@ -7,7 +7,7 @@ import type {MobileChat, MobileItem} from '../src/shared';
 import {layOutTimeline} from './fake-connection';
 import {nodeSqlite} from './sqlite';
 
-const synced = new Date(2026, 10, 14, 14, 2).getTime();
+const synced = new Date().setHours(14, 2, 0, 0);
 const running: MobileChat = {id: 'c1', title: 'Migrate session store to Redis Streams', status: 'running', updatedAt: new Date(synced).toISOString(), place: 'atlas-api', needsYou: 0};
 const done: MobileChat = {id: 'c2', title: 'Bump React Native', status: 'completed', updatedAt: new Date(synced).toISOString(), place: 'mobile-shell', needsYou: 0};
 const items: MobileItem[] = [

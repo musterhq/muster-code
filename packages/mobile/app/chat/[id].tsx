@@ -1,21 +1,21 @@
 import {Stack, useLocalSearchParams} from 'expo-router';
 import {Text, View} from 'react-native';
-import {useLink} from '../../src/connection/ConnectionProvider';
+import {useComputerConnection} from '../../src/connection/ConnectionProvider';
 import {ChatScreen} from '../../src/screens/ChatScreen';
 import {pickAttachment} from '../../src/connection/pickers';
 import {themed, type} from '../../src/theme';
 
-/** One header bar: the stack's own, with the chat's title and its folder or Project under it. */
+/** One header bar: the stack's own, with the chat's title and its folder or Project and computer under it. */
 export default function Chat() {
-  const {id} = useLocalSearchParams<{id: string}>();
-  const {state} = useLink();
+  const {id, computer} = useLocalSearchParams<{id: string; computer?: string}>();
+  const {view, connection} = useComputerConnection(computer || undefined);
   const styles = useStyles();
-  if (state.phase !== 'connected' || !id) return null;
-  return <ChatScreen connection={state.connection} chatId={id} pickAttachment={pickAttachment} header={chat => (
+  if (!connection || !view || !id) return null;
+  return <ChatScreen connection={connection} chatId={id} path={view.path} pickAttachment={pickAttachment} header={chat => (
     <Stack.Screen options={{headerTitle: () => (
       <View style={styles.title}>
         <Text style={styles.name} numberOfLines={1}>{chat?.title ?? ''}</Text>
-        {chat?.place ? <Text style={styles.place} numberOfLines={1}>{chat.place}</Text> : null}
+        <Text style={styles.place} numberOfLines={1}>{[chat?.place, view.name].filter(Boolean).join(' · ')}</Text>
       </View>
     )}} />
   )} />;

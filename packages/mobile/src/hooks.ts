@@ -1,6 +1,8 @@
 /** Live views of the desktop over one MobileConnection: the chat list, one chat, the needs-you feed, this phone's access. */
 import {useEffect, useState} from 'react';
 import {TimelineStore} from './timeline/store';
+import {cacheScopeOf, chatSaver, offlineOf} from './offline/connection';
+import type {OutboxEntry} from './offline/cache';
 import {haptics} from './haptics';
 import {type MobileAccess, type MobileChat, type MobileConnection, type MobileItemOp, type MobileNeed} from './shared';
 
@@ -12,18 +14,6 @@ export function useAccess(connection: MobileConnection): MobileAccess {
   const [access, setAccess] = useState(connection.access);
   useEffect(() => connection.on(event => { if (event.type === 'access') setAccess(event.access); }), [connection]);
   return access;
-}
-
-export function useChats(connection: MobileConnection) {
-  const [chats, setChats] = useState<MobileChat[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const refresh = () => connection.call('chats.list', {}).then(result => { setChats(result.chats); setError(null); }, failure => setError(errorText(failure)));
-  useEffect(() => {
-    const off = connection.on(event => { if (event.type === 'chats') setChats(event.chats); });
-    void refresh();
-    return off;
-  }, [connection]);
-  return {chats, error, refresh};
 }
 
 /**
@@ -44,35 +34,42 @@ export function useChat(connection: MobileConnection, chatId: string) {
     let waiting: Array<{seq: number; ops: MobileItemOp[]}> = [];
     /** Items that were there when the chat opened: their streaming makes no haptic texture. */
     let opened = new Set<string>();
+    /** The open chat is kept for offline reading (a live connection only; the cached one is what it reads). */
+    let current: MobileChat | null = null;
+    const saver = chatSaver(offlineOf(connection) ? undefined : cacheScopeOf(connection), chatId);
+    const persist = () => saver.save(current, store.getIds().map(id => store.getItem(id)!));
     const apply = (delta: {seq: number; ops: MobileItemOp[]}) => {
       if (seq === null) { waiting.push(delta); return; }
       if (delta.seq <= seq) return;
       if (delta.seq !== seq + 1 || !store.apply(delta.ops)) { open(); return; }
       seq = delta.seq;
+      persist();
       if (delta.ops.some(op => !('item' in op) && op.append && !opened.has(op.id))) haptics.streamTick();
     };
     const open = () => {
       seq = null; waiting = [];
       connection.call('chat.open', {id: chatId, deltas: true}).then(result => {
         if (!live) return;
+        current = result.chat;
         setChat(existing => existing ?? result.chat);
         setError(null);
         opened = new Set(result.items.map(item => item.id));
-        if (result.seq === undefined) { store.upsert(result.items); return; }
+        if (result.seq === undefined) { store.upsert(result.items); persist(); return; }
         seq = result.seq;
         store.reset(result.items);
         const held = waiting.sort((a, b) => a.seq - b.seq);
         waiting = [];
         for (const delta of held) { if (seq === null) break; apply(delta); }
+        persist();
       }, failure => { if (live) setError(errorText(failure)); });
     };
     const off = connection.on(event => {
       if (event.type === 'delta' && event.chatId === chatId) apply(event);
-      else if (event.type === 'items' && event.chatId === chatId) store.upsert(event.items);
-      else if (event.type === 'chats') { const found = event.chats.find(entry => entry.id === chatId); if (found) setChat(found); }
+      else if (event.type === 'items' && event.chatId === chatId) { store.upsert(event.items); persist(); }
+      else if (event.type === 'chats') { const found = event.chats.find(entry => entry.id === chatId); if (found) { current = found; setChat(found); } }
     });
     open();
-    return () => { live = false; off(); void connection.call('chat.close', {id: chatId}).catch(() => undefined); };
+    return () => { live = false; off(); saver.flush(); void connection.call('chat.close', {id: chatId}).catch(() => undefined); };
   }, [connection, chatId, store]);
   return {chat, store, error};
 }
@@ -100,3 +97,13 @@ export function useNeedsCount(connection: MobileConnection | null): number {
   }, [connection]);
   return count;
 }
+
+/** Messages written to this chat offline that wait to go out (#326 phase 4). */
+export function useOutbox(connection: MobileConnection, chatId: string) {
+  const scope = cacheScopeOf(connection);
+  const read = () => scope ? scope.cache.outbox(scope.computerId, chatId) : NO_ENTRIES;
+  const [entries, setEntries] = useState(read);
+  useEffect(() => { setEntries(read()); return scope?.cache.subscribe(() => setEntries(read())); }, [connection, chatId]);
+  return entries;
+}
+const NO_ENTRIES: OutboxEntry[] = [];
