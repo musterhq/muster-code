@@ -195,6 +195,13 @@ test('a fill is refused when the login is for another site or the page changed m
   setTimeout(() => { address = 'https://evil.invalid/'; }, 100);
   await assert.rejects(slow, /page changed/);
   delete process.env.FAKE_OP_DELAY_MS;
+  // The page moves to another origin as soon as the username is typed: the password must never follow it there.
+  address = 'https://example.test/login';
+  const moved: string[] = [], hop = chromeTarget(() => address, moved);
+  const typeOne = hop.insertText.bind(hop);
+  hop.insertText = async text => { await typeOne(text); address = 'https://evil.invalid/'; };
+  await assert.rejects(passwords().fill(hop, {id: id('a'), vault: VAULT}), /page changed/);
+  assert.deepEqual(moved, ['ada@example.test'], 'only the username was typed');
   await show(EMPTY_PAGE);
   await assert.rejects(passwords().fill(chromeTarget(() => 'https://example.test/login', typed), {id: id('a'), vault: VAULT}), /No sign-in form/);
   assert.deepEqual(typed, [], 'nothing was typed into any page');

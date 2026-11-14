@@ -136,15 +136,16 @@ export function createBrowserPasswords(deps: BrowserPasswordsDeps): BrowserPassw
       const value = (purpose: string) => { const field = fields.find(entry => entry.purpose === purpose && typeof entry.value === 'string'); return typeof field?.value === 'string' ? field.value : ''; };
       const username = value('USERNAME'), password = value('PASSWORD');
       if (username.length > MAX_VALUE || password.length > MAX_VALUE) throw new Error('That login is too long to fill.');
-      const now = target.getURL();
-      let same = false;
-      try { same = new URL(now).origin === start.origin; } catch { same = false; }
-      if (!same) throw new Error('The page changed while 1Password was asked. Nothing was filled.');
+      // Checked again right before each value is typed: typing the username can make the page navigate, and the password
+      // must never land on a page of another origin.
+      const sameOrigin = () => { try { return new URL(target.getURL()).origin === start.origin; } catch { return false; } };
+      if (!sameOrigin()) throw new Error('The page changed while 1Password was asked. Nothing was filled.');
       let filled = 0;
       for (const [step, entry] of [['username', username], ['password', password]] as const) {
         if (!entry || (step === 'username' ? found.username : found.password) !== true) continue;
         const focus = record(await target.executeJavaScriptInIsolatedWorld(AGENT_WORLD, [{code: loginFieldScript(step)}], true));
         if (focus.ok !== true) continue;
+        if (!sameOrigin()) throw new Error(filled ? 'The page changed after the username was typed. The password was not filled.' : 'The page changed while 1Password was asked. Nothing was filled.');
         await target.insertText(entry);
         filled |= step === 'username' ? 1 : 2;
       }
