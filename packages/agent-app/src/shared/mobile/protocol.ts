@@ -113,6 +113,8 @@ export interface MobileAttachment { id: string; name: string; mime: string; size
 export interface MobileMethods {
   /** `lan`: the desktop's current direct addresses (phase 2), so the phone's record follows network changes. */
   'hello': {params: Record<string, never>; result: {desktopName: string; deviceId: string; access: MobileAccess; protocol: number; lan?: string[]}};
+  /** The phone's heartbeat (phase 3): answered at once, for read-only phones too, so a dead link is noticed fast. */
+  'ping': {params: Record<string, never>; result: Record<string, never>};
   'chats.list': {params: Record<string, never>; result: {chats: MobileChat[]}};
   /** Returns the chat and its latest items, and streams its item events to this phone until chat.close or another chat.open.
    *  With `deltas` (phase 3) the stream is `delta` events numbered from `seq`, carrying only appended text and changed items;
@@ -141,7 +143,7 @@ export interface MobileMethods {
   'upload.discard': {params: {chatId: string; attachmentId: string}; result: Record<string, never>};
 }
 export type MobileMethod = keyof MobileMethods;
-export const MOBILE_METHODS: readonly MobileMethod[] = ['hello', 'chats.list', 'chat.open', 'chat.close', 'chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'needs.list', 'chat.options', 'chat.create', 'upload.start', 'upload.chunk', 'upload.finish', 'upload.cancel', 'upload.discard'];
+export const MOBILE_METHODS: readonly MobileMethod[] = ['hello', 'ping', 'chats.list', 'chat.open', 'chat.close', 'chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'needs.list', 'chat.options', 'chat.create', 'upload.start', 'upload.chunk', 'upload.finish', 'upload.cancel', 'upload.discard'];
 /** Methods a read-only phone may not call. chat.options is only for starting a chat, so it is acting too. */
 export const ACTING_METHODS: ReadonlySet<MobileMethod> = new Set(['chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'chat.options', 'chat.create', 'upload.start', 'upload.chunk', 'upload.finish', 'upload.cancel', 'upload.discard']);
 

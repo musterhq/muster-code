@@ -17,17 +17,17 @@
  */
 import {randomUUID} from 'node:crypto';
 import {chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
-import {hostname, networkInterfaces} from 'node:os';
+import {homedir, hostname, networkInterfaces} from 'node:os';
 import {join} from 'node:path';
 import type {AgentEvent, Snapshot} from '../../shared/protocol.ts';
 import type {MobileDeviceView, MobileStatus} from '../../shared/domains/mobile-protocol.ts';
 import {equalBytes, fromBase64, fromUtf8, toBase64, utf8} from '../../shared/mobile/bytes.ts';
-import {checkCodeOf, keyFingerprint, prologue, SecureChannel, MODE_BYTE, type ChannelMode} from '../../shared/mobile/channel.ts';
+import {checkCodeOf, keyFingerprint, MAX_PHONE_FRAME_BYTES, prologue, SecureChannel, MODE_BYTE, type ChannelMode} from '../../shared/mobile/channel.ts';
 import {Handshake, type KeyPair} from '../../shared/mobile/noise.ts';
 import {CLOSE, formatPairingLink, parsePairingLink, MOBILE_ACCESS, MOBILE_PROTOCOL_VERSION, MobileError, RELAY_NEEDS_TLS, relayUrlAllowed, type MobileAccess, type MobileEvent, type MobileFrame, type MobileItem, type PairRequest, type Welcome} from '../../shared/mobile/protocol.ts';
 import {device} from '../../shared/device-noun.ts';
 import {activeSecretStore, openSecretStores, type SecretStore} from '../secret-store.ts';
-import {handle, mobileChats, mobileItem, needsList} from '../mobile/bridge.ts';
+import {handle, mobileChats, mobileItem, needsList, pathScrubber, type PathScrub} from '../mobile/bridge.ts';
 import {itemOps} from '../../shared/mobile/stream.ts';
 import {generateRouteKey, nodeNoiseCrypto, signWithRouteKey, type RouteKey} from '../mobile/node-crypto.ts';
 import {RelayLink} from '../mobile/relay-link.ts';
@@ -38,7 +38,13 @@ import type {DomainContext, DomainModule} from './types.ts';
 /** Test seams: the secret store, and shorter or smaller limits. */
 export const mobileSeams: {secrets?: () => SecretStore | undefined; pairingTtlMs?: number; handshakeTimeoutMs?: number; maxPendingSessions?: number;
   /** The hosts the LAN listener binds instead of this computer's private-network addresses ([] for none). */
-  lanHosts?: string[]} = {};
+  lanHosts?: string[];
+  /** A lower cap on one phone's requests in flight, and a gate every request waits at (to hold them in flight). */
+  maxRequestsInFlight?: number; requestGate?: Promise<void>;
+  /** Awaited after upload.finish checked a file and before it is staged. */
+  stageGate?: () => Promise<void>} = {};
+/** Requests one phone may have in flight at once, over all its sessions; more are refused at once (phase 3). */
+export const MAX_REQUESTS_IN_FLIGHT = 16;
 /** How often the LAN listener follows the computer's addresses (a laptop changes networks). */
 export const LAN_REFRESH_MS = 30_000;
 export const PAIRING_TTL_MS = 5 * 60_000;
@@ -115,6 +121,16 @@ export function createMobileDomain(context: DomainContext): DomainModule {
     entry.dispose();
   };
   const name = desktopName();
+  /** Requests in flight per phone. */
+  const inFlight = new Map<string, number>();
+  /** Takes absolute paths out of what phones see, for the computer's current folders (rebuilt when they change). */
+  let scrubbing: {key: string; scrub: PathScrub} | null = null;
+  const scrub: PathScrub = text => {
+    const folders = context.store.snapshot().folders.map(folder => ({path: folder.path, name: folder.name}));
+    const key = JSON.stringify(folders);
+    if (scrubbing?.key !== key) scrubbing = {key, scrub: pathScrubber(folders, homedir())};
+    return scrubbing.scrub(text);
+  };
 
   const secrets = (): SecretStore | undefined => mobileSeams.secrets ? mobileSeams.secrets() : openSecretStores().findLast(store => store.secureStorage()) ?? activeSecretStore();
   const secure = () => Boolean(secrets()?.secureStorage());
@@ -265,14 +281,26 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       if (frame.t !== 'req' || typeof frame.id !== 'number') return;
       const request = frame;
       // Requests run concurrently (a send must not wait behind a slow read); replies carry their id.
+      // At most so many requests in flight per phone: a runaway or hostile client can't pile work onto the desktop.
+      const phone = session.deviceId ?? `conn:${session.conn}`;
+      const running = inFlight.get(phone) ?? 0;
+      if (running >= (mobileSeams.maxRequestsInFlight ?? MAX_REQUESTS_IN_FLIGHT)) {
+        send(session, {t: 'res', id: request.id, ok: false, e: {code: 'refused', message: 'Too many requests at once from this phone. Try again in a moment.'}});
+        return;
+      }
+      inFlight.set(phone, running + 1);
       void (async () => {
         try {
           if (session.pending) throw new MobileError('pending', `Confirm the check code on ${device().your} first.`);
+          if (mobileSeams.requestGate) await mobileSeams.requestGate;
           const result = await handle(bridgeFor(session), request.m, request.p);
           send(session, {t: 'res', id: request.id, ok: true, r: result});
         } catch (error) {
           const e = error instanceof MobileError ? error : new MobileError('failed', 'That did not work.');
           send(session, {t: 'res', id: request.id, ok: false, e: {code: e.code, message: e.message}});
+        } finally {
+          const left = (inFlight.get(phone) ?? 1) - 1;
+          if (left > 0) inFlight.set(phone, left); else inFlight.delete(phone);
         }
       })();
       return;
@@ -323,7 +351,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
     const welcome: Welcome = {v: MOBILE_PROTOCOL_VERSION, desktopName: name, deviceId: entry.id, access: entry.access, ...(pending ? {pending: true} : {})};
     session.via.send(session.conn, toBase64(noise.writeMessage(utf8(JSON.stringify(welcome)))));
     const {send: out, receive: incoming} = noise.split();
-    session.channel = new SecureChannel(out, incoming);
+    session.channel = new SecureChannel(out, incoming, MAX_PHONE_FRAME_BYTES);
     session.deviceId = entry.id;
     // A pairing waits for the owner; a session keeps its handshake timeout until its first valid encrypted message.
     if (pending) { clearTimeout(session.timer); session.timer = undefined; }
@@ -337,6 +365,8 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       alive: () => sessions.get(session.conn) === session && devices.some(d => d.id === session.deviceId),
       desktopName: name, deviceId: session.deviceId ?? '',
       lan: () => lan?.addresses ?? [],
+      scrub,
+      ...(mobileSeams.stageGate ? {beforeStage: mobileSeams.stageGate} : {}),
       watch: (chatId: string | null, deltas?: boolean) => { session.watching = chatId; session.stream = chatId && deltas ? {chatId, seq: 0, sent: null, pending: []} : null; },
       streamFrom: (chatId: string, items: MobileItem[]): number => {
         const stream = session.stream;
@@ -367,7 +397,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
     } else if (event.type === 'timelinePatch' || event.type === 'timeline') {
       const items = event.type === 'timeline' ? event.items : event.patch.items;
       const revision = event.type === 'timelinePatch' ? event.patch.revision : 0;
-      const mapped = items.slice(-200).map(mobileItem);
+      const mapped = items.slice(-200).map(item => mobileItem(item, scrub));
       for (const session of live) {
         if (session.watching !== event.chatId) continue;
         if (session.stream?.chatId === event.chatId) streamTo(session, mapped);
@@ -389,7 +419,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
   function scheduleNeeds(snapshot: Snapshot) {
     needsQueue = needsQueue.then(async () => {
       if (disposed) return;
-      const needs = await needsList(context.invoke, snapshot);
+      const needs = await needsList(context.invoke, snapshot, scrub);
       const json = JSON.stringify(needs);
       for (const session of ready()) if (session.sentNeeds !== json) { session.sentNeeds = json; sendEvent(session, {type: 'needs', needs}); }
     }).catch(() => undefined);

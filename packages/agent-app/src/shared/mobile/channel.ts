@@ -16,8 +16,12 @@ export type ChannelMode = 'pair' | 'session';
 export const MODE_BYTE: Record<ChannelMode, number> = {pair: 0x50, session: 0x53};
 export const prologue = (mode: ChannelMode): Uint8Array => utf8(`muster-mobile/${MOBILE_PROTOCOL_VERSION}/${mode}`);
 const CHUNK = NOISE_MAX_MESSAGE - 16 - 1;
-/** A frame larger than this (after JSON) is refused rather than buffered. */
-export const MAX_FRAME_BYTES = 16 * 1024 * 1024;
+/** A frame larger than this (after JSON) is refused rather than buffered: the phone's limit for what the desktop sends (a
+ *  chat's latest items at most). */
+export const MAX_FRAME_BYTES = 8 * 1024 * 1024;
+/** The desktop's limit for a phone's frame: the largest request (a 100,000-character message, or an upload chunk) fits many
+ *  times over (phase 3 security review). */
+export const MAX_PHONE_FRAME_BYTES = 1024 * 1024;
 const EMPTY = new Uint8Array(0);
 
 /** The 6-digit check code both ends show after a pairing handshake (from the handshake hash, so a different peer gives a
@@ -36,7 +40,7 @@ export function keyFingerprint(crypto: NoiseCrypto, publicKey: Uint8Array): stri
 export class SecureChannel {
   private pending: Uint8Array[] = [];
   private pendingBytes = 0;
-  constructor(private readonly send: CipherState, private readonly receive: CipherState) {}
+  constructor(private readonly send: CipherState, private readonly receive: CipherState, private readonly maxFrameBytes = MAX_FRAME_BYTES) {}
   /** Seals one frame into one or more transport messages (base64). */
   seal(frame: MobileFrame): string[] {
     const bytes = utf8(JSON.stringify(frame));
@@ -57,7 +61,7 @@ export class SecureChannel {
     const plain = this.receive.decrypt(EMPTY, sealed);
     if (!plain.length || plain[0]! > 1) throw new Error('Malformed frame.');
     this.pending.push(plain.subarray(1)); this.pendingBytes += plain.length - 1;
-    if (this.pendingBytes > MAX_FRAME_BYTES) throw new Error('Frame too large.');
+    if (this.pendingBytes > this.maxFrameBytes) throw new Error('Frame too large.');
     if (plain[0] === 1) return null;
     const whole = concat(...this.pending);
     this.pending = []; this.pendingBytes = 0;

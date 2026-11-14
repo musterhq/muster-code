@@ -29,6 +29,30 @@ export function mobileChats(snapshot: Snapshot): MobileChat[] {
 }
 
 const cap = (text: string) => text.length > MAX_ITEM_TEXT ? `${text.slice(0, MAX_ITEM_TEXT)}\n[truncated]` : text;
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Takes absolute paths out of text for the phone (DESIGN §8.2): a path inside one of the computer's folders becomes relative
+ *  to it, the folder itself its name, and anything else under a home directory starts with ~. Paths that name no person
+ *  (/etc/hosts) stay. */
+export type PathScrub = (text: string) => string;
+export function pathScrubber(folders: ReadonlyArray<{path: string; name: string}>, home: string): PathScrub {
+  const roots = folders.filter(folder => folder.path && folder.path.length > 1).map(folder => ({path: folder.path.replace(/[\\/]+$/, ''), name: folder.name || baseName(folder.path)}))
+    .sort((a, b) => b.path.length - a.path.length);
+  const end = '(?=$|[\\s\'"`),;:!?\\]>]|\\.(?:$|\\s))';
+  const rules: Array<[RegExp, string]> = roots.flatMap(root => [
+    [new RegExp(`${escape(root.path)}[\\\\/]`, 'g'), ''] as [RegExp, string],
+    [new RegExp(`${escape(root.path)}${end}`, 'g'), root.name] as [RegExp, string],
+  ]);
+  const homes = [home.replace(/[\\/]+$/, '')].filter(entry => entry.length > 1);
+  for (const entry of homes) rules.push([new RegExp(`${escape(entry)}(?=[\\\\/]|${end.slice(3)}`, 'g'), '~']);
+  // Other people's home directories, and this one written another way.
+  rules.push([/(?:\/Users|\/home)\/[^\s/\\'"`]+(?=\/|\s|$)/g, '~'], [/[A-Za-z]:\\Users\\[^\s\\'"`]+(?=\\|\s|$)/g, '~']);
+  return text => {
+    if (!text || (!text.includes('/') && !text.includes('\\'))) return text;
+    let out = text;
+    for (const [pattern, to] of rules) out = out.replace(pattern, to);
+    return out;
+  };
+}
 const baseName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
 /** The phone gets names, never full paths (DESIGN §8.2): the folder's name, and files relative to it (else their base name). */
 function phonePath(path: string, cwd: string | undefined): string {
@@ -56,8 +80,9 @@ function questionsOf(data: Record<string, unknown> | undefined): MobileQuestion[
   return list.map(q => ({id: String(q.id), header: String(q.header ?? ''), question: String(q.question ?? ''), allowCustomAnswer: Boolean(q.allowCustomAnswer), multiSelect: Boolean(q.multiSelect),
     options: (q.options ?? []).map(option => ({label: String(option.label), ...(option.description ? {description: String(option.description)} : {})})), ...(q.isSecret ? {secret: true} : {})}));
 }
-export function mobileItem(item: TimelineItem): MobileItem {
-  const out: MobileItem = {id: item.id, kind: item.kind, text: cap(item.text ?? ''), createdAt: item.createdAt};
+/** `scrub` takes absolute paths out of the row's text; the approval's command stays exactly as it will run. */
+export function mobileItem(item: TimelineItem, scrub: PathScrub = text => text): MobileItem {
+  const out: MobileItem = {id: item.id, kind: item.kind, text: cap(scrub(item.text ?? '')), createdAt: item.createdAt};
   if (item.status) out.status = item.status;
   if (item.kind === 'approval') { const approval = approvalOf(item.data); if (approval) out.approval = approval; }
   if (item.kind === 'question') { const questions = questionsOf(item.data); if (questions) out.questions = questions; }
@@ -87,9 +112,13 @@ export interface BridgeContext {
   uploads?: PhoneUploads;
   /** The desktop's current direct addresses on its network (phase 2). */
   lan?(): string[];
+  /** Takes absolute paths out of row text (phase 3). */
+  scrub?: PathScrub;
+  /** Test seam: awaited after upload.finish checked the file and before it is staged. */
+  beforeStage?(): Promise<void>;
 }
 
-export async function needsList(invoke: DomainContext['invoke'], snapshot: Snapshot): Promise<MobileNeed[]> {
+export async function needsList(invoke: DomainContext['invoke'], snapshot: Snapshot, scrub?: PathScrub): Promise<MobileNeed[]> {
   const out: MobileNeed[] = [];
   for (const entry of snapshot.attention?.chats ?? []) {
     let items: TimelineItem[] = [];
@@ -97,7 +126,7 @@ export async function needsList(invoke: DomainContext['invoke'], snapshot: Snaps
     for (const request of entry.requests) {
       const found = items.find(item => item.id === request.itemId);
       if (!found || (found.kind !== 'approval' && found.kind !== 'question')) continue;
-      const item = mobileItem(found);
+      const item = mobileItem(found, scrub);
       out.push({chatId: entry.chatId, chatTitle: entry.chatTitle, itemId: item.id, kind: found.kind, summary: summary(item), createdAt: request.createdAt,
         ...(item.approval ? {approval: item.approval} : {}), ...(item.questions ? {questions: item.questions} : {})});
     }
@@ -143,6 +172,7 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
   };
   try {
     switch (m) {
+      case 'ping': return {} satisfies MobileMethods['ping']['result'];
       case 'hello': return {desktopName: ctx.desktopName, deviceId: ctx.deviceId, access: ctx.access(), protocol: MOBILE_PROTOCOL_VERSION, lan: ctx.lan?.() ?? []} satisfies MobileMethods['hello']['result'];
       case 'chats.list': return {chats: mobileChats(await ctx.snapshot())} satisfies MobileMethods['chats.list']['result'];
       case 'chat.open': {
@@ -151,7 +181,7 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
         // Watching starts before the read, so a change made while it runs is kept and sent after it, never lost.
         ctx.watch(chatId, deltas);
         const timeline = await ctx.invoke('chat.timeline', {id: chatId});
-        const items = timeline.items.slice(-OPEN_ITEMS).map(mobileItem);
+        const items = timeline.items.slice(-OPEN_ITEMS).map(item => mobileItem(item, ctx.scrub));
         const seq = deltas ? ctx.streamFrom!(chatId, items) : undefined;
         const chat = mobileChats(await ctx.snapshot()).find(entry => entry.id === chatId)!;
         return {chat, items, revision: timeline.revision, ...(seq === undefined ? {} : {seq})} satisfies MobileMethods['chat.open']['result'];
@@ -234,11 +264,15 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
         const uploads = uploadsOf(ctx), file = uploads.finish(p.uploadId);
         await chatOf(file.chatId);
         recheck();
+        await ctx.beforeStage?.();
+        recheck();
         const ref = await ctx.invoke('attachments.stage', file);
+        // Revoked (or made read-only) while staging: the file goes, so a phone that lost access leaves nothing behind.
+        try { recheck(); } catch (error) { await ctx.invoke('attachments.discard', {chatId: file.chatId, id: ref.id}).catch(() => undefined); throw error; }
         uploads.own(ref.id, file.chatId);
         return {attachment: {id: ref.id, name: ref.name, mime: ref.mime, size: ref.size, kind: ref.kind}} satisfies MobileMethods['upload.finish']['result'];
       }
-      case 'needs.list': return {needs: await needsList(ctx.invoke, await ctx.snapshot())} satisfies MobileMethods['needs.list']['result'];
+      case 'needs.list': return {needs: await needsList(ctx.invoke, await ctx.snapshot(), ctx.scrub)} satisfies MobileMethods['needs.list']['result'];
     }
   } catch (error) {
     if (error instanceof MobileError) throw error;
