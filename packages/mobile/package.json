@@ -48,5 +48,10 @@
     "jest-expo": "~58.0.14",
     "test-renderer": "^1.3.0",
     "typescript": "~5.9.3"
+  },
+  "enriched-markdown": {
+    "enableCodeHighlight": false,
+    "enableMath": true,
+    "enableVideo": false
   }
 }

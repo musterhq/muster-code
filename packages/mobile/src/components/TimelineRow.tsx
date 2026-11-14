@@ -1,5 +1,5 @@
 /** One timeline row. It follows only its own item in the store, so a streaming token re-renders this row and no other
- *  (MUS-SPEC-23-16A). Replies render through StreamingText; tool calls are one dim line; approvals and questions are cards. */
+ *  (MUS-SPEC-23-16A). Replies render as native Markdown; tool calls are one dim line; approvals and questions are cards. */
 import {memo} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import type {MobileConnection} from '../shared';
@@ -9,7 +9,7 @@ import {reportRender} from '../perf';
 import {font, radius, space, themed, type} from '../theme';
 import {ApprovalCard, offlineNote} from './ApprovalCard';
 import {QuestionCard} from './QuestionCard';
-import {StreamingText} from './StreamingText';
+import {Markdown} from './Markdown';
 
 export const TimelineRow = memo(function TimelineRow({store, id, connection, canAct, offline}: {store: TimelineStore; id: string; connection: MobileConnection; canAct: boolean; offline?: string}) {
   const item = useTimelineItem(store, id);
@@ -27,7 +27,7 @@ export const TimelineRow = memo(function TimelineRow({store, id, connection, can
   );
   if (item.kind === 'notice') return <Text style={styles.notice}>{item.text}</Text>;
   if (item.kind === 'reasoning') return <Text style={styles.reasoning} numberOfLines={4}>{item.text}</Text>;
-  return <View style={styles.assistant}><StreamingText text={item.text} /></View>;
+  return <View style={styles.assistant}><Markdown text={item.text} /></View>;
 });
 const useStyles = themed(c => StyleSheet.create({
   user: {alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: c.bubble, borderRadius: 18, borderBottomRightRadius: radius.s, paddingVertical: space.s, paddingHorizontal: space.m, marginVertical: space.xs},
