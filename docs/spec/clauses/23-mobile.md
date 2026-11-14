@@ -9,13 +9,15 @@ What the user can do:
 - see everything that needs them across chats in one feed;
 - revoke a phone, or change it between read only and act, from the desktop;
 - start a new chat from the phone in a folder or Project with a provider and model, and send photos and files (phase 2);
-- connect straight to the desktop when both are on the same network, with the relay as the fallback (phase 2).
+- connect straight to the desktop when both are on the same network, with the relay as the fallback (phase 2);
+- pair several computers and switch between them or see all at once, read the last known state with no connection, write messages that go out on reconnect, read replies as native Markdown, and use the app on tablets and in landscape (phase 4).
 
 Boundaries:
 - The phone talks to the desktop through a relay, or directly on the same network, with end-to-end encryption (Noise IK) either way; the relay and the network see only ciphertext.
 - A new phone is read-only. The phone can never raise a chat's access level or approve for a whole session.
 - Pairing needs secure storage on the desktop and a one-time code that expires.
-- Production relay hosting, push notifications, Projects, dictation and rich rendering are later phases (see the design).
+- Each computer keeps its own keys and its own cached data; the phone caches only what it was shown and wipes a computer’s cache when that computer revokes it or is unpaired. Approvals are never queued offline.
+- Production relay hosting, push notifications, Projects and dictation are later phases (see the design).
 
 ## Acceptance cases
 
@@ -85,6 +87,18 @@ Boundaries:
 | [MUS-SPEC-23-18B](23-mobile.md#mus-spec-23-18b) | Requests from one phone beyond the cap on requests in flight are refused at once with a reason, the session stays open, and the held requests finish when they are released. | [`a phone’s requests beyond the in-flight cap are refused and the session stays open`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
 | [MUS-SPEC-23-18C](23-mobile.md#mus-spec-23-18c) | A frame from the phone larger than 1 MB, even split into allowed Noise messages, closes the session before it is parsed; a normal upload chunk and a 100,000-character message still go through. | [`a frame from the phone over 1 MB closes the session, and normal requests still fit`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
 | [MUS-SPEC-23-18D](23-mobile.md#mus-spec-23-18d) | When the phone is revoked after upload.finish started staging its file, the staged file is discarded and nothing is left in the chat. | [`revoking a phone while its upload is being staged discards the file`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
+| [MUS-SPEC-23-19A](23-mobile.md#mus-spec-23-19a) | Both records load with their own keys and the first stays unchanged when the second is saved. The switcher lists each computer with its connection (LAN, Relay) and access (Can act, Read only). Choosing Build box shows only its chats and its name in the computer pill; Show all lists the chats of both, each labelled with its computer. Removing Studio Mac leaves Build box’s record and keys as they were. | [`two computers are paired side by side, the switcher shows each one’s status, and Chats shows one computer or all`](../../../packages/mobile/tests/computers.test.tsx) |
+| [MUS-SPEC-23-19B](23-mobile.md#mus-spec-23-19b) | The link reads LAN once connected, Reconnecting right after the close and still at 2 seconds, Offline after 3 seconds down, Relay once the next attempt connects, and Revoked after the revoked close, with no further attempt. | [`a computer’s link reads LAN, Relay, Reconnecting and Offline, and turns Offline only after 3 seconds down`](../../../packages/mobile/tests/computer-link.test.ts) |
+| [MUS-SPEC-23-20A](23-mobile.md#mus-spec-23-20a) | Chats lists the cached chats, the running one reading Was running. A banner says Offline with the last update time and the computer’s name, and Retry asks the link to connect. The chat shows its cached items and the same banner. | [`with no connection the chats and the open chat come from the cache, with a calm banner, Retry and was running`](../../../packages/mobile/tests/offline.test.tsx) |
+| [MUS-SPEC-23-20B](23-mobile.md#mus-spec-23-20b) | Both messages show as waiting to send and are stored in the outbox. On the first reconnect the first send fails as closed and nothing more is sent; on the second, chat.send is called for both, in order, with the same request ids as before (the computer keeps one run per request id, so each message runs at most once), and the outbox is empty. The approval card offline shows no Approve or Decline and says it can be answered when the computer is back. | [`messages written offline are queued, go out in order once on reconnect, and approvals are never queued`](../../../packages/mobile/tests/outbox.test.tsx) |
+| [MUS-SPEC-23-20C](23-mobile.md#mus-spec-23-20c) | After the revoke nothing of the first computer is left in any table and the second computer’s rows are all still there. After unpairing the second, the cache is empty. | [`a revoked computer’s cached chats, items, needs and outbox are wiped and another computer’s stay`](../../../packages/mobile/tests/offline-wipe.test.ts) |
+| [MUS-SPEC-23-21A](23-mobile.md#mus-spec-23-21a) | The prose goes to the native Markdown view with the GitHub flavour. The code block shows each line with its number and the language; Copy puts the code on the clipboard, shows Copied and gives a light haptic. The Mermaid and chart blocks show as cards with their reserved height before anything renders, and pressing one opens it full screen. | [`a reply renders prose as Markdown, code with line numbers and Copy, and diagrams as cards that open full screen`](../../../packages/mobile/tests/markdown.test.tsx) |
+| [MUS-SPEC-23-21B](23-mobile.md#mus-spec-23-21b) | The unclosed fence shows as a code block with the lines so far. While it grows, the first paragraph does not render again. Closing it keeps the code block and the new paragraph shows after it. | [`while a reply streams only its last block re-renders, and an unclosed fence shows as code`](../../../packages/mobile/tests/markdown.test.tsx) |
+| [MUS-SPEC-23-22A](23-mobile.md#mus-spec-23-22a) | The widths classify as compact, medium, medium and expanded. At 1194 the sidebar lists the chats, the chat column is at most 760 points wide and the inspector shows; opening a chat shows it in the column; collapsing hides the sidebar and keeps the chat. At 390 the shell shows the phone layout. app.json allows every orientation. | [`width classes pick the layout, and an expanded window shows the sidebar, a capped chat column and the inspector`](../../../packages/mobile/tests/tablet.test.tsx) |
+| [MUS-SPEC-23-23A](23-mobile.md#mus-spec-23-23a) | All three sessions rebuild the reply exactly. The scrubber reads under twice the reply’s length in total (each new piece once, not the whole reply per piece and not once per session). The unwatched chat’s stream costs no scrubbing at all. | [`a streaming reply is mapped once per change for every phone watching, and not at all when none watches`](../../../packages/agent-app/tests/mobile-phase4-326.test.ts) |
+| [MUS-SPEC-23-23B](23-mobile.md#mus-spec-23-23b) | The phone receives remove ops for the deleted rows in the next numbered delta, and applying the deltas gives exactly the desktop’s timeline; chat.open is not called again. | [`a message replaced on the desktop is removed from the phone without reopening the chat`](../../../packages/agent-app/tests/mobile-phase4-326.test.ts) |
+| [MUS-SPEC-23-23C](23-mobile.md#mus-spec-23-23c) | The removed item is gone from the screen, the other two stay, and chat.open is not called again. | [`a remove op takes the row off the chat screen`](../../../packages/mobile/tests/chat-stream.test.tsx) |
+| [MUS-SPEC-23-23D](23-mobile.md#mus-spec-23-23d) | Every delta for the reply is an append or a status change, never the whole item. The phone’s text is the reply’s first 65,536 characters followed by a note that the rest is on the computer, and the finished status reaches the phone. | [`a reply that grows past the phone’s item cap is sent as appends and says the rest is on the computer`](../../../packages/agent-app/tests/mobile-phase4-326.test.ts) |
 
 ### Pairing, the device registry and access
 
@@ -824,4 +838,146 @@ Boundaries:
 - Test: `packages/agent-app/tests/mobile-phase3-326.test.ts::revoking a phone while its upload is being staged discards the file`
 - Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and a Node phone built from the same MobileClient and Noise code the app uses, with Node crypto.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### Several computers (phase 4)
+
+<a id="mus-spec-23-19a"></a>
+#### MUS-SPEC-23-19A: Several computers live in one app
+
+- Precondition: Two pairing records for two computers (Studio Mac and Build box), each with its own key pair, in a memory secure store; fake connections for both.
+- Action: Save both records; load them; render the Chats screen with the switcher open; choose Build box; turn on Show all computers; then remove Studio Mac.
+- Expected result: Both records load with their own keys and the first stays unchanged when the second is saved. The switcher lists each computer with its connection (LAN, Relay) and access (Can act, Read only). Choosing Build box shows only its chats and its name in the computer pill; Show all lists the chats of both, each labelled with its computer. Removing Studio Mac leaves Build box’s record and keys as they were.
+- Test: `packages/mobile/tests/computers.test.tsx::two computers are paired side by side, the switcher shows each one’s status, and Chats shows one computer or all`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: The medium-detent sheet’s spring and the crossfade are checked by hand on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-19b"></a>
+#### MUS-SPEC-23-19B: The computer pill shows how the phone is connected
+
+- Precondition: A computer link with a fake connect function and fake timers.
+- Action: Connect over the LAN; close the connection; let 2 seconds pass, then 2 more; let the next attempt connect through the relay; then close it with revoked.
+- Expected result: The link reads LAN once connected, Reconnecting right after the close and still at 2 seconds, Offline after 3 seconds down, Relay once the next attempt connects, and Revoked after the revoked close, with no further attempt.
+- Test: `packages/mobile/tests/computer-link.test.ts::a computer’s link reads LAN, Relay, Reconnecting and Offline, and turns Offline only after 3 seconds down`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native and fake timers.
+- Known gaps: Real network changes (Wi-Fi to cellular) are checked by hand on a device.
+- Evidence: UNVERIFIED
+
+### Offline history and the outbox (phase 4)
+
+<a id="mus-spec-23-20a"></a>
+#### MUS-SPEC-23-20A: The last known state opens without a connection
+
+- Precondition: A cache filled while connected: a chats list with a running chat synced at 14:02, and that chat’s items.
+- Action: Render the Chats screen and then the chat with an offline link; press Retry.
+- Expected result: Chats lists the cached chats, the running one reading Was running. A banner says Offline with the last update time and the computer’s name, and Retry asks the link to connect. The chat shows its cached items and the same banner.
+- Test: `packages/mobile/tests/offline.test.tsx::with no connection the chats and the open chat come from the cache, with a calm banner, Retry and was running`
+- Environment: jest (jest-expo preset) in Node; the offline cache runs its real SQL on Node’s built-in SQLite (node:sqlite) through the same small database interface the app gives expo-sqlite.
+- Known gaps: The banner’s slide is checked by hand on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-20b"></a>
+#### MUS-SPEC-23-20B: Messages written offline wait in the outbox and go out once
+
+- Precondition: A chat opened from the cache with no connection, and a chat with a pending approval; a fake connection whose chat.send fails once as closed.
+- Action: Send two messages offline; reconnect with the failing connection; reconnect again; then look at the approval card offline.
+- Expected result: Both messages show as waiting to send and are stored in the outbox. On the first reconnect the first send fails as closed and nothing more is sent; on the second, chat.send is called for both, in order, with the same request ids as before (the computer keeps one run per request id, so each message runs at most once), and the outbox is empty. The approval card offline shows no Approve or Decline and says it can be answered when the computer is back.
+- Test: `packages/mobile/tests/outbox.test.tsx::messages written offline are queued, go out in order once on reconnect, and approvals are never queued`
+- Environment: jest (jest-expo preset) in Node; the offline cache runs its real SQL on Node’s built-in SQLite (node:sqlite) through the same small database interface the app gives expo-sqlite.
+- Known gaps: A desktop answering the first send after the phone gave up is covered by the desktop’s request-id receipt (one run per id), not by this test.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-20c"></a>
+#### MUS-SPEC-23-20C: Revoking a computer wipes what the phone cached from it
+
+- Precondition: A cache holding chats, a chat’s items, needs and a queued message for two computers.
+- Action: Revoke the first computer (the link closes with revoked); then unpair the second.
+- Expected result: After the revoke nothing of the first computer is left in any table and the second computer’s rows are all still there. After unpairing the second, the cache is empty.
+- Test: `packages/mobile/tests/offline-wipe.test.ts::a revoked computer’s cached chats, items, needs and outbox are wiped and another computer’s stay`
+- Environment: jest (jest-expo preset) in Node; the offline cache runs its real SQL on Node’s built-in SQLite (node:sqlite) through the same small database interface the app gives expo-sqlite.
+- Known gaps: The SQLite file on the device is not encrypted beyond the phone’s own storage encryption; Android backups are turned off for the app.
+- Evidence: UNVERIFIED
+
+### Rich replies (phase 4)
+
+<a id="mus-spec-23-21a"></a>
+#### MUS-SPEC-23-21A: Replies render as native Markdown with code blocks, tables and cards
+
+- Precondition: An assistant reply with a heading, a table, a task list, inline maths, a TypeScript code block, a Mermaid block and a Vega-Lite block; the clipboard is recorded.
+- Action: Render the reply; press Copy on the code block; press the Mermaid card.
+- Expected result: The prose goes to the native Markdown view with the GitHub flavour. The code block shows each line with its number and the language; Copy puts the code on the clipboard, shows Copied and gives a light haptic. The Mermaid and chart blocks show as cards with their reserved height before anything renders, and pressing one opens it full screen.
+- Test: `packages/mobile/tests/markdown.test.tsx::a reply renders prose as Markdown, code with line numbers and Copy, and diagrams as cards that open full screen`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: The native Markdown view itself (tables, task lists, maths) is mocked in Node; it is checked on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-21b"></a>
+#### MUS-SPEC-23-21B: Markdown stays steady while a reply streams
+
+- Precondition: A streaming reply of a paragraph, then an unfinished code fence.
+- Action: Grow the code fence piece by piece, then close it and start a new paragraph.
+- Expected result: The unclosed fence shows as a code block with the lines so far. While it grows, the first paragraph does not render again. Closing it keeps the code block and the new paragraph shows after it.
+- Test: `packages/mobile/tests/markdown.test.tsx::while a reply streams only its last block re-renders, and an unclosed fence shows as code`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: Frame timing while streaming is measured on a device.
+- Evidence: UNVERIFIED
+
+### Tablets and landscape (phase 4)
+
+<a id="mus-spec-23-22a"></a>
+#### MUS-SPEC-23-22A: Tablets and landscape get wider layouts
+
+- Precondition: The app’s width classes and the tablet shell with a fake connection listing chats.
+- Action: Classify widths 599, 600, 839 and 840; render the shell at 1194 points wide; open a chat; collapse the sidebar; render at 390 points.
+- Expected result: The widths classify as compact, medium, medium and expanded. At 1194 the sidebar lists the chats, the chat column is at most 760 points wide and the inspector shows; opening a chat shows it in the column; collapsing hides the sidebar and keeps the chat. At 390 the shell shows the phone layout. app.json allows every orientation.
+- Test: `packages/mobile/tests/tablet.test.tsx::width classes pick the layout, and an expanded window shows the sidebar, a capped chat column and the inspector`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: Hinge-aware splitting on Android foldables needs a native WindowManager module and is deferred; split view and rotation are checked on a device.
+- Evidence: UNVERIFIED
+
+### Phase 3 follow-ups (phase 4)
+
+<a id="mus-spec-23-23a"></a>
+#### MUS-SPEC-23-23A: The desktop maps each changed row once, whoever watches
+
+- Precondition: A paired phone with three sessions open on one chat, a second chat nobody watches, and a seam counting the characters the path scrubber reads.
+- Action: Stream a 24,000-character reply in 60 pieces in the watched chat, then stream the same in the other chat.
+- Expected result: All three sessions rebuild the reply exactly. The scrubber reads under twice the reply’s length in total (each new piece once, not the whole reply per piece and not once per session). The unwatched chat’s stream costs no scrubbing at all.
+- Test: `packages/agent-app/tests/mobile-phase4-326.test.ts::a streaming reply is mapped once per change for every phone watching, and not at all when none watches`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: CPU time is not measured; scrubbed characters stand in for it.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-23b"></a>
+#### MUS-SPEC-23-23B: A row deleted on the desktop leaves the phone
+
+- Precondition: A paired phone watching a chat with deltas, after two turns.
+- Action: Replace the second user message on the desktop (Edit › Replace), which deletes it and everything after it, and let the new turn finish.
+- Expected result: The phone receives remove ops for the deleted rows in the next numbered delta, and applying the deltas gives exactly the desktop’s timeline; chat.open is not called again.
+- Test: `packages/agent-app/tests/mobile-phase4-326.test.ts::a message replaced on the desktop is removed from the phone without reopening the chat`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-23c"></a>
+#### MUS-SPEC-23-23C: The phone drops removed rows
+
+- Precondition: The chat screen opened with three items.
+- Action: Emit a delta that removes the middle item.
+- Expected result: The removed item is gone from the screen, the other two stay, and chat.open is not called again.
+- Test: `packages/mobile/tests/chat-stream.test.tsx::a remove op takes the row off the chat screen`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-23d"></a>
+#### MUS-SPEC-23-23D: A reply longer than the phone’s cap stays append-only
+
+- Precondition: A paired phone watching a chat whose fake provider streams 160 pieces of 500 characters (past the 64 KB item cap).
+- Action: Stream the reply and collect the deltas.
+- Expected result: Every delta for the reply is an append or a status change, never the whole item. The phone’s text is the reply’s first 65,536 characters followed by a note that the rest is on the computer, and the finished status reaches the phone.
+- Test: `packages/agent-app/tests/mobile-phase4-326.test.ts::a reply that grows past the phone’s item cap is sent as appends and says the rest is on the computer`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: The phone shows the start of a very long reply, not its end.
 - Evidence: UNVERIFIED
