@@ -822,7 +822,9 @@ async function stopChoice(id: string): Promise<StopChoice> {
   const chat = state.snapshot?.chats.find(entry => entry.id === id);
   // A second press while the run is already stopping (Force stop) never asks again.
   if (chat?.status === 'stopping') return 'one';
-  const working = (await invoke('delegation.children', { chatId: id }).catch(() => [])).filter(child => WORKING_CHILD.has(child.status));
+  // A service without delegation (an older Muster Server, a test bridge) answers nothing or fails: Stop then stops the chat.
+  const children: unknown = await invoke('delegation.children', { chatId: id }).catch(() => []);
+  const working = (Array.isArray(children) ? children as { title: string; status: string }[] : []).filter(child => WORKING_CHILD.has(child?.status));
   if (!working.length) return 'one';
   return askStopChoice(chat?.title || 'This chat', working.map(child => child.title));
 }
