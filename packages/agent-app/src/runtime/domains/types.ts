@@ -25,6 +25,8 @@ export type ChatDefaultsResolver = (input: { folderId?: string; projectId?: stri
 export interface CommandCompleted { command: string; input: Record<string, unknown>; output: unknown }
 /** #654: a chat is about to be deleted (still in the store) or was just archived. */
 export interface ChatRemoval { chat: Chat; kind: 'delete' | 'archive' }
+/** #147: answers a file or Git command for an `ssh://` folder instead of the local implementation. */
+export type RemoteFolderRouter = (command: string, input: Record<string, unknown>, folder: Folder) => Promise<unknown>;
 /** #44: an approval or question card opened (pending) or was closed (settled) in a chat. Observers must not throw or block. */
 export interface AttentionChange { chatId: string; itemId: string; state: 'pending' | 'settled' }
 export type RunEnvironmentResolver = (chat: Chat, defaultCwd: string) => Promise<{ cwd: string }>;
@@ -69,6 +71,8 @@ export interface DomainHooks {
   onCommand?(fn: (event: CommandCompleted) => void): () => void;
   /** #654: release what a chat owns. On 'delete' a throw keeps the chat (its message is shown); 'archive' never fails the archive. Optional so bare test contexts need not provide it. */
   onChatRemoval?(fn: (event: ChatRemoval) => Promise<void> | void): () => void;
+  /** #147: the single handler of file and Git commands for a folder on an SSH host (undefined clears it). */
+  setRemoteFolderRouter?(fn: RemoteFolderRouter | undefined): void;
   /** #44: approval and question cards opening and closing (a delegating chat mirrors its children's). Optional so bare test contexts need not provide it. */
   onAttention?(fn: (event: AttentionChange) => void): () => void;
   /** #44: replaces the single resolver of extra data a sent message's transcript row carries, by request id (a delegation

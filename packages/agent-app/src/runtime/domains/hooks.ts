@@ -1,7 +1,7 @@
 /** Hook registry behind DomainContext.hooks, plus the bounded runners the service calls. */
 import { isAbsolute } from 'node:path';
-import type { AgentEvent, Chat } from '../../shared/protocol.ts';
-import type { AttentionChange, AutomatedWorktreeResolver, TaskHistoryBriefResolver, ChatDefaults, ChatRemoval, ChatDefaultsResolver, CommandCompleted, DomainHooks, PromptContributor, ProviderEventInfo, ReasoningEffort, RunEnvironmentResolver, ToolPolicyResolver, RunOptions, RunOptionsContributor, RunSettled, RunStarted } from './types.ts';
+import type { AgentEvent, Chat, Folder } from '../../shared/protocol.ts';
+import type { AttentionChange, AutomatedWorktreeResolver, TaskHistoryBriefResolver, ChatDefaults, ChatRemoval, ChatDefaultsResolver, CommandCompleted, DomainHooks, PromptContributor, ProviderEventInfo, ReasoningEffort, RunEnvironmentResolver, RemoteFolderRouter, ToolPolicyResolver, RunOptions, RunOptionsContributor, RunSettled, RunStarted } from './types.ts';
 
 export const PROMPT_CONTRIBUTOR_TIMEOUT_MS = 2_000;
 export const PROMPT_CONTRIBUTION_MAX_BYTES = 8 * 1024;
@@ -37,6 +37,7 @@ export function createDomainHooks() {
   let automated: AutomatedWorktreeResolver | undefined;
   let contextWindow: ((providerId: string, model: string) => number | undefined) | undefined;
   let historyBrief: TaskHistoryBriefResolver | undefined;
+  let remoteRouter: RemoteFolderRouter | undefined;
   let sendData: ((chatId: string, requestId: string) => Record<string, unknown> | undefined) | undefined;
   const add = <T>(set: Set<T>, fn: T) => { set.add(fn); return () => { set.delete(fn); }; };
   const hooks: DomainHooks = {
@@ -59,6 +60,7 @@ export function createDomainHooks() {
     commitIdentity(folderId) { try { return commitIdentity?.(folderId) ?? null; } catch { return null; } },
     onCommand: fn => add(commands, fn),
     onChatRemoval: fn => add(removals, fn),
+    setRemoteFolderRouter(fn) { remoteRouter = fn; },
     onAttention: fn => add(attentionObservers, fn),
     setSendData(fn) { sendData = fn; },
     onAgentEvent: fn => add(agentEvents, fn),
@@ -141,6 +143,11 @@ export function createDomainHooks() {
     },
     chatDefaults(input: { folderId?: string; projectId?: string }): ChatDefaults {
       try { return defaults?.(input) ?? {}; } catch { return {}; }
+    },
+    /** #147: a file or Git command for a folder on an SSH host. Never falls back to a local path. */
+    remoteFolder(command: string, input: Record<string, unknown>, folder: Folder): Promise<unknown> {
+      if (!remoteRouter) return Promise.reject(new Error('Folders on SSH hosts are not available right now.'));
+      return remoteRouter(command, input, folder);
     },
     async runEnvironment(chat: Chat, defaultCwd: string): Promise<string> {
       if (!environment) return defaultCwd;

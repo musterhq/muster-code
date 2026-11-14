@@ -264,7 +264,9 @@ async function main(): Promise<void> {
   };
   // CR-18: new terminals launch the Integrated terminal shell chosen in Preferences (login shell when unset or missing).
   const processes = new ProcessSessions(path.join(dataDir,'process-sessions.json'),async input=>commandAuthority(await loaded.service.invoke('app.snapshot',undefined),dataDir,input),onEvent,undefined,
-    {terminal:{shell:async()=>(await loaded.service.invoke('settings.get',{})).values['terminal.shell']},onExit:session=>processContinuations?.exited(session)});
+    {terminal:{shell:async()=>(await loaded.service.invoke('settings.get',{})).values['terminal.shell'],
+      // #147: a terminal in a folder on an SSH host is `ssh -t` to the host through its shared connection.
+      remote:async folderPath=>{const folder=(await loaded.service.invoke('app.snapshot',undefined)).folders.find(item=>item.path===folderPath);if(!folder)throw new Error('The terminal folder no longer exists.');return loaded.service.invoke('remote.terminal.launch',{folderId:folder.id});}},onExit:session=>processContinuations?.exited(session)});
   processContinuations = new ProcessContinuations({
     agentProcesses:chatId=>processes.agentProcesses(chatId),
     // The same queue a typed follow-up goes through: it waits for a running turn and holds while the queue is paused.

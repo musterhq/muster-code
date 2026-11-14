@@ -36,6 +36,8 @@ const support = {
   'tests/fixtures/cli-agents/fake-cursor.cjs': 'subprocess fixture for CLI workflows',
   'tests/fixtures/cli-agents/fake-grok.cjs': 'subprocess fixture for CLI workflows',
   'tests/fixtures/cli-agents/fake-gemini.cjs': 'subprocess fixture for CLI workflows',
+  'tests/fixtures/fake-ssh/ssh': 'stand-in ssh on PATH for the SSH-workspace workflows (#147)',
+  'tests/fixtures/fake-ssh/ssh-keyscan': 'stand-in ssh-keyscan on PATH for the SSH-workspace workflows (#147)',
   'tests/fixtures/mock-openai-router.ts': 'local HTTP fixture for router workflows',
   'tests/fixtures/paperclip-challenge-mock.ts': 'local HTTP fixture for sign-in workflows',
   'tests/html-sandbox-security.suite.ts': 'driven by tests/run-html-sandbox-security.mjs',

@@ -170,12 +170,8 @@ export async function dirtyFileCount(root: string): Promise<number> {
   return count;
 }
 
-async function snapshot(root: string): Promise<GitLocalStatus> {
-  // 'normal' (git's own default) collapses an untracked directory to one '?? dir/' entry instead of
-  // walking every file inside it — an un-gitignored node_modules must not turn into hundreds of rows.
-  const raw = await git(root, ['status', '--porcelain=v1', '-z', '--branch', '--untracked-files=normal']);
-  const cached = await git(root, ['diff', '--cached', '--raw', '--no-abbrev', '-z', '--no-ext-diff', '--']);
-  const head = await git(root, ['rev-parse', '--verify', 'HEAD']).catch(() => '');
+/** `git status --porcelain=v1 -z --branch` output: the branch line and the changed files. Shared by local and SSH-host folders (#147). */
+export function parseStatus(raw: string) {
   const fields = raw.split('\0');
   let branch = '', detached = false, unborn = false, upstreamGone = false, upstream: string | undefined, ahead: number | undefined, behind: number | undefined;
   const files: GitLocalFile[] = [];
@@ -206,6 +202,16 @@ async function snapshot(root: string): Promise<GitLocalStatus> {
       staged: status[0] !== ' ' && status !== '??', untracked: status === '??',
       conflict: ['DD','AU','UD','UA','DU','AA','UU'].includes(status)});
   }
+  return {branch, detached, unborn, upstreamGone, upstream, ahead, behind, files};
+}
+
+async function snapshot(root: string): Promise<GitLocalStatus> {
+  // 'normal' (git's own default) collapses an untracked directory to one '?? dir/' entry instead of
+  // walking every file inside it — an un-gitignored node_modules must not turn into hundreds of rows.
+  const raw = await git(root, ['status', '--porcelain=v1', '-z', '--branch', '--untracked-files=normal']);
+  const cached = await git(root, ['diff', '--cached', '--raw', '--no-abbrev', '-z', '--no-ext-diff', '--']);
+  const head = await git(root, ['rev-parse', '--verify', 'HEAD']).catch(() => '');
+  const {branch, detached, unborn, upstreamGone, upstream, ahead, behind, files} = parseStatus(raw);
   const fingerprint = createHash('sha256').update(raw).update(cached).update(head);
   // Detect working-file edits even when the two-letter status stays unchanged.
   // Bounded metadata reads avoid hashing multi-gigabyte files during refresh.

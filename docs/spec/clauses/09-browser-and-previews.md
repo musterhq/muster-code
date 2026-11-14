@@ -36,6 +36,7 @@ Boundaries:
 | [MUS-SPEC-09-843E](09-browser-and-previews.md#mus-spec-09-843e) | A fill emits and returns no password, keeps no page form state in the tab's saved history, writes nothing containing it to disk, and no agent browser tool can trigger it. | [`a fill leaves no password in events, saved history, files or agent tools`](../../../packages/agent-app/tests/browser-passwords-843.test.ts) |
 | [MUS-SPEC-09-843F](09-browser-and-previews.md#mus-spec-09-843f) | The browser toolbar's key button lists matching logins and choosing one asks main to fill it; without the 1Password CLI it says so. | [`the key button lists matching logins and fills the chosen one`](../../../packages/agent-app/tests/browser-passwords-843-dom.tsx) |
 | [MUS-SPEC-09-843G](09-browser-and-previews.md#mus-spec-09-843g) | A value is typed only into the field focused for it: when the page moves focus to another field before the value lands, nothing is typed there, the fill stops and says the page changed during the fill. | [`a value is typed only into the field focused for it; focus moved by the page stops the fill`](../../../packages/agent-app/tests/browser-passwords-843.test.ts) |
+| [MUS-SPEC-09-147A](09-browser-and-previews.md#mus-spec-09-147a) | Forwarding a host port returns a `http://127.0.0.1:<port>` URL that reaches the host’s server, is listed, and stops working once closed. | [`a port on the SSH host opens on 127.0.0.1 through a forward`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
 
 ### Page background
 
@@ -267,4 +268,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/browser-passwords-843-dom.tsx::the key button lists matching logins and fills the chosen one`
 - Environment: DOM suite (`linkedom`); the bridge is faked.
 - Known gaps: Does not open a real menu on screen or drive 1Password's approval prompt.
+- Evidence: UNVERIFIED
+
+### Ports on an SSH host (#147)
+
+<a id="mus-spec-09-147a"></a>
+#### MUS-SPEC-09-147A: A port on the SSH host opens on 127.0.0.1 through a forward
+
+- Precondition: A remote folder on a connected host and a web server on the host.
+- Action: Open a forward for the server’s port, fetch the URL, list forwards, close it and fetch again.
+- Expected result: The fetch returns the host server’s page; the list has the forward; after closing, the URL refuses connections.
+- Test: `packages/agent-app/tests/ssh-workspaces-147.test.ts::a port on the SSH host opens on 127.0.0.1 through a forward`
+- Environment: Node test runner with the real agent service, a temp data folder and a temp HOME; a stand-in `ssh` and `ssh-keyscan` on PATH (`tests/fixtures/fake-ssh/`) that run the remote commands under /bin/sh on this machine. No network, no real host.
+- Known gaps: The in-app browser is not opened here; the URL it would load is.
 - Evidence: UNVERIFIED
