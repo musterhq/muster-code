@@ -426,3 +426,13 @@ test('the wake-up report is marked as a delegation report in the parent\'s trans
   assert.equal(report.data?.summary,'All 12 links work.');
   assert.equal(users[0]!.data?.kind,undefined,'the user\'s own message is not marked');
 });
+
+// Spec: MUS-SPEC-14-44O (docs/spec/clauses/14-agents-skills-plugins-and-automations.md#mus-spec-14-44o)
+test('the delegation tool server does not keep a Full access router chat off its Claude route; that route drops it',async()=>{
+  const {claudeLaneAllowed,LANE_DROPPED_SERVERS}=await import('../src/runtime/claude-lane.ts');
+  const {DELEGATION_MCP}=await import('../src/runtime/domains/delegation.ts');
+  const overrides={[`mcp_servers.${DELEGATION_MCP}.command`]:'/x',[`mcp_servers.${DELEGATION_MCP}.env.MUSTER_CHAT_ID`]:'c1',[`mcp_servers.${DELEGATION_MCP}.env.MUSTER_CHAT_TOKEN`]:'t',[`mcp_servers.${DELEGATION_MCP}.tool_timeout_sec`]:600};
+  assert.equal(claudeLaneAllowed('full',overrides),true,'the delegation server alone does not keep the turn off the Messages route');
+  assert.ok(LANE_DROPPED_SERVERS.includes(DELEGATION_MCP),'the Messages route, which has no MCP client, drops the delegation server');
+  assert.equal(claudeLaneAllowed('workspace',overrides),false,'only Full access leaves the Codex client');
+});

@@ -14,6 +14,7 @@ import {BACKGROUND_MCP, BACKGROUND_TOOL_NOTE} from './background-agent-tools.ts'
 import {ASK_MCP} from './ask-user.ts';
 import {OFFICE_MCP, OFFICE_NOTE_PATTERN} from './office-agent-tools.ts';
 import {CANVAS_MCP, CANVAS_NOTE} from './canvas-agent-tools.ts';
+import {DELEGATION_MCP} from '../shared/domains/delegation-protocol.ts';
 import {ClaudeConversationMemory, claudeMessagesAdapter} from './adapters/claude-messages.ts';
 import {sseEvents} from './adapters/shared.ts';
 import type {RunnableAdapter} from './adapters/types.ts';
@@ -25,8 +26,9 @@ const MAX_PROBES = 256;
 
 /** Tool servers the service adds to every Agent chat. The Messages lane has no MCP client: the browser and ask_user are
  *  offered as native tools, the others are simply not offered (their notes are dropped). Any other server carries user or
- *  Project state (mailbox, terminal consent, SSH, sandbox, Project tasks, the user's own servers) and keeps the turn on Codex. */
-const LANE_SERVERS: Record<string, true> = {[BROWSER_MCP]: true, [CANVAS_MCP]: true, [BACKGROUND_MCP]: true, [ASK_MCP]: true, [COMPUTER_MCP]: true, [OFFICE_MCP]: true};
+ *  Project state (mailbox, terminal consent, SSH, sandbox, Project tasks, the user's own servers) and keeps the turn on Codex.
+ *  #44: delegation is offered to every agent chat above read-only, so it never holds a turn back; this route has no delegation tools. */
+const LANE_SERVERS: Record<string, true> = {[BROWSER_MCP]: true, [CANVAS_MCP]: true, [BACKGROUND_MCP]: true, [ASK_MCP]: true, [COMPUTER_MCP]: true, [OFFICE_MCP]: true, [DELEGATION_MCP]: true};
 const SERVER_KEY = /^(?:secret\.)?mcp_servers\.([^.]+)\./;
 
 /** Whether a turn may leave Codex: Full access, and no tool server or goal that only the Codex client can run. */
@@ -45,7 +47,7 @@ export function withoutUnavailableToolNotes(instructions: string | undefined): s
   return text || undefined;
 }
 /** Server names the lane drops from the run's tool servers (the browser has its own native tools). */
-export const LANE_DROPPED_SERVERS: readonly string[] = [BROWSER_MCP, CANVAS_MCP, BACKGROUND_MCP, ASK_MCP, COMPUTER_MCP, OFFICE_MCP];
+export const LANE_DROPPED_SERVERS: readonly string[] = [BROWSER_MCP, CANVAS_MCP, BACKGROUND_MCP, ASK_MCP, COMPUTER_MCP, OFFICE_MCP, DELEGATION_MCP];
 
 export interface ClaudeLaneConfig {
   /** Router base URL, e.g. https://router.example/v1 ( /messages is appended). */

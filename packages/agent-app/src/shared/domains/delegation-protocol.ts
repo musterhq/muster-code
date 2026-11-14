@@ -2,6 +2,8 @@
 import type { ChatStatus } from '../protocol.ts';
 
 /** How many chats deep delegation may go below the chat the user started (child 1, grandchild 2, …). */
+/** The delegation tool server's name (runtime/domains/delegation.ts hosts it; the Claude Messages route drops it). */
+export const DELEGATION_MCP = 'muster_delegation';
 export const DELEGATION_MAX_DEPTH = 3;
 /** Children of one chat that may be working at the same time. */
 export const DELEGATION_MAX_ACTIVE = 4;

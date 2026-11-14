@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 import { join, relative, isAbsolute } from 'node:path';
 import type { Chat, ChatStatus, Folder, ProviderInfo, TimelineItem } from '../../shared/protocol.ts';
 import {
-  DELEGATION_DEFAULT_WAIT_MS, DELEGATION_MAX_ACTIVE, DELEGATION_MAX_DEPTH, DELEGATION_MAX_WAIT_MS,
+  DELEGATION_DEFAULT_WAIT_MS, DELEGATION_MAX_ACTIVE, DELEGATION_MAX_DEPTH, DELEGATION_MAX_WAIT_MS, DELEGATION_MCP,
   type DelegatedAttention, type DelegatedFromNotice, type DelegationReportData, type DelegatedTask, type DelegatedTaskNotice,
 } from '../../shared/domains/delegation-protocol.ts';
 import { ToolHost, toolText, type ToolSpec } from '../governance/tool-host.ts';
@@ -25,7 +25,7 @@ import type { McpToolResult } from '../sandbox-registry.ts';
 import { effectiveAccess } from './automations.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
-export const DELEGATION_MCP = 'muster_delegation';
+export { DELEGATION_MCP };
 /** The provider's own wait for one tool call: the longest wait plus a margin, so a bounded wait answers before it. */
 export const DELEGATION_TOOL_TIMEOUT_MS = DELEGATION_MAX_WAIT_MS + 60_000;
 const ID = /^[a-zA-Z0-9_-]{1,128}$/;

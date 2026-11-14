@@ -94,6 +94,7 @@ Boundaries:
 | [MUS-SPEC-14-44L](14-agents-skills-plugins-and-automations.md#mus-spec-14-44l) | Stop on Lead (Audit API still working) opens the app's dialog naming "Audit API" with Cancel, Stop this chat only and Stop all; Stop all stops Lead then its children; Stop this chat only stops Lead; Cancel and Esc stop nothing; window.confirm is never used. | [`#44 Stop on a chat with working children offers Stop all, Stop this chat only and Cancel; Cancel and Esc stop nothing`](../../../packages/agent-app/tests/delegation-44-dom.tsx) |
 | [MUS-SPEC-14-44M](14-agents-skills-plugins-and-automations.md#mus-spec-14-44m) | The report's row is a delegation-row notice "Audit UI finished · The UI is clean. · Open" whose Open opens the child; no user bubble starts with "Muster: a chat you delegated"; the user's own message stays a bubble. | [`#44 a wake-up report shows as a compact notice row with the child's first line and Open, never as a user bubble`](../../../packages/agent-app/tests/delegation-44-dom.tsx) |
 | [MUS-SPEC-14-44N](14-agents-skills-plugins-and-automations.md#mus-spec-14-44n) | The provider still gets the report as the wake turn's message; the transcript row carries kind delegation-report with the child id, title, state finished and the first line of the reply; the user's own message is not marked. | [`the wake-up report is marked as a delegation report in the parent's transcript, not as the user's message`](../../../packages/agent-app/tests/delegation-44.test.ts) |
+| [MUS-SPEC-14-44O](14-agents-skills-plugins-and-automations.md#mus-spec-14-44o) | The delegation tool server alone does not keep a Full access router chat on the Codex client; the Messages route drops it; a Workspace chat stays on Codex. | [`the delegation tool server does not keep a Full access router chat off its Claude route; that route drops it`](../../../packages/agent-app/tests/delegation-44.test.ts) |
 
 ### Claude Code background sub-agents
 
@@ -976,3 +977,14 @@ An agent can hand a task to a child chat on any provider and model the user has 
 - Environment: Node test runner; the real service and queue; a fake provider; the real tool host.
 - Known gaps: How the row looks is MUS-SPEC-14-44M.
 - Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 11 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9
+
+<a id="mus-spec-14-44o"></a>
+#### MUS-SPEC-14-44O: Delegation tools do not keep a Claude chat off the router's Messages route
+
+- Precondition: A Full access agent chat on a router gateway with a Claude model; the delegation tool server is added to its run, as it is for every agent chat above read-only.
+- Action: Decide the route for its turn.
+- Expected result: The turn may still run over the router's Messages API (MUS-SPEC-03-688H): the delegation server is a known Muster server, not user or Project state. The Messages route has no MCP client, so it drops the delegation server. A Workspace chat with the same server stays on the Codex client.
+- Test: `packages/agent-app/tests/delegation-44.test.ts::the delegation tool server does not keep a Full access router chat off its Claude route; that route drops it`
+- Environment: Node test runner; the real route decision (claudeLaneAllowed) and dropped-server list.
+- Known gaps: On the Messages route the agent cannot delegate in that turn. The Claude Code route keeps the delegation server.
+- Evidence: UNVERIFIED
