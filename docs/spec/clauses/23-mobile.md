@@ -76,6 +76,9 @@ Boundaries:
 | [MUS-SPEC-23-15A](23-mobile.md#mus-spec-23-15a) | A phone that opened a chat with deltas receives the streaming reply as numbered deltas that append text; the reply it rebuilds equals the desktop's, and the bytes the desktop sends per streamed piece stay bounded instead of growing with the reply. | [`a streaming reply reaches the phone as appended text, and the bytes per piece do not grow with the reply`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
 | [MUS-SPEC-23-15B](23-mobile.md#mus-spec-23-15b) | The chat screen applies numbered deltas so only the changed row changes; a delta whose number skips one makes it reopen the chat and show the desktop's state; deltas that arrive before chat.open answers are applied after it; a new connection reopens the chat. | [`applies stream deltas in order, resyncs after a gap, and reopens the chat on a new connection`](../../../packages/mobile/tests/chat-stream.test.tsx) |
 | [MUS-SPEC-23-16A](23-mobile.md#mus-spec-23-16a) | A chat of 2,000 items mounts only a window of rows at its end; while a reply streams by deltas only the streaming row renders again, and a new item renders only itself. | [`a 2,000-row chat mounts a window and streaming re-renders only the streaming row`](../../../packages/mobile/tests/chat-virtualized.test.tsx) |
+| [MUS-SPEC-23-16B](23-mobile.md#mus-spec-23-16b) | Approve shows the card working and ignores a second tap, so approval.respond is called once; when it answers the card collapses to Approved with a success haptic; Decline gives a warning haptic; a failed answer brings the buttons back with the reason; the buttons are at least 44 points tall. | [`approve is sent once, settles to Approved with a haptic, and a failure brings the buttons back`](../../../packages/mobile/tests/approval-card.test.tsx) |
+| [MUS-SPEC-23-16C](23-mobile.md#mus-spec-23-16c) | In Needs you, swiping an approval to the right approves it and swiping it to the left declines it, through approval.respond, for a phone that can act; a read-only phone's rows do not swipe. | [`swiping an approval right approves it and left declines it, and read-only rows do not swipe`](../../../packages/mobile/tests/needs-you-swipe.test.tsx) |
+| [MUS-SPEC-23-16D](23-mobile.md#mus-spec-23-16d) | With the phone set to light the chats screen paints the light palette and with it set to dark the dark palette (the desktop's tokens), and the chat rows show the place and status in the approved layout. | [`the chats screen follows the phone’s light or dark setting`](../../../packages/mobile/tests/theme.test.tsx) |
 
 ### Pairing, the device registry and access
 
@@ -712,4 +715,37 @@ Boundaries:
 - Test: `packages/mobile/tests/chat-virtualized.test.tsx::a 2,000-row chat mounts a window and streaming re-renders only the streaming row`
 - Environment: jest (jest-expo preset) in Node with @testing-library/react-native; the list is the app's own virtualized list, laid out by a layout event.
 - Known gaps: Frame rate and UI-thread animation smoothness can only be measured on a device; the PR lists what was measured there.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-16b"></a>
+#### MUS-SPEC-23-16B: Approval cards can't send twice and settle with a haptic
+
+- Precondition: An approval card for a command with a fake connection whose approval.respond answers only when the test releases it; haptics are recorded.
+- Action: Press Approve twice, then release the answer. On a second card press Decline. On a third card press Approve while approval.respond fails.
+- Expected result: approval.respond is called once with accept, and while it waits both buttons are disabled. After it answers the buttons are gone, Approved shows and a success haptic fired. Decline calls approval.respond with decline and fires a warning haptic. The failure shows its message and the Approve button again. Approve and Decline are at least 44 points tall.
+- Test: `packages/mobile/tests/approval-card.test.tsx::approve is sent once, settles to Approved with a haptic, and a failure brings the buttons back`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; the card is given a fake connection with the MobileClient interface and expo-haptics is mocked.
+- Known gaps: How the haptic feels is checked by hand on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-16c"></a>
+#### MUS-SPEC-23-16C: Needs you answers approvals with a swipe
+
+- Precondition: The Needs you screen with a fake connection whose needs.list answers two approvals, once with access act and once read-only.
+- Action: Swipe the first approval to the right and the second to the left; render again read-only and look for the swipe rows.
+- Expected result: approval.respond is called with accept for the first and decline for the second. Read-only shows the approvals without swipe rows.
+- Test: `packages/mobile/tests/needs-you-swipe.test.tsx::swiping an approval right approves it and left declines it, and read-only rows do not swipe`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native and react-native-gesture-handler's jest utilities; the screen is given a fake connection with the MobileClient interface.
+- Known gaps: The swipe's spring and threshold haptic are checked by hand on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-16d"></a>
+#### MUS-SPEC-23-16D: Screens follow the phone's light or dark setting
+
+- Precondition: The chats screen with a fake connection listing a running chat in a folder and a chat waiting on the person; the phone's colour scheme mocked as light, then dark.
+- Action: Render with the scheme light; render again with it dark.
+- Expected result: With light the screen's background is #fbfbfb and the chat title is #000000 or #1d1d1f; with dark the background is #0e0e0e and the title is #ffffff or #e8e8e8. The running chat's row reads its folder and Working; the waiting chat shows its needs-you count.
+- Test: `packages/mobile/tests/theme.test.tsx::the chats screen follows the phone’s light or dark setting`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; useColorScheme is mocked.
+- Known gaps: The system setting changing while the app is in the background is checked by hand on a device.
 - Evidence: UNVERIFIED
