@@ -110,7 +110,7 @@ test('Claude Code in a folder on an SSH host runs there, streams into the chat a
   const r = await rig(t, ['claude']);
   const chatId = await r.chatFor('claude-code', 'claude-code/default');
   await r.send(chatId, 'say hello');
-  await r.said(chatId, new RegExp(`hello from ${r.project.replace(/[/.]/g, '\\$&')}`));
+  await r.said(chatId, new RegExp(`hello from ${r.project.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}`));
   assert.equal((await r.settled(chatId)).status, 'completed');
   const first = r.jsonl('claude-log.jsonl').find(l => l.argv)!;
   assert.equal(first.cwd, r.project, 'the CLI runs in the folder on the host');
