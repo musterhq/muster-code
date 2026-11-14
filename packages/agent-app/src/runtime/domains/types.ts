@@ -45,6 +45,8 @@ export interface RemoteAgentRun {
 }
 /** Rejects with a sentence when the route cannot run on the host (an API route, the CLI missing there, the host unreachable). */
 export type RemoteAgentResolver = (input: { chat: Chat; folder: Folder; provider: ProviderInfo }) => Promise<RemoteAgentRun>;
+/** #44: an approval or question card opened (pending) or was closed (settled) in a chat. Observers must not throw or block. */
+export interface AttentionChange { chatId: string; itemId: string; state: 'pending' | 'settled' }
 export type RunEnvironmentResolver = (chat: Chat, defaultCwd: string) => Promise<{ cwd: string }>;
 /** G13: a per-agent tool policy decision for an approval request. null: no rule applies and the usual flow decides. */
 export type ToolPolicyResolver = (chat: Chat, method: string, params: Record<string, unknown>) => { effect: 'allow' | 'ask' | 'deny'; message: string } | null;
@@ -91,6 +93,13 @@ export interface DomainHooks {
   setRemoteFolderRouter?(fn: RemoteFolderRouter | undefined): void;
   /** #147 phase 2: prepares a chat's run on its folder's SSH host. */
   setRemoteAgentResolver?(fn: RemoteAgentResolver | undefined): void;
+  /** #44: approval and question cards opening and closing (a delegating chat mirrors its children's). Optional so bare test contexts need not provide it. */
+  onAttention?(fn: (event: AttentionChange) => void): () => void;
+  /** #44: replaces the single resolver of extra data a sent message's transcript row carries, by request id (a delegation
+   *  report is shown as a notice, not as the user's words). Optional so bare test contexts need not provide it. */
+  setSendData?(fn: ((chatId: string, requestId: string) => Record<string, unknown> | undefined) | undefined): void;
+  /** #326: every event the runtime emits (the phone link forwards chat changes). Observers must not throw or block. Optional so bare test contexts need not provide it. */
+  onAgentEvent?(fn: (event: AgentEvent) => void): () => void;
 }
 
 export interface DomainContext {

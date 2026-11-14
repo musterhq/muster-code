@@ -1,4 +1,5 @@
 import {endsWithTab} from './deviceSessions.ts';
+import {askStopChoice, type StopChoice} from './stopChoice';
 import type {
   ApprovalDecision,
   Chat,
@@ -815,9 +816,25 @@ export async function sendMessage(id: string, text: string, skill?: string | Sen
   }
 }
 
+const WORKING_CHILD = new Set(['running', 'stopping', 'waiting', 'queued', 'reconnecting']);
+/** #44: Stop on a chat that started chats which are still working asks: stop all, this chat only, or nothing. */
+async function stopChoice(id: string): Promise<StopChoice> {
+  const chat = state.snapshot?.chats.find(entry => entry.id === id);
+  // A second press while the run is already stopping (Force stop) never asks again.
+  if (chat?.status === 'stopping') return 'one';
+  // A service without delegation (an older Muster Server, a test bridge) answers nothing or fails: Stop then stops the chat.
+  const children: unknown = await invoke('delegation.children', { chatId: id }).catch(() => []);
+  const working = (Array.isArray(children) ? children as { title: string; status: string }[] : []).filter(child => WORKING_CHILD.has(child?.status));
+  if (!working.length) return 'one';
+  return askStopChoice(chat?.title || 'This chat', working.map(child => child.title));
+}
+
 export async function stopChat(id: string): Promise<void> {
   try {
+    const choice = await stopChoice(id);
+    if (choice === 'cancel') return;
     await invoke('chat.stop', { id });
+    if (choice === 'all') await invoke('delegation.stopChildren', { chatId: id });
   } catch (cause) {
     notifyError(cause, () => stopChat(id));
   }

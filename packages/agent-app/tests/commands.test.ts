@@ -19,7 +19,7 @@ test('spreads the process, browser and scoped computer allowlists', () => {
   // Counts pinned so a command silently dropped from an allowlist (not just added) still fails
   // loudly; bump them, don't delete them, whenever a command set legitimately grows.
   assert.equal(Object.keys(PROCESS_COMMANDS).length, 15, 'processes.ports + processes.stopListener joined (S3-E listening ports; outputPage was PER-05)');
-  assert.equal(Object.keys(BROWSER_COMMANDS).length, 21);
+  assert.equal(Object.keys(BROWSER_COMMANDS).length, 23, 'browser.passwords + browser.fillLogin joined (#843 password fill)');
   assert.equal(Object.keys(SCOPED_COMPUTER_COMMANDS).length, 27);
 });
 

@@ -3,8 +3,9 @@ import {randomUUID} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type {BrowserWindow, DownloadItem, NavigationEntry, Session, WebContents, WebContentsView, WebContentsViewConstructorOptions, WebPreferences} from 'electron';
-import {BROWSER_VIEWPORTS, browserURL, type BrowserBounds, type BrowserCapture, type BrowserCommands, type BrowserConsoleEntry, type BrowserDownload, type BrowserEvent, type BrowserPickedElement, type BrowserProfile, type BrowserState, type BrowserSurface, type BrowserViewport} from '../shared/browser-protocol.ts';
+import {BROWSER_VIEWPORTS, browserURL, type BrowserBounds, type BrowserCapture, type BrowserCommands, type BrowserConsoleEntry, type BrowserDownload, type BrowserEvent, type BrowserFillResult, type BrowserLogins, type BrowserPickedElement, type BrowserProfile, type BrowserState, type BrowserSurface, type BrowserViewport} from '../shared/browser-protocol.ts';
 import type {BrowserSessionVault, SavedBrowserSession} from './browser-session-vault.ts';
+import type {BrowserPasswords} from './browser-passwords.ts';
 import {BROWSER_CANCEL_PICK_SCRIPT, BROWSER_PICK_WORLD, browserPickScript, consoleEntry, downloadFilename, faviconURL, MAX_CONSOLE_ENTRIES, pickedElement, pickedRect, uniqueFilename} from './browser-inspect.ts';
 import { device } from '../shared/device-noun.ts';
 
@@ -33,7 +34,7 @@ export interface BrowserRuntime {
   /** Pending downloads land in temp; Save moves them into downloads. */
   paths?():{downloads:string; temp:string};
 }
-export interface BrowserWorkspaceOptions {maxLiveViews?:number; idleDiscardMs?:number; now?:()=>number; sweepIntervalMs?:number; freezeHidden?:boolean; freezeAfterMs?:number; /** BRW-06: encrypted restore of tab history across restarts. */ vault?:BrowserSessionVault}
+export interface BrowserWorkspaceOptions {maxLiveViews?:number; idleDiscardMs?:number; now?:()=>number; sweepIntervalMs?:number; freezeHidden?:boolean; freezeAfterMs?:number; /** BRW-06: encrypted restore of tab history across restarts. */ vault?:BrowserSessionVault; /** #843: the person's password manager for the key menu. */ passwords?:BrowserPasswords}
 /** Optional Electron >= 32 history APIs; test doubles and older runtimes may omit them. */
 interface HistoryAccess {getAllEntries?():NavigationEntry[]; getActiveIndex?():number; restore?(options:{entries:NavigationEntry[];index?:number}):Promise<void>}
 function electronRuntime():BrowserRuntime {
@@ -76,6 +77,8 @@ interface Entry {
   frozen?:boolean;
   /** Last time an agent tool drove this tab; it is exempt from freeze/discard while recent. */
   agentUsedAt?:number;
+  /** #843: a login was filled here; its history is saved without page (form) state. */
+  secretFilled?:boolean;
 }
 const SECURE_PREFERENCES:WebPreferences={contextIsolation:true,sandbox:true,nodeIntegration:false,nodeIntegrationInWorker:false,nodeIntegrationInSubFrames:false,webSecurity:true,allowRunningInsecureContent:false,webviewTag:false,plugins:false,devTools:false,spellcheck:false,navigateOnDragDrop:false,disableDialogs:true,backgroundThrottling:true};
 const originOf=(url:string)=>{try{return new URL(url).origin;}catch{return '';}};
@@ -94,6 +97,11 @@ export function savedBrowserHistory(entries:unknown,index:unknown):SavedBrowserH
     kept.push({url,title,...(typeof item.pageState==='string' && item.pageState.length<=MAX_SAVED_PAGE_STATE?{pageState:item.pageState}:{})});
   }
   return {entries:kept,index:index-start};
+}
+
+/** #843: history without Chromium page state, which can hold the values of a filled sign-in form. */
+function withoutPageState(history:SavedBrowserHistory):SavedBrowserHistory {
+  return {index:history.index,entries:history.entries.map(({url,title})=>({url,title}))};
 }
 
 /** Local browser profiles share cookies only within the same opaque profile ID.
@@ -118,12 +126,13 @@ export class BrowserWorkspaceController {
   private onRendererNavigation=()=>this.hideAll(true);
   private onClosed=()=>this.dispose();
   private vault?:BrowserSessionVault;
+  private passwords?:BrowserPasswords;
   constructor(private window:BrowserWindow,private emit:(event:BrowserEvent)=>void,runtime?:BrowserRuntime,options:BrowserWorkspaceOptions={}) {
     this.runtime=runtime??electronRuntime();
     this.maxLive=Math.max(1,Math.floor(options.maxLiveViews??MAX_LIVE_BROWSER_VIEWS));
     this.idleMs=Math.max(1000,options.idleDiscardMs??BROWSER_IDLE_DISCARD_MS);
     this.now=options.now??Date.now;
-    this.vault=options.vault;
+    this.vault=options.vault;this.passwords=options.passwords;
     this.freezeHidden=options.freezeHidden??true;
     this.freezeAfterMs=Math.max(0,options.freezeAfterMs??BROWSER_FREEZE_AFTER_MS);
     this.ownerContents=window.webContents;
@@ -449,6 +458,7 @@ export class BrowserWorkspaceController {
       try {
         const history=contents.navigationHistory as unknown as HistoryAccess;
         entry.history=history.getAllEntries && history.getActiveIndex?savedBrowserHistory(history.getAllEntries(),history.getActiveIndex()):undefined;
+        if(entry.history && entry.secretFilled) entry.history=withoutPageState(entry.history);
       } catch {entry.history=undefined;}
       try {entry.title=contents.getTitle().slice(0,512);} catch {/* Keep the prior title. */}
     }
@@ -542,6 +552,7 @@ export class BrowserWorkspaceController {
       if(contents && !contents.isDestroyed()){
         try {const access=contents.navigationHistory as unknown as HistoryAccess;history=access.getAllEntries && access.getActiveIndex?savedBrowserHistory(access.getAllEntries(),access.getActiveIndex()):undefined;} catch {history=undefined;}
       }
+      if(history && entry.secretFilled) history=withoutPageState(history);
       let url:string;
       try {url=browserURL(entry.url);} catch {continue;}
       if(url==='about:blank' && !history) continue;
@@ -740,6 +751,20 @@ export class BrowserWorkspaceController {
     const pending=this.record(owner).download;
     if(!pending || pending.info.id!==id || !pending.savedPath) throw new Error('This download is no longer available.');
     return pending.savedPath;
+  }
+  /** #843: the person's logins saved for this tab's site (no passwords). */
+  async passwordLogins(owner:string):Promise<BrowserLogins> {
+    const entry=this.record(owner);
+    if(!this.passwords) return {manager:'1password',available:false,logins:[],message:'Filling logins is not available in this window.'};
+    return this.passwords.logins(entry.view?.webContents.getURL() || entry.url);
+  }
+  /** #843: the person chose a login in the key menu; main types it into the page. Never reachable from agent tools. */
+  async fillLogin(input:BrowserCommands['browser.fillLogin']['input']):Promise<BrowserFillResult> {
+    if(!this.passwords) throw new Error('Filling logins is not available in this window.');
+    const entry=this.entry(input?.owner);
+    // The page may hold the password in its form state now: this tab's saved history keeps no page state from here on.
+    entry.secretFilled=true;
+    return this.passwords.fill(entry.view.webContents,{id:input.id,vault:input.vault});
   }
   closePopup(owner:string):BrowserState {
     const entry=this.record(owner);if(entry.popup)this.closePopupView(entry,entry.popup);
