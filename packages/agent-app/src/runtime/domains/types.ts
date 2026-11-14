@@ -25,6 +25,8 @@ export type ChatDefaultsResolver = (input: { folderId?: string; projectId?: stri
 export interface CommandCompleted { command: string; input: Record<string, unknown>; output: unknown }
 /** #654: a chat is about to be deleted (still in the store) or was just archived. */
 export interface ChatRemoval { chat: Chat; kind: 'delete' | 'archive' }
+/** #44: an approval or question card opened (pending) or was closed (settled) in a chat. Observers must not throw or block. */
+export interface AttentionChange { chatId: string; itemId: string; state: 'pending' | 'settled' }
 export type RunEnvironmentResolver = (chat: Chat, defaultCwd: string) => Promise<{ cwd: string }>;
 /** G13: a per-agent tool policy decision for an approval request. null: no rule applies and the usual flow decides. */
 export type ToolPolicyResolver = (chat: Chat, method: string, params: Record<string, unknown>) => { effect: 'allow' | 'ask' | 'deny'; message: string } | null;
@@ -67,6 +69,11 @@ export interface DomainHooks {
   onCommand?(fn: (event: CommandCompleted) => void): () => void;
   /** #654: release what a chat owns. On 'delete' a throw keeps the chat (its message is shown); 'archive' never fails the archive. Optional so bare test contexts need not provide it. */
   onChatRemoval?(fn: (event: ChatRemoval) => Promise<void> | void): () => void;
+  /** #44: approval and question cards opening and closing (a delegating chat mirrors its children's). Optional so bare test contexts need not provide it. */
+  onAttention?(fn: (event: AttentionChange) => void): () => void;
+  /** #44: replaces the single resolver of extra data a sent message's transcript row carries, by request id (a delegation
+   *  report is shown as a notice, not as the user's words). Optional so bare test contexts need not provide it. */
+  setSendData?(fn: ((chatId: string, requestId: string) => Record<string, unknown> | undefined) | undefined): void;
   /** #326: every event the runtime emits (the phone link forwards chat changes). Observers must not throw or block. Optional so bare test contexts need not provide it. */
   onAgentEvent?(fn: (event: AgentEvent) => void): () => void;
 }

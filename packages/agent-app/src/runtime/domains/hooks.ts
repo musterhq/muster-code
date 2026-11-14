@@ -1,7 +1,7 @@
 /** Hook registry behind DomainContext.hooks, plus the bounded runners the service calls. */
 import { isAbsolute } from 'node:path';
 import type { AgentEvent, Chat } from '../../shared/protocol.ts';
-import type { AutomatedWorktreeResolver, TaskHistoryBriefResolver, ChatDefaults, ChatRemoval, ChatDefaultsResolver, CommandCompleted, DomainHooks, PromptContributor, ProviderEventInfo, ReasoningEffort, RunEnvironmentResolver, ToolPolicyResolver, RunOptions, RunOptionsContributor, RunSettled, RunStarted } from './types.ts';
+import type { AttentionChange, AutomatedWorktreeResolver, TaskHistoryBriefResolver, ChatDefaults, ChatRemoval, ChatDefaultsResolver, CommandCompleted, DomainHooks, PromptContributor, ProviderEventInfo, ReasoningEffort, RunEnvironmentResolver, ToolPolicyResolver, RunOptions, RunOptionsContributor, RunSettled, RunStarted } from './types.ts';
 
 export const PROMPT_CONTRIBUTOR_TIMEOUT_MS = 2_000;
 export const PROMPT_CONTRIBUTION_MAX_BYTES = 8 * 1024;
@@ -31,11 +31,13 @@ export function createDomainHooks() {
   const providerEvents = new Set<(event: ProviderEventInfo) => void>();
   const commands = new Set<(event: CommandCompleted) => void>();
   const removals = new Set<(event: ChatRemoval) => Promise<void> | void>();
+  const attentionObservers = new Set<(event: AttentionChange) => void>();
   const agentEvents = new Set<(event: AgentEvent) => void>();
   let defaults: ChatDefaultsResolver | undefined, environment: RunEnvironmentResolver | undefined, toolPolicy: ToolPolicyResolver | undefined, commitIdentity: ((folderId: string) => { name: string; email: string } | null) | undefined, worktreeRecorder: ((projectId: string, taskId: string, folderId: string) => void) | undefined;
   let automated: AutomatedWorktreeResolver | undefined;
   let contextWindow: ((providerId: string, model: string) => number | undefined) | undefined;
   let historyBrief: TaskHistoryBriefResolver | undefined;
+  let sendData: ((chatId: string, requestId: string) => Record<string, unknown> | undefined) | undefined;
   const add = <T>(set: Set<T>, fn: T) => { set.add(fn); return () => { set.delete(fn); }; };
   const hooks: DomainHooks = {
     addPromptContributor: fn => add(prompts, fn),
@@ -57,6 +59,8 @@ export function createDomainHooks() {
     commitIdentity(folderId) { try { return commitIdentity?.(folderId) ?? null; } catch { return null; } },
     onCommand: fn => add(commands, fn),
     onChatRemoval: fn => add(removals, fn),
+    onAttention: fn => add(attentionObservers, fn),
+    setSendData(fn) { sendData = fn; },
     onAgentEvent: fn => add(agentEvents, fn),
   };
   return {
@@ -108,6 +112,14 @@ export function createDomainHooks() {
     },
     runSettled(run: RunSettled): void {
       for (const fn of settled) void bounded(() => fn(run), 60_000);
+    },
+    /** #44: extra data for a sent message's transcript row; a resolver that throws adds nothing. */
+    sendData(chatId: string, requestId: string): Record<string, unknown> {
+      try { return sendData?.(chatId, requestId) ?? {}; } catch { return {}; }
+    },
+    /** #44: synchronous fan-out of approval and question cards opening and closing; an observer that throws is skipped. */
+    attention(event: AttentionChange): void {
+      for (const fn of attentionObservers) { try { fn(event); } catch { /* observers never break a request */ } }
     },
     /** #326: synchronous fan-out of every runtime event; a throwing observer is skipped. */
     agentEvent(event: AgentEvent): void {

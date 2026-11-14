@@ -41,6 +41,7 @@ import {applyDocumentPreferences,installSendKey,installSystemThemeListener} from
 import {requestedProject} from './webHost.ts';
 import {openProject} from './projectFocus';
 import './app-shell.css';
+import {StopChildrenHost} from './components/StopChildrenSheet';
 
 /** Storage can be unavailable (private data dir, quota); a failed save must never break a resize. */
 function saveNavWidth():void { try { persistNavWidth(); } catch {} }
@@ -124,6 +125,7 @@ export function App(): React.ReactElement {
       <ParallelRunHost/>
       <ImportConversationsHost/>
       <TaskLinkHost/>
+      <StopChildrenHost/>
       <HandBackHost/>
       <SetupGuideHost/>
       {!state.navHidden&&<div

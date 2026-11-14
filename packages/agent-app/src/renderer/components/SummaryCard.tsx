@@ -8,6 +8,7 @@ import {branchPullRequest} from '../branchPullRequest';
 import {loadGitChanges, notifyError, openBrowserTab, openChangesTab, openCreatePullRequestTab, openFile, openPullRequestTab, openFilesTab, openProcessesTab, openSubagentsTab, setSummaryLayout} from '../store';
 import {useStoreSelector, useStoreSlice} from '../useStore';
 import {EMPTY_ACTIVITY_ITEMS, getSubagentActivity, subagentState} from '../subagentActivity';
+import {delegatedChildren} from './DelegationRows';
 import {portURL, useListeningPorts, useProcessSummary} from '../processSummary';
 import {isActiveProcess} from '../../shared/process-protocol';
 import {classifyTool} from './toolPresentation';
@@ -354,6 +355,8 @@ export function SummaryCard() {
   const items = timeline?.value ?? EMPTY_ACTIVITY_ITEMS;
   const {agents, counts} = useMemo(() => getSubagentActivity(items), [items]);
   const agentNames = useMemo(() => agentDisplayNames(agents), [agents]);
+  // #44: chats this one started count with its subagents.
+  const delegated = useMemo(() => delegatedChildren(items, state.snapshot?.chats), [items, state.snapshot?.chats]);
   const sources = useMemo(() => sourceList(items), [items]);
   // This chat's own edits (F23), with lockfiles/generated output counted apart like every other pill (F59).
   const totals = useMemo(() => items.length ? splitChangeTotals(collectFileChanges(items)) : undefined, [items]);
@@ -441,7 +444,8 @@ export function SummaryCard() {
   const shownSources = allSources ? sources.slice(0, 20) : sources.slice(0, 3);
   const openAgents = () => openSubagentsTab(chat.id, chat.folderId ?? folders[0]?.id, chat.title || 'Conversation');
   const attention = chat.status === 'waiting' || chat.status === 'failed' || !!chat.recovery;
-  const agentSummary = [counts.working && `${counts.working} working`, counts.waiting && `${counts.waiting} waiting`, counts.failed && `${counts.failed} failed`, counts.done && `${counts.done} done`].filter(Boolean).join(' · ');
+  const childWorking = delegated.filter(child => ['running', 'stopping', 'waiting', 'queued', 'reconnecting'].includes(child.status)).length;
+  const agentSummary = [counts.working + childWorking && `${counts.working + childWorking} working`, counts.waiting && `${counts.waiting} waiting`, counts.failed && `${counts.failed} failed`, counts.done && `${counts.done} done`, delegated.length - childWorking && `${delegated.length - childWorking} chat${delegated.length - childWorking === 1 ? '' : 's'} started`].filter(Boolean).join(' · ');
   const stats = totals && (totals.adds > 0 || totals.dels > 0 || generatedNote(totals.generated))
     ? <span className="summary-pill-stats"><DiffStat adds={totals.adds} dels={totals.dels}/><GeneratedChanges generated={totals.generated}/></span>
     : null;
@@ -457,10 +461,10 @@ export function SummaryCard() {
         label={<>{port.name} <span className={`summary-port-owner is-${port.owner}`}>{port.owner === 'agent' ? 'Agent' : 'You'}</span></>}
         detail={<span className="summary-muted summary-port">:{port.port}</span>} trailing={<ArrowUpRight size={12} aria-hidden="true"/>} onClick={() => openBrowserTab(portURL(port))}/>)}
     </section>}
-    {agents.length > 0 && <section className="summary-section" aria-label="Subagents">
+    {agents.length + delegated.length > 0 && <section className="summary-section" aria-label="Subagents">
       <header className="summary-section-head"><span>Subagents</span></header>
-      <button type="button" className="summary-row summary-agents" onClick={openAgents} title={agents.map(a => `${agentNames.get(a.id)}: ${subagentState(a.state).label}`).join('\n')}>
-        <span className="summary-agent-dots" aria-hidden="true">{agents.slice(0, 5).map(agent => { const kind = subagentState(agent.state).kind; return <AgentGlyph key={agent.id} name={agentNames.get(agent.id)!} state={kind === 'working' ? 'working' : kind === 'failed' ? 'failed' : kind === 'done' ? 'done' : 'idle'}/>; })}</span>
+      <button type="button" className="summary-row summary-agents" onClick={openAgents} title={[...agents.map(a => `${agentNames.get(a.id)}: ${subagentState(a.state).label}`), ...delegated.map(child => `${child.title}: ${child.status}`)].join('\n')}>
+        <span className="summary-agent-dots" aria-hidden="true">{agents.slice(0, 5).map(agent => { const kind = subagentState(agent.state).kind; return <AgentGlyph key={agent.id} name={agentNames.get(agent.id)!} state={kind === 'working' ? 'working' : kind === 'failed' ? 'failed' : kind === 'done' ? 'done' : 'idle'}/>; })}{delegated.slice(0, Math.max(0, 5 - agents.length)).map(child => <AgentGlyph key={child.childChatId} name={child.title} state={['running', 'stopping', 'waiting', 'queued', 'reconnecting'].includes(child.status) ? 'working' : child.status === 'completed' ? 'done' : child.status === 'failed' || child.status === 'interrupted' ? 'failed' : 'idle'}/>)}</span>
         <span className="summary-row-label">{agentSummary || `${agents.length} reported`}</span>
       </button>
     </section>}
