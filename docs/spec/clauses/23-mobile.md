@@ -99,6 +99,7 @@ Boundaries:
 | [MUS-SPEC-23-23B](23-mobile.md#mus-spec-23-23b) | The phone receives remove ops for the deleted rows in the next numbered delta, and applying the deltas gives exactly the desktop’s timeline; chat.open is not called again. | [`a message replaced on the desktop is removed from the phone without reopening the chat`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
 | [MUS-SPEC-23-23C](23-mobile.md#mus-spec-23-23c) | The removed item is gone from the screen, the other two stay, and chat.open is not called again. | [`a remove op takes the row off the chat screen`](../../../packages/mobile/tests/chat-stream.test.tsx) |
 | [MUS-SPEC-23-23D](23-mobile.md#mus-spec-23-23d) | Every delta for the reply is an append or a status change, never the whole item. The phone’s text is the reply’s first 65,536 characters followed by a note that the rest is on the computer, and the finished status reaches the phone. | [`a reply that grows past the phone’s item cap is sent as appends and says the rest is on the computer`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
+| [MUS-SPEC-23-23E](23-mobile.md#mus-spec-23-23e) | Sending the same chat.send again with its request id, while the turn runs and after it ends, answers with the first run id and no error, and the chat has the message once; a steer sent again with its request id answers steered and reaches the agent once. | [`a message or steer the computer already took is answered as sent when the phone sends it again`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
 
 ### Pairing, the device registry and access
 
@@ -980,4 +981,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/mobile-phase3-326.test.ts::a reply that grows past the phone’s item cap is sent as appends and says the rest is on the computer`
 - Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
 - Known gaps: The phone shows the start of a very long reply, not its end.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-23e"></a>
+#### MUS-SPEC-23-23E: A message sent again from the outbox is answered as sent
+
+- Precondition: A paired phone allowed to act and a chat whose fake provider runs a turn slowly and records steers.
+- Action: Send a message with a request id; send it again with the same id while the turn runs (as the outbox does when the link dropped before the answer came) and once more after it ends; steer a later turn twice with one request id.
+- Expected result: Sending the same chat.send again with its request id, while the turn runs and after it ends, answers with the first run id and no error, and the chat has the message once; a steer sent again with its request id answers steered and reaches the agent once.
+- Test: `packages/agent-app/tests/mobile-phase3-326.test.ts::a message or steer the computer already took is answered as sent when the phone sends it again`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and a Node phone built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: A steer's request id is remembered while the computer's app runs; a steer sent again after a restart can reach the agent twice.
 - Evidence: UNVERIFIED

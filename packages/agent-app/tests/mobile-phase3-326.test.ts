@@ -330,3 +330,35 @@ test('a reply that grows past the phone’s item cap is sent as appends and says
   assert.match(text.text.slice(65_536), /^\n\n\[The rest of this message is too long for the phone\. Read it in Muster on your (computer|Mac|PC)\.\]$/);
   assert.equal(text.status, 'completed');
 });
+
+// Spec: MUS-SPEC-23-23E (docs/spec/clauses/23-mobile.md#mus-spec-23-23e)
+test('a message or steer the computer already took is answered as sent when the phone sends it again', async t => {
+  let release: () => void = () => undefined;
+  const steers: string[] = [];
+  const provider = scripted(async input => {
+    await new Promise<void>(resolve => { release = resolve; });
+    return {status: 'completed', finalMessage: `done ${input.prompt?.slice(0, 20) ?? ''}`};
+  });
+  provider.steer = async (_chatId, text) => { steers.push(String(text)); return true; };
+  const d = await desktop(t, provider);
+  const chat = await d.service.invoke('chat.create', {});
+  const {record} = await pair(t, d);
+  const client = await reconnect(t, record);
+  await allowAct(d, client);
+  // The answer was lost when the link dropped; the outbox sends it again with the same id, even before the first finished.
+  const [first, again] = await Promise.all([0, 1].map(() => client.call('chat.send', {id: chat.id, text: 'keep the old lists', requestId: 'outbox-1'})));
+  assert.deepEqual(again, first);
+  assert.deepEqual(await client.call('chat.send', {id: chat.id, text: 'keep the old lists', requestId: 'outbox-1'}), first, 'while the turn runs');
+  const users = async () => (await d.service.invoke('chat.timeline', {id: chat.id})).items.filter(item => item.kind === 'user' && item.text === 'keep the old lists');
+  release();
+  await until(async () => (await d.service.invoke('chat.timeline', {id: chat.id})).items.some(item => item.kind === 'assistant'), 'turn done');
+  await until(async () => !['running', 'stopping'].includes((await client.call('chats.list', {})).chats.find(entry => entry.id === chat.id)!.status), 'idle');
+  assert.deepEqual(await client.call('chat.send', {id: chat.id, text: 'keep the old lists', requestId: 'outbox-1'}), first, 'after the turn too');
+  assert.equal((await users()).length, 1, 'the message is in the chat once');
+  await client.call('chat.send', {id: chat.id, text: 'next', requestId: 'outbox-2'});
+  await until(async () => (await client.call('chats.list', {})).chats.find(entry => entry.id === chat.id)!.status === 'running', 'second turn running');
+  assert.equal((await client.call('chat.steer', {id: chat.id, text: 'also delete them later', requestId: 'steer-1'})).steered, true);
+  assert.equal((await client.call('chat.steer', {id: chat.id, text: 'also delete them later', requestId: 'steer-1'})).steered, true);
+  release();
+  assert.equal(steers.filter(text => text.includes('also delete them later')).length, 1, 'the steer reaches the agent once');
+});

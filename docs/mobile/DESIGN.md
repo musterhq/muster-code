@@ -238,6 +238,14 @@ path alias (`@muster/shared/mobile/*`), resolved by TypeScript `paths`, jest `mo
 | `react-native-keyboard-controller` 1.23.0 | The composer rides the keyboard (Android included) | 3 |
 | `expo-haptics` | Send, approve, decline and a light stream texture | 3 |
 
+**Version note (phase 4).** `npx expo install --check` reports four packages above what Expo SDK 58 recommends:
+`react-native-gesture-handler` 3.5.0 (58 recommends ~3.3.0), `react-native-keyboard-controller` 1.23.0 (1.22.7),
+`react-native-worklets` 0.13.1 (0.13.0) and `react` 19.3.1 (19.3.0). They were chosen in phase 3 on purpose: the swipe rows
+use Gesture Handler 3.5's hook API (`usePanGesture`), and the composer relies on keyboard-controller 1.23's fixes, with
+Reanimated 4.7.1 needing the matching worklets patch. The app's tests
+and the CI APK build pass on them, so they are kept rather than downgraded; the check is not part of CI. The other entries
+the check lists are patch updates of Expo's own modules, to take with the next SDK update.
+
 ### 5.4 Rendering replies
 
 - **Phase 1:** text with code fences shown monospaced, tool rows as one line with status, approval and question cards native.
