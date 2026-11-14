@@ -40,7 +40,12 @@ const errors:unknown[]=[];
 const root=createRoot(document.getElementById('root')!,{onUncaughtError:error=>errors.push(error)});
 root.render(<BrowserTab owner="browser:one" profileId="personal"/>);
 for(let end=Date.now()+5000;Date.now()<end&&!errors.length&&!document.querySelector('[aria-label="Go back"]');)await delay(20);
-emit({url:'https://example.test/login',title:'Sign in',loading:false});await delay(40);
+// The page is ready only once main answered browser.open; a page emitted before that is replaced by the open reply.
+for(let end=Date.now()+5000;Date.now()<end&&!errors.length&&!calls.some(call=>call.command==='browser.open');)await delay(20);
+await delay(40);
+emit({url:'https://example.test/login',title:'Sign in',loading:false});
+// Logins can be filled only when the page tools are live (the same gate as the element picker).
+for(let end=Date.now()+5000;Date.now()<end&&!errors.length&&(document.querySelector('[aria-label="Pick element for chat"]') as HTMLButtonElement|null)?.disabled!==false;)await delay(20);
 const keyButton=()=>document.querySelector('[aria-label^="Fill a login"]') as HTMLButtonElement|null;
 
 // Spec: MUS-SPEC-09-843F (docs/spec/clauses/09-browser-and-previews.md#mus-spec-09-843f)
