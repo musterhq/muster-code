@@ -95,6 +95,7 @@ Boundaries:
 | [MUS-SPEC-14-44M](14-agents-skills-plugins-and-automations.md#mus-spec-14-44m) | The report's row is a delegation-row notice "Audit UI finished · The UI is clean. · Open" whose Open opens the child; no user bubble starts with "Muster: a chat you delegated"; the user's own message stays a bubble. | [`#44 a wake-up report shows as a compact notice row with the child's first line and Open, never as a user bubble`](../../../packages/agent-app/tests/delegation-44-dom.tsx) |
 | [MUS-SPEC-14-44N](14-agents-skills-plugins-and-automations.md#mus-spec-14-44n) | The provider still gets the report as the wake turn's message; the transcript row carries kind delegation-report with the child id, title, state finished and the first line of the reply; the user's own message is not marked. | [`the wake-up report is marked as a delegation report in the parent's transcript, not as the user's message`](../../../packages/agent-app/tests/delegation-44.test.ts) |
 | [MUS-SPEC-14-44O](14-agents-skills-plugins-and-automations.md#mus-spec-14-44o) | The delegation tool server alone does not keep a Full access router chat on the Codex client; the Messages route drops it; a Workspace chat stays on Codex. | [`the delegation tool server does not keep a Full access router chat off its Claude route; that route drops it`](../../../packages/agent-app/tests/delegation-44.test.ts) |
+| [MUS-SPEC-14-147A](14-agents-skills-plugins-and-automations.md#mus-spec-14-147a) | Every server in the CLI’s config is the relay script in `~/.muster-remote` on the host with the forwarded port. | [`Muster’s tools reach the CLI on the host through the reverse-forwarded relay`](../../../packages/agent-app/tests/ssh-agents-147.test.ts) |
 
 ### Claude Code background sub-agents
 
@@ -988,3 +989,16 @@ An agent can hand a task to a child chat on any provider and model the user has 
 - Environment: Node test runner; the real route decision (claudeLaneAllowed) and dropped-server list.
 - Known gaps: On the Messages route the agent cannot delegate in that turn. The Claude Code route keeps the delegation server.
 - Evidence: local; ~/.muster-work/review/44/green-44O.log; exit 0; 1 passed, 0 failed, 0 skipped; commit e66fd09cf6a78c513681f160f4c0069d0c4e19b7
+
+### Muster tools for agents on an SSH host (#147)
+
+<a id="mus-spec-14-147a"></a>
+#### MUS-SPEC-14-147A: Muster’s tools reach a CLI on an SSH host through a reverse-forwarded relay
+
+- Precondition: A Claude Code chat in a remote folder; Muster’s question tool (and the canvas and office tools) are on.
+- Action: The CLI starts each tool server from its MCP config, lists its tools and calls ask_user.
+- Expected result: Every server in the CLI’s config is the relay script in `~/.muster-remote` on the host with the forwarded port; the question card appears in the chat; the chat token stays on this computer; the run token is in the CLI’s environment and not on its command line; the reverse forward binds 127.0.0.1 on the host.
+- Test: `packages/agent-app/tests/ssh-agents-147.test.ts::Muster’s tools reach the CLI on the host through the reverse-forwarded relay`
+- Environment: Node test runner with the real agent service (Claude Code, Codex and ACP routes whose local binaries do not exist), a temp data folder and a temp HOME; a stand-in `ssh` on PATH (`tests/fixtures/fake-ssh/`) that runs the remote commands under /bin/sh on this machine with a host PATH of its own, relays reverse forwards over real 127.0.0.1 sockets, and starts each session in its own process group; the fake Claude Code (`fake-ssh/fake-claude.cjs`), the fake Codex app-server and the fake ACP agent "installed on the host". No network, no real host.
+- Known gaps: Claude Code passing its environment (or expanding `${MUSTER_RELAY_TOKEN}`) to MCP servers is assumed from its documentation and needs a check against the real CLI.
+- Evidence: UNVERIFIED

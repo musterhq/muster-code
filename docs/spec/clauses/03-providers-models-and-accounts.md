@@ -89,6 +89,9 @@ Boundaries:
 | [MUS-SPEC-03-160J](03-providers-models-and-accounts.md#mus-spec-03-160j) | Cancel, then the steer in the same session, then a completed turn. | [`ACP steering: a message sent mid-turn cancels the turn and goes to the agent next, in the same session`](../../../packages/agent-app/tests/acp-route-160.test.ts) |
 | [MUS-SPEC-03-160K](03-providers-models-and-accounts.md#mus-spec-03-160k) | Preset fill, install hint, plain error, model count and the saved draft. | [`Add ACP agent: a preset fills the command and shows how to install it; Test starts it, Save keeps it`](../../../packages/agent-app/tests/add-acp-agent-160-dom.tsx) |
 | [MUS-SPEC-03-160L](03-providers-models-and-accounts.md#mus-spec-03-160l) | Arguments split correctly and only the draft is removed. | [`Add ACP agent: cancelling an untested draft removes only that draft`](../../../packages/agent-app/tests/add-acp-agent-160-dom.tsx) |
+| [MUS-SPEC-03-147A](03-providers-models-and-accounts.md#mus-spec-03-147a) | The ACP chat is refused: the agent is not installed on the host, with install guidance and that Muster never installs anything. | [`a CLI missing on the host, an API route and a signed-out CLI each say what to do, and nothing runs here`](../../../packages/agent-app/tests/ssh-agents-147.test.ts) |
+| [MUS-SPEC-03-147B](03-providers-models-and-accounts.md#mus-spec-03-147b) | The default is the host’s own sign-in and the CLI gets no key; after choosing to pass the key, the chat's notice says so. | [`the host signs in itself by default; a key Muster holds goes only when chosen, as a variable, never on disk`](../../../packages/agent-app/tests/ssh-agents-147.test.ts) |
+| [MUS-SPEC-03-147C](03-providers-models-and-accounts.md#mus-spec-03-147c) | The ACP agent answers in the chat. | [`Codex and an ACP agent run on the host too, with the host’s own config and files`](../../../packages/agent-app/tests/ssh-agents-147.test.ts) |
 
 ### Configured routers
 
@@ -913,4 +916,39 @@ Any agent that speaks the Agent Client Protocol (JSON-RPC over stdio) can be add
 - Test: `packages/agent-app/tests/add-acp-agent-160-dom.tsx::Add ACP agent: cancelling an untested draft removes only that draft`
 - Environment: As 160K.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### Agents on an SSH host (#147)
+
+<a id="mus-spec-03-147a"></a>
+#### MUS-SPEC-03-147A: A CLI missing on the host, an API route and a signed-out CLI each say what to do on a host
+
+- Precondition: A remote folder whose host has Claude Code only; chats bound to an ACP agent, an API route and Claude Code.
+- Action: Send in each chat; Claude Code’s run fails because it is signed out on the host.
+- Expected result: The ACP chat is refused: the agent is not installed on the host, with install guidance and that Muster never installs anything; the API route is refused: only Claude Code, Codex and ACP agents run on a host; the Claude Code run fails with a retryable sentence to sign in on the host. Nothing runs on this computer.
+- Test: `packages/agent-app/tests/ssh-agents-147.test.ts::a CLI missing on the host, an API route and a signed-out CLI each say what to do, and nothing runs here`
+- Environment: Node test runner with the real agent service (Claude Code, Codex and ACP routes whose local binaries do not exist), a temp data folder and a temp HOME; a stand-in `ssh` on PATH (`tests/fixtures/fake-ssh/`) that runs the remote commands under /bin/sh on this machine with a host PATH of its own, relays reverse forwards over real 127.0.0.1 sockets, and starts each session in its own process group; the fake Claude Code (`fake-ssh/fake-claude.cjs`), the fake Codex app-server and the fake ACP agent "installed on the host". No network, no real host.
+- Known gaps: Sign-in failures are recognised from the CLI’s own words; a CLI that words it differently keeps its message.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-147b"></a>
+#### MUS-SPEC-03-147B: The host signs in itself by default; a key Muster holds goes only when chosen, as a variable, never on disk
+
+- Precondition: Muster holds ANTHROPIC_API_KEY; a Claude Code chat in a remote folder.
+- Action: Run once with the default, choose "pass my key" for the host, run again; then remove the key from Muster and run.
+- Expected result: The default is the host’s own sign-in and the CLI gets no key; after the choice the CLI gets the key in its environment for that run, the key is on no ssh command line and in no file on the host, and the chat's notice says the run uses the person's key instead of the host's own sign-in; an invalid choice is refused; with no key to pass, the send is refused with a sentence.
+- Test: `packages/agent-app/tests/ssh-agents-147.test.ts::the host signs in itself by default; a key Muster holds goes only when chosen, as a variable, never on disk`
+- Environment: Node test runner with the real agent service (Claude Code, Codex and ACP routes whose local binaries do not exist), a temp data folder and a temp HOME; a stand-in `ssh` on PATH (`tests/fixtures/fake-ssh/`) that runs the remote commands under /bin/sh on this machine with a host PATH of its own, relays reverse forwards over real 127.0.0.1 sockets, and starts each session in its own process group; the fake Claude Code (`fake-ssh/fake-claude.cjs`), the fake Codex app-server and the fake ACP agent "installed on the host". No network, no real host.
+- Known gaps: Codex reading OPENAI_API_KEY from its environment is not checked against a real Codex.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-147c"></a>
+#### MUS-SPEC-03-147C: Codex and ACP agents run on the host with the host’s own config and files
+
+- Precondition: A remote folder whose host has the Codex app-server and an ACP agent.
+- Action: Send in an ACP chat and in a Codex chat.
+- Expected result: The ACP agent answers in the chat; it was told Muster serves no file reads or writes (it uses its own on the host) and its session is in the host folder; Codex starts as `app-server` on the host, its thread starts in the host folder, Muster’s tools in its thread config are the relay with the run’s token (never in argv), and no path on this computer (the sudo helper) is sent.
+- Test: `packages/agent-app/tests/ssh-agents-147.test.ts::Codex and an ACP agent run on the host too, with the host’s own config and files`
+- Environment: Node test runner with the real agent service (Claude Code, Codex and ACP routes whose local binaries do not exist), a temp data folder and a temp HOME; a stand-in `ssh` on PATH (`tests/fixtures/fake-ssh/`) that runs the remote commands under /bin/sh on this machine with a host PATH of its own, relays reverse forwards over real 127.0.0.1 sockets, and starts each session in its own process group; the fake Claude Code (`fake-ssh/fake-claude.cjs`), the fake Codex app-server and the fake ACP agent "installed on the host". No network, no real host.
+- Known gaps: The fake Codex completes a turn without text; a real Codex turn with tool calls on a host is not driven.
 - Evidence: UNVERIFIED

@@ -89,7 +89,10 @@ Boundaries:
 | [MUS-SPEC-02-401B](02-turns-streaming-and-queue.md#mus-spec-02-401b) | The run is asked for a suggestion only with the setting on (off by default); the suggestion is stored, cleaned to one short line, on the turn's message; one that arrives after a newer message is dropped. | [`a follow-up suggestion is offered on its turn only when the setting is on, and a newer message drops a late one`](../../../packages/agent-app/tests/follow-up-401.test.ts) |
 | [MUS-SPEC-02-401C](02-turns-streaming-and-queue.md#mus-spec-02-401c) | An HTTP route settles the turn first, then makes one non-streamed request to the same model with a small output cap and returns its one line; with no suggestion asked for it makes no extra request. | [`an HTTP route asks its own model for one short follow-up after the turn, without holding the turn`](../../../packages/agent-app/tests/follow-up-401.test.ts) |
 | [MUS-SPEC-02-401D](02-turns-streaming-and-queue.md#mus-spec-02-401d) | Each sent message records the provider, model and reasoning effort its turn ran with. | [`each message records the model, provider and effort its turn ran with`](../../../packages/agent-app/tests/follow-up-401.test.ts) |
-| [MUS-SPEC-02-147A](02-turns-streaming-and-queue.md#mus-spec-02-147a) | Phase 1 runs no agent for a remote folder: sending is refused with a sentence and no provider run starts on this computer. | [`a chat in a folder on an SSH host is refused instead of running on this computer`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
+| [MUS-SPEC-02-147A](02-turns-streaming-and-queue.md#mus-spec-02-147a) | A route that cannot run on the host (here an API-style route) is refused with a sentence that names the SSH host, and no provider run starts on this computer. | [`a chat in a folder on an SSH host is refused instead of running on this computer`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
+| [MUS-SPEC-02-147B](02-turns-streaming-and-queue.md#mus-spec-02-147b) | The answer streams into the chat. | [`Claude Code in a folder on an SSH host runs there, streams into the chat and resumes its session`](../../../packages/agent-app/tests/ssh-agents-147.test.ts) |
+| [MUS-SPEC-02-147C](02-turns-streaming-and-queue.md#mus-spec-02-147c) | The steer reaches the running CLI and its answer streams in. | [`a message sent mid-run reaches the CLI on the host, and Stop ends its process there`](../../../packages/agent-app/tests/ssh-agents-147.test.ts) |
+| [MUS-SPEC-02-147D](02-turns-streaming-and-queue.md#mus-spec-02-147d) | The run settles as interrupted with a sentence that names the host and says to send again. | [`a dropped connection interrupts the run with a sentence, and the next run ends what was left on the host`](../../../packages/agent-app/tests/ssh-agents-147.test.ts) |
 
 ### Tool rows when a turn ends
 
@@ -931,12 +934,47 @@ Boundaries:
 ### Chats in a folder on an SSH host (#147)
 
 <a id="mus-spec-02-147a"></a>
-#### MUS-SPEC-02-147A: A chat in a folder on an SSH host says agents on the host come later instead of running here
+#### MUS-SPEC-02-147A: A chat in a folder on an SSH host never runs on this computer instead
 
-- Precondition: A chat in a remote folder bound to a ready model.
+- Precondition: A chat in a remote folder bound to a ready model whose route cannot run on a host (not Claude Code, Codex or an ACP agent).
 - Action: Send a message.
 - Expected result: The send is refused with a sentence that names the SSH host; the provider saw no run for the chat.
 - Test: `packages/agent-app/tests/ssh-workspaces-147.test.ts::a chat in a folder on an SSH host is refused instead of running on this computer`
 - Environment: Node test runner with the real agent service, a temp data folder and a temp HOME; a stand-in `ssh` and `ssh-keyscan` on PATH (`tests/fixtures/fake-ssh/`) that run the remote commands under /bin/sh on this machine. No network, no real host.
-- Known gaps: Running the agent on the host is phase 2 of #147.
+- Known gaps: Routes that do run on the host are covered by MUS-SPEC-02-147B to 02-147D (phase 2).
+- Evidence: UNVERIFIED
+
+### Agents on an SSH host (#147)
+
+<a id="mus-spec-02-147b"></a>
+#### MUS-SPEC-02-147B: A Claude Code chat in a folder on an SSH host runs on the host and resumes its session there
+
+- Precondition: Claude Code is installed on the host; a chat in the remote folder is bound to the Claude Code route.
+- Action: Send a message, then a second one.
+- Expected result: The answer streams into the chat; the CLI ran in the folder on the host (its working folder is the host path) through one `ssh -T` session over the shared connection; a notice says where it runs and that the host signs in; the second message resumes the first session id; no process-group file is left on the host.
+- Test: `packages/agent-app/tests/ssh-agents-147.test.ts::Claude Code in a folder on an SSH host runs there, streams into the chat and resumes its session`
+- Environment: Node test runner with the real agent service (Claude Code, Codex and ACP routes whose local binaries do not exist), a temp data folder and a temp HOME; a stand-in `ssh` on PATH (`tests/fixtures/fake-ssh/`) that runs the remote commands under /bin/sh on this machine with a host PATH of its own, relays reverse forwards over real 127.0.0.1 sockets, and starts each session in its own process group; the fake Claude Code (`fake-ssh/fake-claude.cjs`), the fake Codex app-server and the fake ACP agent "installed on the host". No network, no real host.
+- Known gaps: The fake CLI answers with one assistant message per turn; partial-message streaming and sub-agents on a host are not driven.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-147c"></a>
+#### MUS-SPEC-02-147C: A steer reaches the CLI on the host and Stop ends its process group there
+
+- Precondition: A Claude Code chat in a remote folder.
+- Action: Send a message the CLI holds open, steer it, then send one that never answers and press Stop.
+- Expected result: The steer reaches the running CLI and its answer streams in; after Stop the chat is interrupted, the CLI process on the host is gone and the host was asked to signal the run’s process group.
+- Test: `packages/agent-app/tests/ssh-agents-147.test.ts::a message sent mid-run reaches the CLI on the host, and Stop ends its process there`
+- Environment: Node test runner with the real agent service (Claude Code, Codex and ACP routes whose local binaries do not exist), a temp data folder and a temp HOME; a stand-in `ssh` on PATH (`tests/fixtures/fake-ssh/`) that runs the remote commands under /bin/sh on this machine with a host PATH of its own, relays reverse forwards over real 127.0.0.1 sockets, and starts each session in its own process group; the fake Claude Code (`fake-ssh/fake-claude.cjs`), the fake Codex app-server and the fake ACP agent "installed on the host". No network, no real host.
+- Known gaps: Children a CLI puts in a process group of their own are not reached by the group signal (the same as a local run).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-02-147d"></a>
+#### MUS-SPEC-02-147D: A dropped connection interrupts a run on the host and the next run ends what was left there
+
+- Precondition: A Claude Code chat in a remote folder with a turn that keeps working.
+- Action: Drop the connection (the host goes down) while the turn runs; bring it back and send again.
+- Expected result: The run settles as interrupted with a sentence that names the host and says to send again; the CLI on the host, which outlives the connection, is ended when the next run in the chat is prepared, and the next run answers.
+- Test: `packages/agent-app/tests/ssh-agents-147.test.ts::a dropped connection interrupts the run with a sentence, and the next run ends what was left on the host`
+- Environment: Node test runner with the real agent service (Claude Code, Codex and ACP routes whose local binaries do not exist), a temp data folder and a temp HOME; a stand-in `ssh` on PATH (`tests/fixtures/fake-ssh/`) that runs the remote commands under /bin/sh on this machine with a host PATH of its own, relays reverse forwards over real 127.0.0.1 sockets, and starts each session in its own process group; the fake Claude Code (`fake-ssh/fake-claude.cjs`), the fake Codex app-server and the fake ACP agent "installed on the host". No network, no real host.
+- Known gaps: A CLI left running on a host whose connection never comes back is only ended by the next run of that chat.
 - Evidence: UNVERIFIED

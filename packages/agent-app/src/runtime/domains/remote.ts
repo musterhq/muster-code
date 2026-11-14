@@ -10,13 +10,16 @@ import { isRemoteFolderPath, parseRemoteFolderPath, remoteAuthority, type Remote
 import { RemoteHub } from '../remote/hub.ts';
 import { RemoteFiles } from '../remote/remote-fs.ts';
 import { RemoteGit } from '../remote/remote-git.ts';
+import { RemoteAgents, remoteCli, remoteFailure } from '../remote/remote-agent.ts';
+import { ToolRelay } from '../remote/tool-relay.ts';
+import { acpPreset } from '../../shared/acp-agents.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
 const str = (v: unknown, label: string, max = 4096) => { if (typeof v !== 'string' || !v || v.length > max || v.includes('\0')) throw new Error(`Choose ${label}.`); return v; };
 
 export function createRemoteDomain(ctx: DomainContext): DomainModule {
   const hub = new RemoteHub(ctx.dataDir, (hostId, status) => ctx.emit({ type: 'remoteChanged', hostId, status } as never));
-  const files = new RemoteFiles(hub), git = new RemoteGit(hub);
+  const files = new RemoteFiles(hub), git = new RemoteGit(hub), relay = new ToolRelay(), agents = new RemoteAgents(hub, relay);
   const locate = (folder: Folder): { host: RemoteHost; root: string } => {
     const parsed = parseRemoteFolderPath(folder.path); if (!parsed) throw new Error('This folder’s SSH address is not valid.');
     const host = hub.byAuthority(parsed.authority); if (!host) throw new Error(`The SSH host ${parsed.authority} of this folder is no longer in Settings. Add it again in Settings › Environments.`);
@@ -57,6 +60,29 @@ export function createRemoteDomain(ctx: DomainContext): DomainModule {
   }
   ctx.hooks.setRemoteFolderRouter?.(route);
 
+  // #147 phase 2: a chat's provider CLI runs on its folder's host. Only routes that are a CLI there can: Claude Code, Codex
+  // and ACP agents. The CLI must be installed on the host already, and signs in with the host's own login unless the person
+  // chose to pass their key for this host.
+  ctx.hooks.setRemoteAgentResolver?.(async ({ chat, folder, provider }) => {
+    const { host, root } = locate(folder);
+    const cli = remoteCli({ driver: provider.driver, name: provider.name, ...(provider.acp ? { acp: provider.acp } : {}) }, provider.acp?.preset ? acpPreset(provider.acp.preset)?.installHint : undefined);
+    if (!cli) throw new Error(`${provider.name} can’t run on the SSH host ${host.name}: only Claude Code, Codex and ACP agents run on a host. Pick one of those for this chat.`);
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(chat.id)) throw new Error('This chat cannot run on an SSH host.');
+    let key: { env: string; value: string } | undefined;
+    if (host.agentCredentials === 'muster') {
+      const value = cli.key ? process.env[cli.key.env] : undefined;
+      if (!cli.key || !value) throw new Error(cli.key ? `${host.name} is set to use your ${cli.key.label}, but Muster has no ${cli.key.env} to pass. Set it where Muster starts, or switch ${host.name} back to its own sign-in in Settings › Environments › SSH workspaces.` : `${cli.label} signs in on ${host.name} itself; switch ${host.name} back to its own sign-in in Settings › Environments › SSH workspaces.`);
+      key = { env: cli.key.env, value };
+    }
+    const prepared = await agents.prepare({ host, root, chatId: chat.id, cli, ...(key ? { key } : {}), tokenInEnv: provider.driver === 'claude-code-cli' });
+    return {
+      run: prepared.run, tools: prepared.tools, dropped: prepared.dropped, dispose: prepared.dispose,
+      signIn: key && cli.key ? `your ${cli.key.label} from this computer` : 'the host’s own sign-in',
+      note: `This chat’s folder is on the SSH host ${host.name}. You run there, in ${root}: every command you run and every file you change is on that host. Muster’s computer-use, in-app terminal, background-process and sandbox tools act on the person’s own computer, so they are not offered here; use your own shell on the host.`,
+      failure: message => remoteFailure(message, { host: host.name, cli, dropped: prepared.dropped() }),
+    };
+  });
+
   return {
     handlers: {
       'remote.hosts.list': () => hub.list(),
@@ -83,8 +109,9 @@ export function createRemoteDomain(ctx: DomainContext): DomainModule {
       },
       'remote.forward.open': async input => { const { host } = remoteFolder(input.folderId); return hub.openForward(host, input.port); },
       'remote.forward.close': async input => { const { host } = remoteFolder(input.folderId); return { closed: await hub.closeForward(host, input.port) }; },
+      'remote.hosts.agentCredentials': input => { const saved = hub.setAgentCredentials(hub.host(input.id).id, input.credentials); ctx.emit({ type: 'remoteChanged', hostId: saved.id } as never); return saved; },
       'remote.forward.list': input => ({ forwards: hub.listForwards(input.folderId === undefined ? undefined : remoteFolder(input.folderId).host.id) }),
     },
-    async dispose() { ctx.hooks.setRemoteFolderRouter?.(undefined); await hub.dispose(); },
+    async dispose() { ctx.hooks.setRemoteFolderRouter?.(undefined); ctx.hooks.setRemoteAgentResolver?.(undefined); relay.dispose(); await hub.dispose(); },
   };
 }

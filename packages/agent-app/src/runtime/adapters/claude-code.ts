@@ -8,6 +8,7 @@ import {join} from 'node:path';
 import {cliSpawn, jsonLines, loadImages, text} from './shared.ts';
 import {killTree} from './cli-common.ts';
 import {launcherSpec} from '../launcher-script.ts';
+import {inlineMcpConfig} from '../remote/remote-agent.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
 import {CLAUDE_CODE_ALIASES, CLAUDE_CODE_DEFAULT} from './claude-models.ts';
 
@@ -178,13 +179,15 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       try {
         // The config contains MCP environment secrets and per-chat tokens. Only its path belongs in argv.
         let configFile: string | undefined;
-        if (Object.keys(input.mcpServers ?? {}).length) {
+        // #147: on an SSH host the servers are the relay, given inline (no secret in them; see inlineMcpConfig).
+        if (input.remote && Object.keys(input.mcpServers ?? {}).length) configFile = inlineMcpConfig(input.mcpServers!);
+        else if (Object.keys(input.mcpServers ?? {}).length) {
           configDir = mkdtempSync(join(tmpdir(), 'muster-mcp-'));
           configFile = join(configDir, 'config.json');
           const mcpServers = Object.fromEntries(Object.entries(input.mcpServers ?? {}).map(([name, spec]) => [name, spec.args ? spec : {...spec, ...launcherSpec(spec.command)}]));
           writeFileSync(configFile, JSON.stringify({mcpServers}), {mode: 0o600});
         }
-        const launch = cliSpawn(options.binary, claudeArgs(input, sessionId, configFile), env);
+        const launch = cliSpawn(input.remote?.command ?? options.binary, claudeArgs(input, sessionId, configFile), env);
         child = spawnOwned(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe']}, spawn);
       }
       catch (error) { cleanConfig(); resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `Claude Code could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
