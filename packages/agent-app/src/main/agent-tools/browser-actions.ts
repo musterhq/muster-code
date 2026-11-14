@@ -1,7 +1,7 @@
 import type {KeyboardInputEvent, MouseInputEvent} from 'electron';
 import type {BrowserConsoleEntry, BrowserState} from '../../shared/browser-protocol.ts';
 import {cursorHideScript, cursorToScript, type CursorMode} from './agent-cursor.ts';
-import {AGENT_WORLD, BROWSER_TOOL_SPECS, CLICK_BODY, DOUBLE_CLICK_BODY, HOVER_BODY, SNAPSHOT_SCRIPT, argNumber, argString, electronKey, elementScript, focusBody, formatSnapshot, resolveScript, scrollBody, selectBody, textPresentScript, textResult, toolArgs, type McpToolResult} from './browser-tools.ts';
+import {AGENT_WORLD, BROWSER_TOOL_SPECS, CLICK_BODY, DOUBLE_CLICK_BODY, HOVER_BODY, SNAPSHOT_SCRIPT, argNumber, argString, electronKey, elementScript, focusBody, formatSnapshot, resolveScript, scrollBody, secretMaskScript, selectBody, textPresentScript, textResult, toolArgs, type McpToolResult} from './browser-tools.ts';
 
 /** The narrow slice of WebContents the agent drives; tests pass a fake. */
 export interface AgentContents {
@@ -87,9 +87,14 @@ export async function runBrowserTool(host: AgentBrowserHost, tool: string, rawAr
     case 'browser_snapshot': return {result: textResult(await snapshotText(page)), action: 'Read the page'};
     case 'browser_screenshot': {
       const hid = watched(page) && await run(page, cursorHideScript(true)).catch(() => null) === true;
+      // #843: a filled password the page shows as text is drawn as dots for the agent's picture.
+      const masked = Number(await run(page, secretMaskScript(true)).catch(() => 0)) > 0;
       let shot: Awaited<ReturnType<AgentBrowserHost['screenshot']>>;
       try { shot = await host.screenshot(); }
-      finally { if (hid) await run(page, cursorHideScript(false)).catch(() => undefined); }
+      finally {
+        if (masked) await run(page, secretMaskScript(false)).catch(() => undefined);
+        if (hid) await run(page, cursorHideScript(false)).catch(() => undefined);
+      }
       if (!shot) return {result: textResult('The page could not be captured right now. Use browser_snapshot instead.', true), action: ''};
       const state = page.state();
       return {result: {content: [{type: 'image', data: shot.dataUrl.slice(shot.dataUrl.indexOf(',') + 1), mimeType: shot.dataUrl.slice(5, shot.dataUrl.indexOf(';'))}, {type: 'text', text: `${state.title || '(untitled)'} — ${state.url} (${shot.width}×${shot.height})`}]}, action: 'Took a screenshot'};

@@ -6,6 +6,7 @@ What the user can do:
 - open a URL or a local dev server in a browser tab, with back, forward, reload and dev tools;
 - let the agent read, click and type in the page, and pick an element to point the agent at;
 - keep sign-ins per workspace, and see the page picture-in-picture while working elsewhere.
+- fill a sign-in form from their own 1Password; agents never see the password.
 
 Boundaries:
 - Each workspace has its own browser storage; one workspace's sign-in does not leak to another.
@@ -28,6 +29,13 @@ Boundaries:
 | [MUS-SPEC-09-721B](09-browser-and-previews.md#mus-spec-09-721b) | Typing shows a ring around the field; after 1.6 s of quiet the cursor fades out and comes back from the same spot. | [`typing rings the field, and the cursor fades once the agent goes quiet, then returns where it was`](../../../packages/agent-app/tests/agent-cursor.test.ts) |
 | [MUS-SPEC-09-721C](09-browser-and-previews.md#mus-spec-09-721c) | Screenshots the agent takes never include the cursor, and a tab nobody can see gets no cursor at all. | [`the model never sees its own cursor, and a page nobody watches pays nothing`](../../../packages/agent-app/tests/agent-cursor.test.ts) |
 | [MUS-SPEC-09-721D](09-browser-and-previews.md#mus-spec-09-721d) | With Reduce motion on, the cursor moves to each target instantly. | [`with Reduce motion on, the cursor jumps instead of gliding`](../../../packages/agent-app/tests/agent-cursor.test.ts) |
+| [MUS-SPEC-09-843A](09-browser-and-previews.md#mus-spec-09-843a) | The key menu lists only the 1Password logins saved for the page's site (subdomains included; other sites, look-alike hosts and an https login on an http page excluded), with title and username but no password. | [`the key menu offers only logins saved for this site, never their passwords`](../../../packages/agent-app/tests/browser-passwords-843.test.ts) |
+| [MUS-SPEC-09-843B](09-browser-and-previews.md#mus-spec-09-843b) | Choosing a login fills its username and password into the page's sign-in form with real input events; `op` is run as `item get <id> --vault <vault> --format json` and an invalid id never runs it. | [`choosing a login fills the sign-in form from 1Password`](../../../packages/agent-app/tests/browser-passwords-843.test.ts) |
+| [MUS-SPEC-09-843C](09-browser-and-previews.md#mus-spec-09-843c) | After a fill, the agent's snapshot, typing result and screenshot never reveal the password, even when the page switches the field to plain text or the field has no label. | [`after a fill the agent never reads the password: snapshot, typing and screenshot stay masked`](../../../packages/agent-app/tests/browser-passwords-843.test.ts) |
+| [MUS-SPEC-09-843D](09-browser-and-previews.md#mus-spec-09-843d) | A login saved for another site, a page that navigated away while 1Password was asked, and a page with no sign-in form are refused and nothing is typed. | [`a fill is refused when the login is for another site or the page changed meanwhile`](../../../packages/agent-app/tests/browser-passwords-843.test.ts) |
+| [MUS-SPEC-09-843E](09-browser-and-previews.md#mus-spec-09-843e) | A fill emits and returns no password, keeps no page form state in the tab's saved history, writes nothing containing it to disk, and no agent browser tool can trigger it. | [`a fill leaves no password in events, saved history, files or agent tools`](../../../packages/agent-app/tests/browser-passwords-843.test.ts) |
+| [MUS-SPEC-09-843F](09-browser-and-previews.md#mus-spec-09-843f) | The browser toolbar's key button lists matching logins and choosing one asks main to fill it; without the 1Password CLI it says so. | [`the key button lists matching logins and fills the chosen one`](../../../packages/agent-app/tests/browser-passwords-843-dom.tsx) |
+| [MUS-SPEC-09-843G](09-browser-and-previews.md#mus-spec-09-843g) | A value is typed only into the field focused for it: when the page moves focus to another field before the value lands, nothing is typed there, the fill stops and says the page changed during the fill. | [`a value is typed only into the field focused for it; focus moved by the page stops the fill`](../../../packages/agent-app/tests/browser-passwords-843.test.ts) |
 
 ### Page background
 
@@ -180,4 +188,83 @@ Boundaries:
 - Test: `packages/agent-app/tests/agent-cursor.test.ts::with Reduce motion on, the cursor jumps instead of gliding`
 - Environment: Node test runner driving a real headless Chrome over the DevTools protocol; skipped locally when Chrome is not installed.
 - Known gaps: Drives the cursor script in a plain Chrome page, not inside the Electron browser pane.
+- Evidence: UNVERIFIED
+
+### Passwords
+
+<a id="mus-spec-09-843a"></a>
+#### MUS-SPEC-09-843A: The key menu offers only logins saved for the site
+
+- Precondition: A fake `op` CLI on disk returns four Login items: one for `example.test`, one for `accounts.example.test` with an `https` URL, one for `example.test.evil.invalid`, and one for `other.invalid`. No real password manager is used.
+- Action: Ask for the logins for the page `app.example.test/login` over https, then for `example.test/login` over plain http.
+- Expected result: The `https` page gets the `example.test` login (it covers subdomains) but not the look-alike or other sites; the `http` page gets no `https`-only login. Each entry carries id, vault, title and username only, and the whole reply contains no password. `op` was run as `item list --categories Login --format json`.
+- Test: `packages/agent-app/tests/browser-passwords-843.test.ts::the key menu offers only logins saved for this site, never their passwords`
+- Environment: Node test runner; a fake `op` script that logs its arguments; no Electron, no network.
+- Known gaps: Matching compares host names (with subdomains) and scheme; it does not use the public suffix list, so a login saved for a whole shared domain would match its subdomains. The real `op` JSON shape is reproduced from 1Password CLI 2 output, not recorded live.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-09-843b"></a>
+#### MUS-SPEC-09-843B: Choosing a login fills the sign-in form
+
+- Precondition: A real headless Chrome shows a test sign-in page with an email field, a password field and listeners that count input events. The fake `op` returns the chosen item with a username and a password.
+- Action: Fill the `example.test` login into the page; separately, ask to fill an id that is not a 1Password item id.
+- Expected result: The email and password fields hold the item's values and each got trusted input events. `op` was run as `item get <id> --vault <vault> --format json`. The malformed id is refused before `op` runs.
+- Test: `packages/agent-app/tests/browser-passwords-843.test.ts::choosing a login fills the sign-in form from 1Password`
+- Environment: Node test runner driving real headless Chrome over the DevTools protocol (Electron's WebContents swapped for CDP); skipped locally when Chrome is not installed.
+- Known gaps: Runs in a plain Chrome page, not the Electron pane; isolated worlds collapse to the main world over CDP. Logins inside cross-origin frames are not filled.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-09-843c"></a>
+#### MUS-SPEC-09-843C: After a fill the agent never reads the password
+
+- Precondition: The test page is filled as in MUS-SPEC-09-843B. It also has a "Show password" button that turns the field into plain text, and a second form whose password field has no label or placeholder.
+- Action: The agent takes a snapshot, clicks Show password, snapshots again, types into the email field, and takes a screenshot.
+- Expected result: No snapshot or tool reply contains the password (the filled field reads `••••••` even after it is shown as text, and an unlabeled password field is not named by its value). While the screenshot is taken the revealed field is drawn as dots, and it reads as text again afterwards.
+- Test: `packages/agent-app/tests/browser-passwords-843.test.ts::after a fill the agent never reads the password: snapshot, typing and screenshot stay masked`
+- Environment: Node test runner driving real headless Chrome over the DevTools protocol; skipped locally when Chrome is not installed.
+- Known gaps: The page itself can still read and log its own field; a page that copies the password into other text or the console is not masked. The live picture-in-picture the person watches is not masked (it never reaches the model).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-09-843d"></a>
+#### MUS-SPEC-09-843D: A fill is refused for another site or a changed page
+
+- Precondition: The fake `op` has a login saved for `other.invalid`. The browser page is `example.test/login` over https.
+- Action: Fill the `other.invalid` login; then fill a matching login while the page navigates to `evil.invalid` during the `op` call; then fill a matching login on a page that moves to `evil.invalid` as soon as the username is typed; then fill on a page with no password or username field.
+- Expected result: The first is refused as not saved for this site; the second is refused because the page changed and nothing is typed; the third types the username only, never the password, and is refused because the page changed; the fourth says no sign-in form was found. The password is never typed into a page of another origin.
+- Test: `packages/agent-app/tests/browser-passwords-843.test.ts::a fill is refused when the login is for another site or the page changed meanwhile`
+- Environment: Node test runner; fake page contents that record typed text; fake `op` script.
+- Known gaps: The page change check compares origins, so a single-page app that changes path keeps the fill.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-09-843e"></a>
+#### MUS-SPEC-09-843E: A fill leaves no password anywhere but the page
+
+- Precondition: A browser workspace with fake views opens `example.test/login` over https; its history entries carry page state. The fake `op` returns a login whose password is a unique marker.
+- Action: Fill through the workspace, then read the emitted events, the fill reply, the tab's saved sessions, every file in the test's data folder and the agent browser tool list.
+- Expected result: The marker appears only in the text typed into the page. Events and the reply hold no marker; the tab's saved history has no page state; no file contains it; no agent browser tool fills logins, and the bridge refuses one by name.
+- Test: `packages/agent-app/tests/browser-passwords-843.test.ts::a fill leaves no password in events, saved history, files or agent tools`
+- Environment: Node test runner; fake window, views and session; fake `op`; no Electron.
+- Known gaps: Checks this process's outputs only; it cannot prove Chromium keeps no copy in its own memory or caches.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-09-843g"></a>
+#### MUS-SPEC-09-843G: A value is typed only into the field focused for it
+
+- Precondition: The browser page is `example.test/login` over https with a sign-in form and a plain text field ("Notes") outside it; the fake `op` has a matching login.
+- Action: Fill the login while the page moves focus to the Notes field after the password field was focused and before the password is typed. Then fill again while the page moves focus to the Notes field before the username is typed.
+- Expected result: A value is typed only while `document.activeElement` is still exactly the field focused for it, still connected, a password field for the password (or the username field for the username), and the page is still on the same origin. Otherwise nothing more is typed: the Notes field stays empty, the password field stays empty, and the fill fails with "The page changed during the fill". Any field that receives input while the password is typed is treated as secret, so agent snapshots show its value as dots.
+- Test: `packages/agent-app/tests/browser-passwords-843.test.ts::a value is typed only into the field focused for it; focus moved by the page stops the fill`
+- Environment: Node test runner; real headless Chrome running the real fill scripts; the page's focus move is made between the focus step and the typed text; fake `op` script.
+- Known gaps: The guard runs in the top frame, so focus moved into a cross-origin iframe in the instant between the last check and the typed text is detected afterwards (the fill fails) but cannot stop that one value from reaching the iframe. A username typed before the page changed stays typed.
+- Evidence: local; ~/.muster-work/review/857/green-843G.log; exit 0; 1 passed, 0 failed, 0 skipped; commit e92f8884a0e9e0d8c82527bb201322ebcd691ac6
+
+<a id="mus-spec-09-843f"></a>
+#### MUS-SPEC-09-843F: The key button fills a chosen login
+
+- Precondition: The browser tab shows `example.test/login`. The bridge fakes `browser.passwords` with one login, then a reply that the 1Password CLI is not installed.
+- Action: Open the key menu and choose the login; then open it again with no CLI.
+- Expected result: The menu lists the login's title and username; choosing it sends `browser.fillLogin` with the tab and the item's id and vault, and the tab says it filled the login. Without the CLI the menu says 1Password's command-line tool is needed.
+- Test: `packages/agent-app/tests/browser-passwords-843-dom.tsx::the key button lists matching logins and fills the chosen one`
+- Environment: DOM suite (`linkedom`); the bridge is faked.
+- Known gaps: Does not open a real menu on screen or drive 1Password's approval prompt.
 - Evidence: UNVERIFIED
