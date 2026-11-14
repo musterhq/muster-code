@@ -74,6 +74,8 @@ export interface DomainHooks {
   /** #44: replaces the single resolver of extra data a sent message's transcript row carries, by request id (a delegation
    *  report is shown as a notice, not as the user's words). Optional so bare test contexts need not provide it. */
   setSendData?(fn: ((chatId: string, requestId: string) => Record<string, unknown> | undefined) | undefined): void;
+  /** #326: every event the runtime emits (the phone link forwards chat changes). Observers must not throw or block. Optional so bare test contexts need not provide it. */
+  onAgentEvent?(fn: (event: AgentEvent) => void): () => void;
 }
 
 export interface DomainContext {

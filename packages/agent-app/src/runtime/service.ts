@@ -266,6 +266,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (event.type === 'workspaceChanged') forgetQuickOpen();
     if (event.type === 'projectChanged' && event.seq === undefined) { try { event = {...event, seq: projectFeed.append(event.projectId, event.taskId)}; } catch { /* An unsequenced event still reloads; the next replay resets. */ } }
     options.onEvent(event);
+    domainHooks.agentEvent(event);
   };
   setRemoteIconStore(join(options.dataDir, 'plugin-icons'));
   const remoteIcons = options.remotePluginIcons ?? (process.env.NODE_TEST_CONTEXT ? false : {});
