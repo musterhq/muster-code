@@ -1,5 +1,5 @@
 /** One timeline row. It follows only its own item in the store, so a streaming token re-renders this row and no other
- *  (MUS-SPEC-23-16A). Replies render through StreamingText; tool calls are one dim line; approvals and questions are cards. */
+ *  (MUS-SPEC-23-16A). Replies render as native Markdown; tool calls are one dim line; approvals and questions are cards. */
 import {memo} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import type {MobileConnection} from '../shared';
@@ -7,17 +7,17 @@ import type {TimelineStore} from '../timeline/store';
 import {useTimelineItem} from '../timeline/useTimeline';
 import {reportRender} from '../perf';
 import {font, radius, space, themed, type} from '../theme';
-import {ApprovalCard} from './ApprovalCard';
+import {ApprovalCard, offlineNote} from './ApprovalCard';
 import {QuestionCard} from './QuestionCard';
-import {StreamingText} from './StreamingText';
+import {Markdown} from './Markdown';
 
-export const TimelineRow = memo(function TimelineRow({store, id, connection, canAct}: {store: TimelineStore; id: string; connection: MobileConnection; canAct: boolean}) {
+export const TimelineRow = memo(function TimelineRow({store, id, connection, canAct, offline}: {store: TimelineStore; id: string; connection: MobileConnection; canAct: boolean; offline?: string}) {
   const item = useTimelineItem(store, id);
   const styles = useStyles();
   reportRender('timeline-row', id);
   if (!item) return null;
-  if (item.kind === 'approval') return <ApprovalCard connection={connection} itemId={item.id} {...(item.approval ? {approval: item.approval} : {})} {...(item.status ? {status: item.status} : {})} canAct={canAct} fallback={item.text} />;
-  if (item.kind === 'question') return <QuestionCard connection={connection} itemId={item.id} questions={item.questions ?? []} {...(item.status ? {status: item.status} : {})} canAct={canAct} />;
+  if (item.kind === 'approval') return <ApprovalCard connection={connection} itemId={item.id} {...(item.approval ? {approval: item.approval} : {})} {...(item.status ? {status: item.status} : {})} canAct={canAct} fallback={item.text} {...(offline ? {offline} : {})} />;
+  if (item.kind === 'question') return <QuestionCard connection={connection} itemId={item.id} questions={item.questions ?? []} {...(item.status ? {status: item.status} : {})} canAct={canAct && !offline} {...(offline ? {note: offlineNote(offline)} : {})} />;
   if (item.kind === 'user') return <View style={styles.user}><Text style={styles.userText} selectable>{item.text}</Text></View>;
   if (item.kind === 'tool') return (
     <View style={styles.tool}>
@@ -27,7 +27,7 @@ export const TimelineRow = memo(function TimelineRow({store, id, connection, can
   );
   if (item.kind === 'notice') return <Text style={styles.notice}>{item.text}</Text>;
   if (item.kind === 'reasoning') return <Text style={styles.reasoning} numberOfLines={4}>{item.text}</Text>;
-  return <View style={styles.assistant}><StreamingText text={item.text} /></View>;
+  return <View style={styles.assistant}><Markdown text={item.text} /></View>;
 });
 const useStyles = themed(c => StyleSheet.create({
   user: {alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: c.bubble, borderRadius: 18, borderBottomRightRadius: radius.s, paddingVertical: space.s, paddingHorizontal: space.m, marginVertical: space.xs},

@@ -41,7 +41,10 @@ export function applyItemOps(items: readonly MobileItem[], ops: readonly MobileI
     return lookup.index.get(id) ?? -1;
   };
   for (const op of ops) {
-    if (!('item' in op)) {
+    if ('remove' in op) {
+      const at = find(op.remove);
+      if (at >= 0) { next.splice(at, 1); lookup.index = null; }
+    } else if (!('item' in op)) {
       const at = find(op.id);
       if (at < 0) return null;
       const before = next[at]!;

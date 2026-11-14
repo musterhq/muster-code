@@ -233,3 +233,132 @@ test('revoking a phone while its upload is being staged discards the file', {tim
   await delay(100);
   assert.deepEqual(await d.service.invoke('attachments.list', {chatId: chat.id}), [], 'nothing is left staged');
 });
+
+// #326 phase 4 follow-ups.
+type Delta = Extract<MobileEvent, {type: 'delta'}>;
+const deltasOf = (events: MobileEvent[], chatId: string) => events.filter((event): event is Delta => event.type === 'delta' && event.chatId === chatId);
+function rebuild(opened: {items: MobileItem[]}, deltas: Delta[]): MobileItem[] {
+  let items: MobileItem[] | null = opened.items;
+  for (const event of deltas) { items = applyItemOps(items!, event.ops); assert.ok(items, 'every delta applies'); }
+  return items!;
+}
+
+// Spec: MUS-SPEC-23-23A (docs/spec/clauses/23-mobile.md#mus-spec-23-23a)
+test('a streaming reply is mapped once per change for every phone watching, and not at all when none watches', async t => {
+  const PIECES = 60, PIECE = 400;
+  const reply = Array.from({length: PIECES}, (_, index) => `${String(index).padStart(3, '0')}${'abcdefghij'.repeat(PIECE / 10).slice(3)}`).join('');
+  const provider = scripted(async input => {
+    for (let index = 0; index < PIECES; index++) { input.onDelta?.(reply.slice(index * PIECE, (index + 1) * PIECE)); await delay(30); }
+    return {status: 'completed', finalMessage: reply};
+  });
+  const d = await desktop(t, provider);
+  const watched = await d.service.invoke('chat.create', {}), other = await d.service.invoke('chat.create', {});
+  const {record} = await pair(t, d);
+  const sessions = await Promise.all([0, 1, 2].map(async () => {
+    const client = await reconnect(t, record);
+    const events = collect(client);
+    return {events, opened: await client.call('chat.open', {id: watched.id, deltas: true})};
+  }));
+  let scrubbed = 0;
+  mobileSeams.onScrub = chars => { scrubbed += chars; };
+  const done = async (chatId: string) => until(async () => (await d.service.invoke('chat.timeline', {id: chatId})).items.some(item => item.kind === 'assistant' && item.text === reply), 'reply on the desktop');
+  await d.service.invoke('chat.send', {id: watched.id, text: 'stream', requestId: 'p4-a'});
+  await done(watched.id);
+  await until(() => sessions.every(({events, opened}) => rebuild(opened, deltasOf(events, watched.id)).find(item => item.kind === 'assistant')?.text === reply), 'every session rebuilt the reply');
+  // The finished turn's last rows (its status) are part of the watched chat's cost too.
+  await until(() => sessions[0]!.events.some(event => event.type === 'chats' && event.chats.some(entry => entry.id === watched.id && entry.status === 'completed')), 'watched turn completed');
+  await delay(200);
+  const watchedScrub = scrubbed;
+  assert.ok(watchedScrub >= reply.length, `the watched reply was scrubbed (${watchedScrub})`);
+  assert.ok(watchedScrub < reply.length * 3, `scrubbed ${watchedScrub} characters for a ${reply.length}-character reply`);
+  scrubbed = 0;
+  await d.service.invoke('chat.send', {id: other.id, text: 'stream', requestId: 'p4-b'});
+  await done(other.id);
+  await delay(100);
+  assert.equal(scrubbed, 0, 'nobody watches the other chat: nothing is mapped for it');
+  if (process.env.MUSTER_RECEIPT) console.log(JSON.stringify({receipt: 'MUS-SPEC-23-23A', replyChars: reply.length, sessions: 3, scrubbedChars: watchedScrub, ratio: +(watchedScrub / reply.length).toFixed(2), unwatchedScrubbedChars: scrubbed}));
+});
+
+// Spec: MUS-SPEC-23-23B (docs/spec/clauses/23-mobile.md#mus-spec-23-23b)
+test('a message replaced on the desktop is removed from the phone without reopening the chat', async t => {
+  const d = await desktop(t, quick());
+  const chat = await d.service.invoke('chat.create', {});
+  const {record} = await pair(t, d);
+  await d.service.invoke('chat.send', {id: chat.id, text: 'first', requestId: 'p4-r1'});
+  await until(async () => (await d.service.invoke('chat.timeline', {id: chat.id})).items.filter(item => item.kind === 'assistant').length === 1, 'first reply');
+  await d.service.invoke('chat.send', {id: chat.id, text: 'second', requestId: 'p4-r2'});
+  await until(async () => (await d.service.invoke('chat.timeline', {id: chat.id})).items.filter(item => item.kind === 'assistant').length === 2, 'second reply');
+  await delay(100);
+  const client = await reconnect(t, record);
+  const events = collect(client);
+  const opened = await client.call('chat.open', {id: chat.id, deltas: true});
+  const second = opened.items.find(item => item.kind === 'user' && item.text === 'second')!;
+  await d.service.invoke('chat.editResend', {id: chat.id, itemId: second.id, text: 'second, again', requestId: 'p4-r3', mode: 'replace'});
+  const desktopItems = async () => (await d.service.invoke('chat.timeline', {id: chat.id})).items;
+  await until(async () => (await desktopItems()).some(item => item.kind === 'user' && item.text === 'second, again') && (await desktopItems()).filter(item => item.kind === 'assistant').length === 2, 'replaced turn finished');
+  await delay(150);
+  const ops = deltasOf(events, chat.id).flatMap(event => event.ops);
+  assert.ok(ops.some(op => 'remove' in op && op.remove === second.id), 'the replaced message is removed');
+  const want = (await desktopItems()).map(item => item.id);
+  await until(() => JSON.stringify(rebuild(opened, deltasOf(events, chat.id)).map(item => item.id)) === JSON.stringify(want), 'the phone has exactly the desktop’s rows');
+});
+
+// Spec: MUS-SPEC-23-23D (docs/spec/clauses/23-mobile.md#mus-spec-23-23d)
+test('a reply that grows past the phone’s item cap is sent as appends and says the rest is on the computer', async t => {
+  const PIECES = 160, PIECE = 500;
+  const reply = Array.from({length: PIECES}, (_, index) => `${String(index).padStart(3, '0')}${'klmnopqrst'.repeat(PIECE / 10).slice(3)}`).join('');
+  const provider = scripted(async input => {
+    for (let index = 0; index < PIECES; index++) { input.onDelta?.(reply.slice(index * PIECE, (index + 1) * PIECE)); await delay(8); }
+    return {status: 'completed', finalMessage: reply};
+  });
+  const d = await desktop(t, provider);
+  const chat = await d.service.invoke('chat.create', {});
+  const {record} = await pair(t, d);
+  const client = await reconnect(t, record);
+  const events = collect(client);
+  const opened = await client.call('chat.open', {id: chat.id, deltas: true});
+  await d.service.invoke('chat.send', {id: chat.id, text: 'long', requestId: 'p4-c'});
+  await until(() => events.some(event => event.type === 'chats' && event.chats.some(entry => entry.id === chat.id && entry.status === 'completed')), 'turn completed');
+  await delay(150);
+  const deltas = deltasOf(events, chat.id);
+  const replyId = rebuild(opened, deltas).find(item => item.kind === 'assistant')!.id;
+  const replyOps = deltas.flatMap(event => event.ops).filter(op => 'item' in op ? op.item.id === replyId : 'id' in op && op.id === replyId);
+  assert.ok(replyOps.length > 0);
+  assert.ok(replyOps.slice(1).every(op => !('item' in op)), 'never the whole reply again');
+  const text = rebuild(opened, deltas).find(item => item.id === replyId)!;
+  assert.equal(text.text.slice(0, 65_536), reply.slice(0, 65_536));
+  assert.match(text.text.slice(65_536), /^\n\n\[The rest of this message is too long for the phone\. Read it in Muster on your (computer|Mac|PC)\.\]$/);
+  assert.equal(text.status, 'completed');
+});
+
+// Spec: MUS-SPEC-23-23E (docs/spec/clauses/23-mobile.md#mus-spec-23-23e)
+test('a message or steer the computer already took is answered as sent when the phone sends it again', async t => {
+  let release: () => void = () => undefined;
+  const steers: string[] = [];
+  const provider = scripted(async input => {
+    await new Promise<void>(resolve => { release = resolve; });
+    return {status: 'completed', finalMessage: `done ${input.prompt?.slice(0, 20) ?? ''}`};
+  });
+  provider.steer = async (_chatId, text) => { steers.push(String(text)); return true; };
+  const d = await desktop(t, provider);
+  const chat = await d.service.invoke('chat.create', {});
+  const {record} = await pair(t, d);
+  const client = await reconnect(t, record);
+  await allowAct(d, client);
+  // The answer was lost when the link dropped; the outbox sends it again with the same id, even before the first finished.
+  const [first, again] = await Promise.all([0, 1].map(() => client.call('chat.send', {id: chat.id, text: 'keep the old lists', requestId: 'outbox-1'})));
+  assert.deepEqual(again, first);
+  assert.deepEqual(await client.call('chat.send', {id: chat.id, text: 'keep the old lists', requestId: 'outbox-1'}), first, 'while the turn runs');
+  const users = async () => (await d.service.invoke('chat.timeline', {id: chat.id})).items.filter(item => item.kind === 'user' && item.text === 'keep the old lists');
+  release();
+  await until(async () => (await d.service.invoke('chat.timeline', {id: chat.id})).items.some(item => item.kind === 'assistant'), 'turn done');
+  await until(async () => !['running', 'stopping'].includes((await client.call('chats.list', {})).chats.find(entry => entry.id === chat.id)!.status), 'idle');
+  assert.deepEqual(await client.call('chat.send', {id: chat.id, text: 'keep the old lists', requestId: 'outbox-1'}), first, 'after the turn too');
+  assert.equal((await users()).length, 1, 'the message is in the chat once');
+  await client.call('chat.send', {id: chat.id, text: 'next', requestId: 'outbox-2'});
+  await until(async () => (await client.call('chats.list', {})).chats.find(entry => entry.id === chat.id)!.status === 'running', 'second turn running');
+  assert.equal((await client.call('chat.steer', {id: chat.id, text: 'also delete them later', requestId: 'steer-1'})).steered, true);
+  assert.equal((await client.call('chat.steer', {id: chat.id, text: 'also delete them later', requestId: 'steer-1'})).steered, true);
+  release();
+  assert.equal(steers.filter(text => text.includes('also delete them later')).length, 1, 'the steer reaches the agent once');
+});
