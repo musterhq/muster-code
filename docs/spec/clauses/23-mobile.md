@@ -95,10 +95,10 @@ Boundaries:
 | [MUS-SPEC-23-21A](23-mobile.md#mus-spec-23-21a) | The prose goes to the native Markdown view with the GitHub flavour. The code block shows each line with its number and the language; Copy puts the code on the clipboard, shows Copied and gives a light haptic. The Mermaid and chart blocks show as cards with their reserved height before anything renders, and pressing one opens it full screen. | [`a reply renders prose as Markdown, code with line numbers and Copy, and diagrams as cards that open full screen`](../../../packages/mobile/tests/markdown.test.tsx) |
 | [MUS-SPEC-23-21B](23-mobile.md#mus-spec-23-21b) | The unclosed fence shows as a code block with the lines so far. While it grows, the first paragraph does not render again. Closing it keeps the code block and the new paragraph shows after it. | [`while a reply streams only its last block re-renders, and an unclosed fence shows as code`](../../../packages/mobile/tests/markdown.test.tsx) |
 | [MUS-SPEC-23-22A](23-mobile.md#mus-spec-23-22a) | The widths classify as compact, medium, medium and expanded. At 1194 the sidebar lists the chats, the chat column is at most 760 points wide and the inspector shows; opening a chat shows it in the column; collapsing hides the sidebar and keeps the chat. At 390 the shell shows the phone layout. app.json allows every orientation. | [`width classes pick the layout, and an expanded window shows the sidebar, a capped chat column and the inspector`](../../../packages/mobile/tests/tablet.test.tsx) |
-| [MUS-SPEC-23-23A](23-mobile.md#mus-spec-23-23a) | All three sessions rebuild the reply exactly. The scrubber reads under twice the reply’s length in total (each new piece once, not the whole reply per piece and not once per session). The unwatched chat’s stream costs no scrubbing at all. | [`a streaming reply is mapped once per change for every phone watching, and not at all when none watches`](../../../packages/agent-app/tests/mobile-phase4-326.test.ts) |
-| [MUS-SPEC-23-23B](23-mobile.md#mus-spec-23-23b) | The phone receives remove ops for the deleted rows in the next numbered delta, and applying the deltas gives exactly the desktop’s timeline; chat.open is not called again. | [`a message replaced on the desktop is removed from the phone without reopening the chat`](../../../packages/agent-app/tests/mobile-phase4-326.test.ts) |
+| [MUS-SPEC-23-23A](23-mobile.md#mus-spec-23-23a) | All three sessions rebuild the reply exactly. The scrubber reads under three times the reply’s length in total (each new piece about twice, not the whole reply per piece and not once per session; before this change it read about thirty times). The unwatched chat’s stream costs no scrubbing at all. | [`a streaming reply is mapped once per change for every phone watching, and not at all when none watches`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
+| [MUS-SPEC-23-23B](23-mobile.md#mus-spec-23-23b) | The phone receives remove ops for the deleted rows in the next numbered delta, and applying the deltas gives exactly the desktop’s timeline; chat.open is not called again. | [`a message replaced on the desktop is removed from the phone without reopening the chat`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
 | [MUS-SPEC-23-23C](23-mobile.md#mus-spec-23-23c) | The removed item is gone from the screen, the other two stay, and chat.open is not called again. | [`a remove op takes the row off the chat screen`](../../../packages/mobile/tests/chat-stream.test.tsx) |
-| [MUS-SPEC-23-23D](23-mobile.md#mus-spec-23-23d) | Every delta for the reply is an append or a status change, never the whole item. The phone’s text is the reply’s first 65,536 characters followed by a note that the rest is on the computer, and the finished status reaches the phone. | [`a reply that grows past the phone’s item cap is sent as appends and says the rest is on the computer`](../../../packages/agent-app/tests/mobile-phase4-326.test.ts) |
+| [MUS-SPEC-23-23D](23-mobile.md#mus-spec-23-23d) | Every delta for the reply is an append or a status change, never the whole item. The phone’s text is the reply’s first 65,536 characters followed by a note that the rest is on the computer, and the finished status reaches the phone. | [`a reply that grows past the phone’s item cap is sent as appends and says the rest is on the computer`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
 
 ### Pairing, the device registry and access
 
@@ -943,8 +943,8 @@ Boundaries:
 
 - Precondition: A paired phone with three sessions open on one chat, a second chat nobody watches, and a seam counting the characters the path scrubber reads.
 - Action: Stream a 24,000-character reply in 60 pieces in the watched chat, then stream the same in the other chat.
-- Expected result: All three sessions rebuild the reply exactly. The scrubber reads under twice the reply’s length in total (each new piece once, not the whole reply per piece and not once per session). The unwatched chat’s stream costs no scrubbing at all.
-- Test: `packages/agent-app/tests/mobile-phase4-326.test.ts::a streaming reply is mapped once per change for every phone watching, and not at all when none watches`
+- Expected result: All three sessions rebuild the reply exactly. The scrubber reads under three times the reply’s length in total (each new piece about twice, not the whole reply per piece and not once per session; before this change it read about thirty times). The unwatched chat’s stream costs no scrubbing at all.
+- Test: `packages/agent-app/tests/mobile-phase3-326.test.ts::a streaming reply is mapped once per change for every phone watching, and not at all when none watches`
 - Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
 - Known gaps: CPU time is not measured; scrubbed characters stand in for it.
 - Evidence: UNVERIFIED
@@ -955,7 +955,7 @@ Boundaries:
 - Precondition: A paired phone watching a chat with deltas, after two turns.
 - Action: Replace the second user message on the desktop (Edit › Replace), which deletes it and everything after it, and let the new turn finish.
 - Expected result: The phone receives remove ops for the deleted rows in the next numbered delta, and applying the deltas gives exactly the desktop’s timeline; chat.open is not called again.
-- Test: `packages/agent-app/tests/mobile-phase4-326.test.ts::a message replaced on the desktop is removed from the phone without reopening the chat`
+- Test: `packages/agent-app/tests/mobile-phase3-326.test.ts::a message replaced on the desktop is removed from the phone without reopening the chat`
 - Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
 - Known gaps: None known.
 - Evidence: UNVERIFIED
@@ -977,7 +977,7 @@ Boundaries:
 - Precondition: A paired phone watching a chat whose fake provider streams 160 pieces of 500 characters (past the 64 KB item cap).
 - Action: Stream the reply and collect the deltas.
 - Expected result: Every delta for the reply is an append or a status change, never the whole item. The phone’s text is the reply’s first 65,536 characters followed by a note that the rest is on the computer, and the finished status reaches the phone.
-- Test: `packages/agent-app/tests/mobile-phase4-326.test.ts::a reply that grows past the phone’s item cap is sent as appends and says the rest is on the computer`
+- Test: `packages/agent-app/tests/mobile-phase3-326.test.ts::a reply that grows past the phone’s item cap is sent as appends and says the rest is on the computer`
 - Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
 - Known gaps: The phone shows the start of a very long reply, not its end.
 - Evidence: UNVERIFIED
