@@ -75,7 +75,8 @@ function opError(stderr: unknown, fallback: string): Error {
 /** The login fields of the page, resolved in the agents' isolated world: the visible password field (a sign-in one
  *  before a new-password one) and the username field before it in the same form. With no password field (a first,
  *  username-only step) the username field alone. `step` focuses one of them and selects its text, so the next
- *  trusted text input replaces it; a focused password field is remembered as secret for the agent tools. */
+ *  trusted text input replaces it; a focused password field is remembered as secret for the agent tools.
+ *  The focused field is armed as the only one that may take the coming value (see FILL_GUARD). */
 export function loginFieldScript(step: 'find' | 'username' | 'password'): string {
   return `(() => {
   const usable = el => { if (el.disabled || el.readOnly) return false; const r = el.getBoundingClientRect(); if (!r.width || !r.height) return false; const s = getComputedStyle(el); return s.visibility !== 'hidden' && s.display !== 'none'; };
@@ -91,11 +92,42 @@ export function loginFieldScript(step: 'find' | 'username' | 'password'): string
   const el = step === 'password' ? password : username;
   if (!el) return {ok: false};
   if (step === 'password') (globalThis.__musterSecrets ||= new WeakSet()).add(el);
+  ${FILL_GUARD}
+  globalThis.__musterFill = {el, step, blocked: false};
   el.scrollIntoView({block: 'center'}); el.focus();
   try { el.select(); } catch { el.value = ''; }
   return {ok: document.activeElement === el};
 })()`;
 }
+/** #843 (MUS-SPEC-09-843G): installed once in the agents' isolated world. While a value is being typed, input that would
+ *  land anywhere but the armed field (focus moved, field removed) is cancelled before it is inserted and the fill is
+ *  marked blocked. Any field that takes input while the password is typed is remembered as secret. */
+const FILL_GUARD = `if (!globalThis.__musterFillGuard) {
+    globalThis.__musterFillGuard = true;
+    addEventListener('beforeinput', event => {
+      const fill = globalThis.__musterFill;
+      if (!fill) return;
+      if (fill.step === 'password' && event.target instanceof Element) (globalThis.__musterSecrets ||= new WeakSet()).add(event.target);
+      if (fill.blocked || event.target !== fill.el || document.activeElement !== fill.el || !fill.el.isConnected) { fill.blocked = true; event.preventDefault(); event.stopImmediatePropagation(); }
+    }, true);
+    addEventListener('input', event => { const fill = globalThis.__musterFill; if (fill && fill.step === 'password' && event.target instanceof Element) (globalThis.__musterSecrets ||= new WeakSet()).add(event.target); }, true);
+  }`;
+/** #843 (MUS-SPEC-09-843G): right before a value is typed, the armed field must still be exactly the focused element,
+ *  connected, and the kind of field the value is for. `done` disarms the guard and reads whether it cancelled anything
+ *  (a page that replaced its document has no armed fill left, and nothing there was cancelled). */
+export function fillCheckScript(step: 'username' | 'password' | 'done'): string {
+  return `(() => {
+  const fill = globalThis.__musterFill;
+  if (${JSON.stringify(step)} === 'done') { globalThis.__musterFill = null; return {ok: !fill?.blocked, armed: !!fill}; }
+  if (!fill || fill.step !== ${JSON.stringify(step)} || fill.blocked) return {ok: false};
+  const el = fill.el;
+  const kind = fill.step === 'password' ? el.type === 'password' || !!globalThis.__musterSecrets?.has(el) : ['text', 'email', 'tel', ''].includes(el.type);
+  const ok = el.isConnected && document.activeElement === el && kind && el.tagName === 'INPUT';
+  if (!ok) fill.blocked = true;
+  return {ok};
+})()`;
+}
+export const FILL_CHANGED = 'The page changed during the fill.';
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' ? value as Record<string, unknown> : {};
 
 export function createBrowserPasswords(deps: BrowserPasswordsDeps): BrowserPasswords {
@@ -141,14 +173,22 @@ export function createBrowserPasswords(deps: BrowserPasswordsDeps): BrowserPassw
       const sameOrigin = () => { try { return new URL(target.getURL()).origin === start.origin; } catch { return false; } };
       if (!sameOrigin()) throw new Error('The page changed while 1Password was asked. Nothing was filled.');
       let filled = 0;
-      for (const [step, entry] of [['username', username], ['password', password]] as const) {
+      const disarm = async () => record(await target.executeJavaScriptInIsolatedWorld(AGENT_WORLD, [{code: fillCheckScript('done')}]).catch(() => ({ok: true}))).ok === true;
+      // The guard is disarmed on every way out, so it never outlives this fill.
+      try { for (const [step, entry] of [['username', username], ['password', password]] as const) {
         if (!entry || (step === 'username' ? found.username : found.password) !== true) continue;
         const focus = record(await target.executeJavaScriptInIsolatedWorld(AGENT_WORLD, [{code: loginFieldScript(step)}], true));
         if (focus.ok !== true) continue;
+        const stopped = () => new Error(filled ? `${FILL_CHANGED} The password was not filled.` : `${FILL_CHANGED} Nothing was filled.`);
+        // Checked together, right before the value is typed: the page is on the same origin and the armed field is still the
+        // focused one. In the gap that remains, the guard cancels input that would land anywhere else (MUS-SPEC-09-843G).
+        const ready = record(await target.executeJavaScriptInIsolatedWorld(AGENT_WORLD, [{code: fillCheckScript(step)}]));
         if (!sameOrigin()) throw new Error(filled ? 'The page changed after the username was typed. The password was not filled.' : 'The page changed while 1Password was asked. Nothing was filled.');
+        if (ready.ok !== true) throw stopped();
         await target.insertText(entry);
+        if (!await disarm()) throw stopped();
         filled |= step === 'username' ? 1 : 2;
-      }
+      } } finally { await disarm(); }
       if (!filled) throw new Error(password || username ? 'No sign-in form was found on this page.' : 'That login has no username or password.');
       return {title: text(item.title) || site, filled: filled === 3 ? 'login' : filled === 1 ? 'username' : 'password'};
     },
