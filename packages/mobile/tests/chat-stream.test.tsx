@@ -1,7 +1,7 @@
 import {act, render, screen} from '@testing-library/react-native';
 import {ChatScreen} from '../src/screens/ChatScreen';
 import type {MobileChat, MobileItem} from '../src/shared';
-import {fakeConnection} from './fake-connection';
+import {fakeConnection, layOutTimeline} from './fake-connection';
 
 const at = '2026-11-14T10:00:00.000Z';
 const chat: MobileChat = {id: 'c1', title: 'Release notes', status: 'running', updatedAt: at, place: null, needsYou: 0};
@@ -17,6 +17,7 @@ test('applies stream deltas in order, resyncs after a gap, and reopens the chat 
       : {chat, items: [item('u1', 'user', 'write the notes'), item('m1', 'assistant', 'Resynced reply')], revision: 9, seq: 40}; },
   });
   await render(<ChatScreen connection={connection} chatId="c1" />);
+  await layOutTimeline();
   expect(opens[0]).toEqual({id: 'c1', deltas: true});
   // A delta that arrives before chat.open answers is kept and applied after it.
   await act(async () => { connection.emit({type: 'delta', chatId: 'c1', seq: 1, ops: [{id: 'm1', append: 'lo'}]}); });
@@ -26,8 +27,8 @@ test('applies stream deltas in order, resyncs after a gap, and reopens the chat 
     connection.emit({type: 'delta', chatId: 'c1', seq: 2, ops: [{id: 'm1', append: ' world'}]});
     connection.emit({type: 'delta', chatId: 'c1', seq: 3, ops: [{item: item('t1', 'tool', 'Ran npm test')}]});
   });
-  expect(screen.getByText('Hello world')).toBeTruthy();
-  expect(screen.getByText('Ran npm test')).toBeTruthy();
+  expect(await screen.findByText('Hello world')).toBeTruthy();
+  expect(await screen.findByText('Ran npm test')).toBeTruthy();
   expect(opens).toHaveLength(1);
   // Delta 4 never came: the screen reopens the chat and shows the desktop's state.
   await act(async () => { connection.emit({type: 'delta', chatId: 'c1', seq: 5, ops: [{id: 'm1', append: ' lost'}]}); });
@@ -38,6 +39,7 @@ test('applies stream deltas in order, resyncs after a gap, and reopens the chat 
   // A new connection (after a reconnect) opens the chat again.
   const next = fakeConnection({'chat.open': {chat, items: [item('m1', 'assistant', 'After reconnect')], revision: 10, seq: 0}});
   await screen.rerender(<ChatScreen connection={next} chatId="c1" />);
+  await layOutTimeline();
   expect(next.calls.filter(call => call.method === 'chat.open')).toHaveLength(1);
   expect(await screen.findByText('After reconnect')).toBeTruthy();
 });

@@ -1,7 +1,7 @@
 import {act, fireEvent, render, screen} from '@testing-library/react-native';
 import {ChatScreen} from '../src/screens/ChatScreen';
 import type {MobileChat, MobileItem} from '../src/shared';
-import {fakeConnection} from './fake-connection';
+import {fakeConnection, layOutRows, layOutTimeline} from './fake-connection';
 
 const chat = (status: MobileChat['status'] = 'idle'): MobileChat => ({id: 'c1', title: 'Release notes', status, updatedAt: '2026-11-10T10:00:00.000Z', place: null, needsYou: 0});
 const at = '2026-11-10T10:00:00.000Z';
@@ -10,6 +10,7 @@ const at = '2026-11-10T10:00:00.000Z';
 test('streams a reply, sends when idle and steers while running', async () => {
   const connection = fakeConnection({'chat.open': {chat: chat(), items: [], revision: 1}, 'chat.send': {runId: 'r1'}, 'chat.steer': {steered: true}});
   await render(<ChatScreen connection={connection} chatId="c1" />);
+  await layOutTimeline();
   expect(await screen.findByText('Release notes')).toBeTruthy();
   await fireEvent.changeText(screen.getByPlaceholderText('Message'), 'write the notes');
   await fireEvent.press(screen.getByText('Send'));
@@ -22,9 +23,9 @@ test('streams a reply, sends when idle and steers while running', async () => {
     connection.emit({type: 'items', chatId: 'c1', items: [{id: 'u1', kind: 'user', text: 'write the notes', createdAt: at}, reply('Hello ')], revision: 2});
     connection.emit({type: 'items', chatId: 'c1', items: [reply('Hello world')], revision: 3});
   });
-  expect(screen.getByText('Hello world')).toBeTruthy();
-  expect(screen.getByText('write the notes')).toBeTruthy();
-  await fireEvent.changeText(screen.getByPlaceholderText('Message'), 'also add dates');
+  expect(await screen.findByText('Hello world')).toBeTruthy();
+  expect(await screen.findByText('write the notes')).toBeTruthy();
+  await fireEvent.changeText(screen.getByPlaceholderText('Steer the running agent…'), 'also add dates');
   await fireEvent.press(screen.getByText('Steer'));
   await act(async () => undefined);
   expect(connection.calls.find(call => call.method === 'chat.steer')?.params).toMatchObject({id: 'c1', text: 'also add dates'});
@@ -36,7 +37,9 @@ const approval: MobileItem = {id: 'a1', kind: 'approval', text: 'Approve command
 test('approves or declines in place, and read-only hides the actions', async () => {
   const acting = fakeConnection({'chat.open': {chat: chat('waiting'), items: [approval], revision: 1}});
   const view = await render(<ChatScreen connection={acting} chatId="c1" />);
+  await layOutTimeline();
   expect(await screen.findByText('npm test')).toBeTruthy();
+  await layOutRows();
   await fireEvent.press(screen.getByText('Approve'));
   await act(async () => undefined);
   expect(acting.calls.find(call => call.method === 'approval.respond')?.params).toEqual({itemId: 'a1', decision: 'accept'});
@@ -44,10 +47,11 @@ test('approves or declines in place, and read-only hides the actions', async () 
   await view.unmount();
   const reader = fakeConnection({'chat.open': {chat: chat('waiting'), items: [approval], revision: 1}}, 'read-only');
   await render(<ChatScreen connection={reader} chatId="c1" />);
+  await layOutTimeline();
   expect(await screen.findByText('npm test')).toBeTruthy();
   expect(screen.getAllByText('Read only: allow this phone to act in Settings on your computer').length).toBeGreaterThan(0);
   expect(screen.queryByText('Approve')).toBeNull();
-  expect(screen.getByPlaceholderText('Message').props.editable).toBe(false);
+  expect(screen.getByPlaceholderText('Steer the running agent…').props.editable).toBe(false);
 });
 
 // Spec: MUS-SPEC-23-12C (docs/spec/clauses/23-mobile.md#mus-spec-23-12c)
@@ -62,6 +66,7 @@ test('attaches a photo from the composer, uploads it in chunks and sends it with
   });
   const pickAttachment = jest.fn(async (_source: 'photo' | 'camera' | 'file') => ({name: 'IMG_0042.jpg', mime: 'image/jpeg', bytes: photo}));
   await render(<ChatScreen connection={connection} chatId="c1" pickAttachment={pickAttachment} />);
+  await layOutTimeline();
   expect(await screen.findByText('Release notes')).toBeTruthy();
   await fireEvent.press(screen.getByLabelText('Attach'));
   await fireEvent.press(screen.getByText('Photo'));

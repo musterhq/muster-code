@@ -1,20 +1,23 @@
 import {Pressable, StyleSheet, Text} from 'react-native';
-import {colors, font, radius, space} from '../theme';
+import {space, themed, touch, type} from '../theme';
 
-export function Button({label, onPress, kind = 'secondary', disabled = false}: {label: string; onPress(): void; kind?: 'primary' | 'secondary' | 'danger'; disabled?: boolean}) {
+/** A labelled button at least 44 points tall. `busy` shows it working and ignores presses (no double sends). */
+export function Button({label, onPress, kind = 'secondary', disabled = false, busy = false}: {label: string; onPress(): void; kind?: 'primary' | 'secondary' | 'danger'; disabled?: boolean; busy?: boolean}) {
+  const styles = useStyles();
+  const off = disabled || busy;
   return (
-    <Pressable accessibilityRole="button" accessibilityState={{disabled}} disabled={disabled} onPress={onPress}
-      style={({pressed}) => [styles.base, kind === 'primary' && styles.primary, kind === 'danger' && styles.danger, (pressed || disabled) && styles.dim]}>
+    <Pressable accessibilityRole="button" accessibilityState={{disabled: off, busy}} disabled={off} onPress={onPress} hitSlop={4}
+      style={({pressed}) => [styles.base, kind === 'primary' && styles.primary, kind === 'danger' && styles.danger, (pressed || off) && styles.dim]}>
       <Text style={[styles.label, kind === 'primary' && styles.onAccent, kind !== 'secondary' && styles.strong]}>{label}</Text>
     </Pressable>
   );
 }
-const styles = StyleSheet.create({
-  base: {paddingVertical: space.s, paddingHorizontal: space.l, borderRadius: radius.s, backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.control, alignItems: 'center'},
-  primary: {backgroundColor: colors.accentFill, borderColor: colors.accentFill},
-  danger: {borderColor: colors.danger},
+const useStyles = themed(c => StyleSheet.create({
+  base: {minHeight: touch, justifyContent: 'center', paddingHorizontal: space.l, borderRadius: 10, backgroundColor: c.raised, borderWidth: 1, borderColor: c.control, alignItems: 'center'},
+  primary: {backgroundColor: c.accentFill, borderColor: c.accentFill},
+  danger: {borderColor: c.danger},
   dim: {opacity: 0.6},
-  label: {color: colors.text, fontSize: font.body},
-  onAccent: {color: colors.onAccent},
+  label: {color: c.strong, ...type.footnote, fontWeight: '500'},
+  onAccent: {color: c.onAccent},
   strong: {fontWeight: '600'},
-});
+}));

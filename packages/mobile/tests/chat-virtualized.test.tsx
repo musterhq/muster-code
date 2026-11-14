@@ -25,13 +25,19 @@ test('a 2,000-row chat mounts a window and streaming re-renders only the streami
   expect(mounted).toBeLessThan(100);
   expect(screen.getByText('Message number 1998')).toBeTruthy();
   renders.clear();
-  for (let seq = 1; seq <= 20; seq++) await act(async () => { connection.emit({type: 'delta', chatId: 'c1', seq, ops: [{id: 'reply', append: ` piece${seq}`}]}); });
+  const frame = () => new Promise(resolve => setTimeout(resolve, 20));
+  for (let seq = 1; seq <= 20; seq++) await act(async () => { connection.emit({type: 'delta', chatId: 'c1', seq, ops: [{id: 'reply', append: ` piece${seq}`}]}); await frame(); });
   expect(screen.getByText(/ piece20$/)).toBeTruthy();
   expect([...renders.keys()]).toEqual(['reply']);
   expect(renders.get('reply')).toBeGreaterThanOrEqual(20);
   expect(renders.get('reply')).toBeLessThanOrEqual(30);
+  // A burst inside one frame renders the row once, not once per token.
   renders.clear();
-  await act(async () => { connection.emit({type: 'delta', chatId: 'c1', seq: 21, ops: [{item: {id: 'tool-1', kind: 'tool', text: 'Ran npm test', createdAt: at}}]}); });
+  await act(async () => { for (let seq = 21; seq <= 70; seq++) connection.emit({type: 'delta', chatId: 'c1', seq, ops: [{id: 'reply', append: ` burst${seq}`}]}); await frame(); });
+  expect(screen.getByText(/ burst70$/)).toBeTruthy();
+  expect(renders.get('reply')).toBeLessThanOrEqual(2);
+  renders.clear();
+  await act(async () => { connection.emit({type: 'delta', chatId: 'c1', seq: 71, ops: [{item: {id: 'tool-1', kind: 'tool', text: 'Ran npm test', createdAt: at}}]}); });
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
   expect(screen.getByText('Ran npm test')).toBeTruthy();
   expect([...renders.keys()]).toEqual(['tool-1']);

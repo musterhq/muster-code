@@ -1,6 +1,6 @@
 import {useRouter} from 'expo-router';
-import {useLink} from '../src/connection/ConnectionProvider';
-import {SettingsScreen} from '../src/screens/SettingsScreen';
+import {useLink} from '../../src/connection/ConnectionProvider';
+import {SettingsScreen} from '../../src/screens/SettingsScreen';
 
 export default function Settings() {
   const {state, unpair} = useLink();
