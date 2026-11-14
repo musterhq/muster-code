@@ -1,13 +1,14 @@
 import {Redirect, Tabs, useRouter} from 'expo-router';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {Pressable, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
 import {useLink} from '../../src/connection/ConnectionProvider';
-import {ChatsHome} from '../../src/screens/ChatsHome';
+import {TabletShell} from '../../src/screens/TabletShell';
 import {space, themed, touch} from '../../src/theme';
 
 export default function Index() {
   const link = useLink();
   const router = useRouter();
   const styles = useStyles();
+  const {width} = useWindowDimensions();
   if (link.phase === 'loading') return <View style={styles.center} />;
   if (!link.computers.length) return <Redirect href="/pair" />;
   const live = link.selected && (link.selected.path === 'lan' || link.selected.path === 'relay');
@@ -17,7 +18,7 @@ export default function Index() {
   return (
     <>
       <Tabs.Screen options={{title: 'Chats', headerRight: add}} />
-      <ChatsHome computers={link.computers} selectedId={link.selected?.id ?? null} showAll={link.showAll} onSelect={link.select} onShowAll={link.setShowAll}
+      <TabletShell width={width} computers={link.computers} selectedId={link.selected?.id ?? null} showAll={link.showAll} onSelect={link.select} onShowAll={link.setShowAll}
         onPair={() => router.push('/pair')} onOpen={(id, computer) => router.push({pathname: '/chat/[id]', params: {id, computer}})} />
     </>
   );

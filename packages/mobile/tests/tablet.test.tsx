@@ -4,7 +4,7 @@ import {widthClass} from '../src/layout';
 import {TabletShell} from '../src/screens/TabletShell';
 import type {ComputerView} from '../src/connection/computers';
 import type {MobileChat} from '../src/shared';
-import {fakeConnection, layOutTimeline} from './fake-connection';
+import {fakeConnection, layOutRows, layOutTimeline} from './fake-connection';
 
 const app = require('../app.json');
 const chat: MobileChat = {id: 'c1', title: 'Migrate session store', status: 'running', updatedAt: new Date().toISOString(), place: 'atlas-api', needsYou: 0};
@@ -21,6 +21,7 @@ test('width classes pick the layout, and an expanded window shows the sidebar, a
   const sidebar = within(screen.getByTestId('tablet-sidebar'));
   expect(await sidebar.findByText('Migrate session store')).toBeTruthy();
   expect(screen.getByTestId('inspector')).toBeTruthy();
+  await layOutRows('chats-list');
   const column = screen.getByTestId('chat-column');
   expect(StyleSheet.flatten(column.props.style).maxWidth).toBe(760);
   await act(async () => { fireEvent.press(sidebar.getByRole('button', {name: /^Migrate session store/})); });

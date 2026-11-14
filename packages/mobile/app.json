@@ -4,7 +4,7 @@
     "slug": "muster",
     "scheme": "muster",
     "version": "0.1.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "userInterfaceStyle": "automatic",
     "ios": {
       "bundleIdentifier": "dev.muster.mobile",
@@ -19,7 +19,8 @@
       "package": "dev.muster.mobile",
       "permissions": [
         "android.permission.CAMERA"
-      ]
+      ],
+      "allowBackup": false
     },
     "plugins": [
       "expo-router",
