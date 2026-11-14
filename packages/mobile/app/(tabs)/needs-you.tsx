@@ -1,6 +1,6 @@
 import {useRouter} from 'expo-router';
-import {useLink} from '../src/connection/ConnectionProvider';
-import {NeedsYouScreen} from '../src/screens/NeedsYouScreen';
+import {useLink} from '../../src/connection/ConnectionProvider';
+import {NeedsYouScreen} from '../../src/screens/NeedsYouScreen';
 
 export default function NeedsYou() {
   const {state} = useLink();

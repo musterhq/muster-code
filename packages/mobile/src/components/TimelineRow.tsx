@@ -1,37 +1,42 @@
-/** One timeline item. Phase 1 shows text with code fences in monospace; rich rendering (Markdown, diffs, Mermaid, maths,
- *  charts, pages) is phase 4 (docs/mobile/DESIGN.md §5.4). */
+/** One timeline row. It follows only its own item in the store, so a streaming token re-renders this row and no other
+ *  (MUS-SPEC-23-16A). Replies render through StreamingText; tool calls are one dim line; approvals and questions are cards. */
+import {memo} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
-import type {MobileConnection, MobileItem} from '../shared';
-import {colors, font, radius, space} from '../theme';
+import type {MobileConnection} from '../shared';
+import type {TimelineStore} from '../timeline/store';
+import {useTimelineItem} from '../timeline/useTimeline';
+import {reportRender} from '../perf';
+import {font, radius, space, themed, type} from '../theme';
 import {ApprovalCard} from './ApprovalCard';
 import {QuestionCard} from './QuestionCard';
+import {StreamingText} from './StreamingText';
 
-/** Splits ``` fences out so code reads in monospace. */
-export function textParts(text: string): Array<{code: boolean; text: string}> {
-  return text.split(/```[^\n]*\n?/).map((part, index) => ({code: index % 2 === 1, text: part.replace(/\n$/, '')})).filter(part => part.text.length > 0);
-}
-
-export function TimelineRow({item, connection, canAct}: {item: MobileItem; connection: MobileConnection; canAct: boolean}) {
+export const TimelineRow = memo(function TimelineRow({store, id, connection, canAct}: {store: TimelineStore; id: string; connection: MobileConnection; canAct: boolean}) {
+  const item = useTimelineItem(store, id);
+  const styles = useStyles();
+  reportRender('timeline-row', id);
+  if (!item) return null;
   if (item.kind === 'approval') return <ApprovalCard connection={connection} itemId={item.id} {...(item.approval ? {approval: item.approval} : {})} {...(item.status ? {status: item.status} : {})} canAct={canAct} fallback={item.text} />;
   if (item.kind === 'question') return <QuestionCard connection={connection} itemId={item.id} questions={item.questions ?? []} {...(item.status ? {status: item.status} : {})} canAct={canAct} />;
-  if (item.kind === 'user') return <View style={styles.user}><Text style={styles.text}>{item.text}</Text></View>;
-  if (item.kind === 'tool') return <Text style={styles.tool} numberOfLines={2}>{item.text}{item.status && item.status !== 'completed' ? ` · ${item.status}` : ''}</Text>;
-  if (item.kind === 'notice') return <Text style={styles.notice}>{item.text}</Text>;
-  if (item.kind === 'reasoning') return <Text style={styles.reasoning} numberOfLines={4}>{item.text}</Text>;
-  const parts = textParts(item.text);
-  if (parts.length === 1 && !parts[0]!.code) return <Text style={styles.text} selectable>{item.text}</Text>;
-  return (
-    <View style={styles.assistant}>
-      {parts.map((part, index) => <Text key={index} selectable style={part.code ? styles.code : styles.text}>{part.text}</Text>)}
+  if (item.kind === 'user') return <View style={styles.user}><Text style={styles.userText} selectable>{item.text}</Text></View>;
+  if (item.kind === 'tool') return (
+    <View style={styles.tool}>
+      <View style={[styles.toolMark, item.status === 'failed' && styles.toolFailed]} />
+      <Text style={styles.toolText} numberOfLines={2}>{item.text}{item.status && item.status !== 'completed' ? ` · ${item.status}` : ''}</Text>
     </View>
   );
-}
-const styles = StyleSheet.create({
-  user: {alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: colors.raised, borderRadius: radius.l, paddingVertical: space.s, paddingHorizontal: space.m},
-  assistant: {gap: space.s},
-  text: {color: colors.text, fontSize: font.body, lineHeight: 21},
-  code: {color: colors.text, fontFamily: font.mono, fontSize: font.small, backgroundColor: colors.surface, padding: space.s, borderRadius: radius.s},
-  tool: {color: colors.muted, fontFamily: font.mono, fontSize: font.small},
-  notice: {color: colors.muted, fontSize: font.small, fontStyle: 'italic'},
-  reasoning: {color: colors.muted, fontSize: font.small},
+  if (item.kind === 'notice') return <Text style={styles.notice}>{item.text}</Text>;
+  if (item.kind === 'reasoning') return <Text style={styles.reasoning} numberOfLines={4}>{item.text}</Text>;
+  return <View style={styles.assistant}><StreamingText text={item.text} /></View>;
 });
+const useStyles = themed(c => StyleSheet.create({
+  user: {alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: c.bubble, borderRadius: 18, borderBottomRightRadius: radius.s, paddingVertical: space.s, paddingHorizontal: space.m, marginVertical: space.xs},
+  userText: {color: c.strong, ...type.body},
+  assistant: {paddingVertical: space.xs},
+  tool: {flexDirection: 'row', alignItems: 'center', gap: space.s, paddingVertical: 2},
+  toolMark: {width: 12, height: 12, borderRadius: 3, backgroundColor: c.raised, borderWidth: StyleSheet.hairlineWidth, borderColor: c.control},
+  toolFailed: {backgroundColor: c.danger},
+  toolText: {flex: 1, color: c.muted, fontFamily: font.mono, ...type.caption},
+  notice: {color: c.faint, ...type.label, fontStyle: 'italic'},
+  reasoning: {color: c.faint, ...type.label},
+}));

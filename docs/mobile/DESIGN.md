@@ -1,6 +1,6 @@
 # Muster mobile app: design
 
-Status: phases 1 and 2 built (issue #326); later phases planned below. This document is the plan of record for the phone app: how a phone reaches the
+Status: phases 1 and 2 built, phase 3 (the no-lag foundation) in progress (issue #326); later phases planned below. This document is the plan of record for the phone app: how a phone reaches the
 person's desktop Muster from anywhere, how the traffic is protected, which stack the app uses, the screens, the phases and the
 threat model. The acceptance cases live in [docs/spec/clauses/23-mobile.md](../spec/clauses/23-mobile.md).
 
@@ -42,14 +42,16 @@ Non-goals for now:
  phone (Expo app)                     relay (dumb pipe)                     desktop runtime (mobile domain)
  ───────────────                     ─────────────────                     ──────────────────────────────
  WebSocket  ── /v1/phone/<route> ──▶  route table: <route> → desktop link  ◀── /v1/desktop (one outbound WS,
-   Noise IK handshake + frames  ◀──▶  forwards base64 ciphertext only        authenticated by a route secret)
+   Noise IK handshake + frames  ◀──▶  forwards base64 ciphertext only        authenticated by a route key signature)
                                        never sees keys, never sees JSON        Noise responder, device registry,
                                                                                command allowlist, event fan-out
 ```
 
 - **The desktop dials out.** When phone access is on, the runtime opens one WebSocket to the relay and registers a *route*.
-  The route id is `sha256(routeSecret)` (first 16 bytes, hex); only the desktop knows the secret, so only it can register that
-  route, and the relay keeps no account or database (it re-derives the id on every registration).
+  The desktop holds an Ed25519 *route key*; the route id is the first 16 bytes (hex) of `sha256(route public key)`. To register,
+  the desktop signs the relay's fresh one-time challenge with the route key, so only the holder of the private key can claim
+  the route, a recorded registration can't be replayed, and the relay keeps no account or database (it re-derives the id
+  from the public key on every registration; MUS-SPEC-23-6A).
 - **The phone dials the route.** It opens `/v1/phone/<route>`; the relay tells the desktop `open(c)` and then forwards
   `data(c, base64)` both ways. The relay closes the phone's socket with 4404 when the desktop is offline.
 - **Everything inside is end-to-end encrypted** (§3). The relay sees the route id, connection timing and sizes, and nothing
@@ -136,7 +138,7 @@ Why Noise `IK`:
 | Key | Where it lives | Lifetime |
 |---|---|---|
 | Desktop static X25519 key pair | Desktop secret store (Keychain / Windows credential store / keyring via Electron safeStorage). Never written in clear; pairing is refused without secure storage | Until "Reset phone access" (rotating it unpairs every phone) |
-| Route secret | Desktop secret store | Rotated with the static key |
+| Ed25519 route key | Desktop secret store | Rotated with the static key (Reset phone access) |
 | One-time pairing code | Desktop memory only | 5 minutes, single use, invalidated after 5 wrong attempts |
 | Phone static X25519 key pair | Phone Keychain (iOS) / Keystore-backed EncryptedSharedPreferences (Android) via `expo-secure-store`, `WHEN_UNLOCKED_THIS_DEVICE_ONLY` (not in backups) | Until the app unpairs or is deleted |
 | Session keys | Memory on both ends | One connection |
@@ -227,15 +229,21 @@ path alias (`@muster/shared/mobile/*`), resolved by TypeScript `paths`, jest `mo
 | `expo-image-picker`, `expo-document-picker`, `expo-file-system` | Attach photos and files (read as bytes, uploaded through the session) | 2 |
 | `expo-build-properties` | Android: allow `ws://` to the desktop's private address (§2.3) | 2 |
 | `expo-audio` | Dictation recording (#840) | 4 |
+| `@legendapp/list` 3.7.2 | Virtualized chat and chat list, stay-at-end while reading the newest | 3 |
+| `react-native-reanimated` 4.7.1 + `react-native-worklets` 0.13.1 | UI-thread animations with shared durations and Reduce Motion | 3 |
+| `react-native-gesture-handler` ~3.5 | Swipe to answer in Needs you | 3 |
+| `react-native-keyboard-controller` 1.23.0 | The composer rides the keyboard (Android included) | 3 |
+| `expo-haptics` | Send, approve, decline and a light stream texture | 3 |
 
 ### 5.4 Rendering replies
 
 - **Phase 1:** text with code fences shown monospaced, tool rows as one line with status, approval and question cards native.
-- **Phase 4:** one offline WebView bundle built from the desktop renderer's own pieces (`react-markdown` + `remark-gfm` +
-  `remark-math`, Shiki, the inline diff, Mermaid, KaTeX, Vega-Lite, sandboxed `render_html` pages). Built by esbuild from
-  `packages/agent-app/src/renderer` into `packages/mobile/assets/rich/` at build time; the app posts a message's Markdown to it
-  and gets back a measured height. No network in the WebView; `originWhitelist` limited to the bundle; pages keep the same
-  sandbox rules as on the desktop.
+- **Prose (decided 2026-11-14):** native Markdown with `react-native-enriched-markdown` (upstream, MIT): GitHub flavour,
+  tables, task lists, maths, selectable, and it streams without measuring flicker. It replaces the reply's `StreamingText`
+  component; the list and the rows don't change.
+- **WebView only where it must be:** one offline bundle for Mermaid, Vega-Lite charts and sandboxed `render_html` pages, built
+  from the desktop renderer's pieces into `packages/mobile/assets/rich/`. No network in the WebView; `originWhitelist`
+  limited to the bundle; pages keep the same sandbox rules as on the desktop.
 
 ### 5.5 Push notifications
 
@@ -292,7 +300,28 @@ own attachments, so a photo reaches the agent as an image input); direct LAN con
 Acceptance: MUS-SPEC-23-11A..11C (new chat), 12A..12C (attachments), 13A..13D (LAN), plus 14A..14C (pairing fixes found on a
 Galaxy S25: one attempt at a time, AA contrast, `muster://pair` deep links).
 
-**Phase 3: needs-you everywhere.** Push relay and generic pushes; Projects (tasks, runs, Inbox) read and act; a relay mounted
+**Phase 3: the no-lag foundation (in progress).** The review of phases 1 and 2 found that the desktop resent the whole
+streaming message about every 33 ms and the phone re-rendered every row per token. Phase 3 fixes the base before more
+features go on it:
+- *Delta streaming with resync.* `chat.open` with `deltas` returns a sequence number; the desktop remembers what the phone has
+  of each item and sends `delta` events with only appended text, status changes and new or changed items, numbered one after
+  another. The phone holds deltas that arrive before `chat.open` answers, and a skipped number (or a new connection) reopens
+  the chat. Bytes per token stay bounded instead of growing with the reply (MUS-SPEC-23-15A, 15B).
+- *A per-item store and a virtualized chat.* Items live in a store with one subscription per row and changes announced once per
+  frame; the chat is a virtualized list (`@legendapp/list`) that opens at the newest message, follows it only while the reader
+  is near the end, and offers a New pill otherwise (16A). The composer rides the keyboard (`react-native-keyboard-controller`).
+- *Motion and touch.* Reanimated and Gesture Handler with shared durations and Reduce Motion; haptics on send, approve and
+  decline; approval cards that can't send twice; swipe to answer in Needs you (16B, 16C).
+- *The approved look.* Theme tokens from the desktop and the approved concept, light and dark following the phone, a type
+  scale and four bottom tabs (16D).
+- *A dead link noticed fast.* A heartbeat pings every 15 seconds and when the app returns to the foreground; no answer in 5
+  seconds reconnects at once (17A, 17B).
+- *Security leftovers.* Paths in rows made relative or `~` (18A), a cap on one phone's requests in flight (18B), a 1 MB cap on
+  a phone's frames (18C), and a file staged by a phone revoked mid-stage is discarded (18D).
+- Next in phase 3 or 4: several computers in one app, offline history and an outbox, tablet two-pane layouts and landscape,
+  then diff review, files, git and the terminal from approved designs.
+
+**Phase 3b: needs-you everywhere.** Push relay and generic pushes; Projects (tasks, runs, Inbox) read and act; a relay mounted
 in Muster Server. Acceptance: an approval on the desktop produces exactly one generic push whose payload holds no chat text;
 tapping it opens the card; approving from the card unblocks the run; revoking removes the push id.
 
@@ -310,13 +339,14 @@ store listings. Acceptance: a signed build installs from TestFlight and Play int
 | Threat | What the attacker has | Mitigation |
 |---|---|---|
 | **Malicious or compromised relay** | Every byte between phone and desktop | Noise IK end to end: the relay sees ciphertext, route ids, sizes and timing only. It can drop or delay (denial of service), not read, change or replay: tampering fails the AEAD tag, replays fail the counter. It can't impersonate the desktop without the desktop's static private key, nor a phone without the phone's. Tested: the dev relay's log of forwarded frames contains no plaintext (MUS-SPEC-23-3A). |
-| **Someone claims the desktop's route** | The route id | Registration needs the route secret (the id is its hash). Even a hijacked route can't finish a handshake without the desktop's static key. |
+| **Someone claims the desktop's route** | The route id | Registration needs a fresh signature by the desktop's Ed25519 route key over the relay's one-time challenge (the id is the hash of its public key). Even a hijacked route can't finish a handshake without the desktop's static key. |
 | **Stolen pairing QR (photo over the shoulder, screenshot)** | The one-time code and the desktop's public key | The code lasts 5 minutes, works once and dies after 5 wrong tries; the new phone shows up in the desktop list at once, read-only, and one click revokes it. Pairing needs the Settings page open on the desktop. |
 | **Lost or stolen phone** | The device, maybe unlocked | Keys are in Keychain/Keystore, this-device-only and only when unlocked, never in backups. The phone is read-only unless the person granted `act`. Revoke from desktop Settings ends its sessions and future handshakes. Phase 3 adds an optional app lock (Face ID / biometric) before `act` commands. |
 | **Malicious phone app build / modified client** | A paired key pair | The desktop enforces access per command with an allowlist; the phone can't reach any runtime command outside it, can't raise access, and can't approve for a session. |
 | **Push provider (Apple/Google) or push relay** | Push payloads | Payloads are generic ("An agent needs you" + random id); the content is fetched over the E2E session. |
 | **Network attacker on the LAN path** | LAN traffic, and the ability to answer at the desktop's LAN address | The same Noise session as over the relay (§2.3): it can read nothing and can't finish a handshake without the desktop's key. A fake answer or a forged "revoked" close at the LAN address only makes the phone use the relay. Tested: MUS-SPEC-23-13A, 13B. |
 | **Someone else on the same network** | The desktop's LAN port | It answers only the phone route of this desktop, with a literal Host and no foreign Origin, behind the same handshake, registry and caps as the relay; off when phone access is off or the switch is off. Tested: MUS-SPEC-23-13B, 13C. |
+| **A paired phone flooding the desktop** | A paired key pair | At most 16 requests in flight per phone (more are refused at once), frames from a phone capped at 1 MB before parsing, and every request still checked against access and the allowlist. Tested: MUS-SPEC-23-18B, 18C. |
 | **A phone uploading too much or out of order** | A paired phone with act access | Uploads are capped at 20 MB, two at a time, in order, each chunk at most 32 KB and never past the declared size, checked against a SHA-256 before staging; only files that phone uploaded can be sent or removed from it. Tested: MUS-SPEC-23-12B. |
 
 ### 8.2 Rules
@@ -327,7 +357,8 @@ store listings. Acceptance: a signed build installs from TestFlight and Play int
 - Read-only by default; access changes only on the desktop.
 - Revocation is immediate and closes live sessions.
 - The phone gets only what it renders: the bridge maps runtime types to slim wire types (no file paths beyond folder names,
-  no provider credentials, no settings).
+  no provider credentials, no settings). Row text has paths inside the computer's folders made relative and other
+  home-directory paths written with `~` (MUS-SPEC-23-18A); an approval's command is shown exactly as it will run.
 - Logs never contain frame contents or keys.
 
 ## 9. Open decisions

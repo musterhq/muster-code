@@ -1,5 +1,6 @@
 /** Holds the phone's one link to its computer: loads the pairing record from secure storage, connects (and reconnects with
- *  backoff, also when the app returns to the foreground), and pairs or unpairs. */
+ *  backoff, also when the app returns to the foreground), and pairs or unpairs. A heartbeat notices a link that died while
+ *  the phone slept or changed networks and reconnects at once; open screens then reopen their chat (a resync). */
 import {createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {AppState, Platform} from 'react-native';
 import * as SecureStore from 'expo-secure-store';
@@ -9,6 +10,7 @@ import {connectPhone, MobileError, pairPhone, type MobileConnection, type Paired
 import {nobleNoiseCrypto} from './noble-crypto';
 import {createPairingStore, type PairingStore, type SecureStoreLike} from './store';
 import {afterLinkClose, afterLinkFailure, backoff} from './reconnect';
+import {startHeartbeat, type Heartbeat} from './heartbeat';
 
 export type LinkState = {phase: 'loading'} | {phase: 'unpaired'} | {phase: 'connecting'; record: PairedRecord; error?: string}
   | {phase: 'connected'; record: PairedRecord; connection: MobileConnection} | {phase: 'revoked'; record: PairedRecord};
@@ -30,6 +32,7 @@ export function ConnectionProvider({children}: {children: ReactNode}) {
   const store = useMemo(() => createPairingStore(secure), []);
   const [state, setState] = useState<LinkState>({phase: 'loading'});
   const attempt = useRef(0), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined), current = useRef<MobileConnection | null>(null);
+  const heartbeat = useRef<Heartbeat | null>(null);
 
   const generation = useRef(0);
   const connect = useCallback((saved: PairedRecord) => {
@@ -50,9 +53,16 @@ export function ConnectionProvider({children}: {children: ReactNode}) {
       }
       attempt.current = 0; current.current = connection;
       setState({phase: 'connected', record, connection});
+      /** The heartbeat found the link dead: reconnect without waiting out a backoff. */
+      let silent = false;
+      heartbeat.current?.stop();
+      const beat = startHeartbeat(connection, {onDead: () => { silent = true; connection.close(); }});
+      heartbeat.current = beat;
       connection.onClose(reason => {
+        beat.stop();
         if (stale()) return;
         current.current = null;
+        if (silent) { setState({phase: 'connecting', record}); connect(record); return; }
         // Only the desktop's revoked close shows revoked; a network error or bad frame reconnects. The record is kept.
         if (afterLinkClose(reason) === 'revoked') { setState({phase: 'revoked', record}); return; }
         setState({phase: 'connecting', record});
@@ -69,10 +79,12 @@ export function ConnectionProvider({children}: {children: ReactNode}) {
   useEffect(() => {
     void store.load().then(record => { if (record) connect(record); else setState({phase: 'unpaired'}); });
     const sub = AppState.addEventListener('change', next => {
-      if (next !== 'active' || current.current) return;
+      if (next !== 'active') return;
+      // Back in the foreground: a link that died while the phone slept is noticed now, not at the next beat.
+      if (current.current) { heartbeat.current?.check(); return; }
       void store.load().then(record => { if (record) { attempt.current = 0; connect(record); } });
     });
-    return () => { sub.remove(); if (timer.current) clearTimeout(timer.current); current.current?.close(); };
+    return () => { sub.remove(); heartbeat.current?.stop(); if (timer.current) clearTimeout(timer.current); current.current?.close(); };
   }, [store, connect]);
 
   const value = useMemo<LinkContext>(() => ({

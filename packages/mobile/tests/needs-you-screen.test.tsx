@@ -12,7 +12,7 @@ const naming: MobileNeed = {chatId: 'c2', chatTitle: 'Naming', itemId: 'q-item',
 test('the needs-you feed answers a question without opening the chat', async () => {
   const connection = fakeConnection({'needs.list': {needs: [deploy, naming]}});
   await render(<NeedsYouScreen connection={connection} />);
-  expect(await screen.findByText('Deploy')).toBeTruthy();
+  expect(await screen.findByText(/Deploy/)).toBeTruthy();
   expect(screen.getByText('Naming')).toBeTruthy();
   expect(screen.getByText('make deploy')).toBeTruthy();
   await fireEvent.press(screen.getByText('B'));
@@ -20,5 +20,5 @@ test('the needs-you feed answers a question without opening the chat', async () 
   expect(connection.calls.find(call => call.method === 'question.respond')?.params).toEqual({itemId: 'q-item', answers: {q1: ['B']}});
   await act(async () => { connection.emit({type: 'needs', needs: [deploy]}); });
   expect(screen.queryByText('Naming')).toBeNull();
-  expect(screen.getByText('Deploy')).toBeTruthy();
+  expect(screen.getByText(/Deploy/)).toBeTruthy();
 });

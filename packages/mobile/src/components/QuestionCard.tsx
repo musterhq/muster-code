@@ -3,10 +3,11 @@ import {useState} from 'react';
 import {StyleSheet, Text, TextInput, View} from 'react-native';
 import type {MobileConnection, MobileQuestion} from '../shared';
 import {errorText, READ_ONLY_NOTE} from '../hooks';
-import {colors, font, radius, space} from '../theme';
+import {font, radius, space, themed, useTheme} from '../theme';
 import {Button} from './Button';
 
 export function QuestionCard({connection, itemId, questions, status, canAct}: {connection: MobileConnection; itemId: string; questions: MobileQuestion[]; status?: string; canAct: boolean}) {
+  const styles = useStyles(), colors = useTheme();
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +46,7 @@ export function QuestionCard({connection, itemId, questions, status, canAct}: {c
     </View>
   );
 }
-const styles = StyleSheet.create({
+const useStyles = themed(colors => StyleSheet.create({
   card: {backgroundColor: colors.surface, borderRadius: radius.m, borderWidth: 1, borderColor: colors.accent, padding: space.m, gap: space.m},
   question: {gap: space.s},
   header: {color: colors.muted, fontSize: font.small, textTransform: 'uppercase'},
@@ -54,4 +55,4 @@ const styles = StyleSheet.create({
   error: {color: colors.danger, fontSize: font.small},
   options: {flexDirection: 'row', flexWrap: 'wrap', gap: space.s},
   input: {borderWidth: 1, borderColor: colors.border, borderRadius: radius.s, color: colors.text, padding: space.s},
-});
+}));
