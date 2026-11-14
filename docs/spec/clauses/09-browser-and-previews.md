@@ -35,6 +35,7 @@ Boundaries:
 | [MUS-SPEC-09-843D](09-browser-and-previews.md#mus-spec-09-843d) | A login saved for another site, a page that navigated away while 1Password was asked, and a page with no sign-in form are refused and nothing is typed. | [`a fill is refused when the login is for another site or the page changed meanwhile`](../../../packages/agent-app/tests/browser-passwords-843.test.ts) |
 | [MUS-SPEC-09-843E](09-browser-and-previews.md#mus-spec-09-843e) | A fill emits and returns no password, keeps no page form state in the tab's saved history, writes nothing containing it to disk, and no agent browser tool can trigger it. | [`a fill leaves no password in events, saved history, files or agent tools`](../../../packages/agent-app/tests/browser-passwords-843.test.ts) |
 | [MUS-SPEC-09-843F](09-browser-and-previews.md#mus-spec-09-843f) | The browser toolbar's key button lists matching logins and choosing one asks main to fill it; without the 1Password CLI it says so. | [`the key button lists matching logins and fills the chosen one`](../../../packages/agent-app/tests/browser-passwords-843-dom.tsx) |
+| [MUS-SPEC-09-843G](09-browser-and-previews.md#mus-spec-09-843g) | A value is typed only into the field focused for it: when the page moves focus to another field before the value lands, nothing is typed there, the fill stops and says the page changed during the fill. | [`a value is typed only into the field focused for it; focus moved by the page stops the fill`](../../../packages/agent-app/tests/browser-passwords-843.test.ts) |
 
 ### Page background
 
@@ -244,6 +245,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/browser-passwords-843.test.ts::a fill leaves no password in events, saved history, files or agent tools`
 - Environment: Node test runner; fake window, views and session; fake `op`; no Electron.
 - Known gaps: Checks this process's outputs only; it cannot prove Chromium keeps no copy in its own memory or caches.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-09-843g"></a>
+#### MUS-SPEC-09-843G: A value is typed only into the field focused for it
+
+- Precondition: The browser page is `example.test/login` over https with a sign-in form and a plain text field ("Notes") outside it; the fake `op` has a matching login.
+- Action: Fill the login while the page moves focus to the Notes field after the password field was focused and before the password is typed. Then fill again while the page moves focus to the Notes field before the username is typed.
+- Expected result: A value is typed only while `document.activeElement` is still exactly the field focused for it, still connected, a password field for the password (or the username field for the username), and the page is still on the same origin. Otherwise nothing more is typed: the Notes field stays empty, the password field stays empty, and the fill fails with "The page changed during the fill". Any field that receives input while the password is typed is treated as secret, so agent snapshots show its value as dots.
+- Test: `packages/agent-app/tests/browser-passwords-843.test.ts::a value is typed only into the field focused for it; focus moved by the page stops the fill`
+- Environment: Node test runner; real headless Chrome running the real fill scripts; the page's focus move is made between the focus step and the typed text; fake `op` script.
+- Known gaps: The guard runs in the top frame, so focus moved into a cross-origin iframe in the instant between the last check and the typed text is detected afterwards (the fill fails) but cannot stop that one value from reaching the iframe. A username typed before the page changed stays typed.
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-09-843f"></a>

@@ -208,6 +208,31 @@ test('a fill is refused when the login is for another site or the page changed m
   assert.equal(await evaluate('document.getElementById("search").value'), '');
 });
 
+// Spec: MUS-SPEC-09-843G (docs/spec/clauses/09-browser-and-previews.md#mus-spec-09-843g)
+test('a value is typed only into the field focused for it; focus moved by the page stops the fill', {skip}, async () => {
+  const page = LOGIN_PAGE.replace('<form id="other"', '<label for="notes">Notes</label> <input id="notes" type="text" name="notes"><form id="other"');
+  // The page moves focus to Notes in the gap between the fill focusing a field and the value arriving.
+  const stealing = (when: string) => { const target = chromeTarget(() => 'https://example.test/login'), type = target.insertText.bind(target); let n = 0;
+    target.insertText = async text => { if (String(++n) === when) await evaluate('document.getElementById("notes").focus()'); await type(text); }; return target; };
+  await show(page);
+  await assert.rejects(passwords().fill(stealing('2'), {id: id('a'), vault: VAULT}), /page changed during the fill/);
+  assert.equal(await evaluate('document.getElementById("notes").value'), '', 'the password never lands in the field the page moved focus to');
+  assert.equal(await evaluate('document.getElementById("pw").value'), '');
+  assert.equal(await evaluate('document.getElementById("email").value'), 'ada@example.test', 'the username typed before the change stays');
+  // A field that took (even cancelled) input while the password was typed is a secret for the agent from then on.
+  await evaluate('document.getElementById("notes").value = "notes-843-visible"');
+  const marked = JSON.stringify((await runBrowserTool(agentHost(chromeTarget(() => 'https://example.test/login')), 'browser_snapshot', {}, {readOnly: false})).result);
+  assert.match(marked, /Notes\\" \[ref=e\d+\] value=\\"••••••\\"/, 'the Notes field reads as dots');
+  assert.ok(!marked.includes('notes-843-visible'));
+  await show(page);
+  await assert.rejects(passwords().fill(stealing('1'), {id: id('a'), vault: VAULT}), /page changed during the fill/);
+  assert.equal(await evaluate('document.getElementById("notes").value'), '');
+  assert.equal(await evaluate('document.getElementById("email").value'), '');
+  assert.equal(await evaluate('document.getElementById("pw").value'), '', 'nothing is typed after the page changed');
+  const snapshot = JSON.stringify((await runBrowserTool(agentHost(chromeTarget(() => 'https://example.test/login')), 'browser_snapshot', {}, {readOnly: false})).result);
+  assert.ok(!snapshot.includes(SECRET));
+});
+
 /** A workspace with fake views whose history entries carry Chromium page state (form values). */
 class Contents extends EventEmitter {
   destroyed = false; loading = false; title = 'Sign in'; url = 'about:blank'; typed: string[] = []; scripts: string[] = [];
