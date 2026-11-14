@@ -73,6 +73,8 @@ Boundaries:
 | [MUS-SPEC-23-14A](23-mobile.md#mus-spec-23-14a) | While a pairing is in flight the scanner is hidden and the field and Pair button do nothing, so a second attempt never starts; the check code stays on screen with no error; when the attempt itself ends its error shows and pairing can start again. | [`a second scan or Pair press while pairing is in flight is ignored and never hides the check code`](../../../packages/mobile/tests/pair-screen.test.tsx) |
 | [MUS-SPEC-23-14B](23-mobile.md#mus-spec-23-14b) | Every text on the pair screen and the camera prompt has at least 4.5:1 contrast with what is behind it, and the Allow camera and Pair buttons have edges of at least 3:1. | [`the pair screen text and the camera prompt meet WCAG AA contrast`](../../../packages/mobile/tests/pair-contrast.test.tsx) |
 | [MUS-SPEC-23-14C](23-mobile.md#mus-spec-23-14c) | Opening muster://pair?… lands on the pair route with the link in the field, and pairing starts once with the parsed link. | [`a muster://pair deep link fills in the link and starts pairing`](../../../packages/mobile/tests/deep-link.test.tsx) |
+| [MUS-SPEC-23-15A](23-mobile.md#mus-spec-23-15a) | A phone that opened a chat with deltas receives the streaming reply as numbered deltas that append text; the reply it rebuilds equals the desktop's, and the bytes the desktop sends per streamed piece stay bounded instead of growing with the reply. | [`a streaming reply reaches the phone as appended text, and the bytes per piece do not grow with the reply`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
+| [MUS-SPEC-23-15B](23-mobile.md#mus-spec-23-15b) | The chat screen applies numbered deltas so only the changed row changes; a delta whose number skips one makes it reopen the chat and show the desktop's state; deltas that arrive before chat.open answers are applied after it; a new connection reopens the chat. | [`applies stream deltas in order, resyncs after a gap, and reopens the chat on a new connection`](../../../packages/mobile/tests/chat-stream.test.tsx) |
 
 ### Pairing, the device registry and access
 
@@ -672,4 +674,28 @@ Boundaries:
 - Test: `packages/agent-app/tests/mobile-326.test.ts::a LAN phone that stops reading is cut off at the buffer cap instead of the desktop holding everything sent to it`
 - Environment: Node test runner; the real LanListener on 127.0.0.1 and raw TCP sockets as the phones.
 - Known gaps: The production cap (8 MB) is not filled. The relay path's own buffering is the relay's to bound; the dev relay does not.
+- Evidence: UNVERIFIED
+
+### Streaming that stays light (phase 3)
+
+<a id="mus-spec-23-15a"></a>
+#### MUS-SPEC-23-15A: A streaming reply reaches the phone as appended text
+
+- Precondition: A paired phone and a chat whose fake provider streams 60 pieces of 400 characters, a little apart, so the runtime sends a patch for nearly every piece.
+- Action: Open the chat from the phone with deltas on, send a message from the desktop, and record every message the relay forwards from the desktop while the reply streams.
+- Expected result: chat.open returns a sequence number; every later delta event for the chat carries the next number with no gaps. Applying the deltas in order rebuilds a reply equal to the desktop's final text (24,000 characters). Most of the reply's deltas are appends, not whole items. No message forwarded from the desktop during the stream is larger than 4,000 characters, the messages sent near the end are no larger on average than those near the start (plus a small margin), and the total sent while streaming is under three times the reply's length, where sending the whole message each time would be about thirty times.
+- Test: `packages/agent-app/tests/mobile-phase3-326.test.ts::a streaming reply reaches the phone as appended text, and the bytes per piece do not grow with the reply`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and a Node phone built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: Timing on a real cellular network is checked by hand on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-15b"></a>
+#### MUS-SPEC-23-15B: The phone resyncs a chat after a gap or a reconnect
+
+- Precondition: The chat screen with a fake connection whose chat.open answers with items and a sequence number.
+- Action: Emit a delta numbered 1 before chat.open answers; then deltas 2 (an append) and 3 (a new item); then delta 5. Then render the screen with a second fake connection.
+- Expected result: chat.open is called with deltas on. After it answers, delta 1 is applied. The append grows the reply on screen and the new item shows. Delta 5 makes the screen call chat.open again and show what that answer holds, ignoring the skipped deltas. The second connection gets its own chat.open.
+- Test: `packages/mobile/tests/chat-stream.test.tsx::applies stream deltas in order, resyncs after a gap, and reopens the chat on a new connection`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; the screen is given a fake connection with the MobileClient interface.
+- Known gaps: None known.
 - Evidence: UNVERIFIED
