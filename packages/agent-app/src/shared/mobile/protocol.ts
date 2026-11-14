@@ -87,8 +87,9 @@ export interface MobileItem {
   approval?: MobileApproval; questions?: MobileQuestion[];
 }
 /** One change to the open chat's items (phase 3): for an item the phone already has, `append` adds text to its end (a reply
- *  streaming) and `status` sets its status (it finished); `item` adds a new item or replaces one whose other fields changed. */
-export type MobileItemOp = {id: string; append?: string; status?: string} | {item: MobileItem};
+ *  streaming) and `status` sets its status (it finished); `item` adds a new item or replaces one whose other fields changed;
+ *  `remove` (phase 4) takes an item away (deleted on the desktop). A phone that does not know an op reopens the chat. */
+export type MobileItemOp = {id: string; append?: string; status?: string} | {item: MobileItem} | {remove: string};
 export interface MobileNeed {
   chatId: string; chatTitle: string; itemId: string; kind: 'approval' | 'question'; summary: string; createdAt: string;
   approval?: MobileApproval; questions?: MobileQuestion[];
