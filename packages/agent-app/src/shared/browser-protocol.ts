@@ -38,6 +38,10 @@ export interface BrowserState extends BrowserOwner {
   /** A user-initiated sign-in pop-up shown over the page until it returns to the opener. */
   popup?:{url:string; title:string};
 }
+/** #843: a saved login offered by the key menu. Never carries the password. */
+export interface BrowserLogin {id:string; vault:string; title:string; username:string; site:string}
+export interface BrowserLogins {manager:'1password'; available:boolean; logins:BrowserLogin[]; message?:string}
+export interface BrowserFillResult {title:string; filled:'login'|'username'|'password'}
 export type BrowserEvent = {type:'browserState'; state:BrowserState} | {type:'browserClosed'; owner:string};
 export interface BrowserCommands {
   'browser.open': {input:BrowserSurface & {profileId:string; url?:string}; output:BrowserState};
@@ -63,8 +67,11 @@ export interface BrowserCommands {
   'browser.clearData': {input:{profileId:string}; output:void};
   'browser.download': {input:BrowserOwner & {id:string; action:'save'|'cancel'|'reveal'|'dismiss'}; output:BrowserState};
   'browser.closePopup': {input:BrowserOwner; output:BrowserState};
+  /** #843: the person's own password manager; filling is a user action only, never an agent tool. */
+  'browser.passwords': {input:BrowserOwner; output:BrowserLogins};
+  'browser.fillLogin': {input:BrowserOwner & {id:string; vault:string}; output:BrowserFillResult};
 }
-export const BROWSER_COMMANDS = {'browser.open':true, 'browser.navigate':true, 'browser.back':true, 'browser.forward':true, 'browser.reload':true, 'browser.stop':true, 'browser.status':true, 'browser.position':true, 'browser.hide':true, 'browser.close':true, 'browser.release':true, 'browser.openExternal':true, 'browser.console':true, 'browser.setViewport':true, 'browser.capture':true, 'browser.pickElement':true, 'browser.cancelPick':true, 'browser.profiles':true, 'browser.clearData':true, 'browser.download':true, 'browser.closePopup':true} as const satisfies Record<keyof BrowserCommands, true>;
+export const BROWSER_COMMANDS = {'browser.open':true, 'browser.navigate':true, 'browser.back':true, 'browser.forward':true, 'browser.reload':true, 'browser.stop':true, 'browser.status':true, 'browser.position':true, 'browser.hide':true, 'browser.close':true, 'browser.release':true, 'browser.openExternal':true, 'browser.console':true, 'browser.setViewport':true, 'browser.capture':true, 'browser.pickElement':true, 'browser.cancelPick':true, 'browser.profiles':true, 'browser.clearData':true, 'browser.download':true, 'browser.closePopup':true, 'browser.passwords':true, 'browser.fillLogin':true} as const satisfies Record<keyof BrowserCommands, true>;
 
 /** No filesystem, script, custom protocol, embedded credentials, or opaque URL. */
 export function browserURL(value:unknown):string {

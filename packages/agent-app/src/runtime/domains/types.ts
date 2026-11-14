@@ -71,6 +71,8 @@ export interface DomainHooks {
   onChatRemoval?(fn: (event: ChatRemoval) => Promise<void> | void): () => void;
   /** #147: the single handler of file and Git commands for a folder on an SSH host (undefined clears it). */
   setRemoteFolderRouter?(fn: RemoteFolderRouter | undefined): void;
+  /** #326: every event the runtime emits (the phone link forwards chat changes). Observers must not throw or block. Optional so bare test contexts need not provide it. */
+  onAgentEvent?(fn: (event: AgentEvent) => void): () => void;
 }
 
 export interface DomainContext {
