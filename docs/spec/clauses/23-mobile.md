@@ -79,6 +79,12 @@ Boundaries:
 | [MUS-SPEC-23-16B](23-mobile.md#mus-spec-23-16b) | Approve shows the card working and ignores a second tap, so approval.respond is called once; when it answers the card collapses to Approved with a success haptic; Decline gives a warning haptic; a failed answer brings the buttons back with the reason; the buttons are at least 44 points tall. | [`approve is sent once, settles to Approved with a haptic, and a failure brings the buttons back`](../../../packages/mobile/tests/approval-card.test.tsx) |
 | [MUS-SPEC-23-16C](23-mobile.md#mus-spec-23-16c) | In Needs you, swiping an approval to the right approves it and swiping it to the left declines it, through approval.respond, for a phone that can act; a read-only phone's rows do not swipe. | [`swiping an approval right approves it and left declines it, and read-only rows do not swipe`](../../../packages/mobile/tests/needs-you-swipe.test.tsx) |
 | [MUS-SPEC-23-16D](23-mobile.md#mus-spec-23-16d) | With the phone set to light the chats screen paints the light palette and with it set to dark the dark palette (the desktop's tokens), and the chat rows show the place and status in the approved layout. | [`the chats screen follows the phone’s light or dark setting`](../../../packages/mobile/tests/theme.test.tsx) |
+| [MUS-SPEC-23-17A](23-mobile.md#mus-spec-23-17a) | The heartbeat pings the desktop every 15 seconds and on demand (when the app comes back to the foreground); a ping that gets no answer within 5 seconds, or a closed link, reports the link dead once; any answer, even a refusal from an older desktop, counts as alive; stopping it ends the pings. | [`the heartbeat reports a silent link dead once, counts any answer as alive, and checks at once on demand`](../../../packages/mobile/tests/heartbeat.test.ts) |
+| [MUS-SPEC-23-17B](23-mobile.md#mus-spec-23-17b) | ping is answered for a read-only phone without touching the runtime, and the phone counts as seen. | [`the desktop answers a read-only phone’s ping`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
+| [MUS-SPEC-23-18A](23-mobile.md#mus-spec-23-18a) | Tool, assistant and reasoning rows reach the phone with paths inside the chat's folder made relative, the folder itself named by its name, and other home-directory paths starting with ~; the approval command is left exactly as it will run. | [`tool and assistant rows reach the phone without absolute paths`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
+| [MUS-SPEC-23-18B](23-mobile.md#mus-spec-23-18b) | Requests from one phone beyond the cap on requests in flight are refused at once with a reason, the session stays open, and the held requests finish when they are released. | [`a phone’s requests beyond the in-flight cap are refused and the session stays open`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
+| [MUS-SPEC-23-18C](23-mobile.md#mus-spec-23-18c) | A frame from the phone larger than 1 MB, even split into allowed Noise messages, closes the session before it is parsed; a normal upload chunk and a 100,000-character message still go through. | [`a frame from the phone over 1 MB closes the session, and normal requests still fit`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
+| [MUS-SPEC-23-18D](23-mobile.md#mus-spec-23-18d) | When the phone is revoked after upload.finish started staging its file, the staged file is discarded and nothing is left in the chat. | [`revoking a phone while its upload is being staged discards the file`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
 
 ### Pairing, the device registry and access
 
@@ -748,4 +754,74 @@ Boundaries:
 - Test: `packages/mobile/tests/theme.test.tsx::the chats screen follows the phone’s light or dark setting`
 - Environment: jest (jest-expo preset) in Node with @testing-library/react-native; useColorScheme is mocked.
 - Known gaps: The system setting changing while the app is in the background is checked by hand on a device.
+- Evidence: UNVERIFIED
+
+### Noticing a dead link fast (phase 3)
+
+<a id="mus-spec-23-17a"></a>
+#### MUS-SPEC-23-17A: The phone notices a dead link and reconnects at once
+
+- Precondition: A heartbeat on a fake connection whose ping answers, never answers, or is refused as an unknown request, with fake timers.
+- Action: Let 15 seconds pass with ping answering; then make ping silent and let 20 seconds pass; on a second heartbeat call check() with ping silent; on a third, refuse ping as unknown and let 15 seconds pass; stop one and let a minute pass.
+- Expected result: Answered pings never report dead. The silent ping reports dead exactly once, about 20 seconds in (15 s interval plus 5 s timeout). check() reports dead 5 seconds after it is called, without waiting for the interval. A refusal counts as alive. A stopped heartbeat sends no more pings.
+- Test: `packages/mobile/tests/heartbeat.test.ts::the heartbeat reports a silent link dead once, counts any answer as alive, and checks at once on demand`
+- Environment: jest (jest-expo preset) in Node with fake timers; the heartbeat is given a fake connection with the MobileClient interface.
+- Known gaps: Backgrounding, sleep and a network change on a real phone are checked by hand on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-17b"></a>
+#### MUS-SPEC-23-17B: The desktop answers a phone's ping, read-only too
+
+- Precondition: A paired read-only phone.
+- Action: Call ping from the phone.
+- Expected result: It answers with an empty result and the phone stays read-only and connected in mobile.status.
+- Test: `packages/agent-app/tests/mobile-phase3-326.test.ts::the desktop answers a read-only phone’s ping`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and a Node phone built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### Security leftovers from the phase 1 and 2 review (phase 3)
+
+<a id="mus-spec-23-18a"></a>
+#### MUS-SPEC-23-18A: Rows sent to the phone carry no absolute paths
+
+- Precondition: A desktop with a folder at a temporary path whose user home part is known, a chat in it whose fake provider writes a reply and a tool row naming files by their full paths, and a paired phone.
+- Action: Open the chat from the phone with deltas, run a turn, and collect every item the phone receives.
+- Expected result: No item text the phone receives contains the folder's full path or the home directory; a file in the folder reads as its relative path, the folder itself as its name, and a path elsewhere under the home directory starts with ~/.
+- Test: `packages/agent-app/tests/mobile-phase3-326.test.ts::tool and assistant rows reach the phone without absolute paths`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and a Node phone built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: Paths outside every home directory (such as /etc/hosts) are left as they are; they name no person.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-18b"></a>
+#### MUS-SPEC-23-18B: A phone can have only so many requests in flight
+
+- Precondition: A paired phone, with the cap lowered to 3 and a gate that holds requests, both test seams.
+- Action: Send five chats.list requests at once, then release the gate.
+- Expected result: Two are refused with a message that says there are too many requests at once; the other three answer once released; a later request answers normally.
+- Test: `packages/agent-app/tests/mobile-phase3-326.test.ts::a phone’s requests beyond the in-flight cap are refused and the session stays open`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and a Node phone built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: The production cap (16) is not filled.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-18c"></a>
+#### MUS-SPEC-23-18C: The desktop refuses an oversized phone frame
+
+- Precondition: A paired phone allowed to act and a chat.
+- Action: Send a chat.send whose text is 1,200,000 characters; reconnect; send a chat.send of 100,000 characters and upload a 64 KB file.
+- Expected result: The oversized request fails as closed and the session ends, and no user message is added. After reconnecting the 100,000-character message starts a run and the upload is staged.
+- Test: `packages/agent-app/tests/mobile-phase3-326.test.ts::a frame from the phone over 1 MB closes the session, and normal requests still fit`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and a Node phone built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: The phone's own limit for frames from the desktop (8 MB) is not filled.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-18d"></a>
+#### MUS-SPEC-23-18D: A phone revoked while a file is being staged leaves nothing staged
+
+- Precondition: A paired phone allowed to act, a chat, and a test seam that holds staging until the test releases it.
+- Action: Upload a small file; while upload.finish is held at staging, revoke the phone on the desktop; release staging.
+- Expected result: upload.finish does not succeed, and the chat has no staged attachments afterwards.
+- Test: `packages/agent-app/tests/mobile-phase3-326.test.ts::revoking a phone while its upload is being staged discards the file`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and a Node phone built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: None known.
 - Evidence: UNVERIFIED
