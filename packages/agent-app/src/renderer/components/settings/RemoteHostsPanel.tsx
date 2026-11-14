@@ -79,7 +79,7 @@ export function RemoteHostsPanel(): React.ReactElement {
     {entries.length > 0 && <div className="preference-group" aria-label="Hosts in ~/.ssh/config">{entries.map(e => <div key={e.alias} className="preference-row">
       <span className="preference-copy"><strong>{e.alias}</strong><span>{[e.user && `${e.user}@`, e.hostName ?? e.alias, e.port && e.port !== 22 ? `:${e.port}` : ''].filter(Boolean).join('')} · from ~/.ssh/config</span></span>
       <span className="preference-control"><button type="button" className="settings-button secondary" disabled={Boolean(busy)} onClick={() => void addConfig(e.alias)}>Add {e.alias}</button></span></div>)}</div>}
-    {!manual && <div className="project-edit-actions"><button type="button" className="settings-button" onClick={() => setManual({host: '', user: '', port: ''})}>Add a host by hand</button></div>}
+    {!manual && <div className="project-edit-actions ssh-add-actions"><button type="button" className="settings-button" onClick={() => setManual({host: '', user: '', port: ''})}>Add a host by hand</button></div>}
     {manual && <form className="ssh-form" onSubmit={e => { e.preventDefault(); void addManual(); }}>
       <div className="ws-form-row"><label className="project-edit-goal"><span>Host</span><input type="text" className="ws-input" required value={manual.host} placeholder="build.example.com" onChange={e => setManual({...manual, host: e.target.value})}/></label>
         <label className="project-edit-goal"><span>User</span><input type="text" className="ws-input" value={manual.user} placeholder="(from your ssh config)" onChange={e => setManual({...manual, user: e.target.value})}/></label>
