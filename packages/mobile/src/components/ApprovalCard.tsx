@@ -30,9 +30,12 @@ export function useApprovalResponse(connection: MobileConnection, itemId: string
   return {sending, answered, error, respond};
 }
 
+/** Approvals are never queued offline: they wait for the computer. */
+export const offlineNote = (computer: string): string => `${computer} is offline. You can answer this when ${computer} is back.`;
+
 /** `response`: pass one when something else (a swipe) answers this card too; otherwise the card has its own. `heading` names the
  *  chat in Needs you. */
-export function ApprovalCard({connection, itemId, approval, status, canAct, fallback, response, heading}: {connection: MobileConnection; itemId: string; approval?: MobileApproval; status?: string; canAct: boolean; fallback: string; response?: ApprovalResponse; heading?: string}) {
+export function ApprovalCard({connection, itemId, approval, status, canAct, fallback, response, heading, offline}: {connection: MobileConnection; itemId: string; approval?: MobileApproval; status?: string; canAct: boolean; fallback: string; response?: ApprovalResponse; heading?: string; offline?: string}) {
   const styles = useStyles();
   const own = useApprovalResponse(connection, itemId);
   const {sending, answered, error, respond} = response ?? own;
@@ -47,7 +50,7 @@ export function ApprovalCard({connection, itemId, approval, status, canAct, fall
       {!approval?.command && !approval?.tool && !approval?.files?.length ? <Text style={styles.body}>{fallback}</Text> : null}
       {approval?.reason && !settled ? <Text style={styles.muted}>{approval.reason}</Text> : null}
       {settled ? <Text style={styles.muted}>{settled === 'approved' || settled === 'approved-session' ? 'Approved' : settled === 'declined' ? 'Declined' : settled}</Text>
-        : canAct ? (
+        : offline ? <Text style={styles.muted}>{offlineNote(offline)}</Text> : canAct ? (
           <View style={styles.row}>
             <View style={styles.grow}><Button label="Decline" disabled={Boolean(sending)} busy={sending === 'decline'} onPress={() => respond('decline')} /></View>
             <View style={styles.grow}><Button label="Approve" kind="primary" disabled={Boolean(sending)} busy={sending === 'accept'} onPress={() => respond('accept')} /></View>

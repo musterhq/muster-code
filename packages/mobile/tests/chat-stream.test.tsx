@@ -43,3 +43,16 @@ test('applies stream deltas in order, resyncs after a gap, and reopens the chat 
   expect(next.calls.filter(call => call.method === 'chat.open')).toHaveLength(1);
   expect(await screen.findByText('After reconnect')).toBeTruthy();
 });
+
+// Spec: MUS-SPEC-23-23C (docs/spec/clauses/23-mobile.md#mus-spec-23-23c)
+test('a remove op takes the row off the chat screen', async () => {
+  const connection = fakeConnection({'chat.open': {chat, items: [item('u1', 'user', 'first question'), item('u2', 'user', 'replaced question'), item('m1', 'assistant', 'the answer')], revision: 1, seq: 0}});
+  await render(<ChatScreen connection={connection} chatId="c1" />);
+  await layOutTimeline();
+  expect(await screen.findByText('replaced question')).toBeTruthy();
+  await act(async () => { connection.emit({type: 'delta', chatId: 'c1', seq: 1, ops: [{remove: 'u2'}]}); await new Promise(resolve => setTimeout(resolve, 30)); });
+  expect(screen.queryByText('replaced question')).toBeNull();
+  expect(screen.getByText('first question')).toBeTruthy();
+  expect(screen.getByText('the answer')).toBeTruthy();
+  expect(connection.calls.filter(call => call.method === 'chat.open')).toHaveLength(1);
+});

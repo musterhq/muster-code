@@ -42,6 +42,10 @@ export class TimelineStore {
   apply(ops: readonly MobileItemOp[]): boolean {
     for (const op of ops) {
       if ('item' in op) { this.put(op.item); continue; }
+      if ('remove' in op) {
+        if (this.byId.delete(op.remove)) { this.ids = this.ids.filter(id => id !== op.remove); this.idsDirty = true; this.dirty.add(op.remove); }
+        continue;
+      }
       const before = this.byId.get(op.id);
       if (!before) return false;
       this.byId.set(op.id, {...before, ...(op.append ? {text: before.text + op.append} : {}), ...(op.status !== undefined ? {status: op.status} : {})});

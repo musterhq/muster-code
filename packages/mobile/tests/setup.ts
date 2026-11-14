@@ -10,3 +10,5 @@ jest.mock('react-native-reanimated/lib/module/initializers', () => ({initializeR
 // reads them as plain values.
 jest.mock('react-native-reanimated', () => ({...require('react-native-reanimated/mock'), isSharedValue: () => false}));
 require('react-native-gesture-handler/jest-setup/disableRootViewCheck.js');
+jest.mock('react-native-enriched-markdown', () => require('react-native-enriched-markdown/jest'));
+jest.mock('expo-clipboard', () => ({setStringAsync: jest.fn(async () => true)}));

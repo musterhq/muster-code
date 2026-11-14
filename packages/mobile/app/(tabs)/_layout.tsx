@@ -16,8 +16,8 @@ function TabMark({focused, badge}: {focused: boolean; badge?: number}) {
 
 export default function TabsLayout() {
   const c = useTheme();
-  const {state} = useLink();
-  const needs = useNeedsCount(state.phase === 'connected' ? state.connection : null);
+  const {selected} = useLink();
+  const needs = useNeedsCount(selected?.connection ?? null);
   return (
     <Tabs screenOptions={{
       headerStyle: {backgroundColor: c.background}, headerTintColor: c.strong, headerShadowVisible: false, headerTitleStyle: {...type.headline, fontWeight: '700'},

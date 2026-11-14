@@ -1,22 +1,37 @@
-/** Holds the phone's one link to its computer: loads the pairing record from secure storage, connects (and reconnects with
- *  backoff, also when the app returns to the foreground), and pairs or unpairs. A heartbeat notices a link that died while
- *  the phone slept or changed networks and reconnects at once; open screens then reopen their chat (a resync). */
-import {createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+/** Holds the phone's links to every paired computer (#326 phase 4): loads the pairing records from secure storage, keeps
+ *  one link per computer (each reconnects with backoff and a heartbeat on its own), pairs and unpairs, and remembers which
+ *  computer the person chose and whether all are shown together. Screens read the chosen computer's connection, which is the
+ *  live one or, while it can't be reached, the cached stand-in. */
+import {createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {AppState, Platform} from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import {getRandomBytes} from 'expo-crypto';
 import Constants from 'expo-constants';
-import {connectPhone, MobileError, pairPhone, type MobileConnection, type PairedRecord, type PairingLink, type SocketLike} from '../shared';
+import {connectPhone, pairPhone, type MobileConnection, type PairedRecord, type PairingLink, type SocketLike} from '../shared';
 import {nobleNoiseCrypto} from './noble-crypto';
-import {createPairingStore, type PairingStore, type SecureStoreLike} from './store';
-import {afterLinkClose, afterLinkFailure, backoff} from './reconnect';
-import {startHeartbeat, type Heartbeat} from './heartbeat';
+import {createComputerStore, type ComputerStore, type SecureStoreLike} from './store';
+import {Computers, type ComputerView} from './computers';
+import {OfflineCache} from '../offline/cache';
+import {openCacheDb} from '../offline/db';
 
-export type LinkState = {phase: 'loading'} | {phase: 'unpaired'} | {phase: 'connecting'; record: PairedRecord; error?: string}
-  | {phase: 'connected'; record: PairedRecord; connection: MobileConnection} | {phase: 'revoked'; record: PairedRecord};
 /** A pairing in progress: show `checkCode`; `confirmed` settles once the desktop adds the phone. */
 export interface PendingPairing { record: PairedRecord; checkCode: string; confirmed: Promise<void> }
-interface LinkContext { state: LinkState; store: PairingStore; pair(link: PairingLink): Promise<PendingPairing>; unpair(): Promise<void>; retry(): void }
+interface LinkContext {
+  phase: 'loading' | 'ready';
+  computers: ComputerView[];
+  /** The chosen computer (the first when none was chosen); null with none paired. */
+  selected: ComputerView | null;
+  showAll: boolean;
+  store: ComputerStore;
+  select(id: string): void;
+  setShowAll(on: boolean): void;
+  pair(link: PairingLink): Promise<PendingPairing>;
+  /** A pairing was confirmed and saved: connect to that computer and choose it. */
+  paired(record: PairedRecord): void;
+  unpair(id: string): Promise<void>;
+  retry(id?: string): void;
+  computer(id: string | undefined): ComputerView | null;
+}
 const Context = createContext<LinkContext | null>(null);
 
 const secure: SecureStoreLike = {
@@ -27,78 +42,47 @@ const secure: SecureStoreLike = {
 const crypto = nobleNoiseCrypto(length => getRandomBytes(length));
 const socket = (url: string) => new WebSocket(url) as unknown as SocketLike;
 const phoneName = () => String(Constants.deviceName ?? (Platform.OS === 'ios' ? 'iPhone' : 'Android phone')).slice(0, 80);
+/** Not secret: which computer is chosen and whether all show together. Kept in the cache database, under no computer. */
+interface Prefs { selected: string | null; showAll: boolean }
+const PREFS_COMPUTER = '';
+function openCache(): OfflineCache | null { try { return new OfflineCache(openCacheDb()); } catch { return null; } }
 
 export function ConnectionProvider({children}: {children: ReactNode}) {
-  const store = useMemo(() => createPairingStore(secure), []);
-  const [state, setState] = useState<LinkState>({phase: 'loading'});
-  const attempt = useRef(0), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined), current = useRef<MobileConnection | null>(null);
-  const heartbeat = useRef<Heartbeat | null>(null);
-
-  const generation = useRef(0);
-  const connect = useCallback((saved: PairedRecord) => {
-    let record = saved;
-    if (timer.current) clearTimeout(timer.current);
-    // A newer connect (pairing again, possibly from a muster://pair link) supersedes this one: its link closes quietly.
-    const mine = ++generation.current;
-    const stale = () => generation.current !== mine;
-    current.current?.close(); current.current = null;
-    setState({phase: 'connecting', record});
-    connectPhone({record, crypto, socket}).then(connection => {
-      if (stale()) { connection.close(); return; }
-      // The desktop's hello names its current direct addresses; keep them so the next connection on its network skips the relay.
-      if (connection.lan.join() !== (record.lan ?? []).join()) {
-        const {lan: _old, ...rest} = record;
-        record = connection.lan.length ? {...rest, lan: connection.lan} : rest;
-        void store.save(record);
-      }
-      attempt.current = 0; current.current = connection;
-      setState({phase: 'connected', record, connection});
-      /** The heartbeat found the link dead: reconnect without waiting out a backoff. */
-      let silent = false;
-      heartbeat.current?.stop();
-      const beat = startHeartbeat(connection, {onDead: () => { silent = true; connection.close(); }});
-      heartbeat.current = beat;
-      connection.onClose(reason => {
-        beat.stop();
-        if (stale()) return;
-        current.current = null;
-        if (silent) { setState({phase: 'connecting', record}); connect(record); return; }
-        // Only the desktop's revoked close shows revoked; a network error or bad frame reconnects. The record is kept.
-        if (afterLinkClose(reason) === 'revoked') { setState({phase: 'revoked', record}); return; }
-        setState({phase: 'connecting', record});
-        timer.current = setTimeout(() => connect(record), backoff(attempt.current++));
-      });
-    }, (error: unknown) => {
-      if (stale()) return;
-      if (afterLinkFailure(error) === 'revoked') { setState({phase: 'revoked', record}); return; }
-      setState({phase: 'connecting', record, error: error instanceof MobileError || error instanceof Error ? error.message : String(error)});
-      timer.current = setTimeout(() => connect(record), backoff(attempt.current++));
-    });
-  }, [store]);
+  const [{store, cache, computers}] = useState(() => {
+    const store = createComputerStore(secure), cache = openCache();
+    return {store, cache, computers: new Computers({store, cache, connect: record => connectPhone({record, crypto, socket})})};
+  });
+  const views = useSyncExternalStore(computers.subscribe, computers.views);
+  const [phase, setPhase] = useState<'loading' | 'ready'>('loading');
+  const [prefs, setPrefs] = useState<Prefs>(() => cache?.list<Prefs>(PREFS_COMPUTER, 'prefs')?.value ?? {selected: null, showAll: false});
+  const savePrefs = (next: Prefs) => { setPrefs(next); cache?.saveList(PREFS_COMPUTER, 'prefs', next); };
 
   useEffect(() => {
-    void store.load().then(record => { if (record) connect(record); else setState({phase: 'unpaired'}); });
-    const sub = AppState.addEventListener('change', next => {
-      if (next !== 'active') return;
-      // Back in the foreground: a link that died while the phone slept is noticed now, not at the next beat.
-      if (current.current) { heartbeat.current?.check(); return; }
-      void store.load().then(record => { if (record) { attempt.current = 0; connect(record); } });
-    });
-    return () => { sub.remove(); heartbeat.current?.stop(); if (timer.current) clearTimeout(timer.current); current.current?.close(); };
-  }, [store, connect]);
+    void computers.load().finally(() => setPhase('ready'));
+    // Back in the foreground: every link checks itself now (a dead one reconnects without waiting out its backoff).
+    const sub = AppState.addEventListener('change', next => { if (next === 'active') computers.retry(); });
+    return () => { sub.remove(); computers.dispose(); };
+  }, [computers]);
 
-  const value = useMemo<LinkContext>(() => ({
-    state, store,
-    async pair(link) {
-      const {client, record, checkCode, confirmed} = await pairPhone({link, crypto, socket, name: phoneName(), platform: Platform.OS});
-      // The pairing connection stays open until the desktop adds (or rejects) the phone; sessions then use the record.
-      const done = confirmed.finally(() => client.close());
-      done.catch(() => undefined);
-      return {record, checkCode, confirmed: done};
-    },
-    async unpair() { generation.current++; current.current?.close(); current.current = null; if (timer.current) clearTimeout(timer.current); await store.clear(); setState({phase: 'unpaired'}); },
-    retry() { void store.load().then(record => { if (record) { attempt.current = 0; connect(record); } }); },
-  }), [state, store, connect]);
+  const value = useMemo<LinkContext>(() => {
+    const selected = views.find(view => view.id === prefs.selected) ?? views[0] ?? null;
+    return {
+      phase, computers: views, selected, showAll: prefs.showAll && views.length > 1, store,
+      select: id => savePrefs({...prefs, selected: id}),
+      setShowAll: on => savePrefs({...prefs, showAll: on}),
+      async pair(link) {
+        const {client, record, checkCode, confirmed} = await pairPhone({link, crypto, socket, name: phoneName(), platform: Platform.OS});
+        // The pairing connection stays open until the desktop adds (or rejects) the phone; sessions then use the record.
+        const done = confirmed.finally(() => client.close());
+        done.catch(() => undefined);
+        return {record, checkCode, confirmed: done};
+      },
+      paired(record) { computers.add(record); savePrefs({...prefs, selected: record.route}); },
+      unpair: id => computers.remove(id),
+      retry: id => computers.retry(id),
+      computer: id => (id ? views.find(view => view.id === id) : undefined) ?? selected,
+    };
+  }, [views, prefs, phase, store, computers]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
@@ -106,4 +90,9 @@ export function useLink(): LinkContext {
   const value = useContext(Context);
   if (!value) throw new Error('useLink outside ConnectionProvider');
   return value;
+}
+/** The connection for one computer (the chosen one when `id` is not given), live or cached. */
+export function useComputerConnection(id?: string): {view: ComputerView | null; connection: MobileConnection | null} {
+  const view = useLink().computer(id);
+  return {view, connection: view?.connection ?? null};
 }

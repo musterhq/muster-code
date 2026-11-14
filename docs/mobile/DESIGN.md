@@ -1,6 +1,6 @@
 # Muster mobile app: design
 
-Status: phases 1 and 2 built, phase 3 (the no-lag foundation) in progress (issue #326); later phases planned below. This document is the plan of record for the phone app: how a phone reaches the
+Status: phases 1 to 3 built, phase 4 (several computers, offline history and the outbox, native Markdown, tablets) built (issue #326); later phases planned below. This document is the plan of record for the phone app: how a phone reaches the
 person's desktop Muster from anywhere, how the traffic is protected, which stack the app uses, the screens, the phases and the
 threat model. The acceptance cases live in [docs/spec/clauses/23-mobile.md](../spec/clauses/23-mobile.md).
 
@@ -64,8 +64,11 @@ Non-goals for now:
 - **On the same network, no relay hop** (phase 2, §2.3).
 - **Not on a shared server yet.** On Muster Server the `mobile.*` commands are desktop-only for every role (MUS-SPEC-23-3C):
   a phone paired with the shared runtime would bypass per-person project access. Per-person pairing on a server is phase 3.
-- **The desktop is the source of truth.** The phone holds no chat database: it caches the last chat list and the open chat
-  for display while offline, and the desktop's runtime decides every command.
+- **The desktop is the source of truth.** The phone's SQLite cache (phase 4) holds, per computer, only what that computer
+  already sent it: the last chat list, Needs you, its access and the chats it opened (the 40 most recent), plus an outbox of
+  messages written offline. They go out on reconnect in order, each with the request id it was written with, so the
+  desktop's receipt runs each one at most once; approvals are never queued. A computer that revokes the phone, or that is
+  unpaired on it, has its rows wiped. Android backups are off for the app; the file has no encryption beyond the phone's own.
 
 ### 2.3 Direct on the same network, with relay fallback (phase 2)
 
@@ -235,6 +238,14 @@ path alias (`@muster/shared/mobile/*`), resolved by TypeScript `paths`, jest `mo
 | `react-native-keyboard-controller` 1.23.0 | The composer rides the keyboard (Android included) | 3 |
 | `expo-haptics` | Send, approve, decline and a light stream texture | 3 |
 
+**Version note (phase 4).** `npx expo install --check` reports four packages above what Expo SDK 58 recommends:
+`react-native-gesture-handler` 3.5.0 (58 recommends ~3.3.0), `react-native-keyboard-controller` 1.23.0 (1.22.7),
+`react-native-worklets` 0.13.1 (0.13.0) and `react` 19.3.1 (19.3.0). They were chosen in phase 3 on purpose: the swipe rows
+use Gesture Handler 3.5's hook API (`usePanGesture`), and the composer relies on keyboard-controller 1.23's fixes, with
+Reanimated 4.7.1 needing the matching worklets patch. The app's tests
+and the CI APK build pass on them, so they are kept rather than downgraded; the check is not part of CI. The other entries
+the check lists are patch updates of Expo's own modules, to take with the next SDK update.
+
 ### 5.4 Rendering replies
 
 - **Phase 1:** text with code fences shown monospaced, tool rows as one line with status, approval and question cards native.
@@ -318,8 +329,17 @@ features go on it:
   seconds reconnects at once (17A, 17B).
 - *Security leftovers.* Paths in rows made relative or `~` (18A), a cap on one phone's requests in flight (18B), a 1 MB cap on
   a phone's frames (18C), and a file staged by a phone revoked mid-stage is discarded (18D).
-- Next in phase 3 or 4: several computers in one app, offline history and an outbox, tablet two-pane layouts and landscape,
-  then diff review, files, git and the terminal from approved designs.
+- Next: diff review, files, git and the terminal from approved designs.
+
+**Phase 4: several computers, offline, rich replies, tablets (built).** Several pairings, each a record with its own keys
+under its own secure-storage key, one link per computer with a pill that reads LAN, Relay, Reconnecting or Offline (Offline
+only after 3 seconds down), a switcher and Show all computers together (19A, 19B). The offline cache and outbox above (20A to
+20C). Replies through `react-native-enriched-markdown`; code blocks with line numbers and Copy; Mermaid and chart fences as
+cards with reserved height that open full screen (their source for now: drawing them needs the offline rich bundle, still to
+come) (21A, 21B). Width classes (compact under 600, medium 600 to 839, expanded 840 and up), a collapsible sidebar, a chat
+column capped at 760 and a Needs-you inspector, and every orientation allowed (22A); splitting at a foldable's hinge needs a
+WindowManager module and is deferred. On the desktop: rows mapped once per version for all sessions and only for watched
+chats, `remove` ops for deleted rows, and a fixed note on replies past the 64 KB item cap (23A to 23D).
 
 **Phase 3b: needs-you everywhere.** Push relay and generic pushes; Projects (tasks, runs, Inbox) read and act; a relay mounted
 in Muster Server. Acceptance: an approval on the desktop produces exactly one generic push whose payload holds no chat text;

@@ -6,7 +6,7 @@ import {errorText, READ_ONLY_NOTE} from '../hooks';
 import {font, radius, space, themed, useTheme} from '../theme';
 import {Button} from './Button';
 
-export function QuestionCard({connection, itemId, questions, status, canAct}: {connection: MobileConnection; itemId: string; questions: MobileQuestion[]; status?: string; canAct: boolean}) {
+export function QuestionCard({connection, itemId, questions, status, canAct, note = READ_ONLY_NOTE}: {connection: MobileConnection; itemId: string; questions: MobileQuestion[]; status?: string; canAct: boolean; /** Why it can't be answered here. */ note?: string}) {
   const styles = useStyles(), colors = useTheme();
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
@@ -40,7 +40,7 @@ export function QuestionCard({connection, itemId, questions, status, canAct}: {c
             ) : null}
         </View>
       ))}
-      {!pending ? <Text style={styles.muted}>{status === 'answered' ? 'Answered' : status}</Text> : !canAct ? <Text style={styles.muted}>{READ_ONLY_NOTE}</Text> : null}
+      {!pending ? <Text style={styles.muted}>{status === 'answered' ? 'Answered' : status}</Text> : !canAct ? <Text style={styles.muted}>{note}</Text> : null}
       {pending && canAct && !instant ? <Button label="Send answers" kind="primary" disabled={!ready} onPress={() => send(Object.fromEntries(questions.map(question => [question.id, custom[question.id]?.trim() ? [custom[question.id]!.trim()] : picked[question.id] ?? []])))} /> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>

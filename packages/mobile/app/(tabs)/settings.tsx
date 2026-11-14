@@ -3,9 +3,8 @@ import {useLink} from '../../src/connection/ConnectionProvider';
 import {SettingsScreen} from '../../src/screens/SettingsScreen';
 
 export default function Settings() {
-  const {state, unpair} = useLink();
+  const link = useLink();
   const router = useRouter();
-  if (state.phase === 'loading' || state.phase === 'unpaired') return null;
-  const status = state.phase === 'connected' ? (state.connection.via === 'lan' ? 'Connected directly on this network' : 'Connected through the relay') : state.phase === 'revoked' ? 'Revoked on the computer' : state.error ? `Not connected: ${state.error}` : 'Connecting…';
-  return <SettingsScreen desktopName={state.record.desktopName} access={state.phase === 'connected' ? state.connection.access : null} status={status} onUnpair={() => void unpair().then(() => router.replace('/pair'))} />;
+  if (link.phase === 'loading') return null;
+  return <SettingsScreen computers={link.computers} onPair={() => router.push('/pair')} onUnpair={id => void link.unpair(id).then(() => { if (link.computers.length <= 1) router.replace('/pair'); })} />;
 }
