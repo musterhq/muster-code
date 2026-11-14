@@ -1,6 +1,6 @@
 /** Live views of the desktop over one MobileConnection: the chat list, one chat, the needs-you feed, this phone's access. */
 import {useEffect, useState} from 'react';
-import type {MobileAccess, MobileChat, MobileConnection, MobileItem, MobileNeed} from './shared';
+import {applyItemOps, type MobileAccess, type MobileChat, type MobileConnection, type MobileItem, type MobileItemOp, type MobileNeed} from './shared';
 
 export const READ_ONLY_NOTE = 'Read only: allow this phone to act in Settings on your computer';
 export const requestId = (): string => `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -35,21 +35,51 @@ export function mergeItems(current: MobileItem[], incoming: MobileItem[]): Mobil
   return next;
 }
 
+/**
+ * One chat, live. The phone asks for deltas (phase 3): numbered changes that carry only appended text and changed items, so a
+ * streaming reply costs a few bytes per token and only its own row changes. Deltas that arrive before chat.open answers wait
+ * and are applied after it; a skipped number (a missed delta) reopens the chat and takes the desktop's state as it is. A new
+ * connection (after a reconnect) opens the chat again, which is the same resync. Phase 1 desktops send whole items instead.
+ */
 export function useChat(connection: MobileConnection, chatId: string) {
   const [chat, setChat] = useState<MobileChat | null>(null);
   const [items, setItems] = useState<MobileItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
+    /** Null while chat.open is in flight: deltas wait in `waiting`. */
+    let seq: number | null = null;
+    let current: MobileItem[] = [];
+    let waiting: Array<{seq: number; ops: MobileItemOp[]}> = [];
+    const show = (next: MobileItem[]) => { current = next; setItems(next); };
+    const apply = (delta: {seq: number; ops: MobileItemOp[]}) => {
+      if (seq === null) { waiting.push(delta); return; }
+      if (delta.seq <= seq) return;
+      const next = delta.seq === seq + 1 ? applyItemOps(current, delta.ops) : null;
+      if (!next) { open(); return; }
+      seq = delta.seq;
+      show(next);
+    };
+    const open = () => {
+      seq = null; waiting = [];
+      connection.call('chat.open', {id: chatId, deltas: true}).then(result => {
+        if (!live) return;
+        setChat(existing => existing ?? result.chat);
+        setError(null);
+        if (result.seq === undefined) { show(mergeItems(result.items, current)); return; }
+        seq = result.seq;
+        show(result.items);
+        const held = waiting.sort((a, b) => a.seq - b.seq);
+        waiting = [];
+        for (const delta of held) { if (seq === null) break; apply(delta); }
+      }, failure => { if (live) setError(errorText(failure)); });
+    };
     const off = connection.on(event => {
-      if (event.type === 'items' && event.chatId === chatId) setItems(current => mergeItems(current, event.items));
-      if (event.type === 'chats') { const found = event.chats.find(entry => entry.id === chatId); if (found) setChat(found); }
+      if (event.type === 'delta' && event.chatId === chatId) apply(event);
+      else if (event.type === 'items' && event.chatId === chatId) show(mergeItems(current, event.items));
+      else if (event.type === 'chats') { const found = event.chats.find(entry => entry.id === chatId); if (found) setChat(found); }
     });
-    connection.call('chat.open', {id: chatId}).then(result => {
-      if (!live) return;
-      setChat(current => current ?? result.chat);
-      setItems(current => mergeItems(result.items, current));
-    }, failure => { if (live) setError(errorText(failure)); });
+    open();
     return () => { live = false; off(); void connection.call('chat.close', {id: chatId}).catch(() => undefined); };
   }, [connection, chatId]);
   return {chat, items, error};

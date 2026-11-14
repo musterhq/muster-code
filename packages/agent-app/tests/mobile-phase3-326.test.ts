@@ -103,7 +103,7 @@ test('a streaming reply reaches the phone as appended text, and the bytes per pi
   for (const event of deltas) { items = applyItemOps(items!, event.ops); assert.ok(items, 'every delta applies'); }
   assert.equal(items!.find(item => item.kind === 'assistant')?.text, reply, 'the phone rebuilds the exact reply');
   const ops = deltas.flatMap(event => event.ops);
-  assert.ok(ops.filter(op => 'append' in op).length >= ops.length / 2, `mostly appends (${ops.filter(op => 'append' in op).length} of ${ops.length})`);
+  assert.ok(ops.filter(op => 'append' in op && op.append).length >= ops.length / 2, `mostly appends (${ops.filter(op => 'append' in op && op.append).length} of ${ops.length})`);
   const streamed = fromDesktop().slice(start).map(frame => frame.data.length);
   const largest = Math.max(...streamed);
   assert.ok(largest < 4000, `no desktop message over 4,000 characters while streaming (largest ${largest})`);

@@ -24,10 +24,11 @@ import type {MobileDeviceView, MobileStatus} from '../../shared/domains/mobile-p
 import {equalBytes, fromBase64, fromUtf8, toBase64, utf8} from '../../shared/mobile/bytes.ts';
 import {checkCodeOf, keyFingerprint, prologue, SecureChannel, MODE_BYTE, type ChannelMode} from '../../shared/mobile/channel.ts';
 import {Handshake, type KeyPair} from '../../shared/mobile/noise.ts';
-import {CLOSE, formatPairingLink, parsePairingLink, MOBILE_ACCESS, MOBILE_PROTOCOL_VERSION, MobileError, RELAY_NEEDS_TLS, relayUrlAllowed, type MobileAccess, type MobileEvent, type MobileFrame, type PairRequest, type Welcome} from '../../shared/mobile/protocol.ts';
+import {CLOSE, formatPairingLink, parsePairingLink, MOBILE_ACCESS, MOBILE_PROTOCOL_VERSION, MobileError, RELAY_NEEDS_TLS, relayUrlAllowed, type MobileAccess, type MobileEvent, type MobileFrame, type MobileItem, type PairRequest, type Welcome} from '../../shared/mobile/protocol.ts';
 import {device} from '../../shared/device-noun.ts';
 import {activeSecretStore, openSecretStores, type SecretStore} from '../secret-store.ts';
 import {handle, mobileChats, mobileItem, needsList} from '../mobile/bridge.ts';
+import {itemOps} from '../../shared/mobile/stream.ts';
 import {generateRouteKey, nodeNoiseCrypto, signWithRouteKey, type RouteKey} from '../mobile/node-crypto.ts';
 import {RelayLink} from '../mobile/relay-link.ts';
 import {LanListener, lanHosts} from '../mobile/lan-listener.ts';
@@ -62,6 +63,9 @@ interface Session {
   /** Pairing: waits for the owner's confirmation; every request is refused meanwhile. */
   pending: boolean;
   sentChats: string; sentNeeds: string; queue: Promise<void>;
+  /** Phase 3 delta stream of the watched chat: what the phone has of each item (null until chat.open read it; changes made
+   *  meanwhile wait in `pending`) and the last delta's number. */
+  stream: {chatId: string; seq: number; sent: Map<string, MobileItem> | null; pending: MobileItem[][]} | null;
   timer: ReturnType<typeof setTimeout> | undefined;
 }
 interface Identity { keys: KeyPair; route: RouteKey }
@@ -184,7 +188,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
         // Unauthenticated: no valid encrypted message yet. A replayed first message gets a handshake answer but never a
         // valid frame, so it counts here and times out like a stalled handshake (MUS-SPEC-23-10H).
         if ([...sessions.values()].filter(s => !s.verified).length >= limit) { via().closePhone(conn, CLOSE.busy, 'busy'); return; }
-        const session: Session = {conn, via: via(), deviceId: null, channel: null, watching: null, verified: false, pending: false, sentChats: '', sentNeeds: '', queue: Promise.resolve(), timer: undefined};
+        const session: Session = {conn, via: via(), deviceId: null, channel: null, watching: null, verified: false, pending: false, sentChats: '', sentNeeds: '', queue: Promise.resolve(), timer: undefined, stream: null};
         session.timer = setTimeout(() => { if (!session.verified && !session.pending) drop(session, CLOSE.timeout, 'timeout'); }, mobileSeams.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS);
         session.timer.unref?.();
         sessions.set(conn, session);
@@ -333,7 +337,16 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       alive: () => sessions.get(session.conn) === session && devices.some(d => d.id === session.deviceId),
       desktopName: name, deviceId: session.deviceId ?? '',
       lan: () => lan?.addresses ?? [],
-      watch: (chatId: string | null) => { session.watching = chatId; },
+      watch: (chatId: string | null, deltas?: boolean) => { session.watching = chatId; session.stream = chatId && deltas ? {chatId, seq: 0, sent: null, pending: []} : null; },
+      streamFrom: (chatId: string, items: MobileItem[]): number => {
+        const stream = session.stream;
+        if (!stream || stream.chatId !== chatId) return 0;
+        stream.sent = new Map(items.map(item => [item.id, item]));
+        const base = stream.seq, waiting = stream.pending;
+        stream.pending = [];
+        for (const batch of waiting) streamTo(session, batch);
+        return base;
+      },
       ...(session.deviceId ? {uploads: uploadsFor(session.deviceId)} : {}),
     };
   }
@@ -355,8 +368,20 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       const items = event.type === 'timeline' ? event.items : event.patch.items;
       const revision = event.type === 'timelinePatch' ? event.patch.revision : 0;
       const mapped = items.slice(-200).map(mobileItem);
-      for (const session of live) if (session.watching === event.chatId) sendEvent(session, {type: 'items', chatId: event.chatId, items: mapped, revision});
+      for (const session of live) {
+        if (session.watching !== event.chatId) continue;
+        if (session.stream?.chatId === event.chatId) streamTo(session, mapped);
+        else sendEvent(session, {type: 'items', chatId: event.chatId, items: mapped, revision});
+      }
     }
+  }
+  /** Sends only what changed since the phone last heard about these items, as the next numbered delta. */
+  function streamTo(session: Session, items: MobileItem[]) {
+    const stream = session.stream;
+    if (!stream) return;
+    if (!stream.sent) { stream.pending.push(items); return; }
+    const ops = itemOps(stream.sent, items);
+    if (ops.length) sendEvent(session, {type: 'delta', chatId: stream.chatId, seq: ++stream.seq, ops});
   }
   /** Every attention change is sent, in order (they are rare: a request appears or is answered), so the phone's feed never
    *  skips a state. */

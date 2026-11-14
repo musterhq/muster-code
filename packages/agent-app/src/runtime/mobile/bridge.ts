@@ -78,8 +78,11 @@ export interface BridgeContext {
   alive(): boolean;
   desktopName: string;
   deviceId: string;
-  /** Streams this chat's item events to the session (null stops). */
-  watch(chatId: string | null): void;
+  /** Streams this chat's item events to the session (null stops). With `deltas`, changes wait until `streamFrom` says what
+   *  the phone has, then go out as numbered deltas (phase 3). */
+  watch(chatId: string | null, deltas?: boolean): void;
+  /** The items the phone got from chat.open: deltas are computed against them from now on. Returns their stream number. */
+  streamFrom?(chatId: string, items: MobileItem[]): number;
   /** This phone's uploads and the files it staged (phase 2). */
   uploads?: PhoneUploads;
   /** The desktop's current direct addresses on its network (phase 2). */
@@ -143,12 +146,15 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
       case 'hello': return {desktopName: ctx.desktopName, deviceId: ctx.deviceId, access: ctx.access(), protocol: MOBILE_PROTOCOL_VERSION, lan: ctx.lan?.() ?? []} satisfies MobileMethods['hello']['result'];
       case 'chats.list': return {chats: mobileChats(await ctx.snapshot())} satisfies MobileMethods['chats.list']['result'];
       case 'chat.open': {
-        const chatId = id(p.id);
+        const chatId = id(p.id), deltas = p.deltas === true && Boolean(ctx.streamFrom);
         await chatOf(chatId);
+        // Watching starts before the read, so a change made while it runs is kept and sent after it, never lost.
+        ctx.watch(chatId, deltas);
         const timeline = await ctx.invoke('chat.timeline', {id: chatId});
-        ctx.watch(chatId);
+        const items = timeline.items.slice(-OPEN_ITEMS).map(mobileItem);
+        const seq = deltas ? ctx.streamFrom!(chatId, items) : undefined;
         const chat = mobileChats(await ctx.snapshot()).find(entry => entry.id === chatId)!;
-        return {chat, items: timeline.items.slice(-OPEN_ITEMS).map(mobileItem), revision: timeline.revision} satisfies MobileMethods['chat.open']['result'];
+        return {chat, items, revision: timeline.revision, ...(seq === undefined ? {} : {seq})} satisfies MobileMethods['chat.open']['result'];
       }
       case 'chat.close': ctx.watch(null); return {};
       case 'chat.send': {

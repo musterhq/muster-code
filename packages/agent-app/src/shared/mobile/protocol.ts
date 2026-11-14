@@ -86,6 +86,9 @@ export interface MobileItem {
   id: string; kind: MobileItemKind; text: string; status?: string; createdAt: string;
   approval?: MobileApproval; questions?: MobileQuestion[];
 }
+/** One change to the open chat's items (phase 3): for an item the phone already has, `append` adds text to its end (a reply
+ *  streaming) and `status` sets its status (it finished); `item` adds a new item or replaces one whose other fields changed. */
+export type MobileItemOp = {id: string; append?: string; status?: string} | {item: MobileItem};
 export interface MobileNeed {
   chatId: string; chatTitle: string; itemId: string; kind: 'approval' | 'question'; summary: string; createdAt: string;
   approval?: MobileApproval; questions?: MobileQuestion[];
@@ -111,8 +114,10 @@ export interface MobileMethods {
   /** `lan`: the desktop's current direct addresses (phase 2), so the phone's record follows network changes. */
   'hello': {params: Record<string, never>; result: {desktopName: string; deviceId: string; access: MobileAccess; protocol: number; lan?: string[]}};
   'chats.list': {params: Record<string, never>; result: {chats: MobileChat[]}};
-  /** Returns the chat and its latest items, and streams its item events to this phone until chat.close or another chat.open. */
-  'chat.open': {params: {id: string}; result: {chat: MobileChat; items: MobileItem[]; revision: number}};
+  /** Returns the chat and its latest items, and streams its item events to this phone until chat.close or another chat.open.
+   *  With `deltas` (phase 3) the stream is `delta` events numbered from `seq`, carrying only appended text and changed items;
+   *  without it, whole changed items (`items` events), as phase 1 phones expect. */
+  'chat.open': {params: {id: string; deltas?: boolean}; result: {chat: MobileChat; items: MobileItem[]; revision: number; seq?: number}};
   'chat.close': {params: {id: string}; result: Record<string, never>};
   /** `attachmentIds`: attachments this phone uploaded to this chat (upload.finish). */
   'chat.send': {params: {id: string; text: string; requestId: string; attachmentIds?: string[]}; result: {runId: string}};
@@ -143,6 +148,9 @@ export const ACTING_METHODS: ReadonlySet<MobileMethod> = new Set(['chat.send', '
 export type MobileEvent =
   | {type: 'chats'; chats: MobileChat[]}
   | {type: 'items'; chatId: string; items: MobileItem[]; revision: number}
+  /** The open chat's changes, numbered one after another from chat.open's `seq`: a skipped number means the phone missed one
+   *  and reopens the chat (phase 3). */
+  | {type: 'delta'; chatId: string; seq: number; ops: MobileItemOp[]}
   | {type: 'needs'; needs: MobileNeed[]}
   | {type: 'access'; access: MobileAccess}
   /** The desktop confirmed this phone's check code: it is paired (read-only) from now on. */
