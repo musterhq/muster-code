@@ -75,6 +75,7 @@ Boundaries:
 | [MUS-SPEC-23-14C](23-mobile.md#mus-spec-23-14c) | Opening muster://pair?… lands on the pair route with the link in the field, and pairing starts once with the parsed link. | [`a muster://pair deep link fills in the link and starts pairing`](../../../packages/mobile/tests/deep-link.test.tsx) |
 | [MUS-SPEC-23-15A](23-mobile.md#mus-spec-23-15a) | A phone that opened a chat with deltas receives the streaming reply as numbered deltas that append text; the reply it rebuilds equals the desktop's, and the bytes the desktop sends per streamed piece stay bounded instead of growing with the reply. | [`a streaming reply reaches the phone as appended text, and the bytes per piece do not grow with the reply`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
 | [MUS-SPEC-23-15B](23-mobile.md#mus-spec-23-15b) | The chat screen applies numbered deltas so only the changed row changes; a delta whose number skips one makes it reopen the chat and show the desktop's state; deltas that arrive before chat.open answers are applied after it; a new connection reopens the chat. | [`applies stream deltas in order, resyncs after a gap, and reopens the chat on a new connection`](../../../packages/mobile/tests/chat-stream.test.tsx) |
+| [MUS-SPEC-23-16A](23-mobile.md#mus-spec-23-16a) | A chat of 2,000 items mounts only a window of rows at its end; while a reply streams by deltas only the streaming row renders again, and a new item renders only itself. | [`a 2,000-row chat mounts a window and streaming re-renders only the streaming row`](../../../packages/mobile/tests/chat-virtualized.test.tsx) |
 
 ### Pairing, the device registry and access
 
@@ -698,4 +699,17 @@ Boundaries:
 - Test: `packages/mobile/tests/chat-stream.test.tsx::applies stream deltas in order, resyncs after a gap, and reopens the chat on a new connection`
 - Environment: jest (jest-expo preset) in Node with @testing-library/react-native; the screen is given a fake connection with the MobileClient interface.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### Smooth lists (phase 3)
+
+<a id="mus-spec-23-16a"></a>
+#### MUS-SPEC-23-16A: A long chat streams without re-rendering old rows
+
+- Precondition: The chat screen with a fake connection whose chat.open answers 2,000 items (the last one an assistant reply) with a sequence number, and a render probe that counts how often each timeline row renders.
+- Action: Lay the list out on a 390 × 800 window. Reset the counts, then emit 20 deltas that each append a piece to the last reply, then one delta with a new tool item.
+- Expected result: Fewer than 100 rows are mounted after layout, and the newest row is among them. Across the 20 appends only the streaming row renders (20 times, give or take the list's own passes), no other row renders at all, and the reply on screen ends with the last piece. The new tool item renders and no old row renders again.
+- Test: `packages/mobile/tests/chat-virtualized.test.tsx::a 2,000-row chat mounts a window and streaming re-renders only the streaming row`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; the list is the app's own virtualized list, laid out by a layout event.
+- Known gaps: Frame rate and UI-thread animation smoothness can only be measured on a device; the PR lists what was measured there.
 - Evidence: UNVERIFIED
