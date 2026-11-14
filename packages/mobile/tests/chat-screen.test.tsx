@@ -43,7 +43,7 @@ test('approves or declines in place, and read-only hides the actions', async () 
   await fireEvent.press(screen.getByText('Approve'));
   await act(async () => undefined);
   expect(acting.calls.find(call => call.method === 'approval.respond')?.params).toEqual({itemId: 'a1', decision: 'accept'});
-  expect(screen.getByText('Decline')).toBeTruthy();
+  expect(await screen.findByText('Approved')).toBeTruthy();
   await view.unmount();
   const reader = fakeConnection({'chat.open': {chat: chat('waiting'), items: [approval], revision: 1}}, 'read-only');
   await render(<ChatScreen connection={reader} chatId="c1" />);

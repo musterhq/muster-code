@@ -5,11 +5,12 @@ import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import type {MobileConnection, MobileMethods, MobilePlace} from '../shared';
 import {errorText, READ_ONLY_NOTE, useAccess} from '../hooks';
 import {Button} from '../components/Button';
-import {colors, font, radius, space} from '../theme';
+import {font, radius, space, themed, useTheme} from '../theme';
 
 type Options = MobileMethods['chat.options']['result'];
 
 function Choice({label, detail, selected, onPress}: {label: string; detail?: string; selected: boolean; onPress(): void}) {
+  const styles = useStyles();
   return (
     <Pressable accessibilityRole="radio" accessibilityState={{selected}} onPress={onPress} style={[styles.choice, selected && styles.selected]}>
       <Text style={styles.choiceLabel}>{label}</Text>
@@ -19,6 +20,7 @@ function Choice({label, detail, selected, onPress}: {label: string; detail?: str
 }
 
 export function NewChatScreen({connection, onCreated}: {connection: MobileConnection; onCreated(chatId: string): void}) {
+  const styles = useStyles(), colors = useTheme();
   const access = useAccess(connection);
   const [options, setOptions] = useState<Options | null>(null);
   const [place, setPlace] = useState<MobilePlace | null>(null);
@@ -69,7 +71,7 @@ export function NewChatScreen({connection, onCreated}: {connection: MobileConnec
     </ScrollView>
   );
 }
-const styles = StyleSheet.create({
+const useStyles = themed(colors => StyleSheet.create({
   screen: {flex: 1, backgroundColor: colors.background},
   content: {padding: space.l, gap: space.s},
   label: {color: colors.muted, fontSize: font.small, marginTop: space.m},
@@ -79,4 +81,4 @@ const styles = StyleSheet.create({
   muted: {color: colors.muted, fontSize: font.small},
   note: {color: colors.muted, fontSize: font.small, padding: space.l},
   error: {color: colors.danger, fontSize: font.small},
-});
+}));

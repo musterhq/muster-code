@@ -5,4 +5,8 @@ jest.mock('expo-haptics', () => ({impactAsync: jest.fn(), selectionAsync: jest.f
 require('react-native-gesture-handler/jestSetup');
 // Reanimated's native initializer registers CSS handlers the JS fallback does not have.
 jest.mock('react-native-reanimated/src/initializers', () => ({initializeReanimatedModule: () => undefined}));
-jest.mock('react-native-reanimated', () => require('react-native-reanimated/mock'));
+jest.mock('react-native-reanimated/lib/module/initializers', () => ({initializeReanimatedModule: () => undefined}));
+// The mock's shared values are frozen and lack the listener methods gesture handler 3 binds to: tell it there are none, so it
+// reads them as plain values.
+jest.mock('react-native-reanimated', () => ({...require('react-native-reanimated/mock'), isSharedValue: () => false}));
+require('react-native-gesture-handler/jest-setup/disableRootViewCheck.js');

@@ -7,7 +7,7 @@ import {groupCheckCode, MobileError, NOT_A_PAIRING_LINK, parsePairingLink, type 
 import type {PairingStore} from '../connection/store';
 import {Button} from '../components/Button';
 import {errorText} from '../hooks';
-import {colors, font, radius, space} from '../theme';
+import {font, radius, space, themed, useTheme} from '../theme';
 
 export interface PairScreenProps {
   /** Runs the pairing handshake; `confirmed` settles when the desktop adds the phone after the owner compared check codes. */
@@ -21,6 +21,7 @@ export interface PairScreenProps {
 }
 
 export function PairScreen({pairWith, store, onPaired, scanner, initialLink}: PairScreenProps) {
+  const styles = useStyles(), colors = useTheme();
   const [text, setText] = useState(initialLink ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +64,7 @@ export function PairScreen({pairWith, store, onPaired, scanner, initialLink}: Pa
     </View>
   );
 }
-const styles = StyleSheet.create({
+const useStyles = themed(colors => StyleSheet.create({
   screen: {flex: 1, backgroundColor: colors.background, padding: space.l, gap: space.m},
   title: {color: colors.text, fontSize: 22, fontWeight: '700'},
   muted: {color: colors.muted, fontSize: font.small, lineHeight: 18},
@@ -73,4 +74,4 @@ const styles = StyleSheet.create({
   code: {color: colors.text, fontSize: 32, fontWeight: '700', letterSpacing: 4, fontVariant: ['tabular-nums']},
   error: {color: colors.danger, fontSize: font.small},
   success: {color: colors.success, fontSize: font.body},
-});
+}));

@@ -3,9 +3,10 @@ import {useRef} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {CameraView, useCameraPermissions} from 'expo-camera';
 import {Button} from './Button';
-import {colors, space} from '../theme';
+import {space, themed, useTheme} from '../theme';
 
 export function QrScanner({onScan}: {onScan(text: string): void}) {
+  const styles = useStyles(), colors = useTheme();
   const [permission, request] = useCameraPermissions();
   const done = useRef(false);
   if (!permission) return null;
@@ -18,7 +19,7 @@ export function QrScanner({onScan}: {onScan(text: string): void}) {
   return <CameraView style={StyleSheet.absoluteFill} barcodeScannerSettings={{barcodeTypes: ['qr']}}
     onBarcodeScanned={({data}) => { if (!done.current && data.startsWith('muster://pair?')) { done.current = true; onScan(data); } }} />;
 }
-const styles = StyleSheet.create({
+const useStyles = themed(colors => StyleSheet.create({
   ask: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.m, padding: space.l},
   muted: {color: colors.text, textAlign: 'center'},
-});
+}));

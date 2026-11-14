@@ -1,36 +1,53 @@
-/** Everything waiting on the person across chats; approvals and questions are answered right here. */
-import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
-import type {MobileConnection} from '../shared';
+/** Everything waiting on the person across chats; approvals and questions are answered right here. A phone that can act
+ *  swipes an approval right to approve it or left to decline it. */
+import {ScrollView, StyleSheet, Text, View} from 'react-native';
+import type {MobileConnection, MobileNeed} from '../shared';
 import {useAccess, useNeeds} from '../hooks';
-import {ApprovalCard} from '../components/ApprovalCard';
+import {ApprovalCard, useApprovalResponse} from '../components/ApprovalCard';
 import {QuestionCard} from '../components/QuestionCard';
-import {colors, font, space} from '../theme';
+import {SwipeRow} from '../components/SwipeRow';
+import {space, themed, type} from '../theme';
+
+function ApprovalRow({connection, need, canAct}: {connection: MobileConnection; need: MobileNeed; canAct: boolean}) {
+  const response = useApprovalResponse(connection, need.itemId);
+  const card = <ApprovalCard connection={connection} itemId={need.itemId} {...(need.approval ? {approval: need.approval} : {})} canAct={canAct} fallback={need.summary} response={response} heading={need.chatTitle} />;
+  if (!canAct || response.answered) return card;
+  return (
+    <SwipeRow testID={`swipe-${need.itemId}`} rightLabel="Approve" leftLabel="Decline" onRight={() => response.respond('accept')} onLeft={() => response.respond('decline')}>
+      {card}
+    </SwipeRow>
+  );
+}
 
 export function NeedsYouScreen({connection, onOpen}: {connection: MobileConnection; onOpen?(chatId: string): void}) {
+  const styles = useStyles();
   const {needs, error} = useNeeds(connection);
   const canAct = useAccess(connection) === 'act';
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <View style={styles.screen}>
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      {needs && !needs.length ? <Text style={styles.muted}>Nothing needs you right now.</Text> : null}
-      {(needs ?? []).map(need => (
-        <View key={need.itemId} style={styles.entry}>
-          <Pressable accessibilityRole="link" disabled={!onOpen} onPress={() => onOpen?.(need.chatId)}>
-            <Text style={styles.chat}>{need.chatTitle}</Text>
-          </Pressable>
-          {need.kind === 'approval'
-            ? <ApprovalCard connection={connection} itemId={need.itemId} {...(need.approval ? {approval: need.approval} : {})} canAct={canAct} fallback={need.summary} />
-            : <QuestionCard connection={connection} itemId={need.itemId} questions={need.questions ?? []} canAct={canAct} />}
-        </View>
-      ))}
-    </ScrollView>
+      {/* The feed is short (what waits right now), so a plain scroll view; the chat and chat lists are virtualized. */}
+      <ScrollView contentContainerStyle={styles.content}>
+        {needs && !needs.length ? <Text style={styles.muted}>All clear. Nothing needs you right now.</Text> : null}
+        {(needs ?? []).map(need => (
+          <View key={need.itemId} style={styles.entry}>
+            {need.kind === 'approval' ? <ApprovalRow connection={connection} need={need} canAct={canAct} /> : (
+              <>
+                <Text style={styles.chat} onPress={onOpen ? () => onOpen(need.chatId) : undefined} accessibilityRole={onOpen ? 'link' : undefined}>{need.chatTitle}</Text>
+                <QuestionCard connection={connection} itemId={need.itemId} questions={need.questions ?? []} canAct={canAct} />
+              </>
+            )}
+          </View>
+        ))}
+      </ScrollView>
+    </View>
   );
 }
-const styles = StyleSheet.create({
-  screen: {flex: 1, backgroundColor: colors.background},
-  content: {padding: space.l, gap: space.l},
-  entry: {gap: space.s},
-  chat: {color: colors.muted, fontSize: font.small, fontWeight: '600'},
-  muted: {color: colors.muted, fontSize: font.body},
-  error: {color: colors.danger},
-});
+const useStyles = themed(c => StyleSheet.create({
+  screen: {flex: 1, backgroundColor: c.background},
+  content: {padding: space.m},
+  entry: {gap: space.xs, paddingBottom: space.m},
+  chat: {color: c.accent, ...type.label, fontWeight: '600'},
+  muted: {color: c.muted, ...type.body, padding: space.l, textAlign: 'center'},
+  error: {color: c.danger, ...type.label, padding: space.l},
+}));

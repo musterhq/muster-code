@@ -25,16 +25,16 @@ export function fakeConnection(answers: Partial<Record<MobileMethod, unknown | (
 }
 
 /** Lays the chat's list out as a phone would (a 390 × 800 window): the virtualized list mounts rows only once measured. */
-export async function layOutTimeline(): Promise<void> {
+export async function layOutTimeline(testID = 'chat-timeline'): Promise<void> {
   const {act, fireEvent, screen} = require('@testing-library/react-native') as typeof import('@testing-library/react-native');
-  await act(async () => { fireEvent(screen.getByTestId('chat-timeline'), 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 390, height: 800}}}); });
+  await act(async () => { fireEvent(screen.getByTestId(testID), 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 390, height: 800}}}); });
   // The list reveals its rows a frame after it is measured.
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
 }
 /** Measures every row the list mounted (a device does this on its own), so the rows show and take presses. */
-export async function layOutRows(): Promise<void> {
+export async function layOutRows(testID = 'chat-timeline'): Promise<void> {
   const {act, fireEvent, screen} = require('@testing-library/react-native') as typeof import('@testing-library/react-native');
-  const list = screen.getByTestId('chat-timeline');
+  const list = screen.getByTestId(testID);
   const rows = list.queryAll(node => typeof node.type === 'string' && typeof node.props.onLayout === 'function' && node !== list);
   await act(async () => { for (const row of rows) fireEvent(row, 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 390, height: 56}}}); });
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
