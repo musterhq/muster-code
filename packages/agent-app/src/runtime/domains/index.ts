@@ -17,6 +17,7 @@ import { createMcpDomain } from './mcp.ts';
 import { createArtifactsDomain } from './artifacts.ts';
 import { createGoalsDomain } from './goals.ts';
 import { createMailboxDomain } from './mailbox.ts';
+import { createDelegationDomain } from './delegation.ts';
 import { createSandboxDomain } from './sandbox.ts';
 import { createImportDomain } from './import.ts';
 import { createGitHubDomain } from './github.ts';
@@ -38,7 +39,7 @@ import { createCompareDomain } from './compare.ts';
 import { createMobileDomain } from './mobile.ts';
 import { createRemoteDomain } from './remote.ts';
 
-export const DOMAIN_FACTORIES: Record<DomainName, DomainFactory> = {models: createModelsDomain, memory: createMemoryDomain, settings: createSettingsDomain, projects: createProjectsDomain, git: createGitDomain, subagents: createSubagentsDomain, review: createReviewDomain, automations: createAutomationsDomain, computer: createComputerDomain, providers: createProvidersDomain, extensions: createExtensionsDomain, files: createFilesDomain, search: createSearchDomain, mcp: createMcpDomain, artifacts: createArtifactsDomain, goals: createGoalsDomain, mailbox: createMailboxDomain, sandbox: createSandboxDomain, 'import': createImportDomain, stashes: createStashesDomain, github: createGitHubDomain, ci: createCiDomain, terminal: createTerminalDomain, setup: createSetupDomain, paperclip: createPaperclipDomain, musterServer: createMusterServerDomain, work: createWorkDomain, insight: createInsightDomain, backups: createBackupsDomain, org: createOrgDomain, envs: createEnvsDomain, checkout: createCheckoutDomain, office: createOfficeDomain, dictation: createDictationDomain, compare: createCompareDomain, mobile: createMobileDomain, remote: createRemoteDomain};
+export const DOMAIN_FACTORIES: Record<DomainName, DomainFactory> = {models: createModelsDomain, memory: createMemoryDomain, settings: createSettingsDomain, projects: createProjectsDomain, git: createGitDomain, subagents: createSubagentsDomain, review: createReviewDomain, automations: createAutomationsDomain, computer: createComputerDomain, providers: createProvidersDomain, extensions: createExtensionsDomain, files: createFilesDomain, search: createSearchDomain, mcp: createMcpDomain, artifacts: createArtifactsDomain, goals: createGoalsDomain, mailbox: createMailboxDomain, sandbox: createSandboxDomain, 'import': createImportDomain, stashes: createStashesDomain, github: createGitHubDomain, ci: createCiDomain, terminal: createTerminalDomain, setup: createSetupDomain, paperclip: createPaperclipDomain, musterServer: createMusterServerDomain, work: createWorkDomain, insight: createInsightDomain, backups: createBackupsDomain, org: createOrgDomain, envs: createEnvsDomain, checkout: createCheckoutDomain, office: createOfficeDomain, dictation: createDictationDomain, compare: createCompareDomain, mobile: createMobileDomain, delegation: createDelegationDomain, remote: createRemoteDomain};
 
 /** Builds every domain (plus `extra`, used by tests) and merges their handlers. A duplicate command name is a startup error. */
 export function createDomains(context: DomainContext, extra: readonly DomainFactory[] = []) {

@@ -27,12 +27,17 @@ const preview=(text:string,limit:number)=>{
 };
 /** User rows are the only turn anchors. Tool/reasoning output is never promoted
  * to assistant prose. Reuse summaries/array when streaming past preview limits. */
+/** #44: a child's report that woke the chat is labelled by what finished, not by the report's text. */
+function promptText(row:{text:string;data?:Record<string,unknown>}):string {
+  const data=row.data;
+  return data?.kind==='delegation-report'?`${String(data.title??'A started chat')} ${data.state==='failed'?'failed':'finished'}${typeof data.summary==='string'?` · ${data.summary}`:''}`:row.text;
+}
 export function summarizeTurns(rows:readonly TranscriptEntry[],previous:readonly TurnSummary[]=[]):readonly TurnSummary[] {
   const prior=new Map(previous.map(turn=>[turn.id,turn]));
   const turns:TurnSummary[]=[];let current:TurnSummary|undefined;
   for(let rowIndex=0;rowIndex<rows.length;rowIndex++){
     const row=rows[rowIndex];
-    if(row.kind==='user'){current={id:row.id,rowIndex,prompt:preview(row.text,150),response:''};turns.push(current);}
+    if(row.kind==='user'){current={id:row.id,rowIndex,prompt:preview(promptText(row),150),response:''};turns.push(current);}
     else if(current&&row.kind==='assistant'&&!current.response)current.response=preview(row.text,240);
   }
   for(let i=0;i<turns.length;i++){
@@ -72,7 +77,7 @@ export function createTimelineProjection(){
       } else rows.push(item);
       if(item.kind==='user'||item.kind==='assistant'){
         let text=snippets.get(item);
-        if(text===undefined){text=preview(item.text,item.kind==='user'?150:240);snippets.set(item,text);}
+        if(text===undefined){text=preview(item.kind==='user'?promptText(item):item.text,item.kind==='user'?150:240);snippets.set(item,text);}
         if(item.kind==='user'){finish();current={id:item.id,rowIndex,prompt:text,response:''};}
         else if(current&&!current.response)current.response=text;
       }
