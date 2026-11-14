@@ -256,7 +256,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/browser-passwords-843.test.ts::a value is typed only into the field focused for it; focus moved by the page stops the fill`
 - Environment: Node test runner; real headless Chrome running the real fill scripts; the page's focus move is made between the focus step and the typed text; fake `op` script.
 - Known gaps: The guard runs in the top frame, so focus moved into a cross-origin iframe in the instant between the last check and the typed text is detected afterwards (the fill fails) but cannot stop that one value from reaching the iframe. A username typed before the page changed stays typed.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/857/green-843G.log; exit 0; 1 passed, 0 failed, 0 skipped; commit e92f8884a0e9e0d8c82527bb201322ebcd691ac6
 
 <a id="mus-spec-09-843f"></a>
 #### MUS-SPEC-09-843F: The key button fills a chosen login
