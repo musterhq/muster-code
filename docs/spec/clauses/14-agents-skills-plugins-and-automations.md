@@ -987,4 +987,4 @@ An agent can hand a task to a child chat on any provider and model the user has 
 - Test: `packages/agent-app/tests/delegation-44.test.ts::the delegation tool server does not keep a Full access router chat off its Claude route; that route drops it`
 - Environment: Node test runner; the real route decision (claudeLaneAllowed) and dropped-server list.
 - Known gaps: On the Messages route the agent cannot delegate in that turn. The Claude Code route keeps the delegation server.
-- Evidence: UNVERIFIED
+- Evidence: local; ~/.muster-work/review/44/green-44O.log; exit 0; 1 passed, 0 failed, 0 skipped; commit e66fd09cf6a78c513681f160f4c0069d0c4e19b7
