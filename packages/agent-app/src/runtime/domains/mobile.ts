@@ -19,7 +19,7 @@ import {randomUUID} from 'node:crypto';
 import {chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
 import {homedir, hostname, networkInterfaces} from 'node:os';
 import {join} from 'node:path';
-import type {AgentEvent, Snapshot} from '../../shared/protocol.ts';
+import type {AgentEvent, Snapshot, TimelineItem} from '../../shared/protocol.ts';
 import type {MobileDeviceView, MobileStatus} from '../../shared/domains/mobile-protocol.ts';
 import {equalBytes, fromBase64, fromUtf8, toBase64, utf8} from '../../shared/mobile/bytes.ts';
 import {checkCodeOf, keyFingerprint, MAX_PHONE_FRAME_BYTES, prologue, SecureChannel, MODE_BYTE, type ChannelMode} from '../../shared/mobile/channel.ts';
@@ -27,7 +27,7 @@ import {Handshake, type KeyPair} from '../../shared/mobile/noise.ts';
 import {CLOSE, formatPairingLink, parsePairingLink, MOBILE_ACCESS, MOBILE_PROTOCOL_VERSION, MobileError, RELAY_NEEDS_TLS, relayUrlAllowed, type MobileAccess, type MobileEvent, type MobileFrame, type MobileItem, type PairRequest, type Welcome} from '../../shared/mobile/protocol.ts';
 import {device} from '../../shared/device-noun.ts';
 import {activeSecretStore, openSecretStores, type SecretStore} from '../secret-store.ts';
-import {handle, mobileChats, mobileItem, needsList, pathScrubber, type PathScrub} from '../mobile/bridge.ts';
+import {handle, mobileChats, MobileItemMapper, needsList, pathScrubber, type PathScrub} from '../mobile/bridge.ts';
 import {itemOps} from '../../shared/mobile/stream.ts';
 import {generateRouteKey, nodeNoiseCrypto, signWithRouteKey, type RouteKey} from '../mobile/node-crypto.ts';
 import {RelayLink} from '../mobile/relay-link.ts';
@@ -42,7 +42,9 @@ export const mobileSeams: {secrets?: () => SecretStore | undefined; pairingTtlMs
   /** A lower cap on one phone's requests in flight, and a gate every request waits at (to hold them in flight). */
   maxRequestsInFlight?: number; requestGate?: Promise<void>;
   /** Awaited after upload.finish checked a file and before it is staged. */
-  stageGate?: () => Promise<void>} = {};
+  stageGate?: () => Promise<void>;
+  /** Told how many characters the path scrubber reads (phase 4 cost receipts). */
+  onScrub?: (chars: number) => void} = {};
 /** Requests one phone may have in flight at once, over all its sessions; more are refused at once (phase 3). */
 export const MAX_REQUESTS_IN_FLIGHT = 16;
 /** How often the LAN listener follows the computer's addresses (a laptop changes networks). */
@@ -71,7 +73,7 @@ interface Session {
   sentChats: string; sentNeeds: string; queue: Promise<void>;
   /** Phase 3 delta stream of the watched chat: what the phone has of each item (null until chat.open read it; changes made
    *  meanwhile wait in `pending`) and the last delta's number. */
-  stream: {chatId: string; seq: number; sent: Map<string, MobileItem> | null; pending: MobileItem[][]} | null;
+  stream: {chatId: string; seq: number; sent: Map<string, MobileItem> | null; pending: Array<[MobileItem[], Set<string> | null]>} | null;
   timer: ReturnType<typeof setTimeout> | undefined;
 }
 interface Identity { keys: KeyPair; route: RouteKey }
@@ -123,15 +125,25 @@ export function createMobileDomain(context: DomainContext): DomainModule {
   const name = desktopName();
   /** Requests in flight per phone. */
   const inFlight = new Map<string, number>();
-  /** Takes absolute paths out of what phones see, for the computer's current folders (rebuilt when they change). */
+  /** Takes absolute paths out of what phones see, for the computer's current folders. Rebuilt when a snapshot shows the
+   *  folders changed (not read per row: a snapshot per row was most of the phone link's cost while streaming). */
   let scrubbing: {key: string; scrub: PathScrub} | null = null;
-  const scrub: PathScrub = text => {
-    const folders = context.store.snapshot().folders.map(folder => ({path: folder.path, name: folder.name}));
-    const key = JSON.stringify(folders);
-    if (scrubbing?.key !== key) scrubbing = {key, scrub: pathScrubber(folders, homedir())};
-    return scrubbing.scrub(text);
+  let mapper: MobileItemMapper | null = null;
+  const scrubberFor = (folders: ReadonlyArray<{path: string; name: string}>): PathScrub => {
+    const key = JSON.stringify(folders.map(folder => [folder.path, folder.name]));
+    if (scrubbing?.key !== key) {
+      const inner = pathScrubber(folders, homedir());
+      const counted: PathScrub = text => { mobileSeams.onScrub?.(text.length); return inner(text); };
+      counted.reach = inner.reach;
+      scrubbing = {key, scrub: counted};
+      mapper?.forget();
+    }
+    return scrubbing.scrub;
   };
-
+  const scrub: PathScrub = text => (scrubbing?.scrub ?? scrubberFor(context.store.snapshot().folders))(text);
+  const currentScrub = (): PathScrub => scrubbing?.scrub ?? scrubberFor(context.store.snapshot().folders);
+  /** Rows mapped once per version, shared by every session (phase 4). */
+  mapper = new MobileItemMapper(currentScrub);
   const secrets = (): SecretStore | undefined => mobileSeams.secrets ? mobileSeams.secrets() : openSecretStores().findLast(store => store.secureStorage()) ?? activeSecretStore();
   const secure = () => Boolean(secrets()?.secureStorage());
   const changed = () => { if (!disposed) context.emit({type: 'mobileChanged'}); };
@@ -366,6 +378,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       desktopName: name, deviceId: session.deviceId ?? '',
       lan: () => lan?.addresses ?? [],
       scrub,
+      map: (item: TimelineItem) => mapper!.map(item),
       ...(mobileSeams.stageGate ? {beforeStage: mobileSeams.stageGate} : {}),
       watch: (chatId: string | null, deltas?: boolean) => { session.watching = chatId; session.stream = chatId && deltas ? {chatId, seq: 0, sent: null, pending: []} : null; },
       streamFrom: (chatId: string, items: MobileItem[]): number => {
@@ -374,7 +387,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
         stream.sent = new Map(items.map(item => [item.id, item]));
         const base = stream.seq, waiting = stream.pending;
         stream.pending = [];
-        for (const batch of waiting) streamTo(session, batch);
+        for (const [batch, present] of waiting) streamTo(session, batch, present);
         return base;
       },
       ...(session.deviceId ? {uploads: uploadsFor(session.deviceId)} : {}),
@@ -390,27 +403,34 @@ export function createMobileDomain(context: DomainContext): DomainModule {
     const live = ready();
     if (!live.length) return;
     if (event.type === 'snapshot') {
+      scrubberFor(event.snapshot.folders);
       const chats = mobileChats(event.snapshot), json = JSON.stringify(chats);
       for (const session of live) if (session.sentChats !== json) { session.sentChats = json; sendEvent(session, {type: 'chats', chats}); }
       const attention = JSON.stringify(event.snapshot.attention ?? null);
       if (attention !== lastAttention) { lastAttention = attention; scheduleNeeds(event.snapshot); }
     } else if (event.type === 'timelinePatch' || event.type === 'timeline') {
+      const watching = live.filter(session => session.watching === event.chatId);
+      // Nobody has this chat open: nothing to map (phase 4).
+      if (!watching.length) return;
       const items = event.type === 'timeline' ? event.items : event.patch.items;
       const revision = event.type === 'timelinePatch' ? event.patch.revision : 0;
-      const mapped = items.slice(-200).map(item => mobileItem(item, scrub));
-      for (const session of live) {
-        if (session.watching !== event.chatId) continue;
-        if (session.stream?.chatId === event.chatId) streamTo(session, mapped);
+      const mapped = items.slice(-200).map(item => mapper!.map(item));
+      // A whole timeline (after Edit › Replace or Restore) can drop rows: the phone is told to remove them.
+      const present = event.type === 'timeline' ? new Set(items.map(item => item.id)) : null;
+      for (const session of watching) {
+        if (session.stream?.chatId === event.chatId) streamTo(session, mapped, present);
         else sendEvent(session, {type: 'items', chatId: event.chatId, items: mapped, revision});
       }
     }
   }
   /** Sends only what changed since the phone last heard about these items, as the next numbered delta. */
-  function streamTo(session: Session, items: MobileItem[]) {
+  function streamTo(session: Session, items: MobileItem[], present: Set<string> | null = null) {
     const stream = session.stream;
     if (!stream) return;
-    if (!stream.sent) { stream.pending.push(items); return; }
-    const ops = itemOps(stream.sent, items);
+    if (!stream.sent) { stream.pending.push([items, present]); return; }
+    const removed = present ? [...stream.sent.keys()].filter(id => !present.has(id)) : [];
+    for (const id of removed) stream.sent.delete(id);
+    const ops = [...removed.map(id => ({remove: id})), ...itemOps(stream.sent, items)];
     if (ops.length) sendEvent(session, {type: 'delta', chatId: stream.chatId, seq: ++stream.seq, ops});
   }
   /** Every attention change is sent, in order (they are rare: a request appears or is answered), so the phone's feed never

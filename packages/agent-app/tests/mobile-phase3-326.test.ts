@@ -265,6 +265,9 @@ test('a streaming reply is mapped once per change for every phone watching, and 
   await d.service.invoke('chat.send', {id: watched.id, text: 'stream', requestId: 'p4-a'});
   await done(watched.id);
   await until(() => sessions.every(({events, opened}) => rebuild(opened, deltasOf(events, watched.id)).find(item => item.kind === 'assistant')?.text === reply), 'every session rebuilt the reply');
+  // The finished turn's last rows (its status) are part of the watched chat's cost too.
+  await until(() => sessions[0]!.events.some(event => event.type === 'chats' && event.chats.some(entry => entry.id === watched.id && entry.status === 'completed')), 'watched turn completed');
+  await delay(200);
   const watchedScrub = scrubbed;
   assert.ok(watchedScrub >= reply.length, `the watched reply was scrubbed (${watchedScrub})`);
   assert.ok(watchedScrub < reply.length * 3, `scrubbed ${watchedScrub} characters for a ${reply.length}-character reply`);

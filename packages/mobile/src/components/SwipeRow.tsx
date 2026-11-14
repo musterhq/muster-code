@@ -1,6 +1,8 @@
 /** A row that answers with a swipe: right past the threshold runs `onRight`, left runs `onLeft`, with a selection haptic as
- *  the threshold is crossed. The row follows the finger on the UI thread and springs back with the shared motion spring. */
-import {useRef, type ReactNode} from 'react';
+ *  the threshold is crossed. The gesture callbacks are worklets (#326 phase 4): the row follows the finger and springs back
+ *  on the UI thread, and only the haptic and the answer cross to JavaScript. */
+import {type ReactNode} from 'react';
+import {scheduleOnRN} from 'react-native-worklets';
 import {StyleSheet, Text, View} from 'react-native';
 import {GestureDetector, usePanGesture} from 'react-native-gesture-handler';
 import Animated, {useAnimatedStyle, useSharedValue, withSpring} from 'react-native-reanimated';
@@ -13,19 +15,21 @@ export const SWIPE_THRESHOLD = 96;
 export function SwipeRow({testID, children, rightLabel, leftLabel, onRight, onLeft}: {testID: string; children: ReactNode; rightLabel: string; leftLabel: string; onRight(): void; onLeft(): void}) {
   const styles = useStyles();
   const x = useSharedValue(0);
-  const crossed = useRef(0);
+  const crossed = useSharedValue(0);
   const pan = usePanGesture({
-    testID, runOnJS: true, activeOffsetX: [-12, 12], failOffsetY: [-12, 12],
+    testID, activeOffsetX: [-12, 12], failOffsetY: [-12, 12],
     onUpdate: event => {
+      'worklet';
       x.value = event.translationX;
       const side = event.translationX > SWIPE_THRESHOLD ? 1 : event.translationX < -SWIPE_THRESHOLD ? -1 : 0;
-      if (side !== crossed.current) { crossed.current = side; if (side) haptics.select(); }
+      if (side !== crossed.value) { crossed.value = side; if (side) scheduleOnRN(haptics.select); }
     },
     onDeactivate: event => {
+      'worklet';
       x.value = withSpring(0, spring);
-      crossed.current = 0;
-      if (event.translationX > SWIPE_THRESHOLD) onRight();
-      else if (event.translationX < -SWIPE_THRESHOLD) onLeft();
+      crossed.value = 0;
+      if (event.translationX > SWIPE_THRESHOLD) scheduleOnRN(onRight);
+      else if (event.translationX < -SWIPE_THRESHOLD) scheduleOnRN(onLeft);
     },
   });
   const moving = useAnimatedStyle(() => ({transform: [{translateX: x.value}]}));

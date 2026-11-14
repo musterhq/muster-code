@@ -44,7 +44,7 @@ export function useChat(connection: MobileConnection, chatId: string) {
       if (delta.seq !== seq + 1 || !store.apply(delta.ops)) { open(); return; }
       seq = delta.seq;
       persist();
-      if (delta.ops.some(op => !('item' in op) && op.append && !opened.has(op.id))) haptics.streamTick();
+      if (delta.ops.some(op => 'id' in op && op.append && !opened.has(op.id))) haptics.streamTick();
     };
     const open = () => {
       seq = null; waiting = [];

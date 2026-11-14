@@ -10,6 +10,8 @@ import type {PhoneUploads} from './uploads.ts';
 
 const MAX_ITEM_TEXT = 64 * 1024;
 const OPEN_ITEMS = 200;
+/** Rows the mapper remembers before it starts over (a few open chats' worth). */
+const MAX_MAPPED_ROWS = 2000;
 const MAX_MESSAGE = 100_000;
 const ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 
@@ -28,12 +30,18 @@ export function mobileChats(snapshot: Snapshot): MobileChat[] {
   }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-const cap = (text: string) => text.length > MAX_ITEM_TEXT ? `${text.slice(0, MAX_ITEM_TEXT)}\n[truncated]` : text;
+/** A text over the phone's cap keeps its first MAX_ITEM_TEXT characters and this note. It stays the same as the text grows, so
+ *  a reply streaming past the cap costs nothing more and never resends the whole item. */
+export const truncatedNote = (): string => `\n\n[The rest of this message is too long for the phone. Read it in Muster on ${device().your}.]`;
+const cap = (text: string) => text.length > MAX_ITEM_TEXT ? `${text.slice(0, MAX_ITEM_TEXT)}${truncatedNote()}` : text;
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** Takes absolute paths out of text for the phone (DESIGN §8.2): a path inside one of the computer's folders becomes relative
  *  to it, the folder itself its name, and anything else under a home directory starts with ~. Paths that name no person
  *  (/etc/hosts) stay. */
-export type PathScrub = (text: string) => string;
+export type PathScrub = ((text: string) => string) & {
+  /** How far before a cut a path that crosses it can start: the longest literal path plus its lookahead. */
+  reach?: number;
+};
 export function pathScrubber(folders: ReadonlyArray<{path: string; name: string}>, home: string): PathScrub {
   const roots = folders.filter(folder => folder.path && folder.path.length > 1).map(folder => ({path: folder.path.replace(/[\\/]+$/, ''), name: folder.name || baseName(folder.path)}))
     .sort((a, b) => b.path.length - a.path.length);
@@ -46,12 +54,50 @@ export function pathScrubber(folders: ReadonlyArray<{path: string; name: string}
   for (const entry of homes) rules.push([new RegExp(`${escape(entry)}(?=[\\\\/]|${end.slice(3)}`, 'g'), '~']);
   // Other people's home directories, and this one written another way.
   rules.push([/(?:\/Users|\/home)\/[^\s/\\'"`]+(?=\/|\s|$)/g, '~'], [/[A-Za-z]:\\Users\\[^\s\\'"`]+(?=\\|\s|$)/g, '~']);
-  return text => {
+  const scrub: PathScrub = text => {
     if (!text || (!text.includes('/') && !text.includes('\\'))) return text;
     let out = text;
     for (const [pattern, to] of rules) out = out.replace(pattern, to);
     return out;
   };
+  scrub.reach = Math.max(home.length, ...roots.map(root => root.path.length)) + 4;
+  return scrub;
+}
+
+/** A place to cut `text` (at or after `from`) such that scrubbing the two parts apart gives what scrubbing it whole does:
+ *  no slash within `reach` before the cut (no literal path can cross it, lookahead included), and none since the last
+ *  whitespace before it (a home path, which stops at whitespace, can't either). Returns `from` when there is none yet. */
+function safeCut(text: string, from: number, reach: number): number {
+  const cut = text.length - reach - 2;
+  if (cut <= from) return from;
+  const slash = Math.max(text.lastIndexOf('/', cut - 1), text.lastIndexOf('\\', cut - 1));
+  if (slash < 0) return cut;
+  const space = text.slice(0, cut).search(/\s\S*$/);
+  return slash < Math.min(cut - reach, space) ? cut : from;
+}
+
+/**
+ * Maps the runtime's rows to the phone's, once per row version (#326 phase 4). A row whose text and status did not change
+ * gives the same object; a reply that grew scrubs only its new end (the part before a safe cut is kept scrubbed), so a
+ * streaming reply costs about its own length in total, not its length per token, whoever is watching it.
+ */
+export class MobileItemMapper {
+  private readonly rows = new Map<string, {text: string; status: string | undefined; cut: number; head: string; out: MobileItem}>();
+  constructor(private readonly scrub: () => PathScrub) {}
+  map(item: TimelineItem): MobileItem {
+    const scrub = this.scrub(), before = this.rows.get(item.id), text = item.text ?? '';
+    if (before && before.text === text && before.status === item.status && item.kind !== 'approval' && item.kind !== 'question') return before.out;
+    let cut = 0, head = '';
+    if (before && text.length >= before.cut && text.startsWith(before.text.slice(0, before.cut))) { cut = before.cut; head = before.head; }
+    const next = safeCut(text, cut, scrub.reach ?? 256);
+    if (next > cut) { head += scrub(text.slice(cut, next)); cut = next; }
+    if (this.rows.size >= MAX_MAPPED_ROWS) this.rows.clear();
+    const out = mobileItem({...item, text: head + scrub(text.slice(cut))});
+    this.rows.set(item.id, {text, status: item.status, cut, head, out});
+    return out;
+  }
+  /** Forget a chat's rows (nobody watches it) or every row (the folders changed, so scrubbing changes). */
+  forget(ids?: Iterable<string>): void { if (!ids) { this.rows.clear(); return; } for (const id of ids) this.rows.delete(id); }
 }
 const baseName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
 /** The phone gets names, never full paths (DESIGN §8.2): the folder's name, and files relative to it (else their base name). */
@@ -114,6 +160,8 @@ export interface BridgeContext {
   lan?(): string[];
   /** Takes absolute paths out of row text (phase 3). */
   scrub?: PathScrub;
+  /** Maps rows once per version (phase 4); chat.open uses it so the stream starts from the same objects. */
+  map?(item: TimelineItem): MobileItem;
   /** Test seam: awaited after upload.finish checked the file and before it is staged. */
   beforeStage?(): Promise<void>;
 }
@@ -181,7 +229,7 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
         // Watching starts before the read, so a change made while it runs is kept and sent after it, never lost.
         ctx.watch(chatId, deltas);
         const timeline = await ctx.invoke('chat.timeline', {id: chatId});
-        const items = timeline.items.slice(-OPEN_ITEMS).map(item => mobileItem(item, ctx.scrub));
+        const items = timeline.items.slice(-OPEN_ITEMS).map(item => ctx.map ? ctx.map(item) : mobileItem(item, ctx.scrub));
         const seq = deltas ? ctx.streamFrom!(chatId, items) : undefined;
         const chat = mobileChats(await ctx.snapshot()).find(entry => entry.id === chatId)!;
         return {chat, items, revision: timeline.revision, ...(seq === undefined ? {} : {seq})} satisfies MobileMethods['chat.open']['result'];
