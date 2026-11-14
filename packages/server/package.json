@@ -19,7 +19,7 @@
     "package": "node scripts/package.mjs"
   },
   "devDependencies": {
-    "@types/node": "26.6.5",
+    "@types/node": "26.6.6",
     "esbuild": "0.28.2",
     "tsc-rs": "0.8.0",
     "typescript": "7.0.2"
