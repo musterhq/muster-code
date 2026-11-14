@@ -39,6 +39,8 @@ import {AppUpdater,bundlePathOf,detectInstallMethod,plistString} from './app-upd
 import {createUpdateGate,type UpdateGate} from './update-gate.ts';
 import type {UpdateStatus} from '../shared/update-protocol.ts';
 import {unpackedPath} from '../runtime/unpacked-path.ts';
+import {findBinary} from '../runtime/adapters/shared.ts';
+import {createBrowserPasswords} from './browser-passwords.ts';
 import {resolveUpdateChannel} from './update-channel.ts';
 import { createQuitCoordinator, quitChoice, quitPrompt, withinDeadline } from './quit-coordinator.ts';
 import { loadAgentService, type AgentService } from './service-loader.ts';
@@ -365,7 +367,14 @@ async function main(): Promise<void> {
   const nativePreview = new NativePreviewController(window);
   // BRW-06: tab history (auth-bearing URLs, page state) survives restarts only as safeStorage ciphertext. electronSecretBox refuses
   // Linux's hard-coded-key backends (basic_text/unknown), so there tab history is simply not persisted (nothing is written).
-  const browserWorkspace = new BrowserWorkspaceController(window, onEvent, undefined, {vault: new BrowserSessionVault(path.join(app.getPath('userData'), 'browser-sessions.json'), electronSecretBox)});
+  // #843: the key menu fills logins from the person's own 1Password through its `op` CLI (looked up again after a minute).
+  let onePasswordCli: {at: number; path: string | undefined} | undefined;
+  const browserPasswords = createBrowserPasswords({onePassword: () => {
+    if (process.platform === 'win32') return undefined;
+    if (!onePasswordCli || Date.now() - onePasswordCli.at > 60_000) onePasswordCli = {at: Date.now(), path: findBinary('op', process.env, app.getPath('home'), ['/opt/homebrew/bin/op', '/usr/local/bin/op'])};
+    return onePasswordCli.path;
+  }});
+  const browserWorkspace = new BrowserWorkspaceController(window, onEvent, undefined, {vault: new BrowserSessionVault(path.join(app.getPath('userData'), 'browser-sessions.json'), electronSecretBox), passwords: browserPasswords});
   window.on('close', () => browserWorkspace.persistSessions());
   const pluginUi = new PluginUiRegistry();
   if (!protocol.isProtocolHandled(PLUGIN_SCHEME)) protocol.handle(PLUGIN_SCHEME, async request => {
@@ -742,6 +751,8 @@ async function main(): Promise<void> {
       case 'browser.cancelPick': return browserWorkspace.cancelPick((input as Commands['browser.cancelPick']['input'])?.owner);
       case 'browser.clearData': return browserWorkspace.clearData((input as Commands['browser.clearData']['input'])?.profileId);
       case 'browser.closePopup': return browserWorkspace.closePopup((input as Commands['browser.closePopup']['input'])?.owner);
+      case 'browser.passwords': return browserWorkspace.passwordLogins((input as Commands['browser.passwords']['input'])?.owner);
+      case 'browser.fillLogin': return browserWorkspace.fillLogin(input as Commands['browser.fillLogin']['input']);
       case 'browser.download': {
         const request=input as Commands['browser.download']['input'];
         if(request?.action==='reveal')shell.showItemInFolder(browserWorkspace.downloadPath(request.owner,request.id));
