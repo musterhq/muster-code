@@ -10,9 +10,10 @@ import type {FrameSpec} from './device-frames.ts';
 export type DevicePlatform = 'ios' | 'android';
 /** Body shape for the frame and the 3D model; derived from the simulator type or the AVD profile. */
 export type DeviceFormFactor = 'phone' | 'tablet' | 'foldable';
-export type DeviceState = 'booted' | 'shutdown' | 'booting' | 'shutting-down';
+/** `unauthorized`: a USB phone that has not allowed USB debugging from this computer yet (see `fix`). */
+export type DeviceState = 'booted' | 'shutdown' | 'booting' | 'shutting-down' | 'unauthorized';
 export interface DeviceInfo {
-  /** iOS: simulator UDID. Android: emulator serial once running (emulator-5554), else `avd:<name>`. */
+  /** iOS: simulator UDID. Android: emulator serial once running (emulator-5554), else `avd:<name>`; a USB phone's adb serial. */
   id: string;
   name: string;
   platform: DevicePlatform;
@@ -22,6 +23,10 @@ export interface DeviceInfo {
   formFactor: DeviceFormFactor;
   /** How the device looks (flat and 3D), from its simctl device type or AVD profile (shared/device-frames.ts). */
   frame?: FrameSpec;
+  /** A real phone over USB (or Wi-Fi debugging): Muster never boots, shuts down or rotates it. */
+  physical?: boolean;
+  /** What the user does to make it usable (an unauthorized phone). */
+  fix?: string;
 }
 export interface PlatformCheck {
   available: boolean;
@@ -90,6 +95,8 @@ export interface DeviceSession {
   platform: DevicePlatform;
   formFactor: DeviceFormFactor;
   frame?: FrameSpec;
+  /** A real phone (see DeviceInfo.physical). */
+  physical?: boolean;
   /** The chat whose agent opened it; absent for a session the user opened. */
   chatId?: string;
   openedBy: 'user' | 'agent';
@@ -142,12 +149,15 @@ export interface DeviceCommands {
   /** A realistic 3D model: the cached conversion, or the verified apple.com download for the renderer to convert. */
   'devices.model': { input: { id: 'iphone' | 'ipad' }; output: { id: string; bodyNode: string; screenNode: string; glb?: Uint8Array; usdz?: Uint8Array } };
   'devices.modelStore': { input: { id: 'iphone' | 'ipad'; glb: Uint8Array }; output: void };
+  /** Asks for an .apk file (the main process's own file chooser; no path comes from the renderer) and runs
+   *  `adb install -r` on that Android device. Null when the chooser was cancelled. */
+  'devices.installApk': { input: { id: string }; output: { installed: true } | null };
 }
 export type DeviceEvent =
   | { type: 'deviceSetup'; setup: DeviceSetup }
   | { type: 'deviceList'; list: DeviceList }
   | { type: 'deviceSessions'; sessions: DeviceSession[] };
-export const DEVICE_COMMANDS = {'devices.setup': true, 'devices.configure': true, 'devices.installHelper': true, 'devices.list': true, 'devices.boot': true, 'devices.shutdown': true, 'devices.open': true, 'devices.close': true, 'devices.sessions': true, 'devices.view': true, 'devices.button': true, 'devices.rotate': true, 'devices.screenshot': true, 'devices.control': true, 'devices.streamFallback': true, 'devices.chrome': true, 'devices.model': true, 'devices.modelStore': true} as const satisfies Record<keyof DeviceCommands, true>;
+export const DEVICE_COMMANDS = {'devices.setup': true, 'devices.configure': true, 'devices.installHelper': true, 'devices.list': true, 'devices.boot': true, 'devices.shutdown': true, 'devices.open': true, 'devices.close': true, 'devices.sessions': true, 'devices.view': true, 'devices.button': true, 'devices.rotate': true, 'devices.screenshot': true, 'devices.control': true, 'devices.streamFallback': true, 'devices.chrome': true, 'devices.model': true, 'devices.modelStore': true, 'devices.installApk': true} as const satisfies Record<keyof DeviceCommands, true>;
 
 /** IPC: main → renderer frames, renderer → main frame acknowledgements (flow control) and input. */
 export const DEVICE_FRAME_CHANNEL = 'muster:device-frame';

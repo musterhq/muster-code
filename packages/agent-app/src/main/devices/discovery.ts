@@ -1,5 +1,5 @@
 /**
- * Device discovery and platform checks (#363). Read-only: `xcrun simctl list`, `adb devices`, `emulator -list-avds`
+ * Device discovery and platform checks (#363). Read-only: `xcrun simctl list`, `adb devices -l`, `emulator -list-avds`
  * and version probes. Nothing here boots, installs or changes anything, so Settings can show what is available before
  * the user turns devices on. Every external program is reached through an injected runner so tests drive the parsers.
  */
@@ -78,21 +78,50 @@ export function androidSdkRoot(env: NodeJS.ProcessEnv, home: string, platform: N
   return path.join(home, 'Android', 'Sdk');
 }
 export interface AndroidTools {sdk: string; adb: string; emulator: string}
-export function androidTools(deps: Pick<ProbeDeps, 'env' | 'home' | 'platform'>): AndroidTools {
+/** Where adb lives when there is no SDK copy: PATH, then the usual package-manager folders (an app started from the Dock
+ *  does not get the shell's PATH; Homebrew installs adb at /opt/homebrew/bin). */
+const ADB_FOLDERS: Partial<Record<NodeJS.Platform, string[]>> = {darwin: ['/opt/homebrew/bin', '/usr/local/bin'], linux: ['/usr/bin', '/usr/local/bin']};
+/** The SDK's own adb and emulator; with no SDK adb, the first adb on PATH or in a package-manager folder. The emulator is
+ *  only ever the SDK's. */
+export function androidTools(deps: Pick<ProbeDeps, 'env' | 'home' | 'platform'> & Partial<Pick<ProbeDeps, 'exists'>>): AndroidTools {
   const sdk = androidSdkRoot(deps.env, deps.home, deps.platform), exe = deps.platform === 'win32' ? '.exe' : '';
-  return {sdk, adb: path.join(sdk, 'platform-tools', `adb${exe}`), emulator: path.join(sdk, 'emulator', `emulator${exe}`)};
+  let adb = path.join(sdk, 'platform-tools', `adb${exe}`);
+  if (deps.exists && !deps.exists(adb)) {
+    const pathVar = deps.env.PATH ?? deps.env.Path ?? '';
+    const folders = [...pathVar.split(deps.platform === 'win32' ? ';' : ':').filter(dir => dir && path.isAbsolute(dir)), ...(ADB_FOLDERS[deps.platform] ?? [])];
+    const found = folders.map(dir => path.join(dir, `adb${exe}`)).find(file => deps.exists!(file));
+    if (found) adb = found;
+  }
+  return {sdk, adb, emulator: path.join(sdk, 'emulator', `emulator${exe}`)};
 }
 export async function checkAndroid(deps: ProbeDeps): Promise<PlatformCheck> {
   const tools = androidTools(deps);
-  const fix = ['Install Android Studio from developer.android.com/studio.', 'In Android Studio open Settings › Languages & Frameworks › Android SDK and install the Android Emulator and Android SDK Platform-Tools.', 'Create a virtual device in Device Manager.', 'If the SDK is somewhere else, set ANDROID_HOME to its folder and restart Muster.'];
-  if (!deps.exists(tools.sdk)) return {available: false, reason: 'Android SDK not found.', fix, detail: `Looked in ${tools.sdk}`};
-  if (!deps.exists(tools.emulator)) return {available: false, reason: 'The Android Emulator is not installed in the SDK.', fix: fix.slice(1), detail: tools.sdk};
-  if (!deps.exists(tools.adb)) return {available: false, reason: 'Android SDK Platform-Tools (adb) are not installed.', fix: fix.slice(1, 2), detail: tools.sdk};
-  return {available: true, detail: `Android SDK at ${tools.sdk.replace(deps.home, '~')}`};
+  const fix = ['Install Android Studio from developer.android.com/studio.', 'In Android Studio open Settings › Languages & Frameworks › Android SDK and install the Android Emulator and Android SDK Platform-Tools.', 'Create a virtual device in Device Manager.', 'If the SDK is somewhere else, set ANDROID_HOME to its folder and restart Muster.', 'For a phone over USB only, adb is enough (on a Mac: brew install android-platform-tools).'];
+  const sdk = deps.exists(tools.sdk), adb = deps.exists(tools.adb), emulator = sdk && deps.exists(tools.emulator);
+  const where = (file: string) => file.replace(deps.home, '~');
+  if (!sdk && !adb) return {available: false, reason: 'Android SDK not found.', fix, detail: `Looked in ${tools.sdk}`};
+  // USB phones need only adb; emulators need the SDK.
+  if (!sdk) return {available: true, detail: `adb at ${where(tools.adb)}: phones over USB only; emulators need the Android SDK`};
+  if (!emulator && !adb) return {available: false, reason: 'The Android Emulator is not installed in the SDK.', fix: fix.slice(1, 4), detail: tools.sdk};
+  if (!adb) return {available: false, reason: 'Android SDK Platform-Tools (adb) are not installed.', fix: fix.slice(1, 2), detail: tools.sdk};
+  if (!emulator) return {available: true, detail: `Android SDK at ${where(tools.sdk)} without the Android Emulator: phones over USB only`};
+  return {available: true, detail: `Android SDK at ${where(tools.sdk)}`};
 }
-/** `adb devices`: running emulators only (physical phones are out of scope). */
+export interface AdbEntry {serial: string; state: string; model?: string; emulator: boolean}
+/** `adb devices -l`: every device adb sees, with its state and the model it reports. */
+export function parseAdbDeviceList(stdout: string): AdbEntry[] {
+  const out: AdbEntry[] = [];
+  for (const raw of stdout.split(/\r?\n/)) {
+    const m = /^([A-Za-z0-9._:-]{1,128})\s+(device|unauthorized|offline|authorizing|no permissions|recovery|sideload|bootloader)\b(.*)$/.exec(raw.trim());
+    if (!m || m[1]!.startsWith('-')) continue;
+    const model = /\bmodel:([A-Za-z0-9._-]{1,80})/.exec(m[3]!)?.[1];
+    out.push({serial: m[1]!, state: m[2]!, ...(model ? {model} : {}), emulator: /^emulator-\d+$/.test(m[1]!)});
+  }
+  return out;
+}
+/** `adb devices`: running emulators only. */
 export function parseAdbDevices(stdout: string): {serial: string; state: string}[] {
-  return stdout.split(/\r?\n/).map(line => /^(emulator-\d+)\s+(\S+)/.exec(line.trim())).filter((m): m is RegExpExecArray => !!m).map(m => ({serial: m[1]!, state: m[2]!}));
+  return parseAdbDeviceList(stdout).filter(entry => entry.emulator).map(({serial, state}) => ({serial, state}));
 }
 export const parseAvdList = (stdout: string): string[] => stdout.split(/\r?\n/).map(line => line.trim()).filter(line => /^[A-Za-z0-9._-]+$/.test(line));
 export function androidFormFactor(name: string): DeviceFormFactor {
@@ -113,30 +142,52 @@ export function readAvdConfig(deps: Pick<ProbeDeps, 'env' | 'home' | 'readText'>
   return {...parseIni(deps.readText(path.join(dir, 'config.ini')) ?? ''), ...parseIni(deps.readText(path.join(dir, 'hardware-qemu.ini')) ?? '')};
 }
 const formOf = (frame: FrameSpec, name: string) => frame.form === 'foldable' ? 'foldable' as const : frame.form === 'tablet' ? 'tablet' as const : frame.form === 'phone' ? 'phone' as const : androidFormFactor(name);
+/** The cut-out Android itself reports (a generic device's only source for it). */
+async function reportedCutout(deps: ProbeDeps, adb: string, serial: string) {
+  const [displays, size] = await Promise.all([
+    deps.run(adb, ['-s', serial, 'shell', 'dumpsys', 'window', 'displays'], {timeoutMs: 5000}).catch(() => ''),
+    deps.run(adb, ['-s', serial, 'shell', 'wm', 'size'], {timeoutMs: 5000}).catch(() => ''),
+  ]);
+  const physical = /(\d+)x(\d+)/.exec(size);
+  return physical ? parseCutout(displays, Math.min(Number(physical[1]), Number(physical[2]))) : undefined;
+}
+const getprop = (deps: ProbeDeps, adb: string, serial: string, name: string) => deps.run(adb, ['-s', serial, 'shell', 'getprop', name], {timeoutMs: 5000}).then(out => out.trim(), () => '');
+export const USB_DEBUGGING_FIX = 'Unlock the phone and tap Allow on its “Allow USB debugging?” prompt (tick Always allow from this computer). No prompt? Unplug the cable and plug it back in.';
+const NO_PERMISSION_FIX = 'This computer cannot open the phone over USB. On Linux add a udev rule for Android phones (the android-sdk-platform-tools-common package has one), then unplug the phone and plug it back in.';
+/** A real phone adb sees: listed by its maker and model with a generic frame. Nothing is run on one that isn't authorized. */
+async function physicalDevice(deps: ProbeDeps, adb: string, entry: AdbEntry): Promise<DeviceInfo | null> {
+  const reported = entry.model?.replace(/_/g, ' ');
+  if (entry.state === 'unauthorized' || entry.state === 'no permissions' || entry.state === 'authorizing') {
+    const name = reported ?? `Android phone ${entry.serial}`;
+    const frame = androidFrame({}, name);
+    return {id: entry.serial, name, platform: 'android', osVersion: 'Android', formFactor: formOf(frame, name), frame, state: 'unauthorized', physical: true, fix: entry.state === 'no permissions' ? NO_PERMISSION_FIX : USB_DEBUGGING_FIX};
+  }
+  if (entry.state !== 'device') return null;
+  const [model, maker, release, booted] = await Promise.all(['ro.product.model', 'ro.product.manufacturer', 'ro.build.version.release', 'sys.boot_completed'].map(name => getprop(deps, adb, entry.serial, name)));
+  const base = (model || reported || 'Android phone').slice(0, 80);
+  const brand = maker ? maker.charAt(0).toUpperCase() + maker.slice(1) : '';
+  const name = brand && !base.toLowerCase().startsWith(brand.toLowerCase()) ? `${brand} ${base}` : base;
+  const ready = booted === '1';
+  const frame = androidFrame({}, name, ready ? await reportedCutout(deps, adb, entry.serial) : undefined);
+  return {id: entry.serial, name, platform: 'android', osVersion: release ? `Android ${release}` : 'Android', formFactor: formOf(frame, name), frame, state: ready ? 'booted' : 'booting', physical: true};
+}
 export async function listAndroid(deps: ProbeDeps): Promise<DeviceInfo[]> {
   const tools = androidTools(deps);
   const [adbOut, avdOut] = await Promise.all([
-    deps.run(tools.adb, ['devices'], {timeoutMs: 10_000}).catch(() => ''),
-    deps.run(tools.emulator, ['-list-avds'], {timeoutMs: 15_000}).catch(() => ''),
+    deps.run(tools.adb, ['devices', '-l'], {timeoutMs: 10_000}).catch(() => ''),
+    // The emulator is the SDK's only; with adb alone (no SDK) only phones are listed.
+    deps.exists(tools.emulator) ? deps.run(tools.emulator, ['-list-avds'], {timeoutMs: 15_000}).catch(() => '') : Promise.resolve(''),
   ]);
-  const running = parseAdbDevices(adbOut);
   const out: DeviceInfo[] = [];
   const named = new Set<string>();
-  for (const {serial, state} of running) {
+  for (const entry of parseAdbDeviceList(adbOut)) {
+    if (!entry.emulator) { const phone = await physicalDevice(deps, tools.adb, entry); if (phone) out.push(phone); continue; }
+    const {serial, state} = entry;
     // `emu avd name` answers the AVD a running emulator was started from (first line), so it is not listed twice.
     const avd = (await deps.run(tools.adb, ['-s', serial, 'emu', 'avd', 'name'], {timeoutMs: 5000}).catch(() => '')).split(/\r?\n/)[0]?.trim() || serial;
-    const release = state === 'device' ? (await deps.run(tools.adb, ['-s', serial, 'shell', 'getprop', 'ro.build.version.release'], {timeoutMs: 5000}).catch(() => '')).trim() : '';
-    const booted = state === 'device' && (await deps.run(tools.adb, ['-s', serial, 'shell', 'getprop', 'sys.boot_completed'], {timeoutMs: 5000}).catch(() => '')).trim() === '1';
-    // The cut-out Android itself reports (a generic device's only source for it).
-    let cutout;
-    if (booted) {
-      const [displays, size] = await Promise.all([
-        deps.run(tools.adb, ['-s', serial, 'shell', 'dumpsys', 'window', 'displays'], {timeoutMs: 5000}).catch(() => ''),
-        deps.run(tools.adb, ['-s', serial, 'shell', 'wm', 'size'], {timeoutMs: 5000}).catch(() => ''),
-      ]);
-      const physical = /(\d+)x(\d+)/.exec(size);
-      cutout = physical ? parseCutout(displays, Math.min(Number(physical[1]), Number(physical[2]))) : undefined;
-    }
+    const release = state === 'device' ? await getprop(deps, tools.adb, serial, 'ro.build.version.release') : '';
+    const booted = state === 'device' && await getprop(deps, tools.adb, serial, 'sys.boot_completed') === '1';
+    const cutout = booted ? await reportedCutout(deps, tools.adb, serial) : undefined;
     named.add(avd);
     const frame = androidFrame(readAvdConfig(deps, avd), avd, cutout);
     out.push({id: serial, name: avd, platform: 'android', osVersion: release ? `Android ${release}` : 'Android', formFactor: formOf(frame, avd), frame, state: booted ? 'booted' : 'booting'});

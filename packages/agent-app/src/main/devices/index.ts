@@ -29,6 +29,8 @@ export function wireDevices(input: {
   userData: string; manifestDir: string; toolsDir: string; execPath: string;
   emit(event: DeviceEvent): void;
   chat(chatId: string): Promise<{mode: string; permissionMode?: string} | undefined>;
+  /** The main process's file chooser for an .apk; null when cancelled. */
+  chooseApk(): Promise<string | null>;
 }): DevicesWiring {
   const home = homedir();
   let toolHost: DeviceToolHost | undefined;
@@ -112,6 +114,7 @@ export function wireDevices(input: {
       case 'devices.chrome': return manager.chrome(request.id);
       case 'devices.model': return manager.model(request.id);
       case 'devices.modelStore': return manager.storeModel(request.id, request.glb);
+      case 'devices.installApk': { const file = await input.chooseApk(); return file ? manager.installApk(request.id, file) : null; }
     }
   };
   return {
