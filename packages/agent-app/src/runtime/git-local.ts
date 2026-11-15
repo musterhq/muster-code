@@ -407,6 +407,8 @@ export async function listBranches(root: string): Promise<GitBranches> {
     currentBranch(real),
     git(real, ['reflog', 'show', '--format=%gs', '-n', '300', 'HEAD']).catch(() => ''),
   ]);
+  const remoteRefs = await git(real, ['for-each-ref', '--sort=-committerdate', `--count=${BRANCH_LIMIT + 1}`, '--format=%(refname:lstrip=2)', 'refs/remotes']).catch(() => '');
+  const remote = remoteRefs.split('\n').map(line => line.trim()).filter(name => name && !name.endsWith('/HEAD') && name.includes('/'));
   const fields = refs.split('\0');
   const local: GitBranch[] = [];
   for (let at = 0; at + 5 <= fields.length; at += 5) {
@@ -432,7 +434,7 @@ export async function listBranches(root: string): Promise<GitBranches> {
     for (const name of [moved[2], moved[1]]) if (name !== current && names.has(name) && !recent.includes(name)) recent.push(name);
     if (recent.length >= 5) break;
   }
-  return {current, detached: !current, local: local.slice(0, BRANCH_LIMIT), recent: recent.slice(0, 5), truncated: local.length > BRANCH_LIMIT};
+  return {current, detached: !current, local: local.slice(0, BRANCH_LIMIT), recent: recent.slice(0, 5), truncated: local.length > BRANCH_LIMIT, remote: remote.slice(0, BRANCH_LIMIT)};
 }
 
 /** Cheap, network-free facts for the summary: current branch, last fetch time, worktree-ness. */
@@ -472,7 +474,7 @@ export async function fetchGit(root: string): Promise<{status: GitLocalStatus; i
 }
 
 /** Switch (or create and switch). Tracked local changes hold the switch until `carry` confirms; git itself still refuses a conflicting carry. */
-export async function switchBranch(root: string, input: {branch: unknown; create?: boolean; base?: unknown; revision: string; carry?: boolean}): Promise<GitSwitchResult> {
+export async function switchBranch(root: string, input: {branch: unknown; create?: boolean; base?: unknown; revision: string; carry?: boolean; track?: boolean}): Promise<GitSwitchResult> {
   const real = await repository(root);
   return serial(real, async () => {
     const before = await snapshot(real);
@@ -491,6 +493,10 @@ export async function switchBranch(root: string, input: {branch: unknown; create
     // result may leave unmerged files, which the caller routes into the conflict surfaces.
     const merge = changed.length && input.carry ? ['-m'] : [];
     await git(real, input.create ? ['switch', ...merge, '-c', name, ...(base ? [base] : [])] : ['switch', '--no-guess', ...merge, name], 60000);
+    // A branch made from a remote branch tracks it, as `git switch <name>` would set it up.
+    if (input.create && input.track && typeof input.base === 'string' && await git(real, ['show-ref', '--verify', '--quiet', `refs/remotes/${input.base}`]).then(() => true, () => false)) {
+      await git(real, ['branch', `--set-upstream-to=refs/remotes/${input.base}`, name]).catch(() => undefined);
+    }
     const after = await snapshot(real);
     const conflicts = after.files.filter(file => file.conflict).map(file => file.path);
     return {blocked: false, status: after, ...(conflicts.length ? {conflicts} : {})};

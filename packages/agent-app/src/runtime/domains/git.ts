@@ -39,7 +39,7 @@ export function createGitDomain(context: DomainContext): DomainModule {
     'git.switch': async input => {
       const target = folder(input.folderId);
       if (busy(target.id)) throw new Error('A chat is running in this folder. Stop it before switching branches.');
-      const result = await switchBranch(target.path, {branch: input.branch, create: input.create === true, ...(input.base === undefined || input.base === '' ? {} : {base: input.base}), revision: revision(input.revision), carry: input.carry === true});
+      const result = await switchBranch(target.path, {branch: input.branch, create: input.create === true, ...(input.base === undefined || input.base === '' ? {} : {base: input.base}), revision: revision(input.revision), carry: input.carry === true, track: input.track === true});
       if (!result.blocked) changed(target);
       return result;
     },

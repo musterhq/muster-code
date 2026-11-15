@@ -45,6 +45,10 @@ export const mobileSeams: {secrets?: () => SecretStore | undefined; pairingTtlMs
   stageGate?: () => Promise<void>;
   /** Awaited by changes.keep and changes.undo after their reads and before the access check and the write (phase 5). */
   reviewGate?: () => Promise<void>;
+  /** Awaited by the phase 6 writes (commit, switch, pull request) after their reads and before the access check. */
+  writeGate?: () => Promise<void>;
+  /** Stands between the phone bridge and the runtime's commands (a test answers the GitHub commands with it). */
+  invoke?: (command: string, input: unknown, next: (command: string, input: unknown) => Promise<any>) => Promise<any>;
   /** Told how many characters the path scrubber reads (phase 4 cost receipts). */
   onScrub?: (chars: number) => void} = {};
 /** Requests one phone may have in flight at once, over all its sessions; more are refused at once (phase 3). */
@@ -372,8 +376,9 @@ export function createMobileDomain(context: DomainContext): DomainModule {
   }
 
   function bridgeFor(session: Session) {
+    const seam = mobileSeams.invoke;
     return {
-      invoke: context.invoke,
+      invoke: (seam ? (command: string, input: unknown) => seam(command, input, context.invoke as never) : context.invoke) as DomainContext['invoke'],
       snapshot: () => context.invoke('app.snapshot', undefined),
       access: (): MobileAccess => devices.find(d => d.id === session.deviceId)?.access ?? 'read-only',
       alive: () => sessions.get(session.conn) === session && devices.some(d => d.id === session.deviceId),
@@ -383,6 +388,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       map: (item: TimelineItem) => mapper!.map(item),
       ...(mobileSeams.stageGate ? {beforeStage: mobileSeams.stageGate} : {}),
       ...(mobileSeams.reviewGate ? {beforeReview: mobileSeams.reviewGate} : {}),
+      ...(mobileSeams.writeGate ? {beforeWrite: mobileSeams.writeGate} : {}),
       watch: (chatId: string | null, deltas?: boolean) => { session.watching = chatId; session.stream = chatId && deltas ? {chatId, seq: 0, sent: null, pending: []} : null; },
       streamFrom: (chatId: string, items: MobileItem[]): number => {
         const stream = session.stream;

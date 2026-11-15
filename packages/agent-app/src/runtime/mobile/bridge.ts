@@ -9,6 +9,7 @@ import type {DomainContext} from '../domains/types.ts';
 import type {PhoneUploads} from './uploads.ts';
 import type {ReviewBaselineInfo, ReviewChange, ReviewMark} from '../../shared/domains/review-protocol.ts';
 import {buildDiff, diffPage, hunkInfo, type BuiltDiff} from './diff.ts';
+import {gitBranches, gitCommit, gitStatus, gitSwitch, listFolder, prCreate, prDraft, readPage, type WorkspaceContext} from './workspace.ts';
 
 const MAX_ITEM_TEXT = 64 * 1024;
 const OPEN_ITEMS = 200;
@@ -168,6 +169,8 @@ export interface BridgeContext {
   beforeStage?(): Promise<void>;
   /** Test seam: awaited after changes.keep or changes.undo read what they need and before the access check and the write. */
   beforeReview?(): Promise<void>;
+  /** Test seam: awaited by phase 6 writes (commit, switch, pull request) after their reads and before the access check. */
+  beforeWrite?(): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +266,9 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
     if (!ctx.alive()) throw new MobileError('closed', 'This phone’s session has ended.');
     if (ACTING_METHODS.has(m) && ctx.access() !== 'act') throw new MobileError('read-only', readOnlyMessage());
   };
+  /** Files, Git and pull requests (phase 6) work in the chat's folder. */
+  const workspace = async (): Promise<WorkspaceContext> => ({invoke: ctx.invoke, snapshot: ctx.snapshot, chat: await chatOf(id(p.chatId, 'chatId')), recheck,
+    ...(ctx.beforeWrite ? {beforeWrite: ctx.beforeWrite} : {}), ...(ctx.scrub ? {scrub: ctx.scrub} : {})});
   try {
     switch (m) {
       case 'ping': return {} satisfies MobileMethods['ping']['result'];
@@ -433,6 +439,14 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
         await ctx.invoke('chat.stop', {id: chatId});
         return {} satisfies MobileMethods['chat.stop']['result'];
       }
+      case 'files.list': return listFolder(await workspace(), p.path) satisfies Promise<MobileMethods['files.list']['result']>;
+      case 'files.read': return readPage(await workspace(), p.path, p.from, p.query) satisfies Promise<MobileMethods['files.read']['result']>;
+      case 'git.status': return gitStatus(await workspace()) satisfies Promise<MobileMethods['git.status']['result']>;
+      case 'git.commit': return gitCommit(await workspace(), p) satisfies Promise<MobileMethods['git.commit']['result']>;
+      case 'git.branches': return gitBranches(await workspace()) satisfies Promise<MobileMethods['git.branches']['result']>;
+      case 'git.switch': return gitSwitch(await workspace(), p) satisfies Promise<MobileMethods['git.switch']['result']>;
+      case 'pr.draft': return prDraft(await workspace()) satisfies Promise<MobileMethods['pr.draft']['result']>;
+      case 'pr.create': return prCreate(await workspace(), p) satisfies Promise<MobileMethods['pr.create']['result']>;
       case 'needs.list': return {needs: await needsList(ctx.invoke, await ctx.snapshot(), ctx.scrub)} satisfies MobileMethods['needs.list']['result'];
     }
   } catch (error) {

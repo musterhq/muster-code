@@ -63,7 +63,7 @@ async function desktop(t: TestContext): Promise<Desktop> {
       input.onThreadReady?.('thread-1');
       if (input.prompt.includes('hold')) {
         await new Promise<void>(resolve => { const timer = setTimeout(resolve, 20_000); stopped = () => { clearTimeout(timer); resolve(); }; });
-        return {status: 'interrupted', finalMessage: ''};
+        return {status: 'completed', finalMessage: ''};
       }
       return {status: 'completed', finalMessage: 'Appends now use XADD and reads use XRANGE, so a session replays from any point.\n\nI also added tests.'};
     },
@@ -225,7 +225,7 @@ test('commit and push run on the desktop with only the chosen files; read-only, 
   assert.equal(head(), start);
 
   const fresh = await client.call('git.commit', {...commit, revision: (await client.call('git.status', {chatId: d.chatId})).revision, push: true});
-  assert.equal(fresh.pushed, true, fresh.pushError);
+  assert.equal(fresh.pushed, true, fresh.pushError ?? 'pushed');
   assert.equal(fresh.status.ahead, 0);
   assert.equal(git(d.root, 'show', '--name-only', '--format=%s', 'HEAD').trim(), 'Add the stream key\n\nsrc/key.ts');
   assert.deepEqual(fresh.status.files.map(file => [file.path, file.change]), [['src/store.ts', 'modified']], 'src/store.ts stays uncommitted');

@@ -3,8 +3,9 @@ import type {Folder, GitLocalStatus} from '../protocol.ts';
 
 /** A local branch. `worktreePath` is set when the branch is checked out in some worktree (this one included). */
 export interface GitBranch {name:string; upstream?:string; ahead?:number; behind?:number; gone?:boolean; worktreePath?:string; committedAt?:string}
-/** `recent` lists recently checked-out local branches (newest first, current excluded). */
-export interface GitBranches {current:string|null; detached:boolean; local:GitBranch[]; recent:string[]; truncated:boolean}
+/** `recent` lists recently checked-out local branches (newest first, current excluded). `remote`: remote-tracking branches
+ *  (origin/main), newest first. */
+export interface GitBranches {current:string|null; detached:boolean; local:GitBranch[]; recent:string[]; truncated:boolean; remote?:string[]}
 /** `fetchedAt` is the last successful fetch (FETCH_HEAD time), null when this checkout never fetched.
  *  `worktree` is set when the folder is a linked worktree; `mainPath` is the primary checkout. */
 export interface GitRepoInfo {branch:string|null; detached:boolean; fetchedAt:string|null; hasRemote:boolean; worktree:{mainPath:string}|null}
@@ -52,7 +53,7 @@ export interface GitCommands {
   'git.branches': {input:{folderId:string}; output:GitBranches};
   'git.info': {input:{folderId:string}; output:GitRepoInfo};
   'git.headMessage': {input:{folderId:string}; output:{message:string|null}};
-  'git.switch': {input:{folderId:string; branch:string; create?:boolean; base?:string; revision:string; carry?:boolean}; output:GitSwitchResult};
+  'git.switch': {input:{folderId:string; branch:string; create?:boolean; base?:string; revision:string; carry?:boolean; /** With create from a remote branch (origin/x): the new branch tracks it. */ track?:boolean}; output:GitSwitchResult};
   'git.fetch': {input:{folderId:string}; output:{status:GitLocalStatus; info:GitRepoInfo}};
   'git.commit': {input:{folderId:string; revision:string; message:string; amend?:boolean; push?:boolean}; output:GitCommitResult};
   'git.worktree.create': {input:{folderId:string; branch:string; base?:string}; output:{folder:Folder; path:string; branch:string}};
