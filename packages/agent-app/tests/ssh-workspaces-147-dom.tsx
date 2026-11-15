@@ -28,6 +28,7 @@ const state:any={hosts:[] as any[],status:[] as any[],entries:[{alias:'devbox',h
   case 'remote.hosts.connect':return {hostId:input.id,state:'hostkey-unknown',detail:'Muster does not know devbox’s host key yet. Compare its fingerprint and trust it to connect.',at:'now',hostKey:{type:'ed25519',fingerprint:FP}};
   case 'remote.hosts.trust':return {hostId:input.id,state:'connected',detail:'Connected to devbox.',at:'now'};
   case 'remote.folder.add':return {id:'f1',path:'ssh://devbox/home/dev/app',name:'app'};
+  case 'remote.hosts.agentCredentials':{state.hosts=state.hosts.map((h:any)=>h.id===input.id?{...h,agentCredentials:input.credentials}:h);return state.hosts[0];}
   default:return undefined;
  }
 }} as any;
@@ -61,6 +62,17 @@ await check('the SSH workspaces panel adds a config host and shows the fingerpri
   await setValue(document.querySelector('[aria-label="Folder on devbox"]'),'~/app');
   await click(button(/Open folder/),120);
   assert.deepEqual(last('remote.folder.add')!.input,{hostId:'h1',path:'~/app'});
+});
+// Spec: MUS-SPEC-15-147F (docs/spec/clauses/15-settings-and-themes.md#mus-spec-15-147f)
+await check('agents on a host sign in with the host’s own login unless you choose to pass your key', async () => {
+  const select=document.querySelector('[aria-label="Agent sign-in on devbox"]') as any;
+  assert.ok(select,'the sign-in choice is shown for the host');
+  assert.equal(select.value,'host');
+  assert.match(text(),/Muster sends no key/);
+  for(const option of select.querySelectorAll('option'))option.toggleAttribute('selected',option.getAttribute('value')==='muster');
+  assert.equal(select.value,'muster');select.dispatchEvent(new window.Event('change',{bubbles:true}));await delay(150);
+  assert.deepEqual(last('remote.hosts.agentCredentials')!.input,{id:'h1',credentials:'muster'});
+  assert.match(text(),/environment variable for that run only\. It is never written on the host/);
 });
 assert.equal(errors.length,0,String(errors[0]));
 root.unmount();

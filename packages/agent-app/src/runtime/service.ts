@@ -1,5 +1,5 @@
 import { applyPendingRestore } from './backups.ts';
-import {isRemoteFolderPath, parseRemoteFolderPath} from '../shared/domains/remote-protocol.ts';
+import {isRemoteFolderPath} from '../shared/domains/remote-protocol.ts';
 import { APPROVAL_SHOWN_EVENT } from './turn-ledger.ts';
 import { addMemory, listMemory, searchMemory, inspectMemoryStore, isVisibleInScopes, projectMemoryScope } from './memory-adapter.ts';
 import { createMemoryIdentity } from './memory-identity.ts';
@@ -90,6 +90,7 @@ import { findBinary } from './adapters/shared.ts';
 import { ASK_MCP, ASK_USER_METHOD, ASK_USER_SPEC, ASK_QUESTION_ID, askUserAnswerMessage, askUserCard, askUserReply, askUserRunOverrides, isNonBlockingQuestion, parseAskUser } from './ask-user.ts';
 import { plural } from '../shared/wording.ts';
 import { device } from '../shared/device-noun.ts';
+import type { RemoteAgentRun } from './domains/types.ts';
 /** #147: the commands that touch a folder's files or repository. */
 const REMOTE_ROUTED = /^(?:files|git|review|github|ci)\./;
 
@@ -120,7 +121,7 @@ function detail(value: unknown): string {
   if (typeof value === 'string') return value.slice(0, 65536);
   try { return JSON.stringify(value ?? {}).slice(0, 65536); } catch { return 'Details unavailable'; }
 }
-interface ActiveRun { cwd: string; stopped: boolean; prompt?: string; promise?: Promise<void>; retry: AbortController; seal?(): void; /** #448: the run ended on a provider usage limit. */ limit?: {text: string; retryAfterMs?: number; notDispatched: boolean; prompt: string; attachmentIds: string[]}; /** #449: Muster quit under this run (not a user Stop); `shutdown` when it continues after the next start. */ quit?: boolean; shutdown?: boolean }
+interface ActiveRun { cwd: string; stopped: boolean; /** #147 phase 2: the run's CLI works on its folder's SSH host. */ remote?: RemoteAgentRun; prompt?: string; promise?: Promise<void>; retry: AbortController; seal?(): void; /** #448: the run ended on a provider usage limit. */ limit?: {text: string; retryAfterMs?: number; notDispatched: boolean; prompt: string; attachmentIds: string[]}; /** #449: Muster quit under this run (not a user Stop); `shutdown` when it continues after the next start. */ quit?: boolean; shutdown?: boolean }
 interface PendingApproval { chatId: string; createdAt: string; expiresAt: number; resolve(decision: ApprovalDecision): void; timer: ReturnType<typeof setTimeout> }
 /** `null` answers mean the question was dismissed, expired or interrupted: the provider gets a cancel, never empty answers. */
 type QuestionAnswers = Record<string, {answers: string[]}> | null;
@@ -758,11 +759,13 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     let claudeEntry: (typeof attachedSkills)[number] | undefined;
     for (const entry of attachedSkills) if (entry.claude && await claudeReachesByName(entry, folder ? [folder.path] : [])) { claudeEntry = entry; break; }
     const nativeSkillContext = claudeEntry ? [...attachedSkills.filter(entry => entry !== claudeEntry).map(entry => selectedSkillBlock(entry, prompt)), invokedPluginContext(plugins)].filter(Boolean).join('\n\n') : '';
-    // #147 phase 1: agents do not run on an SSH host yet, and must never run on this computer in its place.
-    if (folder && isRemoteFolderPath(folder.path)) throw new Error(`This chat’s folder is on the SSH host ${parseRemoteFolderPath(folder.path)?.authority ?? ''}. Agents that run on an SSH host come in a later release; use the folder’s terminal, file tree and Git pane meanwhile.`);
-    const defaultCwd = folder ? canonicalFolderPath(folder.path) : join(options.dataDir, 'scratch', chatId);
-    const cwd = await domainHooks.runEnvironment(chat, defaultCwd);
-    if (folder || cwd !== defaultCwd) { if (!(await fs.stat(cwd)).isDirectory()) throw new Error('Selected folder is unavailable.'); }
+    // #147: a folder on an SSH host. The run's CLI works there (prepared below); nothing here ever reads a local path for it,
+    // so the run's local `cwd` stays the folder's ssh:// address and never names a folder on this computer.
+    const onHost = !!folder && isRemoteFolderPath(folder.path);
+    const defaultCwd = onHost ? folder!.path : folder ? canonicalFolderPath(folder.path) : join(options.dataDir, 'scratch', chatId);
+    const cwd = onHost ? defaultCwd : await domainHooks.runEnvironment(chat, defaultCwd);
+    if (onHost) { /* checked on the host when the run is prepared */ }
+    else if (folder || cwd !== defaultCwd) { if (!(await fs.stat(cwd)).isDirectory()) throw new Error('Selected folder is unavailable.'); }
     else await fs.mkdir(cwd, {recursive: true, mode: 0o700});
     if (closing || disposed) throw new Error('Agent runtime is stopping. No new attempt was dispatched.');
     // File preflight awaits can overlap a future-run access/mode change. Use
@@ -827,7 +830,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     // #401: the message this turn answers. A retried message gets this run's record, and its old suggestion goes.
     const turnItem = invoked.reuseUserItemId ? store.item(invoked.reuseUserItemId) : store.lastUserItem(chatId);
     if (invoked.reuseUserItemId && turnItem) { const {followUp: _old, ...kept} = turnItem.data ?? {}; store.updateItem(turnItem.id, turnItem.text, turnItem.status, {...kept, ranWith}); }
-    const run: ActiveRun = {cwd, stopped: false, retry: new AbortController(), prompt}; runs.set(chatId, run); state(); timeline(chatId);
+    // #147 phase 2: connect, find the route's CLI on the host and open the tools' connection. A route that cannot run there
+    // (or a CLI that is missing) refuses the send with a sentence; it never runs on this computer instead.
+    const remote = onHost ? await domainHooks.remoteAgent({chat, folder: folder!, provider: selectedProvider}) : undefined;
+    if (remote && (closing || disposed || runs.has(chatId))) { remote.dispose(); throw new Error('Agent runtime is stopping. No new attempt was dispatched.'); }
+    const run: ActiveRun = {cwd, stopped: false, retry: new AbortController(), prompt, ...(remote ? {remote} : {})}; runs.set(chatId, run); state(); timeline(chatId);
     const suggest = turnItem && suggestionsOn() ? (raw: string) => offerSuggestion(chatId, turnItem.id, run, raw) : undefined;
     let segment: TimelineItem | undefined;
     let producedAssistant = false;
@@ -869,6 +876,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     segmentFlushes.set(chatId, flushSegment);
     const seal = () => { if (segment) store.updateItem(segment.id, segment.text, 'completed'); segment = undefined; segmentDirty = false; };
     run.seal = seal;
+    let remoteTools: {close(): void} | undefined, remoteDropped = false;
     run.promise = (async () => {
       try {
         const persistIdentity = (threadId: string, turnId?: string, driver?: string) => {
@@ -882,7 +890,16 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // No registered hooks: dispatch in the same tick, exactly as before the seam existed.
         const hooked = domainHooks.hasRunHooks();
         const contributed = hooked ? await domainHooks.contributePrompt({chat, ...(folder ? {folder} : {}), ...(project ? {project} : {}), prompt}) : {text:'', sources:[] as string[], blocks:[] as ContextBlock[]};
-        const runOptions = withAskUser(chat.id, hooked ? await domainHooks.resolveRunOptions(chat) : {});
+        let runOptions = withAskUser(chat.id, hooked ? await domainHooks.resolveRunOptions(chat) : {});
+        // #147 phase 2: Muster's tools reach the host's CLI through the relay, with this run's own token.
+        if (run.remote) {
+          const tools = run.remote.tools(runOptions.configOverrides, chatId); remoteTools = tools;
+          runOptions = {...runOptions, configOverrides: tools.overrides, developerInstructions: [runOptions.developerInstructions, run.remote.note].filter(Boolean).join('\n\n')};
+          // A new notice when the host, the folder or the sign-in changes (the person may switch to passing their key).
+          const {host, root} = run.remote.run, signIn = run.remote.signIn, last = store.noticesOfKind(chatId, 'remote-run').at(-1);
+          if (!last || last.data?.host !== host || last.data?.root !== root || last.data?.signIn !== signIn)
+            store.appendItem(chatId, 'notice', `Runs on ${host} in ${root}, with ${signIn}.${tools.dropped.length ? ' Computer use, terminal and background tools stay on this computer and are not offered here.' : ''}`, 'completed', {kind: 'remote-run', host, root, signIn});
+        }
         if (hooked) await domainHooks.runStarted({chat, runId: accepted.runId, cwd});
         if (disposed) return;
         let ownership = '';
@@ -924,7 +941,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         let continuationPrompt: string | undefined;
         const attempt = () => {
           producedAssistant = false; attemptActivity = false; lastWasTool = false; assistantText = ''; lastAssistantText = '';
-          return run.stopped ? Promise.resolve(stoppedBeforeDispatch) : provider.run({ chat: {...(continuationPrompt ? store.chat(chatId)! : chat),providerTurnId:undefined,recovery:undefined}, cwd, prompt: continuationPrompt ?? contextualPrompt,
+          return run.stopped ? Promise.resolve(stoppedBeforeDispatch) : provider.run({ chat: {...(continuationPrompt ? store.chat(chatId)! : chat),providerTurnId:undefined,recovery:undefined}, cwd, ...(run.remote ? {remote: run.remote.run} : {}), prompt: continuationPrompt ?? contextualPrompt,
           contextWindow,
           ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) || pluginReloads.wantsConnectors(chatId) ? {connectorsRequested: true, connectorNames: [...requestedConnectorNames(prompt), ...pluginReloads.connectorNames(chatId)]} : {}),
           ...(runOptions.configOverrides ? {configOverrides: runOptions.configOverrides as Record<string, string | number | boolean | string[]>} : {}), ...(runOptions.developerInstructions ? {developerInstructions: runOptions.developerInstructions} : {}),
@@ -1184,7 +1201,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             const change = typeof params.itemId === 'string' && toolIds.has(params.itemId) ? store.item(toolIds.get(params.itemId)!)?.data?.changes : params.changes;
             // #841: Auto settles a routine request (a read, an edit inside the folder, a safe or allowlisted command) and says so on its row.
             if (autoOn && !threat && toolPolicy?.effect !== 'ask') {
-              const settled = autoApprove(method, params, change ?? params.changes, {cwd: run.cwd, allowlist: autoAllowlist(), sandboxed: autoSandboxed});
+              const settled = autoApprove(method, params, change ?? params.changes, {cwd: run.remote?.run.root ?? run.cwd, allowlist: autoAllowlist(), sandboxed: autoSandboxed});
               if (settled) {
                 const rowId = typeof params.itemId === 'string' ? toolIds.get(params.itemId) : undefined, row = rowId ? store.item(rowId) : undefined;
                 if (row) { store.updateItem(row.id, row.text, row.status, {...row.data, autoApproved: settled}); timeline(chatId); }
@@ -1224,6 +1241,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           timeline(chatId);
         }});
         let result = retried.result;
+        // #147 phase 2: a run on a host that failed for the host's reasons says so plainly; a dropped connection is an interruption.
+        if (run.remote && result.status === 'failed' && !run.stopped) {
+          const dropped = run.remote.dropped(), said = run.remote.failure(`${result.errorMessage ?? ''} ${result.recovery?.reason ?? ''}`);
+          if (said) result = {...result, errorMessage: said, recovery: dropped ? {kind: 'cancelled', retryable: false, reason: said} : {kind: 'failed', retryable: true, reason: said}};
+          if (dropped) remoteDropped = true;
+        }
         if (retryNotice && !disposed) {
           const sent = !retried.cancelled && result.recovery?.kind !== 'admission-rejected' && result.recovery?.kind !== 'failed';
           const lead = retryReason === 'transient' ? 'Provider attempt did not start.' : retryDetail ? asSentence(retryDetail) : 'The provider is temporarily unavailable.';
@@ -1325,7 +1348,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // #448: a limited turn that never started re-runs its own prompt at reset, so it is not also handed back as a draft (sent twice).
         const restoreDraft=result.status==='failed' && result.dispatchState==='not-dispatched' && recovery?.kind!=='recovery-needed' && store.chat(chatId)?.draft==='' && !(run.limit && settingOn('chats.resumeAfterLimit'));
         if (restoreDraft && attachmentIds.length) attachments.restage(attachmentIds);
-        store.updateChat(chatId, {status:recovery?.kind === 'recovery-needed' ? 'failed' : run.stopped ? 'interrupted' : result.status,recovery:recovery ?? null,error:recovery?.reason ?? result.errorMessage ?? null,...(restoreDraft?{draft:prompt}:{})});
+        store.updateChat(chatId, {status:recovery?.kind === 'recovery-needed' ? 'failed' : run.stopped || remoteDropped ? 'interrupted' : result.status,recovery:recovery ?? null,error:recovery?.reason ?? result.errorMessage ?? null,...(restoreDraft?{draft:prompt}:{})});
       } catch (error) {
         if (!disposed) {
           seal();
@@ -1353,6 +1376,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // #449: any tool row still running once the run's work has ended settles as interrupted.
         if (settled) store.settleRunningTools(chatId);
         runs.delete(chatId);
+        // #147: the run's relay token and its host command end with the run.
+        remoteTools?.close(); run.remote?.dispose();
         // #426: a compaction asked for during the turn runs now (before any queued message is dispatched).
         const deferred = deferredCompactions.get(chatId);
         if (deferred && !disposed) { deferredCompactions.delete(chatId); void compactChat(chatId, {fresh: deferred.fresh, rowId: deferred.rowId}).catch(() => undefined); }

@@ -25,6 +25,7 @@ Boundaries:
 | [MUS-SPEC-15-147C](15-settings-and-themes.md#mus-spec-15-147c) | When the host refuses every key, the state is `auth` and the message tells the user to run `ssh-add`; every ssh Muster starts runs with BatchMode=yes and StrictHostKeyChecking=yes. | [`a host that wants a passphrase or password asks for ssh-add and never prompts`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
 | [MUS-SPEC-15-147D](15-settings-and-themes.md#mus-spec-15-147d) | Settings › Environments lists the config hosts with an Add button, shows a host waiting for its key with the fingerprint and a Trust button, sends the shown fingerprint, and offers a folder path field for a connected host. | [`the SSH workspaces panel adds a config host and shows the fingerprint before trusting`](../../../packages/agent-app/tests/ssh-workspaces-147-dom.tsx) |
 | [MUS-SPEC-15-147E](15-settings-and-themes.md#mus-spec-15-147e) | Trust asks ssh again before writing anything: a changed key is refused after a disconnect and after a restart, Muster’s known_hosts keeps the old key and nothing connects; a host behind a jump host is refused instead of scanned directly. | [`a changed host key is refused after a disconnect or a restart, and a jump host is never scanned directly`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
+| [MUS-SPEC-15-147F](15-settings-and-themes.md#mus-spec-15-147f) | The choice defaults to the host’s own login and says Muster sends no key; choosing your key calls remote.hosts.agentCredentials and says it goes as a variable for that run only. | [`agents on a host sign in with the host’s own login unless you choose to pass your key`](../../../packages/agent-app/tests/ssh-workspaces-147-dom.tsx) |
 
 ### Built-in themes
 
@@ -138,4 +139,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/ssh-workspaces-147.test.ts::a changed host key is refused after a disconnect or a restart, and a jump host is never scanned directly`
 - Environment: Node test runner with the real agent service, a temp data folder and a temp HOME; a stand-in `ssh` and `ssh-keyscan` on PATH (`tests/fixtures/fake-ssh/`). The service is disposed and created again on the same data folder. No network, no real host.
 - Known gaps: Real OpenSSH accepts a host when any known_hosts file holds a matching key; the stand-in models that rule, it is not checked against a real sshd here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-15-147f"></a>
+#### MUS-SPEC-15-147F: Agents on a host sign in with the host’s own login unless you choose to pass your key
+
+- Precondition: The SSH workspaces panel with one trusted, connected host.
+- Action: Read the host’s agent sign-in choice, then choose “My API key from Muster”.
+- Expected result: The choice reads the host’s own login by default and says Muster sends no key; choosing the key calls `remote.hosts.agentCredentials` with `muster` for that host and the hint says the key goes as an environment variable for that run only and is never written on the host.
+- Test: `packages/agent-app/tests/ssh-workspaces-147-dom.tsx::agents on a host sign in with the host’s own login unless you choose to pass your key`
+- Environment: DOM suite (linkedom) with the real RemoteHostsPanel and a stubbed bridge; no ssh.
+- Known gaps: Does not open the Electron window.
 - Evidence: UNVERIFIED
