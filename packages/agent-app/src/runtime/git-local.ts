@@ -6,6 +6,8 @@ import {resolveInside} from './paths.ts';
 import type {GitLocalStatus, GitLocalFile, GitPullRequest, GitPullRequestList, GitCompareUrl} from '../shared/protocol.ts';
 import type {GitBranch, GitBranches, GitCommitResult, GitRepoInfo, GitSwitchResult, GitWorktree} from '../shared/domains/git-protocol.ts';
 import {normalizeFsPath, samePath} from '../shared/path-normalize.ts';
+import type {ForgeKind} from '../shared/forge.ts';
+import {detectForge} from './forge/remote.ts';
 
 const queues = new Map<string, Promise<unknown>>();
 const depths = new Map<string, number>();
@@ -130,12 +132,13 @@ async function pushTarget(root: string, branch: string): Promise<{remote?: strin
 }
 
 /** Cheap remote metadata. Any failure (no remote, odd config) leaves the fields absent; status never depends on it. */
-async function remoteInfo(root: string, branch: string, detached: boolean, unborn: boolean): Promise<{remoteUrl?: string; pushRemote?: string}> {
+async function remoteInfo(root: string, branch: string, detached: boolean, unborn: boolean): Promise<{remoteUrl?: string; pushRemote?: string; forge?: ForgeKind; forgeUrl?: string}> {
   try {
     const target = detached || unborn || !branch ? {} : await pushTarget(root, branch);
     const url = (await git(root, ['config', '--get', `remote.${target.remote ?? 'origin'}.url`]).catch(() => '')).trim();
     const remoteUrl = githubWebUrl(url);
-    return {...(remoteUrl ? {remoteUrl} : {}), ...(target.remote ? {pushRemote: target.remote} : {})};
+    const forge = remoteUrl ? {kind: 'github' as const, webUrl: remoteUrl} : detectForge(url);
+    return {...(remoteUrl ? {remoteUrl} : {}), ...(target.remote ? {pushRemote: target.remote} : {}), ...(forge ? {forge: forge.kind, forgeUrl: forge.webUrl} : {})};
   } catch { return {}; }
 }
 
