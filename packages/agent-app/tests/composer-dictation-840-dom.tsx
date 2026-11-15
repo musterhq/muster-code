@@ -30,6 +30,13 @@ class FakeRecorder{
 Object.defineProperty(globalThis,'navigator',{configurable:true,value:{userAgent:'Mozilla/5.0 Muster Electron/39.0.0',language:'en-US',platform:'MacIntel',
   mediaDevices:{async getUserMedia(constraints:any){assert.deepEqual(Object.keys(constraints),['audio'],'audio only');microphoneOpens++;const track={stopped:false,stop(){this.stopped=true;}};tracks.push(track);return {getTracks:()=>[track]};}}}});
 Object.assign(globalThis,{MediaRecorder:FakeRecorder});(window as any).MediaRecorder=FakeRecorder;
+// Fake Web Audio: decoding gives 10 ms of audio; rendering at 16 kHz mono gives 160 samples alternating +0.5 and -0.5.
+const audioUse={decoded:0,rendered:[] as {channels:number;length:number;rate:number}[]};
+class FakeAudioContext{async decodeAudioData(data:ArrayBuffer){assert.ok(data.byteLength>0);audioUse.decoded++;return {duration:0.01,numberOfChannels:2,sampleRate:48000,length:480};}async close(){}}
+class FakeOfflineAudioContext{destination={};constructor(public channels:number,public length:number,public rate:number){}
+  createBufferSource(){return {buffer:null,connect(){},start(){}};}
+  async startRendering(){audioUse.rendered.push({channels:this.channels,length:this.length,rate:this.rate});const samples=new Float32Array(this.length).map((_,i)=>i%2?-0.5:0.5);return {getChannelData:()=>samples,length:this.length,sampleRate:this.rate,numberOfChannels:1};}}
+Object.assign(globalThis,{AudioContext:FakeAudioContext,OfflineAudioContext:FakeOfflineAudioContext});Object.assign(window,{AudioContext:FakeAudioContext,OfflineAudioContext:FakeOfflineAudioContext});
 
 const twoHoursAgo=new Date(Date.now()-2*3600_000).toISOString();
 let chat:any={id:'one',title:'one',folderId:'folder',status:'completed',updatedAt:twoHoursAgo,pinned:false,archived:false,draft:'',model:'fixture',mode:'agent',providerId:'hybrow'};
@@ -37,9 +44,10 @@ const listeners=new Set<(event:any)=>void>();
 const snapshot=()=>JSON.parse(JSON.stringify({version:1,chats:[chat],folders:[{id:'folder',name:'Folder',path:'/fixture'}],projects:[],activeChatId:'one'}));
 const emit=()=>{for(const fn of listeners)fn({type:'snapshot',snapshot:snapshot()});};
 const calls:{command:string;input:any}[]=[];
-const view=(backend:string,extra:Record<string,unknown>={})=>({backend,ready:backend==='cloud',...(backend==='cloud'?{}:{reason:'Choose a dictation service in Settings › Chat.'}),
-  backends:[{id:'off',label:'Off',available:true},{id:'cloud',label:'Cloud',available:true},{id:'macos',label:'On-device',available:false,reason:'Coming in a later version.'}],
-  cloud:{connectionId:null,endpoint:'',model:'whisper-1',keyStored:false,secureStorage:true},...extra});
+const MODELS=['/Users/me/.muster/models/ggml-small.en.bin','/opt/homebrew/share/whisper-cpp/models/ggml-base.bin'];
+const view=(backend:string,extra:Record<string,unknown>={})=>({backend,ready:backend==='cloud',...(backend==='cloud'?{}:{reason:backend==='local'?'Choose a whisper model in Settings › Chat, or put one in ~/.muster/models.':'Choose a dictation service in Settings › Chat.'}),
+  backends:[{id:'off',label:'Off',available:true},{id:'cloud',label:'Cloud',available:true},{id:'macos',label:'On-device',available:false,reason:'Coming in a later version.'},{id:'local',label:'Local model',available:true}],
+  cloud:{connectionId:null,endpoint:'',model:'whisper-1',keyStored:false,secureStorage:true},local:{program:'/opt/homebrew/bin/whisper-cli',model:'',models:MODELS},...extra});
 let config:any=view('cloud',{cloud:{connectionId:null,endpoint:'https://speech.example/v1',model:'whisper-1',keyStored:true,secureStorage:true}});
 let microphone:any={granted:true,status:'granted'};
 let transcript='ship the release notes';let transcribeGate:Promise<void>=Promise.resolve();
@@ -60,7 +68,8 @@ window.muster={subscribe(fn:any){listeners.add(fn);return()=>{listeners.delete(f
   if(command==='dictation.config.get')return config;
   if(command==='dictation.config.set'){
     const cloud={...config.cloud,...(input.endpoint!==undefined?{endpoint:input.endpoint}:{}),...(input.model!==undefined?{model:input.model}:{}),...(input.connectionId!==undefined?{connectionId:input.connectionId}:{}),...(input.apiKey?{keyStored:true}:{})};
-    config=view(input.backend??config.backend,{cloud});return config;
+    const local={...config.local,...(input.localModel!==undefined?{model:input.localModel}:{})};
+    config=view(input.backend??config.backend,{cloud,local,...(local.model&&(input.backend??config.backend)==='local'?{ready:true,reason:undefined,recording:'wav'}:{})});return config;
   }
   if(command==='dictation.microphone')return microphone;
   if(command==='dictation.transcribe'){await transcribeGate;return {text:transcript};}
@@ -166,6 +175,31 @@ await check('dictation works in the steer composer while a chat runs',async()=>{
   chat={...chat,status:'completed'};emit();await delay(40);
 });
 
+// Spec: MUS-SPEC-01-840N (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-840n)
+await check('with the local backend the composer sends a 16 kHz mono WAV recording and inserts the words',async()=>{
+  const cloud=config;
+  config=view('local',{ready:true,reason:undefined,recording:'wav',local:{program:'/opt/homebrew/bin/whisper-cli',model:MODELS[0],models:MODELS}});
+  transcript='run the local tests';
+  const before=count('dictation.transcribe');
+  mic()!.click();
+  await until(()=>mic()?.getAttribute('aria-pressed')==='true','recording');
+  mic()!.click();
+  await until(()=>count('dictation.transcribe')===before+1,'the recording is sent');
+  const sent=calls.filter(call=>call.command==='dictation.transcribe').at(-1)!.input;
+  assert.equal(sent.mime,'audio/wav');
+  assert.equal(audioUse.decoded,1,'the recording was decoded');
+  assert.deepEqual(audioUse.rendered,[{channels:1,length:160,rate:16000}],'resampled to 16 kHz mono');
+  const bytes=Buffer.from(sent.audio,'base64');
+  assert.equal(bytes.toString('latin1',0,4),'RIFF');assert.equal(bytes.toString('latin1',8,16),'WAVEfmt ');
+  assert.equal(bytes.readUInt16LE(20),1,'PCM');assert.equal(bytes.readUInt16LE(22),1,'one channel');
+  assert.equal(bytes.readUInt32LE(24),16000,'16 kHz');assert.equal(bytes.readUInt16LE(34),16,'16-bit');
+  assert.equal(bytes.toString('latin1',36,40),'data');assert.equal(bytes.readUInt32LE(40),320);assert.equal(bytes.length,44+320);
+  assert.equal(bytes.readInt16LE(44),Math.round(0.5*32767));assert.equal(bytes.readInt16LE(46),-Math.round(0.5*32768));
+  await until(()=>field().value==='run the local tests','the words fill the composer');
+  config=cloud;
+});
+await setDraft('');
+
 // Spec: MUS-SPEC-01-840F (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-840f)
 await check('Settings › Chat chooses the dictation service and saves a cloud key',async()=>{
   config=view('off');
@@ -189,6 +223,19 @@ await check('Settings › Chat chooses the dictation service and saves a cloud k
   await until(()=>($('[aria-label="Transcription API key"]') as HTMLInputElement).value==='','the key field is cleared after saving');
   assert.match(document.body.textContent??'',/Key saved/);
   assert.equal((document.body.innerHTML).includes('sk-typed-key'),false,'the key is not shown back');
+});
+
+// Spec: MUS-SPEC-01-840O (docs/spec/clauses/01-chat-and-composer.md#mus-spec-01-840o)
+await check('Settings › Chat chooses the local model and shows what is missing',async()=>{
+  const segment=(label:string)=>[...document.querySelectorAll('[aria-label="Dictation"] button')].find(button=>button.textContent===label) as HTMLButtonElement|undefined;
+  await until(()=>segment('Local model'),'Local is offered');
+  segment('Local model')!.click();
+  await until(()=>$('[aria-label="Local whisper model"]'),'the local model row appears');
+  assert.match(document.body.textContent??'',/~\/\.muster\/models/,'the setup hint shows');
+  const picker=$('[aria-label="Local whisper model"]') as HTMLSelectElement;
+  assert.deepEqual([...picker.querySelectorAll('option')].map(option=>(option as HTMLOptionElement).value).filter(Boolean),MODELS,'the found models are listed');
+  picker.value=MODELS[1]!;picker.dispatchEvent(new window.Event('change',{bubbles:true}));
+  await until(()=>calls.some(call=>call.command==='dictation.config.set'&&call.input.localModel===MODELS[1]),'picking a model saves its path');
 });
 assert.deepEqual(errors,[]);
 process.exit(0);

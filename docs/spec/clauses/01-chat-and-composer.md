@@ -48,6 +48,10 @@ Boundaries:
 | [MUS-SPEC-01-840I](01-chat-and-composer.md#mus-spec-01-840i) | Cloud dictation through a saved OpenAI-compatible connection uses that connection's endpoint and stored key. | [`the cloud backend can use a saved provider connection and its key`](../../../packages/agent-app/tests/dictation-840.test.ts) |
 | [MUS-SPEC-01-840J](01-chat-and-composer.md#mus-spec-01-840j) | On macOS, microphone access asks the system once when undecided and returns a System Settings message when denied, without asking. | [`microphone access asks macOS when undecided and explains a denial`](../../../packages/agent-app/tests/microphone-840.test.ts) |
 | [MUS-SPEC-01-840K](01-chat-and-composer.md#mus-spec-01-840k) | The window allows a media request only for audio from the app's own page; video, other permissions and other pages are refused. | [`only the app page may open the microphone, and only for audio`](../../../packages/agent-app/tests/microphone-840.test.ts) |
+| [MUS-SPEC-01-840L](01-chat-and-composer.md#mus-spec-01-840l) | With Local chosen, the WAV recording goes to the whisper.cpp program with the chosen model; its timestamps and silence markers are removed from the words; no network request is made; the temporary audio is gone afterwards and no audio is in the data folder or the logs. | [`the local backend transcribes the recording with whisper.cpp on this computer and keeps nothing`](../../../packages/agent-app/tests/dictation-840.test.ts) |
+| [MUS-SPEC-01-840M](01-chat-and-composer.md#mus-spec-01-840m) | Without whisper.cpp the view says how to install it; without a model it says where to put one; models in `~/.muster/models` and Homebrew's folder are listed; a model path that is not a model file is refused; a recording that is not WAV is refused without running anything. | [`the local backend says what is missing and finds the models the muster CLI uses`](../../../packages/agent-app/tests/dictation-840.test.ts) |
+| [MUS-SPEC-01-840N](01-chat-and-composer.md#mus-spec-01-840n) | With Local chosen, the recording is decoded and sent to `dictation.transcribe` as `audio/wav`: a RIFF header for 16 kHz, one channel, 16-bit samples, then the samples; the words land in the composer. | [`with the local backend the composer sends a 16 kHz mono WAV recording and inserts the words`](../../../packages/agent-app/tests/composer-dictation-840-dom.tsx) |
+| [MUS-SPEC-01-840O](01-chat-and-composer.md#mus-spec-01-840o) | Choosing Local in Settings › Chat shows the found models and the setup hint; picking a model calls `dictation.config.set` with its path. | [`Settings › Chat chooses the local model and shows what is missing`](../../../packages/agent-app/tests/composer-dictation-840-dom.tsx) |
 | [MUS-SPEC-01-401A](01-chat-and-composer.md#mus-spec-01-401a) | With the chat idle and the composer empty, the last turn's suggestion shows as ghost text in the composer (the textarea placeholder steps aside), and Tab puts exactly that text in the composer without sending. | [`the suggested follow-up shows as ghost text in an empty composer and Tab fills it`](../../../packages/agent-app/tests/follow-up-401-dom.tsx) |
 | [MUS-SPEC-01-401B](01-chat-and-composer.md#mus-spec-01-401b) | Clicking the suggestion fills the composer and sends nothing; a Cmd/Ctrl-click sends the suggestion as the next message. | [`clicking the suggestion fills the composer, and a modifier-click sends it`](../../../packages/agent-app/tests/follow-up-401-dom.tsx) |
 | [MUS-SPEC-01-401C](01-chat-and-composer.md#mus-spec-01-401c) | The suggestion is gone once anything is typed, and is not shown while a turn runs. | [`the suggestion hides once you type and while a turn runs`](../../../packages/agent-app/tests/follow-up-401-dom.tsx) |
@@ -433,6 +437,50 @@ Boundaries:
 - Expected result: Only the audio-only request from the app's own page in its window is allowed.
 - Test: `packages/agent-app/tests/microphone-840.test.ts::only the app page may open the microphone, and only for audio`
 - Environment: Main-process helper with plain inputs; no Electron.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-840l"></a>
+#### MUS-SPEC-01-840L: A local model transcribes on this computer
+
+- Precondition: Dictation is set to Local, whisper.cpp (`whisper-cli`) is installed and a ggml model file is chosen.
+- Action: Transcribe a WAV recording.
+- Expected result: The whisper.cpp program runs once with the chosen model and the recording (no shell), and the words come back without timestamps or markers such as `[BLANK_AUDIO]`. No network request is made. When the call ends the temporary copy of the recording is deleted, and no audio is left in the data folder or written to the logs.
+- Test: `packages/agent-app/tests/dictation-840.test.ts::the local backend transcribes the recording with whisper.cpp on this computer and keeps nothing`
+- Environment: Node test runner; the real dictation domain with a stand-in `whisper-cli` script on PATH that records its arguments and checks the WAV it is given; fake fetch; no microphone.
+- Known gaps: A real whisper.cpp build and model are not run in CI; accuracy and speed depend on the model the person chooses.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-840m"></a>
+#### MUS-SPEC-01-840M: The local backend says what is missing
+
+- Precondition: Dictation is set to Local. First no whisper.cpp program and no model; then whisper.cpp and model files in `~/.muster/models` (the folder the muster CLI uses) and in Homebrew's whisper-cpp folder.
+- Action: Read the dictation settings, choose a model, try a path that is not a model, and transcribe a recording that is not WAV.
+- Expected result: Without whisper.cpp the settings are not ready and say to install it (`brew install whisper-cpp`). With it but no model, they say where to put a model. Found models are listed, and choosing one makes the backend ready. A path that is not an existing `.bin` file is refused. A recording that is not WAV is refused with a clear message and nothing is run.
+- Test: `packages/agent-app/tests/dictation-840.test.ts::the local backend says what is missing and finds the models the muster CLI uses`
+- Environment: Node test runner; the real dictation domain with a temp home folder, a temp PATH and a stand-in `whisper-cli`.
+- Known gaps: Muster does not download models; the person gets one themselves (the hint says from where).
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-840n"></a>
+#### MUS-SPEC-01-840N: With Local the composer sends WAV
+
+- Precondition: Dictation is set to Local and ready. The microphone is allowed.
+- Action: Click the mic, then click it again.
+- Expected result: The recording is decoded and resampled to 16 kHz mono and sent to `dictation.transcribe` as `audio/wav` with a valid RIFF header (16,000 Hz, 1 channel, 16-bit) followed by the samples. The transcript fills the composer.
+- Test: `packages/agent-app/tests/composer-dictation-840-dom.tsx::with the local backend the composer sends a 16 kHz mono WAV recording and inserts the words`
+- Environment: Real components in a DOM suite (linkedom); fake MediaRecorder, getUserMedia and Web Audio decoding; fake app bridge; no microphone.
+- Known gaps: Chromium's real decoding of a MediaRecorder recording is not run here; it is checked by hand in the app.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-01-840o"></a>
+#### MUS-SPEC-01-840O: Settings › Chat sets up the local model
+
+- Precondition: Settings › Chat is open. The local backend reports two found models and that no model is chosen yet.
+- Action: Choose Local, then pick a model.
+- Expected result: Local is offered in the Dictation choice. Once chosen, a row lists the found models and shows the setup hint. Picking one calls `dictation.config.set` with that model's path.
+- Test: `packages/agent-app/tests/composer-dictation-840-dom.tsx::Settings › Chat chooses the local model and shows what is missing`
+- Environment: Real components in a DOM suite (linkedom); fake app bridge.
 - Known gaps: None known.
 - Evidence: UNVERIFIED
 
