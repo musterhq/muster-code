@@ -9,6 +9,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { DICTATION_HOLD_MS, DICTATION_MAX_SECONDS, MICROPHONE_SETTINGS_HINT } from '../shared/domains/dictation-protocol';
+import { recordingAsWav } from './wavRecording';
 import { invoke } from './bridge';
 import { runtimeMessage as errorText } from './composerBridge';
 import { openAppSettings, pushNotice } from './store';
@@ -50,7 +51,7 @@ function base64(bytes: Uint8Array): string {
 const pickMime = (Class: RecorderClass) => MIME_PREFERENCE.find(type => { try { return Class.isTypeSupported?.(type) ?? false; } catch { return false; } });
 const release = (stream: MediaStream | undefined) => { for (const track of stream?.getTracks() ?? []) { try { track.stop(); } catch { /* already stopped */ } } };
 
-interface Session { stream: MediaStream; recorder: Recorder; chunks: Blob[]; mime: string; cancelled: boolean; timer: ReturnType<typeof setTimeout> }
+interface Session { stream: MediaStream; recorder: Recorder; chunks: Blob[]; mime: string; cancelled: boolean; timer: ReturnType<typeof setTimeout>; /** The backend reads WAV only (local). */ wav: boolean }
 
 export interface DictationOptions {
   /** Final words to insert at the caret. */
@@ -91,14 +92,16 @@ export function useDictation(options: DictationOptions) {
   };
 
   const transcribe = async (current: Session) => {
-    const blob = new Blob(current.chunks, { type: current.mime });
+    const recorded = new Blob(current.chunks, { type: current.mime });
     current.chunks.length = 0;
-    if (!blob.size) { latest.current.flash('No audio was recorded'); move('idle'); return; }
+    if (!recorded.size) { latest.current.flash('No audio was recorded'); move('idle'); return; }
     move('transcribing');
     const mine = generation.current;
     try {
+      const blob = current.wav ? await recordingAsWav(recorded) : recorded;
+      if (mine !== generation.current) return;
       const audio = base64(new Uint8Array(await blob.arrayBuffer()));
-      const result = await invoke('dictation.transcribe', { audio, mime: current.mime });
+      const result = await invoke('dictation.transcribe', { audio, mime: current.wav ? 'audio/wav' : current.mime });
       if (mine !== generation.current) return;
       const words = result?.text?.trim() ?? '';
       if (words) latest.current.onText(words); else latest.current.flash('No speech heard');
@@ -128,7 +131,7 @@ export function useDictation(options: DictationOptions) {
       if (mine !== generation.current) { release(stream); return; }
       const Class = recorderClass()!, wanted = pickMime(Class);
       const recorder = new Class(stream, wanted ? { mimeType: wanted } : undefined);
-      const current: Session = { stream, recorder, chunks: [], mime: recorder.mimeType || wanted || 'audio/webm', cancelled: false,
+      const current: Session = { stream, recorder, chunks: [], mime: recorder.mimeType || wanted || 'audio/webm', cancelled: false, wav: config.recording === 'wav',
         timer: setTimeout(() => { if (session.current === current) finish(); }, DICTATION_MAX_SECONDS * 1000) };
       recorder.ondataavailable = event => { if (event.data && event.data.size) current.chunks.push(event.data); };
       recorder.onerror = () => { if (session.current === current) cancel(); latest.current.flash('Recording stopped unexpectedly'); };
