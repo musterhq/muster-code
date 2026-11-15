@@ -1,6 +1,6 @@
 import React, {useState} from 'react';
 import {ExternalLink, FolderPlus, KeyRound, Plug, Trash2, Unplug} from 'lucide-react';
-import type {RemoteForward, RemoteHost, RemoteState, RemoteStatus} from '../../../shared/domains/remote-protocol';
+import type {RemoteAgentCredentials, RemoteForward, RemoteHost, RemoteState, RemoteStatus} from '../../../shared/domains/remote-protocol';
 import {parseRemoteFolderPath, remoteAuthority} from '../../../shared/domains/remote-protocol';
 import {invoke} from '../../bridge';
 import {useEventLoad} from '../../orgHooks';
@@ -40,6 +40,7 @@ export function RemoteHostsPanel(): React.ReactElement {
   const connect = (h: RemoteHost) => run(`connect:${h.id}`, async () => { remember(await invoke('remote.hosts.connect', {id: h.id})); });
   const trust = (h: RemoteHost, fingerprint: string) => run(`trust:${h.id}`, async () => { remember(await invoke('remote.hosts.trust', {id: h.id, fingerprint})); hosts.reload(); });
   const disconnect = (h: RemoteHost) => run(`disconnect:${h.id}`, async () => { remember(await invoke('remote.hosts.disconnect', {id: h.id})); setForwards(f => f.filter(x => x.hostId !== h.id)); });
+  const credentials = (h: RemoteHost, value: RemoteAgentCredentials) => run(`cred:${h.id}`, async () => { await invoke('remote.hosts.agentCredentials', {id: h.id, credentials: value}); hosts.reload(); });
   const remove = (h: RemoteHost) => run(`rm:${h.id}`, async () => { await invoke('remote.hosts.remove', {id: h.id}); hosts.reload(); config.reload(); });
   const openFolder = (h: RemoteHost) => run(`folder:${h.id}`, async () => { const folder = await invoke('remote.folder.add', {hostId: h.id, path: (paths[h.id] ?? '').trim()}); setPaths(p => ({...p, [h.id]: ''})); notifySuccess(`Added ${folder.name} from ${h.name} to the sidebar.`); });
   const forward = (h: RemoteHost) => run(`fwd:${h.id}`, async () => {
@@ -67,6 +68,16 @@ export function RemoteHostsPanel(): React.ReactElement {
             <code className="ssh-fingerprint">{s.hostKey.fingerprint}</code>
             <div className="server-inline"><button type="button" className="settings-button" disabled={Boolean(busy)} onClick={() => void trust(h, s.hostKey!.fingerprint)}><KeyRound size={12} aria-hidden="true"/> Trust this host</button></div></>}
         </div></td></tr>}
+        <tr><td colSpan={3}><div className="server-inline">
+          {/* #147 phase 2: agents in this host's folders run there; how their CLI signs in to its model provider. */}
+          <label className="ws-faint" htmlFor={`agent-sign-in-${h.id}`}>Agents on {h.name} sign in with</label>
+          <select id={`agent-sign-in-${h.id}`} className="ws-input" aria-label={`Agent sign-in on ${h.name}`} disabled={Boolean(busy)} value={h.agentCredentials ?? 'host'} onChange={e => void credentials(h, e.target.value as RemoteAgentCredentials)}>
+            <option value="host">The host’s own login (recommended)</option>
+            <option value="muster">My API key from Muster, for each run</option>
+          </select></div>
+          <p className="project-edit-hint ws-settings-hint">{(h.agentCredentials ?? 'host') === 'host'
+            ? `Claude Code, Codex and ACP agents run on ${h.name} with the login and config they have there. Muster sends no key; install and sign in to each CLI on the host yourself.`
+            : `Muster passes ANTHROPIC_API_KEY (Claude Code) or OPENAI_API_KEY (Codex) to the agent on ${h.name} as an environment variable for that run only. It is never written on the host, but anyone with root there could read it while the run lasts.`}</p></td></tr>
         {up && <tr><td colSpan={3}><div className="server-inline">
           <input type="text" className="ws-input" aria-label={`Folder on ${h.name}`} placeholder="~/project or /srv/app" value={paths[h.id] ?? ''} onChange={e => setPaths(p => ({...p, [h.id]: e.target.value}))}/>
           <button type="button" className="settings-button" disabled={Boolean(busy) || !(paths[h.id] ?? '').trim()} onClick={() => void openFolder(h)}><FolderPlus size={12} aria-hidden="true"/> Open folder</button>

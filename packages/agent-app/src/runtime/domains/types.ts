@@ -27,6 +27,24 @@ export interface CommandCompleted { command: string; input: Record<string, unkno
 export interface ChatRemoval { chat: Chat; kind: 'delete' | 'archive' }
 /** #147: answers a file or Git command for an `ssh://` folder instead of the local implementation. */
 export type RemoteFolderRouter = (command: string, input: Record<string, unknown>, folder: Folder) => Promise<unknown>;
+/** #147 phase 2: a chat's run on the SSH host of its folder, prepared before the run starts. */
+export interface RemoteAgentRun {
+  /** What the provider gets: the host, the folder there and the command that starts the route's CLI there. */
+  run: { host: string; root: string; command: string };
+  /** The run's Muster tool servers become the relay on the host (per-run token); local-only servers are left out. */
+  tools(overrides: Record<string, unknown> | undefined, chatId: string): { overrides: Record<string, unknown>; dropped: string[]; close(): void };
+  /** A line for the agent's instructions: where it runs and which of Muster's tools it lacks there. */
+  note: string;
+  /** How the CLI signs in for this run, for the chat's notice: the host's own login, or the person's key passed by Muster. */
+  signIn: string;
+  /** A failed run's message in plain words (the CLI's sign-in on the host), or undefined to keep the provider's. */
+  failure(message: string): string | undefined;
+  /** The connection to the host dropped while the run was going. */
+  dropped(): boolean;
+  dispose(): void;
+}
+/** Rejects with a sentence when the route cannot run on the host (an API route, the CLI missing there, the host unreachable). */
+export type RemoteAgentResolver = (input: { chat: Chat; folder: Folder; provider: ProviderInfo }) => Promise<RemoteAgentRun>;
 /** #44: an approval or question card opened (pending) or was closed (settled) in a chat. Observers must not throw or block. */
 export interface AttentionChange { chatId: string; itemId: string; state: 'pending' | 'settled' }
 export type RunEnvironmentResolver = (chat: Chat, defaultCwd: string) => Promise<{ cwd: string }>;
@@ -73,6 +91,8 @@ export interface DomainHooks {
   onChatRemoval?(fn: (event: ChatRemoval) => Promise<void> | void): () => void;
   /** #147: the single handler of file and Git commands for a folder on an SSH host (undefined clears it). */
   setRemoteFolderRouter?(fn: RemoteFolderRouter | undefined): void;
+  /** #147 phase 2: prepares a chat's run on its folder's SSH host. */
+  setRemoteAgentResolver?(fn: RemoteAgentResolver | undefined): void;
   /** #44: approval and question cards opening and closing (a delegating chat mirrors its children's). Optional so bare test contexts need not provide it. */
   onAttention?(fn: (event: AttentionChange) => void): () => void;
   /** #44: replaces the single resolver of extra data a sent message's transcript row carries, by request id (a delegation

@@ -212,8 +212,8 @@ function handshakeProblem(agent: AcpAgentSpec, error: unknown, connection: AcpCo
   return sentence(message);
 }
 
-async function handshake(connection: AcpConnection, agent: AcpAgentSpec, timeoutMs: number): Promise<Record<string, unknown>> {
-  const init = await connection.request('initialize', {protocolVersion: ACP_PROTOCOL_VERSION, clientCapabilities: {fs: {readTextFile: true, writeTextFile: true}, terminal: false}, clientInfo: {name: 'muster', title: 'Muster', version: '1'}}, timeoutMs);
+async function handshake(connection: AcpConnection, agent: AcpAgentSpec, timeoutMs: number, files = true): Promise<Record<string, unknown>> {
+  const init = await connection.request('initialize', {protocolVersion: ACP_PROTOCOL_VERSION, clientCapabilities: {fs: {readTextFile: files, writeTextFile: files}, terminal: false}, clientInfo: {name: 'muster', title: 'Muster', version: '1'}}, timeoutMs);
   const version = num(init.protocolVersion);
   if (version !== undefined && version !== ACP_PROTOCOL_VERSION) throw new Error(`${agent.name} speaks Agent Client Protocol version ${version}; Muster speaks version ${ACP_PROTOCOL_VERSION}.`);
   return init;
@@ -240,7 +240,8 @@ export async function acpProbe(agent: AcpAgentSpec, options: {cwd: string; env?:
 export function acpAdapter(options: {agent: AcpAgentSpec; env?: NodeJS.ProcessEnv; home?: string; spawn?: AgentSpawn; killGraceMs?: number; handshakeTimeoutMs?: number}): RunnableAdapter {
   const agent = options.agent, label = agent.name;
   return {kind: 'cli', async run(input): Promise<AdapterRunResult> {
-    const turnId = randomUUID(), base = options.env ?? process.env, found = resolveAcpCommand(agent, base, options.home);
+    // #147: on an SSH host the command is found there (the remote run's own command); this computer's PATH does not matter.
+    const turnId = randomUUID(), base = options.env ?? process.env, found = input.remote ? {binary: input.remote.command} : resolveAcpCommand(agent, base, options.home);
     if ('problem' in found) return {status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: found.problem};
     let connection: AcpConnection;
     try { connection = new AcpConnection(found.binary, agent.args, {cwd: input.cwd, env: acpEnv(agent, base, found.binary, input.env), spawn: options.spawn, label}); }
@@ -301,6 +302,7 @@ export function acpAdapter(options: {agent: AcpAgentSpec; env?: NodeJS.ProcessEn
         const optionId = pickOption(choices, allowed);
         return optionId ? {outcome: {outcome: 'selected', optionId}} : {outcome: {outcome: 'cancelled'}};
       }
+      if (input.remote && method.startsWith('fs/')) throw new AcpRpcError(`The files are on ${input.remote.host}; read and write them there with your own tools.`, -32601);
       if (method === 'fs/read_text_file') {
         const resolved = await fsPath(params.path, false);
         const read = await readLimited(resolved.path, MAX_FILE_BYTES, resolved.confined).catch((error: unknown) => { throw new AcpRpcError(error instanceof Error ? error.message : String(error), -32603); });
@@ -333,7 +335,8 @@ export function acpAdapter(options: {agent: AcpAgentSpec; env?: NodeJS.ProcessEn
     let stopReason = '';
     try {
       let init: Record<string, unknown>;
-      try { init = await handshake(connection, agent, options.handshakeTimeoutMs ?? 60_000); } catch (error) { throw new Error(handshakeProblem(agent, error, connection)); }
+      // #147: an agent on an SSH host reads and writes its files there itself; Muster does not serve them from this computer.
+      try { init = await handshake(connection, agent, options.handshakeTimeoutMs ?? 60_000, !input.remote); } catch (error) { throw new Error(handshakeProblem(agent, error, connection)); }
       const caps = obj(init.agentCapabilities), sessionCaps = obj(caps.sessionCapabilities);
       let mcpServers: unknown[] = acpMcpServers(input.mcpServers), instructions = input.instructions, opened: Record<string, unknown> | undefined, seed: string | undefined;
       if (input.resumeThreadId) {
