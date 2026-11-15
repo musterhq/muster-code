@@ -234,7 +234,8 @@ await check('Settings › Chat chooses the local model and shows what is missing
   assert.match(document.body.textContent??'',/~\/\.muster\/models/,'the setup hint shows');
   const picker=$('[aria-label="Local whisper model"]') as HTMLSelectElement;
   assert.deepEqual([...picker.querySelectorAll('option')].map(option=>(option as HTMLOptionElement).value).filter(Boolean),MODELS,'the found models are listed');
-  picker.value=MODELS[1]!;picker.dispatchEvent(new window.Event('change',{bubbles:true}));
+  for(const option of picker.querySelectorAll('option'))option.toggleAttribute('selected',(option as HTMLOptionElement).value===MODELS[1]);
+  picker.dispatchEvent(new window.Event('change',{bubbles:true}));
   await until(()=>calls.some(call=>call.command==='dictation.config.set'&&call.input.localModel===MODELS[1]),'picking a model saves its path');
 });
 assert.deepEqual(errors,[]);

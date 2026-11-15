@@ -4,8 +4,8 @@
  * and nothing is kept after transcription (no file, no log line).
  */
 /** `off`: no backend (a browser host may still use its own Web Speech). `cloud`: an OpenAI-compatible
- *  `/audio/transcriptions` endpoint with the person's own key. `macos` (on-device speech) and `local` (a local model)
- *  are listed for the choice but not available in this build. */
+ *  `/audio/transcriptions` endpoint with the person's own key. `local`: whisper.cpp with a model file on this computer.
+ *  `macos` (on-device speech) is listed for the choice but not available in this build. */
 export type DictationBackendId = 'off' | 'cloud' | 'macos' | 'local';
 export const DICTATION_BACKENDS: readonly DictationBackendId[] = ['off', 'cloud', 'macos', 'local'];
 export interface DictationBackendView { id: DictationBackendId; label: string; available: boolean; reason?: string }
@@ -18,6 +18,14 @@ export interface DictationCloudView {
   keyStored: boolean;
   secureStorage: boolean;
 }
+export interface DictationLocalView {
+  /** The whisper.cpp program found (`whisper-cli`), or null when it is not installed. */
+  program: string | null;
+  /** The chosen ggml model file; empty when none is chosen. */
+  model: string;
+  /** Model files found where the muster CLI and Homebrew keep them. */
+  models: string[];
+}
 export interface DictationConfigView {
   backend: DictationBackendId;
   /** The chosen backend can transcribe now. */
@@ -26,6 +34,9 @@ export interface DictationConfigView {
   reason?: string;
   backends: DictationBackendView[];
   cloud: DictationCloudView;
+  local: DictationLocalView;
+  /** `wav`: the composer sends 16 kHz mono 16-bit WAV (the local backend reads nothing else); otherwise the recording as made. */
+  recording?: 'wav';
 }
 export interface DictationConfigInput {
   backend?: DictationBackendId;
@@ -34,6 +45,8 @@ export interface DictationConfigInput {
   model?: string;
   /** A new key for the dictation endpoint; null removes the saved one. */
   apiKey?: string | null;
+  /** The ggml model file for the local backend. */
+  localModel?: string;
 }
 export type MicrophoneStatus = 'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown';
 export interface MicrophoneAccess { granted: boolean; status: MicrophoneStatus; message?: string }
@@ -45,6 +58,8 @@ export const DICTATION_MAX_AUDIO_BYTES = 24 * 1024 * 1024;
 export const DICTATION_MAX_SECONDS = 300;
 /** Holding the shortcut longer than this is push-to-talk (release transcribes); a shorter tap toggles recording on. */
 export const DICTATION_HOLD_MS = 350;
+/** The sample rate whisper.cpp reads. */
+export const DICTATION_WAV_RATE = 16_000;
 export const MICROPHONE_SETTINGS_HINT = 'Turn it on in System Settings › Privacy & Security › Microphone, then try again.';
 
 export interface DictationCommands {

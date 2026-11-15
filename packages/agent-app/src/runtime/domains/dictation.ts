@@ -4,14 +4,20 @@
  * - `cloud`: an OpenAI-compatible `POST <endpoint>/audio/transcriptions` with the person's own key, either a saved
  *   provider connection (its endpoint and key) or an endpoint and key entered for dictation (the key is encrypted in
  *   the secret store). This is the only backend that sends audio anywhere.
- * - `macos` (on-device speech) and `local` (a local model) are listed so the choice is visible, but this build does
- *   not ship them: they are reported unavailable and never transcribe.
+ * - `local`: whisper.cpp (`whisper-cli`) with a ggml model file, on this computer. The composer sends 16 kHz mono WAV,
+ *   which is written to a private temp folder for the program to read and deleted as soon as it answers. Models are
+ *   found where the muster CLI keeps them (~/.muster/models, ~/.cache/whisper*) and in Homebrew's whisper-cpp folder.
+ * - `macos` (on-device speech) is listed so the choice is visible, but this build does not ship it: it is reported
+ *   unavailable and never transcribes.
  *
- * The recording arrives as base64, is posted once and dropped: it is never written to disk or logged, and errors
- * never quote it. Only the choice (backend, connection, endpoint, model) is stored, in dataDir/dictation.json.
+ * The recording arrives as base64 and is dropped after one use: it is never kept on disk or logged, and errors never
+ * quote it. Only the choice (backend, connection, endpoint, model, local model) is stored, in dataDir/dictation.json.
  */
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { execFile, type ChildProcess } from 'node:child_process';
+import { accessSync, chmodSync, constants, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { delimiter, isAbsolute, join } from 'node:path';
 import {
   DICTATION_BACKENDS, DICTATION_MAX_AUDIO_BYTES, type DictationBackendId, type DictationBackendView, type DictationConfigInput,
   type DictationConfigView, type MicrophoneAccess,
@@ -25,13 +31,28 @@ const DEFAULT_MODEL = 'whisper-1';
 const CHOOSE = 'Choose a dictation service in Settings › Chat.';
 const LABELS: Record<DictationBackendId, string> = { off: 'Off', cloud: 'Cloud', macos: 'On-device (macOS)', local: 'Local model' };
 const TIMEOUT_MS = 120_000;
+const WHISPER_PROGRAMS = ['whisper-cli', 'whisper-cpp'];
+const INSTALL_WHISPER = 'Install whisper.cpp to use a local model (brew install whisper-cpp), then try again.';
+const GET_MODEL = 'Choose a whisper model in Settings › Chat, or put one in ~/.muster/models (for example ggml-base.en.bin from huggingface.co/ggerganov/whisper.cpp).';
+const MODEL_FILE = /^ggml-[A-Za-z0-9._-]+\.bin$/;
+
+/** whisper.cpp output -> plain words: no timestamps, no [BLANK_AUDIO]-style markers (as the muster CLI does). */
+export function cleanTranscript(raw: string): string {
+  return raw.split('\n')
+    .map(line => line
+      .replace(/^\s*\[\d{2}:\d{2}(?::\d{2})?[.,]\d{3}\s*-->\s*\d{2}:\d{2}(?::\d{2})?[.,]\d{3}\]\s*/, '')
+      .replace(/\[(?:BLANK_AUDIO|MUSIC|NOISE|SILENCE|INAUDIBLE)\]|\((?:silence|music|noise)\)/gi, '')
+      .trim())
+    .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+}
+const isWav = (audio: Buffer) => audio.byteLength > 44 && audio.toString('latin1', 0, 4) === 'RIFF' && audio.toString('latin1', 8, 12) === 'WAVE';
 const MAX_ANSWER_BYTES = 1024 * 1024;
 const MIME = /^audio\/[a-z0-9.+-]{1,40}(?:;\s*codecs="?[a-z0-9.,-]{1,40}"?)?$/i;
 const MODEL = /^[A-Za-z0-9._:/-]{1,128}$/;
 const CONNECTION = /^[A-Za-z0-9_-]{1,128}$/;
 
-interface Stored { version: 1; backend: DictationBackendId; connectionId: string | null; endpoint: string; model: string }
-const DEFAULTS: Stored = { version: 1, backend: 'off', connectionId: null, endpoint: '', model: DEFAULT_MODEL };
+interface Stored { version: 1; backend: DictationBackendId; connectionId: string | null; endpoint: string; model: string; localModel: string }
+const DEFAULTS: Stored = { version: 1, backend: 'off', connectionId: null, endpoint: '', model: DEFAULT_MODEL, localModel: '' };
 
 export interface DictationDomainOptions {
   fetch?: typeof fetch;
@@ -63,6 +84,31 @@ export function createDictationDomain(context: Pick<DomainContext, 'dataDir'>, o
   const env = options.env ?? process.env;
   const platform = options.platform ?? process.platform;
   const inflight = new Set<AbortController>();
+  const children = new Set<ChildProcess>();
+  const home = env.HOME || env.USERPROFILE || '';
+  /** Homebrew's prefix: HOMEBREW_PREFIX when set, else both usual ones. The app's PATH misses them when opened from the Dock. */
+  const brewPrefixes = () => env.HOMEBREW_PREFIX ? [env.HOMEBREW_PREFIX] : ['/opt/homebrew', '/usr/local'];
+  const whisperProgram = (): string | null => {
+    const dirs = [...(env.PATH ?? '').split(delimiter).filter(Boolean), ...brewPrefixes().map(prefix => join(prefix, 'bin'))];
+    for (const name of WHISPER_PROGRAMS) for (const dir of dirs) {
+      const candidate = join(dir, name);
+      try { accessSync(candidate, constants.X_OK); if (statSync(candidate).isFile()) return candidate; } catch { /* keep looking */ }
+    }
+    return null;
+  };
+  /** ggml model files where the muster CLI and Homebrew keep them, in that order. */
+  const localModels = (): string[] => {
+    const dirs = home ? [join(home, '.muster', 'models'), join(home, '.cache', 'whisper'), join(home, '.cache', 'whisper.cpp')] : [];
+    dirs.push(...brewPrefixes().map(prefix => join(prefix, 'share', 'whisper-cpp', 'models')));
+    const found: string[] = [];
+    for (const dir of dirs) {
+      let names: string[];
+      try { names = readdirSync(dir).filter(name => MODEL_FILE.test(name)).sort(); } catch { continue; }
+      for (const name of names) { const path = join(dir, name); try { if (statSync(path).isFile() && !found.includes(path)) found.push(path); } catch { /* gone */ } }
+    }
+    return found;
+  };
+  const modelFile = (path: string) => { try { return isAbsolute(path) && /\.bin$/i.test(path) && statSync(path).isFile(); } catch { return false; } };
 
   const read = (): Stored => {
     try {
@@ -73,6 +119,7 @@ export function createDictationDomain(context: Pick<DomainContext, 'dataDir'>, o
         connectionId: typeof raw.connectionId === 'string' && CONNECTION.test(raw.connectionId) ? raw.connectionId : null,
         endpoint: typeof raw.endpoint === 'string' ? raw.endpoint : '',
         model: typeof raw.model === 'string' && MODEL.test(raw.model) ? raw.model : DEFAULT_MODEL,
+        localModel: typeof raw.localModel === 'string' ? raw.localModel : '',
       };
     } catch { return { ...DEFAULTS }; }
   };
@@ -84,10 +131,18 @@ export function createDictationDomain(context: Pick<DomainContext, 'dataDir'>, o
     try { chmodSync(file, 0o600); } catch { /* filesystems without modes */ }
   };
   const backends = (): DictationBackendView[] => DICTATION_BACKENDS.map(id => {
-    if (id === 'off' || id === 'cloud') return { id, label: LABELS[id], available: true };
     if (id === 'macos') return { id, label: LABELS[id], available: false, reason: platform === 'darwin' ? 'On-device macOS speech is not in this version yet.' : 'On-device speech is available on macOS only.' };
-    return { id, label: LABELS[id], available: false, reason: 'A local speech model is not in this version yet.' };
+    return { id, label: LABELS[id], available: true };
   });
+  /** The program and model a local transcription uses; a reason instead when one is missing. */
+  const localTarget = (stored: Stored): { program: string; model: string } | { reason: string } => {
+    const program = whisperProgram();
+    if (!program) return { reason: INSTALL_WHISPER };
+    const model = stored.localModel || localModels()[0] || '';
+    if (!model) return { reason: GET_MODEL };
+    if (!modelFile(model)) return { reason: `The whisper model ${model} is missing. ${GET_MODEL}` };
+    return { program, model };
+  };
   /** Where the cloud request goes and with which key; a reason instead when it cannot go anywhere. */
   const target = (stored: Stored): { endpoint: string; key?: string } | { reason: string } => {
     if (stored.connectionId) {
@@ -104,12 +159,14 @@ export function createDictationDomain(context: Pick<DomainContext, 'dataDir'>, o
   const view = (stored = read()): DictationConfigView => {
     const store = secrets();
     const cloud = { connectionId: stored.connectionId, endpoint: stored.endpoint, model: stored.model, keyStored: Boolean(store?.status(DICTATION_SECRET_ID).stored), secureStorage: Boolean(store?.secureStorage()) };
+    const program = whisperProgram(), models = localModels();
+    const local = { program, model: stored.localModel || models[0] || '', models };
     const option = backends().find(entry => entry.id === stored.backend)!;
     let reason: string | undefined;
     if (stored.backend === 'off') reason = CHOOSE;
     else if (!option.available) reason = `${option.reason} ${CHOOSE}`;
-    else { const where = target(stored); if ('reason' in where) reason = where.reason; }
-    return { backend: stored.backend, ready: !reason, ...(reason ? { reason } : {}), backends: backends(), cloud };
+    else { const where = stored.backend === 'local' ? localTarget(stored) : target(stored); if ('reason' in where) reason = where.reason; }
+    return { backend: stored.backend, ready: !reason, ...(reason ? { reason } : {}), backends: backends(), cloud, local, ...(stored.backend === 'local' ? { recording: 'wav' as const } : {}) };
   };
   const set = (raw: Record<string, unknown>): DictationConfigView => {
     const input = raw as DictationConfigInput;
@@ -132,6 +189,11 @@ export function createDictationDomain(context: Pick<DomainContext, 'dataDir'>, o
       if (!MODEL.test(model)) throw new Error('Enter a transcription model name, such as whisper-1.');
       next.model = model;
     }
+    if (input.localModel !== undefined) {
+      const path = typeof input.localModel === 'string' ? input.localModel.trim() : '';
+      if (path && !modelFile(path)) throw new Error('Choose a whisper model file (a ggml .bin file) that exists on this computer.');
+      next.localModel = path;
+    }
     if (input.apiKey !== undefined) {
       const store = secrets();
       if (input.apiKey === null || input.apiKey === '') store?.clear(DICTATION_SECRET_ID);
@@ -140,17 +202,49 @@ export function createDictationDomain(context: Pick<DomainContext, 'dataDir'>, o
     write(next);
     return view(next);
   };
+  /** whisper.cpp reads the WAV from a private temp folder that is removed as soon as it answers. */
+  const transcribeLocally = async (stored: Stored, raw: Record<string, unknown>): Promise<{ text: string }> => {
+    const where = localTarget(stored);
+    if ('reason' in where) throw new Error(where.reason);
+    const audio = recording(raw);
+    if (!isWav(audio)) { audio.fill(0); throw new Error('The local model needs the recording as WAV. Update Muster, then try again.'); }
+    const dir = await mkdtemp(join(tmpdir(), 'muster-dictation-'));
+    try {
+      const file = join(dir, 'dictation.wav');
+      await writeFile(file, audio, { mode: 0o600 });
+      audio.fill(0);
+      // A multilingual model listens for any language; an English-only (.en) model is English already.
+      const args = ['-m', where.model, '-f', file, '-nt', '-np', ...(/\.en\.bin$/i.test(where.model) ? [] : ['-l', 'auto'])];
+      const output = await new Promise<string>((resolve, reject) => {
+        const child = execFile(where.program, args, { timeout: TIMEOUT_MS, maxBuffer: MAX_ANSWER_BYTES, windowsHide: true }, (error, stdout, stderr) => {
+          children.delete(child);
+          if (!error) { resolve(String(stdout)); return; }
+          const failure = error as NodeJS.ErrnoException & { killed?: boolean };
+          const detail = String(stderr).trim().split('\n').slice(-2).join(' ').slice(0, 300);
+          reject(new Error(failure.killed ? 'The local model took too long to transcribe. Try a shorter recording or a smaller model.' : `The local model could not transcribe the recording${detail ? `: ${detail}` : '.'}`));
+        });
+        children.add(child);
+      });
+      return { text: cleanTranscript(output) };
+    } finally { await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); }
+  };
+  /** The recording from the composer, checked for size. */
+  const recording = (raw: Record<string, unknown>): Buffer<ArrayBuffer> => {
+    if (typeof raw.audio !== 'string' || !raw.audio || raw.audio.length > Math.ceil(DICTATION_MAX_AUDIO_BYTES / 3) * 4 + 4) throw new Error('The recording is empty or too long to transcribe.');
+    const audio = Buffer.from(raw.audio, 'base64');
+    if (!audio.byteLength || audio.byteLength > DICTATION_MAX_AUDIO_BYTES) throw new Error('The recording is empty or too long to transcribe.');
+    return audio;
+  };
   const transcribe = async (raw: Record<string, unknown>): Promise<{ text: string }> => {
     const stored = read(), current = view(stored);
+    if (stored.backend === 'local' && current.ready) return transcribeLocally(stored, raw);
     // Nothing is sent anywhere unless the chosen backend is a cloud one that is ready.
     if (stored.backend !== 'cloud' || !current.ready) throw new Error(current.reason ?? CHOOSE);
     const where = target(stored);
     if ('reason' in where) throw new Error(where.reason);
     const mime = typeof raw.mime === 'string' && MIME.test(raw.mime) ? raw.mime : '';
     if (!mime) throw new Error('The recording is not in an audio format Muster can send.');
-    if (typeof raw.audio !== 'string' || !raw.audio || raw.audio.length > Math.ceil(DICTATION_MAX_AUDIO_BYTES / 3) * 4 + 4) throw new Error('The recording is empty or too long to transcribe.');
-    const audio = Buffer.from(raw.audio, 'base64');
-    if (!audio.byteLength || audio.byteLength > DICTATION_MAX_AUDIO_BYTES) throw new Error('The recording is empty or too long to transcribe.');
+    const audio = recording(raw);
     const form = new FormData();
     form.append('file', new Blob([audio], { type: mime.split(';')[0]! }), `dictation.${extension(mime)}`);
     form.append('model', stored.model);
@@ -178,7 +272,7 @@ export function createDictationDomain(context: Pick<DomainContext, 'dataDir'>, o
     } finally { clearTimeout(timer); inflight.delete(controller); }
   };
   return {
-    dispose: () => { for (const controller of inflight) controller.abort(); inflight.clear(); },
+    dispose: () => { for (const controller of inflight) controller.abort(); inflight.clear(); for (const child of children) child.kill(); children.clear(); },
     handlers: {
       'dictation.config.get': () => view(),
       'dictation.config.set': input => set(input),

@@ -23,7 +23,7 @@ async function domain(t: TestContext, options: {fetch: typeof globalThis.fetch; 
   const {createDictationDomain} = await import('../src/runtime/domains/dictation.ts');
   const module = createDictationDomain({dataDir} as never, {fetch: options.fetch, secrets: () => secrets, connections: options.connections as never, platform: 'darwin', ...(options.env ? {env: options.env} : {})});
   t.after(() => module.dispose?.());
-  const call = (command: string, input: Record<string, unknown> = {}) => Promise.resolve(module.handlers[command]!(input)) as Promise<any>;
+  const call = (command: string, input: Record<string, unknown> = {}) => Promise.resolve().then(() => module.handlers[command]!(input)) as Promise<any>;
   return {dataDir, secrets, call};
 }
 async function filesUnder(dir: string): Promise<string[]> {

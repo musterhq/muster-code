@@ -280,6 +280,7 @@ function DictationSection():React.ReactElement {
   const [endpoint,setEndpoint]=useState('');
   const [model,setModel]=useState('');
   const [key,setKey]=useState('');
+  const [modelPath,setModelPath]=useState('');
   const [busy,setBusy]=useState(false);
   const providers=useStoreSelector(state=>state.providers);
   const connections=(('value' in providers?providers.value:undefined)??[]).filter(provider=>provider.custom&&provider.endpoint);
@@ -309,6 +310,18 @@ function DictationSection():React.ReactElement {
           <button type="button" className="settings-button" disabled={busy} onClick={()=>void save({model:model.trim(),...(ownEndpoint?{endpoint:endpoint.trim(),...(key.trim()?{apiKey:key.trim()}:{})}:{})}).then(ok=>{if(ok)setKey('');})}>Save</button>
           {ownEndpoint&&config.cloud.keyStored&&<button type="button" className="settings-button secondary" disabled={busy} onClick={()=>void save({apiKey:null})}>Remove key</button>}
           {ownEndpoint&&<span className="settings-muted">{config.cloud.keyStored?'Key saved, encrypted on this computer':config.cloud.secureStorage?'No key saved':'Secure storage is unavailable, so a key cannot be saved'}</span>}
+        </span>
+      </span>
+    </Row>}
+    {config.backend==='local'&&<Row title="Local model" scope={device().title+" · audio stays on this computer"} description={config.ready?`whisper.cpp transcribes on this computer${config.local.program?` (${config.local.program})`:''}. Models in ~/.muster/models are shared with the muster CLI.`:config.reason}>
+      <span className="dictation-settings">
+        <select aria-label="Local whisper model" value={config.local.model} disabled={busy||!config.local.models.length&&!config.local.model} onChange={event=>void save({localModel:event.target.value})}>
+          {!config.local.model&&<option value="">{config.local.models.length?'Choose a model':'No model found'}</option>}
+          {[...new Set([...(config.local.model?[config.local.model]:[]),...config.local.models])].map(path=><option key={path} value={path}>{path.split('/').pop()} ({path})</option>)}
+        </select>
+        <input type="text" aria-label="Whisper model path" placeholder="/path/to/ggml-base.en.bin" spellCheck={false} value={modelPath} disabled={busy} onChange={event=>setModelPath(event.target.value)}/>
+        <span className="dictation-settings-actions">
+          <button type="button" className="settings-button" disabled={busy||!modelPath.trim()} onClick={()=>void save({localModel:modelPath.trim()}).then(ok=>{if(ok)setModelPath('');})}>Use this model</button>
         </span>
       </span>
     </Row>}
