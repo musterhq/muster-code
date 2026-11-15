@@ -52,6 +52,8 @@ Boundaries:
 | [MUS-SPEC-03-688N](03-providers-models-and-accounts.md#mus-spec-03-688n) | The saved conversation starts with a user message that holds the person's own text, stays within its limits and holds no image data. | [`saved Claude history never starts with an assistant message`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
 | [MUS-SPEC-03-688O](03-providers-models-and-accounts.md#mus-spec-03-688o) | An error event before any content is retried once and the turn completes; an error after text has streamed fails the turn without resending; every request asks for high effort. | [`an error event before any content is sent once more; after content it fails the turn`](../../../packages/agent-app/tests/claude-messages-driver.test.ts) |
 | [MUS-SPEC-03-688P](03-providers-models-and-accounts.md#mus-spec-03-688p) | The turn runs over the Messages API with a native ask_user tool offered; the call returns the default at once, a non-blocking question card is posted, and the turn completes on the Messages lane. | [`a Full access Claude turn still runs over the Messages API when the service adds the ask_user server, and ask_user returns the default`](../../../packages/agent-app/tests/claude-messages-lane.test.ts) |
+| [MUS-SPEC-03-866A](03-providers-models-and-accounts.md#mus-spec-03-866a) | With the device tool server added, the turn still runs over the Messages API (the Codex client never runs), completes on the Messages lane, and the request carries no device tool and no device note. | [`a Full access Claude turn with device tools on still runs over the Messages API, without the device server or its note`](../../../packages/agent-app/tests/claude-messages-lane.test.ts) |
+| [MUS-SPEC-03-866B](03-providers-models-and-accounts.md#mus-spec-03-866b) | With the device tool server added, the turn through Claude Code loads `muster_device` in its MCP config next to the user's server. | [`with device tools on, a router Claude turn through Claude Code keeps the device server`](../../../packages/agent-app/tests/router-claude-code-730.test.ts) |
 | [MUS-SPEC-03-716A](03-providers-models-and-accounts.md#mus-spec-03-716a) | When the copy of the thread is refused too, one fresh thread starts with a summary of the earlier messages; the chat ends completed on it, with one notice for the copy and one for the summary. | [`when the copy is refused too, one fresh conversation starts with a summary`](../../../packages/agent-app/tests/replay-expired-716.test.ts) |
 | [MUS-SPEC-03-716B](03-providers-models-and-accounts.md#mus-spec-03-716b) | If the copy and the fresh conversation are both refused there is no fourth attempt and the error is shown through the usual recovery notice. | [`when the copy and the fresh conversation are refused with the same 409 there is no fourth attempt and the error is shown`](../../../packages/agent-app/tests/replay-expired-716.test.ts) |
 | [MUS-SPEC-03-767A](03-providers-models-and-accounts.md#mus-spec-03-767a) | Through the real coding client, a router that refuses the thread's session gets the turn from a new session whose request carries every earlier user message and reply as history, with no digest; one notice says the chat continues in a copy; later turns keep working. | [`a router that refuses a thread's session continues the turn with the whole earlier conversation`](../../../packages/agent-app/tests/router-refused-session-767.test.ts) |
@@ -457,6 +459,28 @@ Boundaries:
 - Known gaps: The `muster_ask` MCP server itself is dropped on this lane (it has no MCP client); the native tool takes its place.
 - Evidence: UNVERIFIED
 
+<a id="mus-spec-03-866a"></a>
+#### MUS-SPEC-03-866A: Device tools do not move a Claude turn off the Messages API
+
+- Precondition: A Full access Agent chat on a router gateway route, model `cc/claude-opus-5-5`, Claude Code not installed. "Let agents use devices" is on, so the service adds the `muster_device` server and the device note to the turn, next to its usual per-chat servers.
+- Action: Send a message.
+- Expected result: The turn runs over the Messages API and the Codex client never starts. The request offers no device tool and its system text has no device note. The turn completes on the Messages lane.
+- Test: `packages/agent-app/tests/claude-messages-lane.test.ts::a Full access Claude turn with device tools on still runs over the Messages API, without the device server or its note`
+- Environment: Node test runner; the real service, computer domain and provider adapter with a fake router over fetch and a fake Codex client; no network. Every tool launcher the service reads from the environment is set or cleared by the test, so a launcher in the caller's environment (as inside Muster) does not change the result.
+- Known gaps: The Messages lane has no device tools, so the agent cannot drive a device on this route; the device server itself is not started.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-03-866b"></a>
+#### MUS-SPEC-03-866B: Claude Code on a router keeps the device tools
+
+- Precondition: A Workspace Agent chat on a router gateway route, model `cc/claude-opus-5-5`, with Claude Code installed (a fake `claude` executable). "Let agents use devices" is on and the chat has a user tool server.
+- Action: Send a message.
+- Expected result: The turn runs through Claude Code, and the MCP config Claude Code starts with lists `muster_device` as well as the user's server.
+- Test: `packages/agent-app/tests/router-claude-code-730.test.ts::with device tools on, a router Claude turn through Claude Code keeps the device server`
+- Environment: Node test runner; the real service, provider adapter and Claude Code adapter with a fake `claude` executable, a fake router and a fake Codex client; no network.
+- Known gaps: A guard for the route that keeps the device server: it also passes before the #866 change, which only touches the Messages lane.
+- Evidence: UNVERIFIED
+
 <a id="mus-spec-03-767a"></a>
 #### MUS-SPEC-03-767A: A refused router thread continues with the whole conversation
 
@@ -826,7 +850,7 @@ Any agent that speaks the Agent Client Protocol (JSON-RPC over stdio) can be add
 - Action: In Auto, send an edit of a file inside the folder, then "RUN npm install left-pad" and decline its card. In Full access, send "RUN npm install left-pad".
 - Expected result: In Auto the edit is approved without a card and its row records the Auto rule (inside the chat's folder); the install still shows a command card with its command. In Full access the command runs with no card.
 - Test: `packages/agent-app/tests/acp-route-160.test.ts::ACP in Auto: an edit inside the folder settles itself, an install still asks; Full access never asks`
-- Environment: As 160B.
+- Environment: As 160B. The fake agent ends each prompt 150 ms after its last words, and each follow-up is sent only once the previous turn has settled (#877).
 - Known gaps: Auto's rules themselves are clause 05 (#841); this checks that ACP requests reach them.
 - Evidence: UNVERIFIED
 
@@ -837,7 +861,7 @@ Any agent that speaks the Agent Client Protocol (JSON-RPC over stdio) can be add
 - Action: Ask the agent to write a file outside the folder and inside it, and to read a line range; in Read only, to write and to edit; in Full access, to write outside the folder.
 - Expected result: Workspace refuses the outside write (the agent gets an error naming the working folder and no file appears), writes the inside file, and returns line 2 of a file for `line: 2, limit: 1`. Read only refuses the write (error says read-only), rejects the edit's permission request without a card, leaves the file unchanged and switches the agent to its plan mode. Full access writes outside the folder.
 - Test: `packages/agent-app/tests/acp-route-160.test.ts::ACP file access follows the access level: Workspace writes stay in the folder, Read only writes nothing and refuses edits`
-- Environment: As 160B.
+- Environment: As 160B. The fake agent ends each prompt 150 ms after its last words, and each follow-up is sent only once the previous turn has settled (#877).
 - Known gaps: Links inside the folder are refused by the same check as the HTTP tools (MUS-SPEC-03-384E) and are not exercised again here.
 - Evidence: UNVERIFIED
 

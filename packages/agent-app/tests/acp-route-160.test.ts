@@ -26,7 +26,7 @@ async function rig(t: TestContext, options: {mode: ChatPermissionMode; flags?: s
   const dataDir = await realpath(await mkdtemp(join(tmpdir(), 'muster-acp-')));
   const folder = join(dataDir, 'project'), outside = join(dataDir, 'outside'), logFile = join(dataDir, 'acp-log.jsonl');
   await mkdir(folder); await mkdir(outside);
-  const agent: AcpAgentSpec = {id: 'acp_fake', name: 'Fake ACP', command: FAKE, args: [`--log=${logFile}`, ...(options.flags ?? [])]};
+  const agent: AcpAgentSpec = {id: 'acp_fake', name: 'Fake ACP', command: FAKE, args: [`--log=${logFile}`, '--end-delay=150', ...(options.flags ?? [])]};
   const route = {info: {id: 'acp_fake', name: 'Fake ACP', driver: 'acp-agent', available: true, bindingId: 'b-acp', identityMasked: 'x', models: [{id: 'acp_fake/fast', name: 'Fast'}, {id: 'acp_fake/smart', name: 'Smart'}]}, command: '', env: {}, sessionsRoot: '', adapter: acpAdapter({agent, killGraceMs: 500})};
   const provider = createProviderAdapter({instances: () => [route]});
   const service = createAgentService({dataDir: join(dataDir, 'data'), provider, onEvent() {}});

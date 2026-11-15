@@ -33,6 +33,8 @@ Boundaries:
 | [MUS-SPEC-22-482A](22-engineering-standards.md#mus-spec-22-482a) | With no dist folder, the Hindsight service test file loads and the tests that use a fake core pass; only the tests that drive the real bundle are skipped. | [`unconfigured status is truthful and never includes a key`](../../../packages/agent-app/tests/hindsight-service.test.ts) |
 | [MUS-SPEC-22-5A](22-engineering-standards.md#mus-spec-22-5a) | Every `tests/*.tsx` file in the repository is either a suite run by `npm run test:renderer` or excluded with a stated reason, and every listed name has a file. | [`every tests/*.tsx file is a renderer suite or is excluded with a reason`](../../../packages/agent-app/tests/renderer-suites.test.ts) |
 | [MUS-SPEC-22-5B](22-engineering-standards.md#mus-spec-22-5b) | The guard names a stray DOM suite, a stale list entry, a name in both lists and a duplicate. | [`the guard names a stray suite, a stale entry, a name in both lists and a duplicate`](../../../packages/agent-app/tests/renderer-suites.test.ts) |
+| [MUS-SPEC-22-876A](22-engineering-standards.md#mus-spec-22-876a) | With the first mirror refusing the package list and the second missing a package, the script installs from the third mirror, rewriting the sources each time; when every mirror fails it exits non-zero after trying each one. | [`the apt install moves to the next mirror when one cannot find a package, and fails only after every mirror`](../../../packages/agent-app/tests/ci-apt-install.test.ts) |
+| [MUS-SPEC-22-876B](22-engineering-standards.md#mus-spec-22-876b) | The Linux build job and the Ubuntu 24.04 container job both call the script for their apt packages and no longer run apt-get install themselves. | [`both Linux jobs install their apt packages through the retrying script`](../../../packages/agent-app/tests/ci-apt-install.test.ts) |
 
 ### Case format
 
@@ -242,4 +244,28 @@ Boundaries:
 - Test: `packages/agent-app/tests/renderer-suites.test.ts::the guard names a stray suite, a stale entry, a name in both lists and a duplicate`
 - Environment: Node test runner; pure function over made-up lists.
 - Known gaps: None known.
+- Evidence: UNVERIFIED
+
+### Linux CI survives an apt mirror outage (#876)
+
+<a id="mus-spec-22-876a"></a>
+#### MUS-SPEC-22-876A: The apt step falls back to another mirror
+
+- Precondition: A Ubuntu apt setup (a deb822 `ubuntu.sources` and a classic `sources.list`). The first mirror fails `apt-get update`; on the second, update works but the install cannot find a package; the third works.
+- Action: Run `scripts/ci-apt-install.sh` with the packages to install.
+- Expected result: The script points the sources at each mirror in turn, refreshes the package lists with errors treated as failures, and installs from the first mirror that works (the third here). When every mirror fails, it exits non-zero after trying each one, so the job fails with apt's own error.
+- Test: `packages/agent-app/tests/ci-apt-install.test.ts::the apt install moves to the next mirror when one cannot find a package, and fails only after every mirror`
+- Environment: Node test runner; the real script under bash with a stand-in `apt-get` on PATH and the apt folders in a temp directory; no network and no root.
+- Known gaps: Real mirrors are not contacted; a mirror that stalls is covered by apt's own per-request timeout and the script's time limit per attempt, which the test does not exercise.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-22-876b"></a>
+#### MUS-SPEC-22-876B: Both Linux jobs use the retrying apt step
+
+- Precondition: The cross-platform workflow, with the Linux build job on the runner and the Ubuntu 24.04 job inside a container.
+- Action: Read the apt steps of both jobs.
+- Expected result: Each job installs its apt packages through `scripts/ci-apt-install.sh` and does not call `apt-get install` directly.
+- Test: `packages/agent-app/tests/ci-apt-install.test.ts::both Linux jobs install their apt packages through the retrying script`
+- Environment: Node test runner; reads the real workflow file.
+- Known gaps: Checks the wiring, not a real CI run; the PR's own CI run is the end-to-end proof.
 - Evidence: UNVERIFIED
