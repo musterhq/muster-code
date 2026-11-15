@@ -35,6 +35,7 @@ Boundaries:
 | [MUS-SPEC-05-841D](05-access-modes-and-approvals.md#mus-spec-05-841d) | A Claude Code chat in Auto access sends its permission prompts to Muster in default mode; a safe git command is allowed at once and git push waits for the card. | [`Auto access on Claude Code: prompts reach Muster, a safe command is allowed at once and git push still asks`](../../../packages/agent-app/tests/auto-approvals-841.test.ts) |
 | [MUS-SPEC-05-841E](05-access-modes-and-approvals.md#mus-spec-05-841e) | Codex runs Auto with a workspace sandbox and asks Muster about every untrusted command; Full access still never prompts; an OpenCode route runs as Workspace; the picker lists Auto and says when it runs as Ask for approval. | [`Auto access: Codex asks Muster about every untrusted command; other routes run as Workspace and the picker says so`](../../../packages/agent-app/tests/auto-approvals-841.test.ts) |
 | [MUS-SPEC-05-841F](05-access-modes-and-approvals.md#mus-spec-05-841f) | Environment prefixes, rg preprocessors, git config and output options, writing or executing sed scripts, sort helpers and tools that write output still ask in Auto; project code (tests, scripts, linters) settles only inside Codex's workspace sandbox; edits inside `.git` ask. | [`Auto access: read-only commands that can run programs or write files still ask`](../../../packages/agent-app/tests/auto-approvals-841.test.ts) |
+| [MUS-SPEC-05-44G](05-access-modes-and-approvals.md#mus-spec-05-44g) | The child's approval card is copied onto the parent with the same text and data.delegated naming the child card; approving the parent's copy gives the child "accept" and both cards read approved; declining the next one in the child gives "decline" and the parent's copy reads declined. | [`a child's approval shows on its parent too and can be answered from either chat`](../../../packages/agent-app/tests/delegation-44.test.ts) |
 
 ### Confined writes and policy-only requests
 
@@ -245,3 +246,18 @@ Boundaries:
 - Environment: Node test runner; the Auto classifier and a fake Claude Code process; temp folder; no network.
 - Known gaps: A conservative list, not a shell interpreter: forms it does not recognise ask. A program on PATH that was itself replaced is outside this check.
 - Evidence: local; ~/.muster-work/review/841/green.txt; exit 0; 6 passed, 0 failed, 0 skipped; commit 3c30a000465f4b482ef8f7eaf07e101fb31fab0c
+
+### Delegated chats (#44)
+
+A chat another chat started has its parent's access, never more, and its approvals and questions also reach the parent.
+
+<a id="mus-spec-05-44g"></a>
+#### MUS-SPEC-05-44G: A child's approval shows on its parent too and can be answered from either chat
+
+- Precondition: A Workspace parent with a child that asks to run two commands.
+- Action: Approve the first from the parent's copy; decline the second in the child itself.
+- Expected result: A child's approval and question cards also show on its parent (and every chat above it). Answering either card answers the child's request, and the other card closes with the same result.
+- Test: `packages/agent-app/tests/delegation-44.test.ts::a child's approval shows on its parent too and can be answered from either chat`
+- Environment: Node test runner; the real service and its approval flow; a fake provider that asks through onRequest.
+- Known gaps: Questions use the same path (question.respond and question.dismiss answer the child's card); only approvals are driven here.
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 11 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9

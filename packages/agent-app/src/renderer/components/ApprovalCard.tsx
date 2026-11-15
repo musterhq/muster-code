@@ -3,6 +3,7 @@ import {Check,CheckCheck,FileDiff,SquareTerminal,Wrench,X} from 'lucide-react';
 import type {ApprovalData,ApprovalDecision,TimelineItem} from '../../shared/protocol';
 import {invoke} from '../bridge';
 import {InlineDiff} from './InlineDiff';
+import {DelegatedAsk} from './DelegationRows';
 import './approval-card.css';
 
 /** Readable outcome for a settled approval; unknown statuses fall back to a neutral label. */
@@ -42,6 +43,7 @@ export function ApprovalCard({item}:{item:TimelineItem}):React.ReactElement {
   };
   return <div className={`approval-card${pending?'':' is-settled'}`} role="group" aria-label={TITLE[data.kind]}>
     <div className="approval-head"><Icon size={14} aria-hidden="true"/><strong>{TITLE[data.kind]}</strong>{data.kind==='mcp'&&data.server&&<span className="approval-origin">{data.server}</span>}</div>
+    <DelegatedAsk data={item.data}/>
     {data.reason&&<p className="approval-reason">{data.reason}</p>}
     {data.kind==='command'&&(data.command
       ?<div className="approval-command">{data.cwd&&<div className="approval-cwd" title={data.cwd}>{data.cwd}</div>}<pre><code>$ {data.command}</code></pre></div>

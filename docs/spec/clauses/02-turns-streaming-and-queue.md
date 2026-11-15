@@ -89,6 +89,7 @@ Boundaries:
 | [MUS-SPEC-02-401B](02-turns-streaming-and-queue.md#mus-spec-02-401b) | The run is asked for a suggestion only with the setting on (off by default); the suggestion is stored, cleaned to one short line, on the turn's message; one that arrives after a newer message is dropped. | [`a follow-up suggestion is offered on its turn only when the setting is on, and a newer message drops a late one`](../../../packages/agent-app/tests/follow-up-401.test.ts) |
 | [MUS-SPEC-02-401C](02-turns-streaming-and-queue.md#mus-spec-02-401c) | An HTTP route settles the turn first, then makes one non-streamed request to the same model with a small output cap and returns its one line; with no suggestion asked for it makes no extra request. | [`an HTTP route asks its own model for one short follow-up after the turn, without holding the turn`](../../../packages/agent-app/tests/follow-up-401.test.ts) |
 | [MUS-SPEC-02-401D](02-turns-streaming-and-queue.md#mus-spec-02-401d) | Each sent message records the provider, model and reasoning effort its turn ran with. | [`each message records the model, provider and effort its turn ran with`](../../../packages/agent-app/tests/follow-up-401.test.ts) |
+| [MUS-SPEC-02-147A](02-turns-streaming-and-queue.md#mus-spec-02-147a) | Phase 1 runs no agent for a remote folder: sending is refused with a sentence and no provider run starts on this computer. | [`a chat in a folder on an SSH host is refused instead of running on this computer`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
 
 ### Tool rows when a turn ends
 
@@ -925,4 +926,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/follow-up-401.test.ts::each message records the model, provider and effort its turn ran with`
 - Environment: Node test runner; the agent service with a fake provider; a temp data folder.
 - Known gaps: The model-default case is not driven here. An effort set by a Project or agent run option (not the composer) is not what the record shows; the record shows the composer's choice or the model's default.
+- Evidence: UNVERIFIED
+
+### Chats in a folder on an SSH host (#147)
+
+<a id="mus-spec-02-147a"></a>
+#### MUS-SPEC-02-147A: A chat in a folder on an SSH host says agents on the host come later instead of running here
+
+- Precondition: A chat in a remote folder bound to a ready model.
+- Action: Send a message.
+- Expected result: The send is refused with a sentence that names the SSH host; the provider saw no run for the chat.
+- Test: `packages/agent-app/tests/ssh-workspaces-147.test.ts::a chat in a folder on an SSH host is refused instead of running on this computer`
+- Environment: Node test runner with the real agent service, a temp data folder and a temp HOME; a stand-in `ssh` and `ssh-keyscan` on PATH (`tests/fixtures/fake-ssh/`) that run the remote commands under /bin/sh on this machine. No network, no real host.
+- Known gaps: Running the agent on the host is phase 2 of #147.
 - Evidence: UNVERIFIED

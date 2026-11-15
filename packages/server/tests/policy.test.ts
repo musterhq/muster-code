@@ -295,3 +295,11 @@ test('the organisation name: set at init, trimmed, shown by server.me; only an o
     assert.equal(readConfig(pt)!.orgName, null, 'clearing the name returns to the address');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// Spec: MUS-SPEC-23-3C (docs/spec/clauses/23-mobile.md#mus-spec-23-3c)
+test('phone pairing commands are desktop only on Muster Server, even for the owner', () => {
+  for (const command of ['mobile.status', 'mobile.relay.set', 'mobile.pair.start', 'mobile.pair.link', 'mobile.pair.confirm', 'mobile.pair.reject', 'mobile.pair.cancel', 'mobile.lan.set', 'mobile.devices.revoke', 'mobile.devices.setAccess', 'mobile.reset']) {
+    assert.equal(classifyCommand(command), 'desktop', command);
+    for (const role of ['owner', 'admin', 'member', 'viewer'] as const) assert.throws(() => authorizeCommand(command, role), (error: unknown) => error instanceof PolicyError && error.code === 'desktop-only', `${command} as ${role}`);
+  }
+});

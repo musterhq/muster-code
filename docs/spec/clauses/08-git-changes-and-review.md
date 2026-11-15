@@ -70,6 +70,7 @@ Boundaries:
 | [MUS-SPEC-08-175G](08-git-changes-and-review.md#mus-spec-08-175g) | The comparison is listed with the same runs, branches, start commit and state, and its compare view still shows each run's time and changed files. | [`a comparison and its runs survive a restart`](../../../packages/agent-app/tests/compare-agents-175.test.ts) |
 | [MUS-SPEC-08-175H](08-git-changes-and-review.md#mus-spec-08-175h) | One column per run with model, status, time, tokens, reply, files with counts and tests; a selected file's diff shows per run; Use this one confirms with Keep branch choices and sends them. | [`the compare view shows each run side by side and the diff of one file across runs`](../../../packages/agent-app/tests/compare-agents-175-dom.tsx) |
 | [MUS-SPEC-08-175I](08-git-changes-and-review.md#mus-spec-08-175i) | Send stays off until two models are picked and no more than four can be picked. | [`send to several picks two to four models and starts one comparison`](../../../packages/agent-app/tests/compare-agents-175-dom.tsx) |
+| [MUS-SPEC-08-147A](08-git-changes-and-review.md#mus-spec-08-147a) | The Git pane’s status, change list, diff, stage and commit run git on the host, keep the revision check, and pass a commit message with quotes and `$(…)` through literally. | [`git status, diff, stage and commit work in a folder on an SSH host`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
 | [MUS-SPEC-08-329A](08-git-changes-and-review.md#mus-spec-08-329a) | ssh, scp-style and https remotes for gitlab.com, a gitlab.* host, a saved self-hosted host and bitbucket.org give the right kind, host, project path and web link; an unknown host and a local path are no forge; `remoteUrl` stays GitHub-only; GitLab reads MR, merge request and `!`. | [`GitLab and Bitbucket remotes are recognised from every git URL syntax, and a self-hosted GitLab once it has an account`](../../../packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts) |
 | [MUS-SPEC-08-329B](08-git-changes-and-review.md#mus-spec-08-329b) | With a token saved for gitlab.com, the repository, the open MR list, the create draft, create (pushed first, title prefixed Draft:), the MR view and merge (squash, head SHA sent, a stale SHA refused, rebase refused) map to the shared shapes; every request carries the token and goes only to gitlab.com. | [`GitLab with a token from Settings: list, create (pushing first), view and merge a merge request`](../../../packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts) |
 | [MUS-SPEC-08-329C](08-git-changes-and-review.md#mus-spec-08-329c) | The head pipeline’s jobs map to checks named stage / job with durations; a failed job fails, an allowed failure is neutral, a manual job is skipped, a running job is pending; the failed job’s trace becomes the log excerpt with section markers, colours and tokens removed. | [`GitLab pipelines: the head pipeline’s jobs are the checks, a failed job’s trace is the log, and CI repair can read it`](../../../packages/agent-app/tests/forge-gitlab-bitbucket-329.test.ts) |
@@ -604,6 +605,19 @@ Boundaries:
 - Test: `packages/agent-app/tests/compare-agents-175-dom.tsx::send to several picks two to four models and starts one comparison`
 - Environment: linkedom DOM suite; the real picker; a fake bridge.
 - Known gaps: The + menu row that opens the picker is checked in the real app.
+- Evidence: UNVERIFIED
+
+### Git in a folder on an SSH host (#147)
+
+<a id="mus-spec-08-147a"></a>
+#### MUS-SPEC-08-147A: Git status, diff, stage and commit work in a folder on an SSH host
+
+- Precondition: A remote folder that is a git repository with an edited README.md and a new file.
+- Action: Read status and changes, open README.md’s diff, stage it, commit with a message holding quotes and `$(…)`, then stage with the old revision.
+- Expected result: Status shows the branch, README.md as modified and the new file as untracked; the diff has the old and new text; after staging one file is staged; the commit’s message on the host is exactly what was typed and nothing ran; a stale revision is refused.
+- Test: `packages/agent-app/tests/ssh-workspaces-147.test.ts::git status, diff, stage and commit work in a folder on an SSH host`
+- Environment: Node test runner with the real agent service, a temp data folder and a temp HOME; a stand-in `ssh` and `ssh-keyscan` on PATH (`tests/fixtures/fake-ssh/`) that run the remote commands under /bin/sh on this machine. No network, no real host.
+- Known gaps: Push, branches, log and worktrees for remote folders are not in phase 1; they say so instead of running on this computer.
 - Evidence: UNVERIFIED
 
 ### GitLab merge requests and Bitbucket pull requests (#329)

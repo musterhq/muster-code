@@ -81,6 +81,20 @@ Boundaries:
 | [MUS-SPEC-14-845D](14-agents-skills-plugins-and-automations.md#mus-spec-14-845d) | Editing the target from chat A to chat B keeps the set time; at that time the run goes to chat B only and chat A gets nothing. | [`a scheduled once automation moved to another chat before its time runs in the new chat only, at the same time`](../../../packages/agent-app/tests/automations-once-845.test.ts) |
 | [MUS-SPEC-14-845E](14-agents-skills-plugins-and-automations.md#mus-spec-14-845e) | Kolkata, New York summer and winter, a DST-skipped 02:30 (runs 03:30) and a repeated 01:30 (runs the first) all resolve; nothing after the time; summaries name the zone; malformed and impossible dates are refused. | [`once times are wall-clock times in their zone, DST included, and malformed ones are refused`](../../../packages/agent-app/tests/automations-once-845.test.ts) |
 | [MUS-SPEC-14-845F](14-agents-skills-plugins-and-automations.md#mus-spec-14-845f) | Repeat lists "Once at a date and time"; picking it shows a date and time control (9:00 tomorrow) and the time zone; the preview says "Runs at"; a refused past time shows in the editor; the save sends the once schedule; a run once automation reads Done with its chat linked. | [`#845 the editor schedules a once run with a date and time in a named zone, and a run once automation reads Done with its chat linked`](../../../packages/agent-app/tests/automations-once-845-dom.tsx) |
+| [MUS-SPEC-14-44A](14-agents-skills-plugins-and-automations.md#mus-spec-14-44a) | The tool answers with the child's status ("finished" on Beta One) and its final reply; the child chat is on beta/beta-1, titled as asked, in the parent's folder with Workspace access, and got the prompt; it reads "Started by Planner"; the parent shows "Started Summarise README on Beta One" then "Summarise README finished"; the parent has no extra turn. | [`delegate_task with wait starts a child chat on another provider in the parent's folder and returns its final reply`](../../../packages/agent-app/tests/delegation-44.test.ts) |
+| [MUS-SPEC-14-44B](14-agents-skills-plugins-and-automations.md#mus-spec-14-44b) | With the parent idle, the first child's finish starts one parent turn whose prompt says a delegated chat finished, with its reply and id; with the parent busy, the second report waits in the parent's queue and starts one turn after the parent's turn; each result wakes the parent once; both "finished" rows show. | [`an idle parent wakes with the child's result when an async child finishes; a busy parent gets it after its turn`](../../../packages/agent-app/tests/delegation-44.test.ts) |
+| [MUS-SPEC-14-44C](14-agents-skills-plugins-and-automations.md#mus-spec-14-44c) | On a working child message_task answers "Steered Tests" and the provider got exactly that text as a steer; on the finished child it answers "Sent to Tests" and the child runs a second turn with the text; read_task with last 2 returns both replies in order. | [`message_task steers a working child, and gives an idle child a new turn`](../../../packages/agent-app/tests/delegation-44.test.ts) |
+| [MUS-SPEC-14-44D](14-agents-skills-plugins-and-automations.md#mus-spec-14-44d) | interrupt_task answers "Stopped 2 chats (Refactor and the chats it started)"; the provider was told to stop the child and the grandchild; both read interrupted; the parent gets no new turn; the parent shows "Refactor was stopped"; list_tasks lists both as stopped, the grandchild indented. | [`interrupt_task stops a child and the chat it started, and a stop does not wake the parent`](../../../packages/agent-app/tests/delegation-44.test.ts) |
+| [MUS-SPEC-14-44E](14-agents-skills-plugins-and-automations.md#mus-spec-14-44e) | While the child works read_task says running with no reply; after it finished, read_task returns finished, "Seeded SEEDS.md." and "Changed files: SEEDS.md"; the report queued while the parent worked is withdrawn, so the parent has one turn and an empty queue. | [`read_task returns status, the final reply and changed files, and reading a result first withdraws its queued report`](../../../packages/agent-app/tests/delegation-44.test.ts) |
+| [MUS-SPEC-14-44F](14-agents-skills-plugins-and-automations.md#mus-spec-14-44f) | A read-only chat's turn carries no muster_delegation server or token and a call without its token gets 403; a Full access parent's child is Full access; a chain stops at 3 deep with "at most 3 chats deep"; every child in the chain has Workspace like its root; the fifth concurrent child is refused ("at most 4 at once"); an unknown model, an unknown provider and a folder outside the chat's are refused with what is set up; refused calls create no chat. | [`children get the parent's access and never more; read-only chats get no tools; depth, concurrency and unconfigured models are refused`](../../../packages/agent-app/tests/delegation-44.test.ts) |
+| [MUS-SPEC-14-44H](14-agents-skills-plugins-and-automations.md#mus-spec-14-44h) | A sibling chat's read_task, message_task, wait_task and interrupt_task on the child are refused with "is not a chat you started"; the child cannot interrupt its parent; nothing was steered or stopped; the sibling lists no tasks; the root may read its grandchild. | [`only a parent or its ancestors may control a child; a sibling or the child itself is refused`](../../../packages/agent-app/tests/delegation-44.test.ts) |
+| [MUS-SPEC-14-44I](14-agents-skills-plugins-and-automations.md#mus-spec-14-44i) | After a restart delegation.children still returns the child; the parent's list_tasks shows it finished and read_task returns "42 files."; another chat is still refused; the child still reads "Started by Lead". | [`links survive a restart: the parent still lists, reads and controls its child, and others still cannot`](../../../packages/agent-app/tests/delegation-44.test.ts) |
+| [MUS-SPEC-14-44J](14-agents-skills-plugins-and-automations.md#mus-spec-14-44j) | delegation.children lists both working children with title, status, model and depth; delegation.stopChildren answers {stopped: 2}; both read interrupted. | [`stopping a parent's children stops every working chat below it`](../../../packages/agent-app/tests/delegation-44.test.ts) |
+| [MUS-SPEC-14-44K](14-agents-skills-plugins-and-automations.md#mus-spec-14-44k) | The parent's transcript shows "Started Audit API on Beta One", "Started Audit UI on Beta One" and "Audit UI finished", each opening its chat; the child shows "Started by Lead", opening the parent; the sub-agents pane lists both chats as Working and Done with a count of 2 and opens them; the parent's approval copy reads "From Audit API, a chat this one started" and Approve answers the copy. | [`#44 started chats show as compact linked rows in both transcripts, in the sub-agents pane and on the parent's approval copy`](../../../packages/agent-app/tests/delegation-44-dom.tsx) |
+| [MUS-SPEC-14-44L](14-agents-skills-plugins-and-automations.md#mus-spec-14-44l) | Stop on Lead (Audit API still working) opens the app's dialog naming "Audit API" with Cancel, Stop this chat only and Stop all; Stop all stops Lead then its children; Stop this chat only stops Lead; Cancel and Esc stop nothing; window.confirm is never used. | [`#44 Stop on a chat with working children offers Stop all, Stop this chat only and Cancel; Cancel and Esc stop nothing`](../../../packages/agent-app/tests/delegation-44-dom.tsx) |
+| [MUS-SPEC-14-44M](14-agents-skills-plugins-and-automations.md#mus-spec-14-44m) | The report's row is a delegation-row notice "Audit UI finished · The UI is clean. · Open" whose Open opens the child; no user bubble starts with "Muster: a chat you delegated"; the user's own message stays a bubble. | [`#44 a wake-up report shows as a compact notice row with the child's first line and Open, never as a user bubble`](../../../packages/agent-app/tests/delegation-44-dom.tsx) |
+| [MUS-SPEC-14-44N](14-agents-skills-plugins-and-automations.md#mus-spec-14-44n) | The provider still gets the report as the wake turn's message; the transcript row carries kind delegation-report with the child id, title, state finished and the first line of the reply; the user's own message is not marked. | [`the wake-up report is marked as a delegation report in the parent's transcript, not as the user's message`](../../../packages/agent-app/tests/delegation-44.test.ts) |
+| [MUS-SPEC-14-44O](14-agents-skills-plugins-and-automations.md#mus-spec-14-44o) | The delegation tool server alone does not keep a Full access router chat on the Codex client; the Messages route drops it; a Workspace chat stays on Codex. | [`the delegation tool server does not keep a Full access router chat off its Claude route; that route drops it`](../../../packages/agent-app/tests/delegation-44.test.ts) |
 
 ### Claude Code background sub-agents
 
@@ -816,3 +830,161 @@ An automation can run once at a date and time instead of repeating. The time is 
 - Environment: Renderer DOM suite (linkedom); stubbed bridge.
 - Known gaps: Not a screenshot of the real app; the native date and time picker is not opened.
 - Evidence: local; ~/.muster-work/review/845/green-dom.log; exit 0; 1 passed, 0 failed, 0 skipped; commit f9ec3210c81cb85a725b81e73ce5d8b4ce170f89
+
+### Agents start and control agents (#44)
+
+An agent can hand a task to a child chat on any provider and model the user has set up, follow it, steer it and stop it, through the `muster_delegation` tools (delegate_task, message_task, wait_task, read_task, interrupt_task, list_tasks). A child is a real Muster chat linked to the chat that started it.
+
+<a id="mus-spec-14-44a"></a>
+#### MUS-SPEC-14-44A: Delegate_task with wait starts a child chat on another provider and returns its final reply
+
+- Precondition: An agent chat "Planner" on provider Alpha with Workspace access in a folder; a second configured provider Beta with model beta-1.
+- Action: The parent's turn calls delegate_task with a prompt, provider "Beta", model beta-1, title "Summarise README" and wait true; the child's turn replies "README says hello."
+- Expected result: The call blocks until the child finishes and returns its status and final reply. The child is a real chat: on Beta One, titled "Summarise README", in the parent's folder, with the parent's access, and its first message is the prompt. The child shows "Started by Planner". The parent's transcript has "Started Summarise README on Beta One" and then "Summarise README finished", each linking the child. A parent that waited for the result is not woken again with it.
+- Test: `packages/agent-app/tests/delegation-44.test.ts::delegate_task with wait starts a child chat on another provider in the parent's folder and returns its final reply`
+- Environment: Node test runner; the real service; a fake provider with two routes whose turns call the real muster_delegation loopback host with the run's chat token.
+- Known gaps: A real provider's own MCP timeout is not exercised; the bound is 10 minutes and the provider is told 11.
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 11 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9
+
+<a id="mus-spec-14-44b"></a>
+#### MUS-SPEC-14-44B: An idle parent wakes with the child's result; a busy parent gets it after its turn
+
+- Precondition: A parent that started two children without waiting; both children block until released.
+- Action: Release the first child while the parent is idle; then send the parent a message that keeps it busy and release the second child; then let the parent finish.
+- Expected result: The idle parent starts a turn at once with the first child's report (marked as a report, not the user's words, with the child's reply and id). While the parent works, the second report waits in its queue and does not interrupt it; when the parent's turn ends, the report starts one more turn. No result wakes the parent twice.
+- Test: `packages/agent-app/tests/delegation-44.test.ts::an idle parent wakes with the child's result when an async child finishes; a busy parent gets it after its turn`
+- Environment: Node test runner; the real service and queue; a fake provider; the real tool host.
+- Known gaps: Only a completed or failed child turn reports back; a stopped one does not (MUS-SPEC-14-44D).
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 11 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9
+
+<a id="mus-spec-14-44c"></a>
+#### MUS-SPEC-14-44C: Message_task steers a working child and gives an idle child a new turn
+
+- Precondition: A parent with one child that is still working.
+- Action: Call message_task while the child works; let it finish; call message_task again; then read_task with last 2.
+- Expected result: A message to a working child steers its current turn (the same path as the composer's Steer, #839); when the turn cannot take it, it is queued. A message to an idle child starts a new turn in it. read_task returns the last replies, oldest first.
+- Test: `packages/agent-app/tests/delegation-44.test.ts::message_task steers a working child, and gives an idle child a new turn`
+- Environment: Node test runner; the real service; a fake provider that accepts steers while a turn runs.
+- Known gaps: A route that refuses steering mid-turn falls back to the child's queue; that branch is not driven here.
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 11 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9
+
+<a id="mus-spec-14-44d"></a>
+#### MUS-SPEC-14-44D: Interrupt_task stops a child and the chats it started; a stop does not wake the parent
+
+- Precondition: A parent whose child started a grandchild; both are working.
+- Action: The parent calls interrupt_task on the child.
+- Expected result: The child and every working chat below it are stopped. A stop is the parent's (or the user's) own act, so it does not start a report turn in the parent; the parent's transcript says the child was stopped.
+- Test: `packages/agent-app/tests/delegation-44.test.ts::interrupt_task stops a child and the chat it started, and a stop does not wake the parent`
+- Environment: Node test runner; the real service; a fake provider whose stop ends the running turn as cancelled.
+- Known gaps: None known.
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 11 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9
+
+<a id="mus-spec-14-44e"></a>
+#### MUS-SPEC-14-44E: Read_task returns status, the final reply and changed files; reading first withdraws the queued report
+
+- Precondition: A parent that starts a child and keeps working while the child edits SEEDS.md and finishes.
+- Action: The parent calls read_task while the child works, and again after it finished, in the same turn.
+- Expected result: read_task gives the child's status, its final reply and the files its turns changed (folder-relative). A parent that read a result itself is not woken with it again: the queued report is removed.
+- Test: `packages/agent-app/tests/delegation-44.test.ts::read_task returns status, the final reply and changed files, and reading a result first withdraws its queued report`
+- Environment: Node test runner; the real service; a fake provider that reports a fileChange item.
+- Known gaps: Changed files come from the child's own edit rows; a file a command changed without an edit row is not listed.
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 11 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9
+
+<a id="mus-spec-14-44f"></a>
+#### MUS-SPEC-14-44F: Children never get more access than the parent; read-only gets no tools; depth, concurrency and models are bounded
+
+- Precondition: Chats with Read only, Full access and Workspace access; providers Alpha and Beta.
+- Action: Run a read-only turn; delegate from the Full access chat; delegate down a chain until it is refused; start five children at once; ask for model gpt-unknown, provider gamma and folder /etc.
+- Expected result: Delegation is offered only to agent chats with more than read-only access. A child has exactly its parent's effective access, never more. Delegation goes at most 3 chats deep and at most 4 of a chat's children work at once. The model must be one a configured, available provider offers (no new credentials); the folder must be the parent's or one of its project's. A refusal says why and what is allowed, and creates no chat.
+- Test: `packages/agent-app/tests/delegation-44.test.ts::children get the parent's access and never more; read-only chats get no tools; depth, concurrency and unconfigured models are refused`
+- Environment: Node test runner; the real service; a fake provider; the real tool host and chat-token binding.
+- Known gaps: The 403 shows the host refusing a call without the run's token; the per-chat token itself is covered by tests/agent-tool-chat-binding.test.ts.
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 11 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9
+
+<a id="mus-spec-14-44h"></a>
+#### MUS-SPEC-14-44H: Only a parent or its ancestors may control a child
+
+- Precondition: A parent with a child that started a grandchild, and an unrelated chat in the same folder.
+- Action: The unrelated chat calls every control tool on the child; the child calls interrupt_task on its parent; the parent reads the grandchild.
+- Expected result: Only the chat that started a child, or a chat above it, may read, message, wait for or stop it. Anyone else is refused and nothing happens to the child.
+- Test: `packages/agent-app/tests/delegation-44.test.ts::only a parent or its ancestors may control a child; a sibling or the child itself is refused`
+- Environment: Node test runner; the real service; a fake provider; the real tool host.
+- Known gaps: None known.
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 11 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9
+
+<a id="mus-spec-14-44i"></a>
+#### MUS-SPEC-14-44I: Links survive a restart
+
+- Precondition: A parent whose child finished, then Muster restarts on the same data folder.
+- Action: After the restart the parent calls list_tasks and read_task, and another chat calls read_task.
+- Expected result: The parent-child link is stored, so after a restart the parent still sees, reads and controls its children and others still cannot.
+- Test: `packages/agent-app/tests/delegation-44.test.ts::links survive a restart: the parent still lists, reads and controls its child, and others still cannot`
+- Environment: Node test runner; two real service instances on one data folder; a fake provider.
+- Known gaps: A child that was working when Muster closed follows the usual restart rules (#449); its report is not re-sent after the restart.
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 11 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9
+
+<a id="mus-spec-14-44j"></a>
+#### MUS-SPEC-14-44J: Stopping a parent's children stops every working chat below it
+
+- Precondition: A parent with two working children.
+- Action: Ask for the parent's children, then stop them (what Stop on the parent does when the user chooses to stop its children too).
+- Expected result: The parent's children are listed with their state; stopping them stops every working chat below the parent.
+- Test: `packages/agent-app/tests/delegation-44.test.ts::stopping a parent's children stops every working chat below it`
+- Environment: Node test runner; the real service; a fake provider.
+- Known gaps: The Stop dialog itself is covered by MUS-SPEC-14-44K.
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 11 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9
+
+<a id="mus-spec-14-44k"></a>
+#### MUS-SPEC-14-44K: Started chats are visible and reachable from both sides
+
+- Precondition: Chat "Lead" is working; it started "Audit API" (working) and "Audit UI" (finished) on Beta One; "Audit API" asked to run `rm -rf build`.
+- Action: Look at Lead's transcript and click its rows; look at Audit API's transcript and click "Started by"; open Lead's sub-agents pane and click a card; approve the copied card.
+- Expected result: Lead's transcript has one compact row per event: "Started Audit API on Beta One", "Started Audit UI on Beta One", "Audit UI finished"; each names the chat and opens it. The child's transcript starts with "Started by Lead", which opens Lead. The existing sub-agents pane lists the started chats next to provider sub-agents (Audit API Working, Audit UI Done; count 2) and a card opens its chat. Lead's copy of the approval says "From Audit API, a chat this one started" and Approve answers it. (Stop is MUS-SPEC-14-44L.)
+- Test: `packages/agent-app/tests/delegation-44-dom.tsx::#44 started chats show as compact linked rows in both transcripts, in the sub-agents pane and on the parent's approval copy`
+- Environment: Renderer DOM suite (linkedom); stubbed bridge; the real Timeline, SubagentsTab, ApprovalCard and store.
+- Known gaps: Not a screenshot of the real app. The summary card's Subagents row also counts started chats; that is not asserted here.
+- Evidence: local; ~/.muster-work/review/44/green-dom.log; exit 0; 3 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9
+
+<a id="mus-spec-14-44l"></a>
+#### MUS-SPEC-14-44L: Stop on a chat with working children asks with three explicit choices
+
+- Precondition: Chat "Lead" is working and started "Audit API", which is still working.
+- Action: Press Stop on Lead and choose Stop all; again and choose Stop this chat only; again and choose Cancel; again and press Esc.
+- Expected result: Stop opens the app's own confirmation sheet (not the system confirm), saying "“Lead” started a chat that is still working: “Audit API”." with three buttons: Cancel, Stop this chat only and Stop all (the default). Stop all stops Lead and then every working chat below it. Stop this chat only stops Lead and leaves its children working. Cancel, Esc and a click outside stop nothing. A chat with no working children stops at once, without asking, and a second press while a chat is already stopping never asks.
+- Test: `packages/agent-app/tests/delegation-44-dom.tsx::#44 Stop on a chat with working children offers Stop all, Stop this chat only and Cancel; Cancel and Esc stop nothing`
+- Environment: Renderer DOM suite (linkedom); stubbed bridge; the real store, ConfirmSheet and host.
+- Known gaps: Not a screenshot of the real app. A window with no mounted host (none today) stops only the chat without asking.
+- Evidence: local; ~/.muster-work/review/44/green-dom.log; exit 0; 3 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9
+
+<a id="mus-spec-14-44m"></a>
+#### MUS-SPEC-14-44M: A wake-up report shows as a notice, not as the user's message
+
+- Precondition: Chat "Lead" started a child that finishes while Lead is idle (or the report arrives after Lead's turn).
+- Action: Let the child finish so the report wakes Lead; look at Lead's transcript.
+- Expected result: The provider still receives the report as the wake turn's message. In the transcript that row carries `kind: 'delegation-report'` with the child's id, title, state and the first line of its reply, and is shown as a compact notice in the delegation-row style: "<title> finished · <first line of its reply> · Open", where Open opens the child chat. No user bubble starts with "Muster: a chat you delegated". The user's own messages are unchanged.
+- Test: `packages/agent-app/tests/delegation-44-dom.tsx::#44 a wake-up report shows as a compact notice row with the child's first line and Open, never as a user bubble`
+- Environment: Renderer DOM suite (linkedom); stubbed bridge; the real Timeline. The runtime marking is MUS-SPEC-14-44N.
+- Known gaps: While it waits in the composer's queue (a busy parent), the report still reads as its text in the queue list.
+- Evidence: local; ~/.muster-work/review/44/green-dom.log; exit 0; 3 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9
+
+<a id="mus-spec-14-44n"></a>
+#### MUS-SPEC-14-44N: The runtime marks the wake-up report's transcript row as a delegation report
+
+- Precondition: Chat "Lead" started "Link check", which finishes with "All 12 links work." while Lead is idle.
+- Action: Let the report wake Lead; read Lead's transcript.
+- Expected result: The provider receives the report as the wake turn's message (so routes that need a user-role message still get one). The transcript row of that message carries `kind: 'delegation-report'`, the child's id, its title, state `finished` and the first line of its reply as `summary`. The user's own message carries no such mark.
+- Test: `packages/agent-app/tests/delegation-44.test.ts::the wake-up report is marked as a delegation report in the parent's transcript, not as the user's message`
+- Environment: Node test runner; the real service and queue; a fake provider; the real tool host.
+- Known gaps: How the row looks is MUS-SPEC-14-44M.
+- Evidence: local; ~/.muster-work/review/44/green-workflow.log; exit 0; 11 passed, 0 failed, 0 skipped; commit 09558d095da37f8c76cd6c5ac337ee2cedb276e9
+
+<a id="mus-spec-14-44o"></a>
+#### MUS-SPEC-14-44O: Delegation tools do not keep a Claude chat off the router's Messages route
+
+- Precondition: A Full access agent chat on a router gateway with a Claude model; the delegation tool server is added to its run, as it is for every agent chat above read-only.
+- Action: Decide the route for its turn.
+- Expected result: The turn may still run over the router's Messages API (MUS-SPEC-03-688H): the delegation server is a known Muster server, not user or Project state. The Messages route has no MCP client, so it drops the delegation server. A Workspace chat with the same server stays on the Codex client.
+- Test: `packages/agent-app/tests/delegation-44.test.ts::the delegation tool server does not keep a Full access router chat off its Claude route; that route drops it`
+- Environment: Node test runner; the real route decision (claudeLaneAllowed) and dropped-server list.
+- Known gaps: On the Messages route the agent cannot delegate in that turn. The Claude Code route keeps the delegation server.
+- Evidence: local; ~/.muster-work/review/44/green-44O.log; exit 0; 1 passed, 0 failed, 0 skipped; commit e66fd09cf6a78c513681f160f4c0069d0c4e19b7
