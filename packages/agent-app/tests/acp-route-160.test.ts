@@ -39,7 +39,8 @@ async function rig(t: TestContext, options: {mode: ChatPermissionMode; flags?: s
   const settled = () => until(async () => { const chat_ = (await service.invoke('app.snapshot', undefined)).chats.find(entry => entry.id === chat.id); return chat_?.status !== 'running' && chat_?.status !== 'stopping'; }, 'the turn settling');
   return {service, chatId: chat.id, folder, outside, items, settled,
     log: () => existsSync(logFile) ? readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [],
-    async send(text) { await service.invoke('chat.send', {id: chat.id, text, requestId: randomUUID()}); await until(async () => (await items()).some(item => item.kind === 'user' && item.text === text), 'the message being recorded'); }};
+    // #877: an answer can show before the agent ends its prompt, so a follow-up first waits for the previous turn to settle.
+    async send(text) { await settled(); await service.invoke('chat.send', {id: chat.id, text, requestId: randomUUID()}); await until(async () => (await items()).some(item => item.kind === 'user' && item.text === text), 'the message being recorded'); }};
 }
 const said = async (r: Rig, match: RegExp) => until(async () => (await r.items()).some(item => item.kind === 'assistant' && match.test(item.text)), `an answer matching ${match}`).catch(async error => { throw new Error(`${error.message}; the chat holds: ${JSON.stringify((await r.items()).map(item => [item.kind, item.status, item.text.slice(0, 160)]))}`); });
 const card = async (r: Rig) => { await until(async () => (await r.items()).some(item => item.kind === 'approval' && item.status === 'pending'), 'the approval card'); return (await r.items()).find(item => item.kind === 'approval' && item.status === 'pending')!; };

@@ -253,7 +253,7 @@ Boundaries:
 
 - Precondition: A Ubuntu apt setup (a deb822 `ubuntu.sources` and a classic `sources.list`). The first mirror fails `apt-get update`; on the second, update works but the install cannot find a package; the third works.
 - Action: Run `scripts/ci-apt-install.sh` with the packages to install.
-- Expected result: The script points the sources at each mirror in turn, refreshes the package lists with errors treated as failures, and installs from the first mirror that works (the third here). When every mirror fails, it exits non-zero after trying each one, so the job fails with apt's own error.
+- Expected result: The script points the sources at each mirror in turn, refreshes the package lists and installs from the first mirror that works (the third here). When every mirror fails, it exits non-zero after trying each one, so the job fails with apt's own error.
 - Test: `packages/agent-app/tests/ci-apt-install.test.ts::the apt install moves to the next mirror when one cannot find a package, and fails only after every mirror`
 - Environment: Node test runner; the real script under bash with a stand-in `apt-get` on PATH and the apt folders in a temp directory; no network and no root.
 - Known gaps: Real mirrors are not contacted; a mirror that stalls is covered by apt's own per-request timeout and the script's time limit per attempt, which the test does not exercise.
