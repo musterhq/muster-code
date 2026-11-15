@@ -25,7 +25,7 @@ test('the changes screen shows the review ring and files, keeps and undoes by sw
   expect(await screen.findByLabelText('Reviewed 1 of 3')).toBeTruthy();
   expect(screen.getByText('1 kept · 2 to review')).toBeTruthy();
   expect(screen.getByText('store.ts')).toBeTruthy();
-  expect(screen.getByText('src/session')).toBeTruthy();
+  expect(screen.getAllByText('src/session')).toHaveLength(2);
   expect(screen.getByLabelText('stream-key.ts, Kept')).toBeTruthy();
   expect(screen.getByLabelText('store.ts, 48 added, 18 removed')).toBeTruthy();
   expect(screen.getByRole('button', {name: 'Keep all'})).toBeTruthy();
