@@ -11,14 +11,15 @@ What the user can do:
 - start a new chat from the phone in a folder or Project with a provider and model, and send photos and files (phase 2);
 - connect straight to the desktop when both are on the same network, with the relay as the fallback (phase 2);
 - pair several computers and switch between them or see all at once, read the last known state with no connection, write messages that go out on reconnect, read replies as native Markdown, and use the app on tablets and in landscape (phase 4);
-- review a chat’s changed files and their diffs and keep or undo each file or change, and stop a running turn (phase 5).
+- review a chat’s changed files and their diffs and keep or undo each file or change, and stop a running turn (phase 5);
+- browse and read the chat’s folder, see its branch and commit, push, switch branches and open a pull request (phase 6).
 
 Boundaries:
 - The phone talks to the desktop through a relay, or directly on the same network, with end-to-end encryption (Noise IK) either way; the relay and the network see only ciphertext.
 - A new phone is read-only. The phone can never raise a chat's access level or approve for a whole session.
 - Pairing needs secure storage on the desktop and a one-time code that expires.
 - Each computer keeps its own keys and its own cached data; the phone caches only what it was shown and wipes a computer’s cache when that computer revokes it or is unpaired. Approvals are never queued offline.
-- Keeping, undoing and stopping need act access, checked again right before the desktop runs them; the phone sees folder-relative paths only and gets diffs already highlighted, in pages.
+- Keeping, undoing, stopping, committing, pushing, switching branches and opening pull requests need act access, checked again right before the desktop runs them; the phone sees folder-relative paths only and gets diffs already highlighted, in pages.
 - Production relay hosting, push notifications, Projects and dictation are later phases (see the design).
 
 ## Acceptance cases
@@ -118,6 +119,17 @@ Boundaries:
 | [MUS-SPEC-23-24N](23-mobile.md#mus-spec-23-24n) | The ring and the header say 1 of 3 kept. Files to review show their counts and the kept one says Kept. Swiping right calls changes.keep with the whole file; swiping left calls changes.undo with the file’s hash, and each row then says Kept or Undone. Read-only shows the files and the ring but no Keep all or Undo all, and swipes do nothing. | [`the changes screen shows the review ring and files, keeps and undoes by swipe, and hides actions when read only`](../../../packages/mobile/tests/changes-screen.test.tsx) |
 | [MUS-SPEC-23-24O](23-mobile.md#mus-spec-23-24o) | Each hunk has a pill named in its function, removed lines have no number and added lines their new number, and the toolbar reads 1 of 2. Keep calls changes.keep with the focused hunk and folds it into a Kept pill; next moves to 2 of 2 and Undo calls changes.undo with that hunk. The 5,000-line file renders its first page with only a window of rows mounted and asks for the next page only as the reader nears the end, until it has all 5,000 lines. | [`the diff shows function-named hunks with one gutter, keeps and undoes from the toolbar and pages a 5,000-line file`](../../../packages/mobile/tests/diff-screen.test.tsx) |
 | [MUS-SPEC-23-24P](23-mobile.md#mus-spec-23-24p) | At 390 the diff is inline (one column). At 844 it is split: the removed line on the left with its old number and the added line on the right with its new number, in the same row. | [`landscape and tablet widths show the diff side by side`](../../../packages/mobile/tests/diff-screen.test.tsx) |
+| [MUS-SPEC-23-25A](23-mobile.md#mus-spec-23-25a) | The first answer names the folder by its name, lists src before README.md, and marks src as holding 2 changes. The second lists key.ts as added, store.ts as modified and types.ts unchanged, each with its folder-relative path. Neither answer holds the folder’s absolute path, and a read-only phone is allowed to read. | [`a phone browses the chat’s folder one level at a time with each file’s Git state`](../../../packages/agent-app/tests/mobile-phase6-326.test.ts) |
+| [MUS-SPEC-23-25B](23-mobile.md#mus-spec-23-25b) | The first page holds lines 1 to 400 split into coloured tokens from a palette of [dark, light] pairs, says 1,000 lines in total and names 400 as where the next page starts; the next page starts at line 401. The query answers the match lines 9, 499 and 989 (counted from 0). | [`a phone reads a file highlighted, in pages, and finds the lines that match`](../../../packages/agent-app/tests/mobile-phase6-326.test.ts) |
+| [MUS-SPEC-23-25C](23-mobile.md#mus-spec-23-25c) | Every path out of the folder is refused, no answer holds the secret’s text or the folder’s absolute path, and the link entries are not listed. The binary file answers binary with no lines and the large file answers too large with no lines. | [`paths stay inside the chat’s folder, and binary and large files are named, not sent`](../../../packages/agent-app/tests/mobile-phase6-326.test.ts) |
+| [MUS-SPEC-23-25D](23-mobile.md#mus-spec-23-25d) | The title is atlas-api and src shows 2 modified. Pressing src asks files.list for src, the title becomes src and the subtitle reads atlas-api › src. Changed lists the two changed files with Modified and Added in words. Recent and the Opened recently cards show the file opened before. | [`the files screen drills down one folder at a time and filters to changed and recent files`](../../../packages/mobile/tests/files-screen.test.tsx) |
+| [MUS-SPEC-23-25E](23-mobile.md#mus-spec-23-25e) | Each line shows its number. Find calls files.read with the query and reads 1 of 2, then 2 of 2 after next. Wrap off and a larger text size change the code style. Show diff and Ask about this call their handlers with the file’s path. The binary file says to open it on Studio Mac and shows no lines. | [`the file viewer numbers lines, finds with a count, wraps, sizes text and opens the diff or the chat`](../../../packages/mobile/tests/file-viewer.test.tsx) |
+| [MUS-SPEC-23-25F](23-mobile.md#mus-spec-23-25f) | The answer names the branch, its upstream, 1 ahead and 0 behind, and lists src/key.ts as added and src/store.ts as modified. Its message has the chat’s title as the subject and the first paragraph of the reply as the body. Nothing in the answer holds the token, the remote address or the folder’s absolute path. | [`a phone reads the branch, the files to commit and the agent’s message, and never the remote’s token`](../../../packages/agent-app/tests/mobile-phase6-326.test.ts) |
+| [MUS-SPEC-23-25G](23-mobile.md#mus-spec-23-25g) | The read-only call is refused as read only and the revoked one fails; neither makes a commit. The old revision is refused and makes no commit. The last commit holds only src/key.ts with the given message, src/store.ts stays modified and uncommitted, the push lands in the bare repository, and the answer says pushed with 0 ahead. | [`commit and push run on the desktop with only the chosen files; read-only, a revoke mid-commit or an old revision commit nothing`](../../../packages/agent-app/tests/mobile-phase6-326.test.ts) |
+| [MUS-SPEC-23-25H](23-mobile.md#mus-spec-23-25h) | git.branches lists both local branches with the current one marked, the remote branch, and how many uncommitted files move with a switch. Each switch lands on the named branch, the remote one as a local branch tracking it. While the turn runs the switch first stops the turn, then switches, and answers that the agent was paused. | [`switching branches finds, creates and checks out remote branches, and pauses a running agent first`](../../../packages/agent-app/tests/mobile-phase6-326.test.ts) |
+| [MUS-SPEC-23-25I](23-mobile.md#mus-spec-23-25i) | The draft gives the head, the base and the title and holds no token. The read-only create is refused and reaches no GitHub command. The create calls the desktop’s github.pr.create for the chat’s folder with the title, description, draft and push, then github.pr.requestReview with the reviewer, and answers the pull request’s number and address. | [`a pull request opens through the desktop’s own GitHub commands, only with act and with no token sent`](../../../packages/agent-app/tests/mobile-phase6-326.test.ts) |
+| [MUS-SPEC-23-25J](23-mobile.md#mus-spec-23-25j) | The branch line reads feat/session-streams and 2 ahead, To commit reads 3 of 3 and then 2 of 3, and the message shows Written by the agent. Commit and push calls git.commit with the revision, the two ticked paths, the edited message and push. Read-only shows the files and the message but no Commit buttons. | [`source control chooses files, edits the agent’s message and commits and pushes, and hides commit when read only`](../../../packages/mobile/tests/source-control.test.tsx) |
+| [MUS-SPEC-23-25K](23-mobile.md#mus-spec-23-25k) | The sheet says 2 uncommitted files move with you and that the agent pauses first. Typing filters the list and offers Create “fix”, which calls git.switch with create. Pressing the remote branch calls git.switch with remote. The pull request sheet reads head into base, and Open pull request calls pr.create with the title, the description, draft and the reviewer. | [`the branch sheet finds, creates and switches, and the pull request sheet opens a draft with reviewers`](../../../packages/mobile/tests/branch-and-pr.test.tsx) |
 
 ### Pairing, the device registry and access
 
@@ -1190,4 +1202,129 @@ Boundaries:
 - Test: `packages/mobile/tests/diff-screen.test.tsx::landscape and tablet widths show the diff side by side`
 - Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
 - Known gaps: Anchoring the focused hunk through a rotation is checked on a device.
+- Evidence: UNVERIFIED
+
+### Files (phase 6)
+
+<a id="mus-spec-23-25a"></a>
+#### MUS-SPEC-23-25A: A phone browses the chat’s folder one level at a time
+
+- Precondition: A desktop with a folder that is a Git repository holding src/store.ts, src/types.ts and README.md, with src/store.ts changed and src/key.ts added since the last commit, and a chat in that folder; a paired read-only phone.
+- Action: From the phone call files.list for the chat with no path, then with the path src.
+- Expected result: The first answer names the folder by its name, lists src before README.md, and marks src as holding 2 changes. The second lists key.ts as added, store.ts as modified and types.ts unchanged, each with its folder-relative path. Neither answer holds the folder’s absolute path, and a read-only phone is allowed to read.
+- Test: `packages/agent-app/tests/mobile-phase6-326.test.ts::a phone browses the chat’s folder one level at a time with each file’s Git state`
+- Environment: Node test runner; the real agent service with a fake provider in a temporary Git repository, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: Listings stop at the desktop’s own cap of 2,000 entries a folder.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-25b"></a>
+#### MUS-SPEC-23-25B: A phone reads a file highlighted, in pages, and finds in it
+
+- Precondition: The folder of 25A with a TypeScript file of 1,000 lines, where lines 10, 500 and 990 hold the word needle.
+- Action: From the phone call files.read for the file, then for its next page, then with the query needle.
+- Expected result: The first page holds lines 1 to 400 split into coloured tokens from a palette of [dark, light] pairs, says 1,000 lines in total and names 400 as where the next page starts; the next page starts at line 401. The query answers the match lines 9, 499 and 989 (counted from 0).
+- Test: `packages/agent-app/tests/mobile-phase6-326.test.ts::a phone reads a file highlighted, in pages, and finds the lines that match`
+- Environment: Node test runner; the real agent service with a fake provider in a temporary Git repository, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: Each page is highlighted on its own, so a comment or string that starts on an earlier page is coloured from where the page starts.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-25c"></a>
+#### MUS-SPEC-23-25C: Paths stay inside the chat’s folder, and binary and large files are named, not sent
+
+- Precondition: The folder of 25A, a secret file next to it outside the folder, a link inside the folder to that file and a link to the folder’s parent, a binary file and a 600 KB text file in the folder.
+- Action: From the phone call files.read with ../secret.txt, with the secret file’s absolute path, with ~/secret.txt, with the link to the file and through the link to the parent, and files.list with .. and through the link to the parent; then files.read for the binary file and the large file.
+- Expected result: Every path out of the folder is refused, no answer holds the secret’s text or the folder’s absolute path, and the link entries are not listed. The binary file answers binary with no lines and the large file answers too large with no lines.
+- Test: `packages/agent-app/tests/mobile-phase6-326.test.ts::paths stay inside the chat’s folder, and binary and large files are named, not sent`
+- Environment: Node test runner; the real agent service with a fake provider in a temporary Git repository, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: Windows junctions are covered by the desktop’s own path checks, not exercised here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-25d"></a>
+#### MUS-SPEC-23-25D: The files screen drills down, filters to changed and recent files, and shows recent cards
+
+- Precondition: The files screen with a fake connection whose files.list answers the folder atlas-api and its src folder, and whose git.status answers two changed files; one file opened before.
+- Action: Render it; press src; choose Changed, then Recent.
+- Expected result: The title is atlas-api and src shows 2 modified. Pressing src asks files.list for src, the title becomes src and the subtitle reads atlas-api › src. Changed lists the two changed files with Modified and Added in words. Recent and the Opened recently cards show the file opened before.
+- Test: `packages/mobile/tests/files-screen.test.tsx::the files screen drills down one folder at a time and filters to changed and recent files`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: The push and the collapsing title are checked on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-25e"></a>
+#### MUS-SPEC-23-25E: The file viewer numbers lines, finds, wraps, sizes text and hands off to the diff and the chat
+
+- Precondition: The file viewer with a fake connection whose files.read answers a changed file of three lines, two of which hold xadd, then a binary file.
+- Action: Render the first file; type xadd in find and press next; turn wrap off; make the text larger; press Show diff and Ask about this; render the binary file.
+- Expected result: Each line shows its number. Find calls files.read with the query and reads 1 of 2, then 2 of 2 after next. Wrap off and a larger text size change the code style. Show diff and Ask about this call their handlers with the file’s path. The binary file says to open it on Studio Mac and shows no lines.
+- Test: `packages/mobile/tests/file-viewer.test.tsx::the file viewer numbers lines, finds with a count, wraps, sizes text and opens the diff or the chat`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: Pinch to resize is checked on a device; the buttons step the size.
+- Evidence: UNVERIFIED
+
+### Git (phase 6)
+
+<a id="mus-spec-23-25f"></a>
+#### MUS-SPEC-23-25F: A phone reads the branch, the files to commit and the agent’s message
+
+- Precondition: The folder of 25A on a branch that tracks a bare repository and is one commit ahead of it, whose remote address carries a token; a chat whose last turn ended with a reply; a paired read-only phone.
+- Action: From the phone call git.status for the chat.
+- Expected result: The answer names the branch, its upstream, 1 ahead and 0 behind, and lists src/key.ts as added and src/store.ts as modified. Its message has the chat’s title as the subject and the first paragraph of the reply as the body. Nothing in the answer holds the token, the remote address or the folder’s absolute path.
+- Test: `packages/agent-app/tests/mobile-phase6-326.test.ts::a phone reads the branch, the files to commit and the agent’s message, and never the remote’s token`
+- Environment: Node test runner; the real agent service with a fake provider in a temporary Git repository with a bare repository as its remote, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-25g"></a>
+#### MUS-SPEC-23-25G: Commit and push run on the desktop, only with act, and only the chosen files
+
+- Precondition: The folder of 25F with a bare repository as its remote; a paired phone, first read-only; a gate that holds a write after its reads.
+- Action: While read-only, call git.commit. Allow the phone to act; hold a commit of src/key.ts at the gate, revoke the phone on the desktop and release it. Pair again with act; commit src/key.ts with an old revision; then commit only src/key.ts with push.
+- Expected result: The read-only call is refused as read only and the revoked one fails; neither makes a commit. The old revision is refused and makes no commit. The last commit holds only src/key.ts with the given message, src/store.ts stays modified and uncommitted, the push lands in the bare repository, and the answer says pushed with 0 ahead.
+- Test: `packages/agent-app/tests/mobile-phase6-326.test.ts::commit and push run on the desktop with only the chosen files; read-only, a revoke mid-commit or an old revision commit nothing`
+- Environment: Node test runner; the real agent service with a fake provider in a temporary Git repository with a bare repository as its remote, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: Pushing to a host that asks for a password is the desktop’s credential helper’s business and is not exercised.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-25h"></a>
+#### MUS-SPEC-23-25H: Switching branches finds, creates and pauses a running agent first
+
+- Precondition: The folder of 25F with a second local branch and a remote branch; a chat whose fake provider runs a turn until stopped; a paired phone with act.
+- Action: Call git.branches; switch to the local branch; create a new branch; switch to the remote branch; start the turn and switch back to the first branch while it runs.
+- Expected result: git.branches lists both local branches with the current one marked, the remote branch, and how many uncommitted files move with a switch. Each switch lands on the named branch, the remote one as a local branch tracking it. While the turn runs the switch first stops the turn, then switches, and answers that the agent was paused.
+- Test: `packages/agent-app/tests/mobile-phase6-326.test.ts::switching branches finds, creates and checks out remote branches, and pauses a running agent first`
+- Environment: Node test runner; the real agent service with a fake provider in a temporary Git repository with a bare repository as its remote, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-25i"></a>
+#### MUS-SPEC-23-25I: A pull request opens through the desktop’s own GitHub commands
+
+- Precondition: The folder of 25F, with the desktop’s GitHub commands answered by a stand-in that records its calls and puts a token into the draft’s compare address; a paired phone, first read-only.
+- Action: Call pr.draft; call pr.create while read-only; allow the phone to act and call pr.create with a title, a Markdown description, draft on and a reviewer.
+- Expected result: The draft gives the head, the base and the title and holds no token. The read-only create is refused and reaches no GitHub command. The create calls the desktop’s github.pr.create for the chat’s folder with the title, description, draft and push, then github.pr.requestReview with the reviewer, and answers the pull request’s number and address.
+- Test: `packages/agent-app/tests/mobile-phase6-326.test.ts::a pull request opens through the desktop’s own GitHub commands, only with act and with no token sent`
+- Environment: Node test runner; the real agent service with a fake provider in a temporary Git repository, the desktop’s GitHub commands answered by a recording stand-in, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: Labels are not set yet: the desktop has no label command to reuse. The real GitHub call is the desktop’s own, tested with its domain.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-25j"></a>
+#### MUS-SPEC-23-25J: Source control chooses files, edits the agent’s message and commits and pushes
+
+- Precondition: The source control screen with a fake connection whose git.status answers branch feat/session-streams 2 ahead, three files and a message written by the agent; access act, then read-only.
+- Action: Render it; untick one file; edit the message; press Commit and push; render it read-only.
+- Expected result: The branch line reads feat/session-streams and 2 ahead, To commit reads 3 of 3 and then 2 of 3, and the message shows Written by the agent. Commit and push calls git.commit with the revision, the two ticked paths, the edited message and push. Read-only shows the files and the message but no Commit buttons.
+- Test: `packages/mobile/tests/source-control.test.tsx::source control chooses files, edits the agent’s message and commits and pushes, and hides commit when read only`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: The two-step progress in the button is checked on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-25k"></a>
+#### MUS-SPEC-23-25K: The branch sheet finds or creates a branch and the pull request sheet opens one
+
+- Precondition: The switch-branch sheet with a fake connection whose git.branches answers two local branches, one remote branch and 2 uncommitted files, with the chat running; then the pull request sheet with a draft.
+- Action: Type fix in the find field; press Create fix; open the sheet again and press the remote branch. Then fill the pull request sheet, turn Draft on, add a reviewer and press Open pull request.
+- Expected result: The sheet says 2 uncommitted files move with you and that the agent pauses first. Typing filters the list and offers Create “fix”, which calls git.switch with create. Pressing the remote branch calls git.switch with remote. The pull request sheet reads head into base, and Open pull request calls pr.create with the title, the description, draft and the reviewer.
+- Test: `packages/mobile/tests/branch-and-pr.test.tsx::the branch sheet finds, creates and switches, and the pull request sheet opens a draft with reviewers`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: Sheet detents are checked on a device.
 - Evidence: UNVERIFIED

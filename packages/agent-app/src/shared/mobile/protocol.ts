@@ -138,6 +138,42 @@ export interface MobileDiffPage {
   lines: MobileDiffLine[]; from: number; total: number; next: number | null;
 }
 
+
+/** A file's Git state in words (phase 6), as the files screen shows it. */
+export type MobileFileChange = 'modified' | 'added' | 'deleted' | 'renamed' | 'conflict';
+/** One entry of a folder in the chat's folder (phase 6), by its folder-relative path. A folder says how many changed files it
+ *  holds. */
+export interface MobileFileEntry { name: string; path: string; kind: 'file' | 'directory'; change?: MobileFileChange; changed?: number }
+/** Lines one files.read page holds at most. */
+export const FILE_PAGE_LINES = 400;
+/** Match lines one files.read query answers at most. */
+export const FILE_MATCHES_MAX = 500;
+export interface MobileFilePage {
+  path: string; change?: MobileFileChange;
+  /** Binary or too large to show: no lines; open it on the computer. */
+  binary?: boolean; tooLarge?: boolean;
+  palette: Array<[string, string]>;
+  /** Lines `from` to `from + lines.length` of `total`, as coloured tokens; `next` is where the next page starts. */
+  lines: MobileToken[][]; from: number; total: number; next: number | null;
+  /** With a query: the lines (from 0) that hold it, at most FILE_MATCHES_MAX. */
+  matches?: number[]; matchesTruncated?: boolean;
+}
+/** The chat's folder in Git (phase 6): the branch, how far it is from its upstream, the files to commit, and a message the agent
+ *  wrote from the chat (its title and the last reply's first paragraph). Never the remote's address or a credential. */
+export interface MobileGitFile { path: string; previousPath?: string; change: MobileFileChange; staged: boolean }
+export interface MobileGitStatus {
+  branch: string; detached: boolean; upstream: string | null; ahead: number; behind: number;
+  files: MobileGitFile[]; truncated: boolean; conflicted: boolean;
+  /** Pass back to git.commit and git.switch: a write against an older status is refused. */
+  revision: string;
+  message: {subject: string; body: string} | null;
+}
+export interface MobileBranch { name: string; current?: boolean; ahead?: number; behind?: number }
+export interface MobilePullRequestDraft {
+  available: boolean; reason?: string; head: string; base: string; bases: string[]; title: string; body: string;
+  needsPush: boolean; existing?: {number: number; url: string; title: string};
+}
+
 /** Methods the phone may call. Every one is checked on the desktop against the phone's access. */
 export interface MobileMethods {
   /** `lan`: the desktop's current direct addresses (phase 2), so the phone's record follows network changes. */
@@ -180,11 +216,25 @@ export interface MobileMethods {
   'changes.undo': {params: {chatId: string; runId: string; path: string; afterHash: string; hunkId?: string}; result: {stale: boolean}};
   /** Stops the chat's running turn. */
   'chat.stop': {params: {id: string}; result: Record<string, never>};
+  /** One folder of the chat's folder (phase 6): '' or no path for its top. */
+  'files.list': {params: {chatId: string; path?: string}; result: {folder: string; path: string; entries: MobileFileEntry[]; truncated: boolean}};
+  /** One page of a file in the chat's folder, highlighted on the computer; with `query`, the lines that hold it. */
+  'files.read': {params: {chatId: string; path: string; from?: number; query?: string}; result: MobileFilePage};
+  'git.status': {params: {chatId: string}; result: MobileGitStatus};
+  /** Commits exactly `paths` (other changes stay uncommitted) with `message`; `push` pushes on the computer after. */
+  'git.commit': {params: {chatId: string; revision: string; paths: string[]; message: string; push?: boolean}; result: {status: MobileGitStatus; pushed: boolean; pushError?: string}};
+  /** Local and remote branches, how many uncommitted files a switch carries, and whether the chat runs (it pauses first). */
+  'git.branches': {params: {chatId: string}; result: {current: string | null; local: MobileBranch[]; remote: MobileBranch[]; uncommitted: number; running: boolean}};
+  /** Switches to a local branch, creates one (`create`) or checks out a remote one (`remote`); a running chat is stopped first. */
+  'git.switch': {params: {chatId: string; branch: string; create?: boolean; remote?: boolean}; result: {status: MobileGitStatus; paused: boolean}};
+  'pr.draft': {params: {chatId: string}; result: MobilePullRequestDraft};
+  /** Opens a pull request on the computer with its own credentials (pushing first when needed). */
+  'pr.create': {params: {chatId: string; base: string; title: string; body: string; draft: boolean; reviewers?: string[]}; result: {number: number; url: string; title: string; draft: boolean}};
 }
 export type MobileMethod = keyof MobileMethods;
-export const MOBILE_METHODS: readonly MobileMethod[] = ['hello', 'ping', 'chats.list', 'chat.open', 'chat.close', 'chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'needs.list', 'chat.options', 'chat.create', 'upload.start', 'upload.chunk', 'upload.finish', 'upload.cancel', 'upload.discard', 'changes.list', 'changes.diff', 'changes.keep', 'changes.undo', 'chat.stop'];
+export const MOBILE_METHODS: readonly MobileMethod[] = ['hello', 'ping', 'chats.list', 'chat.open', 'chat.close', 'chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'needs.list', 'chat.options', 'chat.create', 'upload.start', 'upload.chunk', 'upload.finish', 'upload.cancel', 'upload.discard', 'changes.list', 'changes.diff', 'changes.keep', 'changes.undo', 'chat.stop', 'files.list', 'files.read', 'git.status', 'git.commit', 'git.branches', 'git.switch', 'pr.draft', 'pr.create'];
 /** Methods a read-only phone may not call. chat.options is only for starting a chat, so it is acting too. */
-export const ACTING_METHODS: ReadonlySet<MobileMethod> = new Set(['chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'chat.options', 'chat.create', 'upload.start', 'upload.chunk', 'upload.finish', 'upload.cancel', 'upload.discard', 'changes.keep', 'changes.undo', 'chat.stop']);
+export const ACTING_METHODS: ReadonlySet<MobileMethod> = new Set(['chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'chat.options', 'chat.create', 'upload.start', 'upload.chunk', 'upload.finish', 'upload.cancel', 'upload.discard', 'changes.keep', 'changes.undo', 'chat.stop', 'git.commit', 'git.switch', 'pr.create']);
 
 export type MobileEvent =
   | {type: 'chats'; chats: MobileChat[]}
