@@ -1,27 +1,42 @@
-import {Stack, useLocalSearchParams} from 'expo-router';
-import {Text, View} from 'react-native';
+import {Stack, useLocalSearchParams, useRouter} from 'expo-router';
+import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useComputerConnection} from '../../src/connection/ConnectionProvider';
 import {ChatScreen} from '../../src/screens/ChatScreen';
 import {pickAttachment} from '../../src/connection/pickers';
-import {themed, type} from '../../src/theme';
+import {Icon} from '../../src/components/Icon';
+import {Glass} from '../../src/components/v3';
+import {size, themed, type, useTheme} from '../../src/theme';
 
-/** One header bar: the stack's own, with the chat's title and its folder or Project and computer under it. */
+/** One header bar (v3): the chat's title with its folder or Project under it, and Changes as a glass button with its count. */
 export default function Chat() {
   const {id, computer} = useLocalSearchParams<{id: string; computer?: string}>();
   const {view, connection} = useComputerConnection(computer || undefined);
-  const styles = useStyles();
+  const router = useRouter();
+  const styles = useStyles(), c = useTheme();
   if (!connection || !view || !id) return null;
-  return <ChatScreen connection={connection} chatId={id} path={view.path} pickAttachment={pickAttachment} header={chat => (
-    <Stack.Screen options={{headerTitle: () => (
-      <View style={styles.title}>
-        <Text style={styles.name} numberOfLines={1}>{chat?.title ?? ''}</Text>
-        <Text style={styles.place} numberOfLines={1}>{[chat?.place, view.name].filter(Boolean).join(' · ')}</Text>
-      </View>
-    )}} />
+  const review = () => router.push({pathname: '/changes', params: {chat: id, computer: view.id}});
+  return <ChatScreen connection={connection} chatId={id} path={view.path} pickAttachment={pickAttachment} onReview={review} header={(chat, changes) => (
+    <Stack.Screen options={{
+      headerTitle: () => (
+        <View style={styles.title}>
+          <Text style={styles.name} numberOfLines={1}>{chat?.title ?? ''}</Text>
+          <Text style={styles.place} numberOfLines={1}>{[chat?.place, view.name].filter(Boolean).join(' · ')}</Text>
+        </View>
+      ),
+      headerRight: changes ? () => (
+        <Glass radius={size.glassCircle / 2}>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Changes, ${changes} ${changes === 1 ? 'file' : 'files'}`} onPress={review} style={styles.changes}>
+            <Icon name="diff" size={20} color={c.text} /><Text style={styles.count}>{changes}</Text>
+          </Pressable>
+        </Glass>
+      ) : undefined,
+    }} />
   )} />;
 }
-const useStyles = themed(c => ({
-  title: {alignItems: 'center' as const, maxWidth: 240},
-  name: {color: c.strong, ...type.footnote, fontWeight: '600' as const},
-  place: {color: c.faint, ...type.caption},
+const useStyles = themed(c => StyleSheet.create({
+  title: {alignItems: 'center', maxWidth: 220},
+  name: {color: c.text, ...type.headline},
+  place: {color: c.muted, ...type.footnote},
+  changes: {flexDirection: 'row', alignItems: 'center', gap: 6, height: size.glassCircle, paddingHorizontal: 14},
+  count: {color: c.text, ...type.headline},
 }));

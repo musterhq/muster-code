@@ -1,9 +1,10 @@
-/** The computer's chats, newest first, in the approved layout: a status dot, the title, the place and what it is doing, and
- *  a count of what waits on the person. Filters for running chats and chats that need you. Updates live. With several
- *  computers shown together each row names its computer; a computer that can't be reached shows its cached chats under a
- *  calm banner, a running chat reading "Was running" (#326 phase 4). */
-import {memo, useEffect, useMemo, useState} from 'react';
-import {Pressable, RefreshControl, StyleSheet, Text, View} from 'react-native';
+/** The computer's chats in the v3 layout (MUS-SPEC-23-24B): two-line rows (what the chat is, and what it is doing now) with a
+ *  36 pt status glyph, grouped into Active (running or waiting on the person) and Earlier. No filter chips: search lives in the
+ *  tab bar. A chat that starts running moves into Active with a selection tick. With several computers shown together each
+ *  row names its computer; a computer that can't be reached shows its cached chats under a calm banner, a running chat
+ *  reading "Was running" (#326 phase 4). */
+import {memo, useEffect, useMemo, useRef, useState, type ReactElement} from 'react';
+import {Pressable, RefreshControl, StyleSheet, Text, TextInput, View} from 'react-native';
 import {LegendList} from '@legendapp/list/react-native';
 import type {MobileChat, MobileConnection} from '../shared';
 import {errorText} from '../hooks';
@@ -12,45 +13,60 @@ import {ago} from '../time';
 import {offlineOf} from '../offline/connection';
 import {ConnectionBanner} from '../components/ConnectionBanner';
 import type {LinkPath} from '../connection/link';
-import {space, themed, touch, type, useTheme, type Palette} from '../theme';
-
-type Filter = 'all' | 'running' | 'needs';
-const FILTERS: Array<[Filter, string]> = [['all', 'All'], ['running', 'Running'], ['needs', 'Needs you']];
-const RUNNING = new Set<MobileChat['status']>(['running', 'stopping']);
+import {Icon} from '../components/Icon';
+import {GLYPH_WORD, glyphColor, glyphOf, Shimmer, StatusGlyph} from '../components/v3';
+import {TAB_BAR_SPACE} from '../components/GlassTabBar';
+import {size, space, themed, type, useTheme} from '../theme';
 
 export {ago};
-const doing = (chat: MobileChat, offline = false): string => {
+const ACTIVE = new Set<MobileChat['status']>(['running', 'stopping', 'waiting']);
+const isActive = (chat: MobileChat) => ACTIVE.has(chat.status) || chat.needsYou > 0;
+/** What a chat is doing now, in plain words (the lead word is coloured for a chat that needs the person or failed). */
+function doing(chat: MobileChat, offline: boolean): {lead?: string; text: string} {
   switch (chat.status) {
-    case 'running': return offline ? 'Was running' : `Working ${ago(chat.updatedAt)}`;
-    case 'stopping': return 'Stopping';
-    case 'waiting': return 'Waiting for you';
-    case 'failed': return `Failed · ${ago(chat.updatedAt)}`;
-    case 'interrupted': return `Stopped · ${ago(chat.updatedAt)}`;
-    case 'completed': return `Done · ${ago(chat.updatedAt)}`;
-    default: return ago(chat.updatedAt);
+    case 'running': return {text: offline ? 'Was running' : 'Working'};
+    case 'stopping': return {text: 'Stopping'};
+    case 'waiting': return {lead: 'Needs you', text: ''};
+    case 'failed': return {lead: 'Failed', text: ''};
+    case 'interrupted': return {text: 'Stopped'};
+    case 'completed': return {text: 'Done'};
+    default: return {text: ''};
   }
-};
-const dotColor = (c: Palette, status: MobileChat['status']): string =>
-  status === 'running' ? c.accent : status === 'waiting' || status === 'stopping' ? c.warning : status === 'completed' ? c.success : status === 'failed' ? c.danger : c.control;
+}
 
 /** One computer's chats, as the screen gets them. `path` is how the phone reaches it (for the banner). */
 export interface ChatSource { id: string; name: string; connection: MobileConnection; path?: LinkPath }
 interface Row { key: string; chat: MobileChat; computerId: string; computer: string | null; offline: boolean }
+type Entry = {header: string} | Row;
 
 const ChatRow = memo(function ChatRow({row, onOpen}: {row: Row; onOpen(chatId: string, computerId: string): void}) {
   const styles = useStyles(), c = useTheme();
-  const {chat} = row, what = doing(chat, row.offline);
+  const {chat} = row, kind = glyphOf(chat.status, row.offline), what = doing(chat, row.offline);
+  const rest = [row.computer, chat.place, what.text].filter(Boolean).join(' · ');
+  const line = what.lead ? [what.lead, rest].filter(Boolean).join(' · ') : rest;
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={`${chat.title}, ${what}`} onPress={() => onOpen(chat.id, row.computerId)} style={({pressed}) => [styles.row, pressed && styles.pressed]}>
-      <View style={[styles.dot, {backgroundColor: row.offline ? c.control : dotColor(c, chat.status)}, chat.status === 'running' && !row.offline && styles.dotRunning]} />
+    <Pressable testID={`chat-row-${chat.id}`} accessibilityRole="button" accessibilityLabel={`${chat.title}, ${GLYPH_WORD[kind]}${line && line !== GLYPH_WORD[kind] ? `, ${line}` : ''}`}
+      onPress={() => onOpen(chat.id, row.computerId)} style={({pressed}) => [styles.row, pressed && styles.pressed]}>
+      <View style={styles.lead}><StatusGlyph kind={kind} /></View>
       <View style={styles.body}>
-        <Text style={styles.title} numberOfLines={1}>{chat.title}</Text>
-        <Text style={[styles.sub, chat.status === 'failed' && styles.failed]} numberOfLines={1}>{[row.computer, chat.place, what].filter(Boolean).join(' · ')}</Text>
+        <View style={styles.top}>
+          <Text style={styles.title} numberOfLines={1}>{chat.title}</Text>
+          <Text style={styles.time}>{ago(chat.updatedAt)}</Text>
+        </View>
+        {kind === 'running' ? <Shimmer text={rest} style={styles.preview} />
+          : <Text style={styles.preview} numberOfLines={1}>
+            {what.lead ? <Text style={{color: glyphColor(c, kind), fontWeight: '500'}}>{what.lead}</Text> : null}
+            {what.lead && rest ? ' · ' : ''}{rest}
+          </Text>}
       </View>
-      {chat.needsYou ? <Text style={styles.pill} accessibilityLabel={`${chat.needsYou} waiting on you`}>{chat.needsYou}</Text> : null}
     </Pressable>
   );
 });
+
+function Header({label}: {label: string}) {
+  const styles = useStyles();
+  return <View accessibilityRole="header" accessibilityLabel={label} style={styles.header}><Text style={styles.headerText}>{label}</Text></View>;
+}
 
 const tags = new WeakMap<MobileConnection, number>();
 let lastTag = 0;
@@ -75,57 +91,93 @@ function useChatsFrom(sources: ChatSource[]) {
   return {lists: ready ? lists : null, error, refresh: () => Promise.all(sources.map(load))};
 }
 
-export function ChatsScreen({connection, sources: given, onOpen}: {connection?: MobileConnection; sources?: ChatSource[]; onOpen(chatId: string, computerId: string): void}) {
+/** `header`: the screen's large title, scrolled with the list. `searching`: show the search field (from the tab bar). */
+export function ChatsScreen({connection, sources: given, onOpen, header, searching = false, empty}: {connection?: MobileConnection; sources?: ChatSource[]; onOpen(chatId: string, computerId: string): void; header?: ReactElement; searching?: boolean; empty?: ReactElement}) {
   const styles = useStyles(), c = useTheme();
   const sources = given ?? (connection ? [{id: '', name: connection.desktopName, connection}] : []);
   const {lists, error, refresh} = useChatsFrom(sources);
-  const [filter, setFilter] = useState<Filter>('all');
   const [refreshing, setRefreshing] = useState(false);
+  const [query, setQuery] = useState('');
   const several = sources.length > 1;
   const rows = useMemo(() => !lists ? null : sources.flatMap(source => (lists[source.id] ?? []).map((chat): Row => ({key: `${source.id}:${chat.id}`, chat, computerId: source.id, computer: several ? source.name : null, offline: Boolean(offlineOf(source.connection))})))
     .sort((a, b) => b.chat.updatedAt.localeCompare(a.chat.updatedAt)), [lists, several, sourcesKey(sources)]);
-  const shown = useMemo(() => (rows ?? []).filter(({chat}) => filter === 'all' || (filter === 'running' ? RUNNING.has(chat.status) : chat.needsYou > 0)), [rows, filter]);
+  // A row moving into Active gives one selection tick (not on the first load).
+  const active = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!rows) return;
+    const now = new Set(rows.filter(row => isActive(row.chat)).map(row => row.key));
+    if (active.current && [...now].some(key => !active.current!.has(key))) haptics.select();
+    active.current = now;
+  }, [rows]);
+  const entries = useMemo((): Entry[] => {
+    const needle = searching ? query.trim().toLowerCase() : '';
+    const shown = (rows ?? []).filter(row => !needle || row.chat.title.toLowerCase().includes(needle) || (row.chat.place ?? '').toLowerCase().includes(needle));
+    const now = shown.filter(row => isActive(row.chat)), earlier = shown.filter(row => !isActive(row.chat));
+    return [...(now.length ? [{header: 'Active'}, ...now] : []), ...(earlier.length ? [{header: 'Earlier'}, ...earlier] : [])];
+  }, [rows, query, searching]);
   const pull = () => { setRefreshing(true); void refresh().finally(() => setRefreshing(false)); };
+  const top = (
+    <View>
+      {header}
+      {searching ? <View style={styles.search}>
+        <Icon name="search" size={18} color={c.muted} />
+        <TextInput style={styles.searchInput} placeholder="Search chats" placeholderTextColor={c.muted} value={query} onChangeText={setQuery} autoFocus autoCorrect={false} returnKeyType="search" />
+      </View> : null}
+      {sources.map(source => { const offline = offlineOf(source.connection); return offline ? <ConnectionBanner key={source.id} name={source.name} path={source.path ?? 'offline'} lastSync={offline.cache.lastSync(offline.computerId)} onRetry={offline.retry} /> : null; })}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+    </View>
+  );
   return (
     <View style={styles.screen}>
-      {sources.map(source => { const offline = offlineOf(source.connection); return offline ? <ConnectionBanner key={source.id} name={source.name} path={source.path ?? 'offline'} lastSync={offline.cache.lastSync(offline.computerId)} onRetry={offline.retry} /> : null; })}
-      <View style={styles.segments} accessibilityRole="tablist">
-        {FILTERS.map(([value, label]) => (
-          <Pressable key={value} accessibilityRole="tab" accessibilityState={{selected: filter === value}} onPress={() => { haptics.select(); setFilter(value); }} style={[styles.segment, filter === value && styles.segmentOn]}>
-            <Text style={[styles.segmentText, filter === value && styles.segmentTextOn]}>{label}</Text>
-          </Pressable>
-        ))}
-      </View>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
       <LegendList
         testID="chats-list"
-        data={shown}
-        keyExtractor={row => row.key}
-        estimatedItemSize={62}
+        data={entries}
+        keyExtractor={entry => 'header' in entry ? `h:${entry.header}` : entry.key}
+        getItemType={entry => 'header' in entry ? 'header' : 'row'}
+        estimatedItemSize={size.chatRow}
         recycleItems={false}
+        ListHeaderComponent={top}
+        contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={pull} tintColor={c.muted} />}
-        ListEmptyComponent={rows ? <Text style={styles.empty}>{filter === 'all' ? `No chats on ${several ? 'your computers' : sources[0]?.name ?? 'your computer'} yet.` : 'Nothing here right now.'}</Text> : <Text style={styles.empty}>Loading…</Text>}
-        renderItem={({item: row}) => <ChatRow row={row} onOpen={onOpen} />}
+        ListEmptyComponent={rows ? (query ? <Text style={styles.empty}>No chats match “{query}”.</Text> : empty ?? <Text style={styles.empty}>{`No chats on ${several ? 'your computers' : sources[0]?.name ?? 'your computer'} yet.`}</Text>) : <Skeleton />}
+        renderItem={({item: entry}) => 'header' in entry ? <Header label={entry.header} /> : <ChatRow row={entry} onOpen={onOpen} />}
       />
     </View>
   );
 }
+
+/** Loading: skeletons the shape of the two-line row, so nothing jumps when the list lands. */
+function Skeleton() {
+  const styles = useStyles();
+  return (
+    <View accessibilityLabel="Loading chats" testID="chats-loading">
+      {Array.from({length: 6}, (_, index) => (
+        <View key={index} style={styles.row}>
+          <View style={[styles.lead, styles.skeletonDot]} />
+          <View style={[styles.body, {gap: 8, paddingTop: 6}]}><View style={[styles.bar, {width: '55%'}]} /><View style={[styles.bar, {width: '75%', height: 10}]} /></View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const useStyles = themed(c => StyleSheet.create({
   screen: {flex: 1, backgroundColor: c.background},
-  segments: {flexDirection: 'row', marginHorizontal: space.m, marginBottom: space.s, padding: 2, borderRadius: 9, backgroundColor: c.surface},
-  segment: {flex: 1, minHeight: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 7},
-  segmentOn: {backgroundColor: c.scheme === 'light' ? c.raised : 'rgba(255,255,255,0.1)'},
-  segmentText: {color: c.muted, ...type.label},
-  segmentTextOn: {color: c.strong, fontWeight: '600'},
-  row: {flexDirection: 'row', alignItems: 'center', gap: space.m, minHeight: Math.max(touch, 60), paddingVertical: space.s, paddingHorizontal: space.l, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border},
+  content: {paddingBottom: TAB_BAR_SPACE},
+  header: {paddingHorizontal: space.margin, paddingTop: space.l, paddingBottom: space.s},
+  headerText: {color: c.muted, ...type.footnote, fontWeight: '500'},
+  row: {flexDirection: 'row', gap: space.m, minHeight: size.chatRow, paddingTop: space.m, paddingBottom: space.m, paddingLeft: space.l, paddingRight: space.margin},
   pressed: {backgroundColor: c.surface},
-  dot: {width: 8, height: 8, borderRadius: 4},
-  dotRunning: {shadowColor: c.accent, shadowOpacity: 0.6, shadowRadius: 3},
-  body: {flex: 1, gap: 2},
-  title: {color: c.strong, ...type.footnote, fontWeight: '600'},
-  sub: {color: c.faint, ...type.caption},
-  failed: {color: c.danger},
-  pill: {color: c.warning, backgroundColor: c.scheme === 'light' ? 'rgba(160,120,0,0.12)' : 'rgba(224,168,79,0.18)', ...type.caption, fontWeight: '600', paddingHorizontal: space.s, borderRadius: 6, overflow: 'hidden'},
-  empty: {color: c.muted, ...type.footnote, padding: space.l, textAlign: 'center'},
-  error: {color: c.danger, ...type.label, paddingHorizontal: space.l},
+  lead: {width: size.glyph, height: 44, alignItems: 'center', justifyContent: 'center'},
+  body: {flex: 1, minWidth: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, paddingBottom: space.s},
+  top: {flexDirection: 'row', alignItems: 'baseline', gap: space.s},
+  title: {flex: 1, color: c.text, ...type.headline},
+  time: {color: c.muted, ...type.subhead},
+  preview: {color: c.muted, ...type.subhead, marginTop: 3},
+  search: {flexDirection: 'row', alignItems: 'center', gap: space.s, marginHorizontal: space.l, marginBottom: space.s, paddingHorizontal: space.m, height: 40, borderRadius: 20, backgroundColor: c.fill},
+  searchInput: {flex: 1, color: c.text, ...type.body, paddingVertical: 0},
+  empty: {color: c.muted, ...type.callout, padding: space.margin, textAlign: 'center'},
+  error: {color: c.danger, ...type.footnote, paddingHorizontal: space.margin},
+  skeletonDot: {borderRadius: size.glyph / 2, backgroundColor: c.surface, width: size.glyph, height: size.glyph},
+  bar: {height: 13, borderRadius: 6, backgroundColor: c.surface},
 }));

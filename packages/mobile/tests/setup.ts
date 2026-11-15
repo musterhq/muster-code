@@ -12,3 +12,4 @@ jest.mock('react-native-reanimated', () => ({...require('react-native-reanimated
 require('react-native-gesture-handler/jest-setup/disableRootViewCheck.js');
 jest.mock('react-native-enriched-markdown', () => require('react-native-enriched-markdown/jest'));
 jest.mock('expo-clipboard', () => ({setStringAsync: jest.fn(async () => true)}));
+jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);

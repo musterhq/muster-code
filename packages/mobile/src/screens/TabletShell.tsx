@@ -5,13 +5,14 @@ import {useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {CHAT_COLUMN_MAX, INSPECTOR_WIDTH, SIDEBAR_WIDTH, widthClass} from '../layout';
 import {haptics} from '../haptics';
-import {space, themed, touch, type} from '../theme';
+import {radius, space, themed, touch, type, useTheme} from '../theme';
+import {Icon} from '../components/Icon';
 import {ChatsHome, type ComputersProps} from './ChatsHome';
 import {ChatScreen} from './ChatScreen';
 import {NeedsYouScreen} from './NeedsYouScreen';
 
-export function TabletShell(props: ComputersProps & {width: number; onOpen?(chatId: string, computerId: string): void}) {
-  const styles = useStyles();
+export function TabletShell(props: ComputersProps & {width: number; onOpen?(chatId: string, computerId: string): void; onNew?(): void; searching?: boolean}) {
+  const styles = useStyles(), c = useTheme();
   const {width, computers, selectedId, showAll, onOpen} = props;
   const [open, setOpen] = useState<{chatId: string; computerId: string} | null>(null);
   const [sidebar, setSidebar] = useState(true);
@@ -25,7 +26,7 @@ export function TabletShell(props: ComputersProps & {width: number; onOpen?(chat
       {sidebar ? <View style={styles.sidebar} testID="tablet-sidebar"><ChatsHome {...props} onOpen={(chatId, computerId) => setOpen({chatId, computerId})} /></View> : null}
       <View style={styles.center}>
         <View style={styles.toolbar}>
-          <Pressable accessibilityRole="button" accessibilityLabel={sidebar ? 'Hide sidebar' : 'Show sidebar'} onPress={toggle} hitSlop={8} style={styles.tool}><Text style={styles.toolText}>{sidebar ? '⟨' : '☰'}</Text></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel={sidebar ? 'Hide sidebar' : 'Show sidebar'} onPress={toggle} hitSlop={8} style={styles.tool}><Icon name="sidebar" size={22} color={c.text} stroke={1.9} /></Pressable>
         </View>
         <View style={styles.column} testID="chat-column">
           {open && current?.connection ? <ChatScreen key={`${open.computerId}:${open.chatId}`} connection={current.connection} chatId={open.chatId} path={current.path} />
@@ -33,7 +34,6 @@ export function TabletShell(props: ComputersProps & {width: number; onOpen?(chat
         </View>
       </View>
       {size === 'expanded' ? <View style={styles.inspector} testID="inspector">
-        <Text style={styles.heading}>Needs you</Text>
         <NeedsYouScreen sources={shown.map(view => ({id: view.id, name: view.name, connection: view.connection!}))} onOpen={(chatId, computerId) => setOpen({chatId, computerId})} />
       </View> : null}
     </View>
@@ -41,13 +41,11 @@ export function TabletShell(props: ComputersProps & {width: number; onOpen?(chat
 }
 const useStyles = themed(c => StyleSheet.create({
   row: {flex: 1, flexDirection: 'row', backgroundColor: c.background},
-  sidebar: {width: SIDEBAR_WIDTH, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: c.border},
+  sidebar: {width: SIDEBAR_WIDTH, margin: space.s, marginRight: 0, borderRadius: radius.card, overflow: 'hidden', backgroundColor: c.surface},
   center: {flex: 1},
   toolbar: {flexDirection: 'row', paddingHorizontal: space.s, minHeight: touch, alignItems: 'center'},
   tool: {width: touch, height: touch, alignItems: 'center', justifyContent: 'center'},
-  toolText: {color: c.muted, ...type.headline},
   column: {flex: 1, width: '100%', maxWidth: CHAT_COLUMN_MAX, alignSelf: 'center'},
-  empty: {color: c.faint, ...type.body, textAlign: 'center', marginTop: space.xl},
-  inspector: {width: INSPECTOR_WIDTH, borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: c.border},
-  heading: {color: c.muted, ...type.caption, fontWeight: '600', textTransform: 'uppercase', padding: space.m, paddingBottom: 0},
+  empty: {color: c.muted, ...type.body, textAlign: 'center', marginTop: space.xl},
+  inspector: {width: INSPECTOR_WIDTH, margin: space.s, marginLeft: 0, borderRadius: radius.card, overflow: 'hidden', backgroundColor: c.surface},
 }));

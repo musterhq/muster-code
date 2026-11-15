@@ -10,13 +10,15 @@ What the user can do:
 - revoke a phone, or change it between read only and act, from the desktop;
 - start a new chat from the phone in a folder or Project with a provider and model, and send photos and files (phase 2);
 - connect straight to the desktop when both are on the same network, with the relay as the fallback (phase 2);
-- pair several computers and switch between them or see all at once, read the last known state with no connection, write messages that go out on reconnect, read replies as native Markdown, and use the app on tablets and in landscape (phase 4).
+- pair several computers and switch between them or see all at once, read the last known state with no connection, write messages that go out on reconnect, read replies as native Markdown, and use the app on tablets and in landscape (phase 4);
+- review a chat’s changed files and their diffs and keep or undo each file or change, and stop a running turn (phase 5).
 
 Boundaries:
 - The phone talks to the desktop through a relay, or directly on the same network, with end-to-end encryption (Noise IK) either way; the relay and the network see only ciphertext.
 - A new phone is read-only. The phone can never raise a chat's access level or approve for a whole session.
 - Pairing needs secure storage on the desktop and a one-time code that expires.
 - Each computer keeps its own keys and its own cached data; the phone caches only what it was shown and wipes a computer’s cache when that computer revokes it or is unpaired. Approvals are never queued offline.
+- Keeping, undoing and stopping need act access, checked again right before the desktop runs them; the phone sees folder-relative paths only and gets diffs already highlighted, in pages.
 - Production relay hosting, push notifications, Projects and dictation are later phases (see the design).
 
 ## Acceptance cases
@@ -100,6 +102,22 @@ Boundaries:
 | [MUS-SPEC-23-23C](23-mobile.md#mus-spec-23-23c) | The removed item is gone from the screen, the other two stay, and chat.open is not called again. | [`a remove op takes the row off the chat screen`](../../../packages/mobile/tests/chat-stream.test.tsx) |
 | [MUS-SPEC-23-23D](23-mobile.md#mus-spec-23-23d) | Every delta for the reply is an append or a status change, never the whole item. The phone’s text is the reply’s first 65,536 characters followed by a note that the rest is on the computer, and the finished status reaches the phone. | [`a reply that grows past the phone’s item cap is sent as appends and says the rest is on the computer`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
 | [MUS-SPEC-23-23E](23-mobile.md#mus-spec-23-23e) | Sending the same chat.send again with its request id, while the turn runs and after it ends, answers with the first run id and no error, and the chat has the message once; a steer sent again with its request id answers steered and reaches the agent once. | [`a message or steer the computer already took is answered as sent when the phone sends it again`](../../../packages/agent-app/tests/mobile-phase3-326.test.ts) |
+| [MUS-SPEC-23-24A](23-mobile.md#mus-spec-23-24a) | Primary and secondary text are at least 7:1 and 4.5:1 on every surface in both palettes, the label on the filled accent is at least 4.5:1, and amber, green, red and the accent are at least 3:1 on the canvas. No type style is under 12 points, chat prose is 17 on 26, and code is 13 on 21. The snappy, gentle and bouncy springs have damping, mass and stiffness 26/0.7/330, 20/1/180 and 14/0.8/260; with Reduce Motion on, each is a 150 ms crossfade instead. | [`the v3 palettes keep text readable, the type never goes under 12 and Reduce Motion turns springs into a crossfade`](../../../packages/mobile/tests/v3-tokens.test.tsx) |
+| [MUS-SPEC-23-24B](23-mobile.md#mus-spec-23-24b) | There are no filter chips. Active lists the running and the waiting chat, Earlier the failed and the finished one; each row shows its title and one line of what it is doing (the waiting one says Needs you, the failed one Failed) with a status glyph that names its state for screen readers. After the event the chat that started running is under Active and the phone gives one selection haptic. | [`chats show as two-line rows in Active and Earlier, and a chat that starts running moves into Active with a tick`](../../../packages/mobile/tests/chats-v3.test.tsx) |
+| [MUS-SPEC-23-24C](23-mobile.md#mus-spec-23-24c) | The reasoning and tool rows are one capsule reading Working and 4 steps, not four rows; opening it lists each step. The live line under the reply names the running tool, and the reply ends with the accent caret. After the turn ends the live line is gone, the caret is gone, the capsule reads Worked with its duration and 4 steps, and a summary card says the run finished, 1 file changed, with Review; the phone gives one success haptic. | [`a turn’s steps fold into one capsule, the live line names the running step, and a finished run shows its summary`](../../../packages/mobile/tests/chat-v3.test.tsx) |
+| [MUS-SPEC-23-24D](23-mobile.md#mus-spec-23-24d) | With an empty field the composer shows Stop (with its moving ring) and no floating Working pill; pressing it calls chat.stop for the chat and gives a light haptic. With text typed it shows Steer and the hint that the message goes to the running turn. | [`while a turn runs Send becomes Stop, and Stop stops the turn on the computer with a light tap`](../../../packages/mobile/tests/chat-v3.test.tsx) |
+| [MUS-SPEC-23-24E](23-mobile.md#mus-spec-23-24e) | Before focus the composer is one row (add, field, send) with no chips. Focused, it shows the Photo, Camera and File chips above the field. Blurred with nothing typed, the chips go again. | [`the composer shows its chips only while it is focused`](../../../packages/mobile/tests/chat-v3.test.tsx) |
+| [MUS-SPEC-23-24F](23-mobile.md#mus-spec-23-24f) | The card’s title is the question Run this command?, then the command in a code well, then the reason; Approve is the one filled action and Decline is plain; one quiet line says approving for the whole chat is a desktop setting. Pressing Approve calls approval.respond with accept and settles into an Approved receipt with a success haptic. The watch-only card keeps its question and command but has no buttons and says where to answer it. | [`an approval reads as its question, the command, one line of why and one filled Approve, and a watch-only phone is told where to answer`](../../../packages/mobile/tests/approval-v3.test.tsx) |
+| [MUS-SPEC-23-24G](23-mobile.md#mus-spec-23-24g) | The header counts 1 waiting before. After the answer the screen shows All clear, the answered request as a receipt under Just answered, and exactly one success haptic for the moment. | [`answering the last request shows All clear with one success haptic`](../../../packages/mobile/tests/needs-you-v3.test.tsx) |
+| [MUS-SPEC-23-24H](23-mobile.md#mus-spec-23-24h) | Four tabs show with Chats selected and a badge of 2 on Needs you; search is a separate button. Pressing Needs you goes to that tab with a selection haptic; pressing search opens Chats with its search field. | [`the glass tab bar shows four tabs and the Needs you count, with search as its own circle`](../../../packages/mobile/tests/tabbar.test.tsx) |
+| [MUS-SPEC-23-24I](23-mobile.md#mus-spec-23-24i) | In the switcher and in Settings the watch-only computer carries an eye described as Watch only and the other carries none, and neither shows an access pill. After pairing the screen shows the paired moment: Paired with the computer’s name, that nobody in between can read what passes, and a Continue action, with a success haptic. | [`a watch-only computer carries an eye in the switcher and Settings, and pairing ends on the paired moment`](../../../packages/mobile/tests/computers-v3.test.tsx) |
+| [MUS-SPEC-23-24J](23-mobile.md#mus-spec-23-24j) | changes.list names the turn and lists both files by folder-relative path with their added and removed counts, both to review. The diff of src/store.ts has one hunk named after the function it is in, its removed line marked removed with no number, its added line marked added with its new line number, context lines around them, the changed words marked on both lines, and its code split into coloured tokens from a palette with a dark and a light colour. Nothing in either answer holds the folder’s absolute path. README.md is refused as not one of the turn’s changes. | [`a phone lists a chat’s changed files and reads a highlighted diff with function-named hunks`](../../../packages/agent-app/tests/mobile-phase5-326.test.ts) |
+| [MUS-SPEC-23-24K](23-mobile.md#mus-spec-23-24k) | Every page holds at most 400 lines and names where the next starts; the pages together hold all 5,000 lines once, in order. Each page answers in under 1,500 ms, and every ping sent meanwhile answers in under 500 ms. | [`a 5,000-line diff comes in pages without holding up the desktop`](../../../packages/agent-app/tests/mobile-phase5-326.test.ts) |
+| [MUS-SPEC-23-24L](23-mobile.md#mus-spec-23-24l) | The read-only calls are refused as read only and nothing changes on disk or in the review marks. Keep marks src/key.ts kept on the desktop and changes.list then shows it kept. Undoing the hunk puts src/store.ts back to its text before the turn byte for byte. The undo with the old hash answers stale and leaves the file as written. The undo held while the phone was revoked fails and leaves the file as it was. | [`keep and undo use the desktop’s review commands; a read-only phone, a stale hash or a revoke mid-action changes nothing`](../../../packages/agent-app/tests/mobile-phase5-326.test.ts) |
+| [MUS-SPEC-23-24M](23-mobile.md#mus-spec-23-24m) | The read-only call is refused and the turn keeps running; with act the turn stops and the chat is no longer running. | [`a phone that can act stops a running turn, and a read-only one can’t`](../../../packages/agent-app/tests/mobile-phase5-326.test.ts) |
+| [MUS-SPEC-23-24N](23-mobile.md#mus-spec-23-24n) | The ring and the header say 1 of 3 kept. Files to review show their counts and the kept one says Kept. Swiping right calls changes.keep with the whole file; swiping left calls changes.undo with the file’s hash, and each row then says Kept or Undone. Read-only shows the files and the ring but no Keep all or Undo all, and swipes do nothing. | [`the changes screen shows the review ring and files, keeps and undoes by swipe, and hides actions when read only`](../../../packages/mobile/tests/changes-screen.test.tsx) |
+| [MUS-SPEC-23-24O](23-mobile.md#mus-spec-23-24o) | Each hunk has a pill named in its function, removed lines have no number and added lines their new number, and the toolbar reads 1 of 2. Keep calls changes.keep with the focused hunk and folds it into a Kept pill; next moves to 2 of 2 and Undo calls changes.undo with that hunk. The 5,000-line file renders its first page with only a window of rows mounted and asks for the next page only as the reader nears the end, until it has all 5,000 lines. | [`the diff shows function-named hunks with one gutter, keeps and undoes from the toolbar and pages a 5,000-line file`](../../../packages/mobile/tests/diff-screen.test.tsx) |
+| [MUS-SPEC-23-24P](23-mobile.md#mus-spec-23-24p) | At 390 the diff is inline (one column). At 844 it is split: the removed line on the left with its old number and the added line on the right with its new number, in the same row. | [`landscape and tablet widths show the diff side by side`](../../../packages/mobile/tests/diff-screen.test.tsx) |
 
 ### Pairing, the device registry and access
 
@@ -992,4 +1010,184 @@ Boundaries:
 - Test: `packages/agent-app/tests/mobile-phase3-326.test.ts::a message or steer the computer already took is answered as sent when the phone sends it again`
 - Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and a Node phone built from the same MobileClient and Noise code the app uses, with Node crypto.
 - Known gaps: A steer's request id is remembered while the computer's app runs; a steer sent again after a restart can reach the agent twice.
+- Evidence: UNVERIFIED
+
+### v3 design (phase 5)
+
+<a id="mus-spec-23-24a"></a>
+#### MUS-SPEC-23-24A: The v3 colours and type keep text readable
+
+- Precondition: The dark and light palettes, the type scale and the motion presets of packages/mobile/src/theme.ts and motion.ts.
+- Action: Measure the contrast of primary and secondary text on the canvas, on a cell and on a raised cell, of the accent label on the filled accent, and of the status hues on the canvas; list every type style; ask for a spring with Reduce Motion off and on.
+- Expected result: Primary and secondary text are at least 7:1 and 4.5:1 on every surface in both palettes, the label on the filled accent is at least 4.5:1, and amber, green, red and the accent are at least 3:1 on the canvas. No type style is under 12 points, chat prose is 17 on 26, and code is 13 on 21. The snappy, gentle and bouncy springs have damping, mass and stiffness 26/0.7/330, 20/1/180 and 14/0.8/260; with Reduce Motion on, each is a 150 ms crossfade instead.
+- Test: `packages/mobile/tests/v3-tokens.test.tsx::the v3 palettes keep text readable, the type never goes under 12 and Reduce Motion turns springs into a crossfade`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: Glass blur and saturation are drawn by the platform and checked on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-24b"></a>
+#### MUS-SPEC-23-24B: Chats are two-line rows grouped into Active and Earlier
+
+- Precondition: The chats screen with a fake connection listing a running chat, a chat waiting on the person, a failed chat and a finished one.
+- Action: Render the screen; then emit a chats event in which the finished chat starts running.
+- Expected result: There are no filter chips. Active lists the running and the waiting chat, Earlier the failed and the finished one; each row shows its title and one line of what it is doing (the waiting one says Needs you, the failed one Failed) with a status glyph that names its state for screen readers. After the event the chat that started running is under Active and the phone gives one selection haptic.
+- Test: `packages/mobile/tests/chats-v3.test.tsx::chats show as two-line rows in Active and Earlier, and a chat that starts running moves into Active with a tick`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: The large title collapsing into the bar and the 2.2 s shimmer are checked on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-24c"></a>
+#### MUS-SPEC-23-24C: Tool steps fold into one capsule and the live line says what runs now
+
+- Precondition: The chat screen with a fake connection whose chat is running: a user message, a reasoning row, three tool rows (the last still running) and a streaming reply.
+- Action: Render the chat; open the capsule; then emit a delta that finishes the running tool and the chat as completed, with one changed file.
+- Expected result: The reasoning and tool rows are one capsule reading Working and 4 steps, not four rows; opening it lists each step. The live line under the reply names the running tool, and the reply ends with the accent caret. After the turn ends the live line is gone, the caret is gone, the capsule reads Worked with its duration and 4 steps, and a summary card says the run finished, 1 file changed, with Review; the phone gives one success haptic.
+- Test: `packages/mobile/tests/chat-v3.test.tsx::a turn’s steps fold into one capsule, the live line names the running step, and a finished run shows its summary`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: The caret blink, the shimmer and the summary ripple are timed on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-24d"></a>
+#### MUS-SPEC-23-24D: Send turns into Stop while a turn runs
+
+- Precondition: The chat screen with a fake connection, access act, whose chat is running.
+- Action: Read the composer with an empty field; press Stop; type a message.
+- Expected result: With an empty field the composer shows Stop (with its moving ring) and no floating Working pill; pressing it calls chat.stop for the chat and gives a light haptic. With text typed it shows Steer and the hint that the message goes to the running turn.
+- Test: `packages/mobile/tests/chat-v3.test.tsx::while a turn runs Send becomes Stop, and Stop stops the turn on the computer with a light tap`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: The ring’s motion is checked on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-24e"></a>
+#### MUS-SPEC-23-24E: The composer shows its chips only while focused
+
+- Precondition: The chat screen with a fake connection, access act, an idle chat and a picker for attachments.
+- Action: Read the composer; focus the field; blur it.
+- Expected result: Before focus the composer is one row (add, field, send) with no chips. Focused, it shows the Photo, Camera and File chips above the field. Blurred with nothing typed, the chips go again.
+- Test: `packages/mobile/tests/chat-v3.test.tsx::the composer shows its chips only while it is focused`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: Keyboard-sticky motion is checked on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-24f"></a>
+#### MUS-SPEC-23-24F: An approval reads as its question, the command and one filled action
+
+- Precondition: An approval card for the command pnpm db:reset --seed with a reason, once for a phone that can act and once for a watch-only phone.
+- Action: Render it for the acting phone and press Approve; render it for the watch-only phone.
+- Expected result: The card’s title is the question Run this command?, then the command in a code well, then the reason; Approve is the one filled action and Decline is plain; one quiet line says approving for the whole chat is a desktop setting. Pressing Approve calls approval.respond with accept and settles into an Approved receipt with a success haptic. The watch-only card keeps its question and command but has no buttons and says where to answer it.
+- Test: `packages/mobile/tests/approval-v3.test.tsx::an approval reads as its question, the command, one line of why and one filled Approve, and a watch-only phone is told where to answer`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: Face ID before approving is the app lock of a later phase.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-24g"></a>
+#### MUS-SPEC-23-24G: Answering the last request is all clear
+
+- Precondition: Needs you with a fake connection listing one approval.
+- Action: Approve it; let the computer’s needs event say nothing waits.
+- Expected result: The header counts 1 waiting before. After the answer the screen shows All clear, the answered request as a receipt under Just answered, and exactly one success haptic for the moment.
+- Test: `packages/mobile/tests/needs-you-v3.test.tsx::answering the last request shows All clear with one success haptic`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: The drawn check and the ring burst are timed on a device; with Reduce Motion the check is static.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-24h"></a>
+#### MUS-SPEC-23-24H: The glass tab bar keeps search in its own circle
+
+- Precondition: The tab bar with the Chats tab selected and two requests waiting.
+- Action: Render it; press Needs you; press the search circle.
+- Expected result: Four tabs show with Chats selected and a badge of 2 on Needs you; search is a separate button. Pressing Needs you goes to that tab with a selection haptic; pressing search opens Chats with its search field.
+- Test: `packages/mobile/tests/tabbar.test.tsx::the glass tab bar shows four tabs and the Needs you count, with search as its own circle`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: The glass material (iOS 26 glass, blur below it, tonal surface on Android) is drawn natively and checked on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-24i"></a>
+#### MUS-SPEC-23-24I: Computers show watch-only with an eye, and pairing ends on a moment
+
+- Precondition: Two computers, one that can act and one watch-only; the pair screen with a pairing that confirms.
+- Action: Open the computer switcher and Settings; pair.
+- Expected result: In the switcher and in Settings the watch-only computer carries an eye described as Watch only and the other carries none, and neither shows an access pill. After pairing the screen shows the paired moment: Paired with the computer’s name, that nobody in between can read what passes, and a Continue action, with a success haptic.
+- Test: `packages/mobile/tests/computers-v3.test.tsx::a watch-only computer carries an eye in the switcher and Settings, and pairing ends on the paired moment`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: The fingerprint scramble and shield animation are checked on a device.
+- Evidence: UNVERIFIED
+
+### Diff review with keep and undo (phase 5)
+
+<a id="mus-spec-23-24j"></a>
+#### MUS-SPEC-23-24J: A phone reads a chat’s changed files and a highlighted diff
+
+- Precondition: A desktop with a folder that is a Git repository and a chat in it whose fake provider edits src/store.ts inside a function and adds src/key.ts during a turn; a paired read-only phone.
+- Action: Run the turn; from the phone call changes.list for the chat, changes.diff for src/store.ts, and changes.diff for README.md, which is in the folder but not changed by the turn.
+- Expected result: changes.list names the turn and lists both files by folder-relative path with their added and removed counts, both to review. The diff of src/store.ts has one hunk named after the function it is in, its removed line marked removed with no number, its added line marked added with its new line number, context lines around them, the changed words marked on both lines, and its code split into coloured tokens from a palette with a dark and a light colour. Nothing in either answer holds the folder’s absolute path. README.md is refused as not one of the turn’s changes.
+- Test: `packages/agent-app/tests/mobile-phase5-326.test.ts::a phone lists a chat’s changed files and reads a highlighted diff with function-named hunks`
+- Environment: Node test runner; the real agent service with a fake provider that edits files in a temporary Git repository during its turn, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: Highlighting covers the common languages bundled with the desktop’s runtime; other files come as plain text.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-24k"></a>
+#### MUS-SPEC-23-24K: A 5,000-line diff comes in pages without holding up the desktop
+
+- Precondition: The chat of 24J whose turn also writes a new 5,000-line file.
+- Action: Read the file’s diff page by page with changes.diff; while each page is read, ping the desktop from a second session.
+- Expected result: Every page holds at most 400 lines and names where the next starts; the pages together hold all 5,000 lines once, in order. Each page answers in under 1,500 ms, and every ping sent meanwhile answers in under 500 ms.
+- Test: `packages/agent-app/tests/mobile-phase5-326.test.ts::a 5,000-line diff comes in pages without holding up the desktop`
+- Environment: Node test runner; the real agent service with a fake provider that edits files in a temporary Git repository during its turn, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: Times are measured on the CI runner; the receipt in the PR lists the times measured locally.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-24l"></a>
+#### MUS-SPEC-23-24L: Keep and undo use the desktop’s review commands, and only with act
+
+- Precondition: The chat of 24J after its turn; a paired phone, first read-only; a gate that holds a request after its reads.
+- Action: While read-only, call changes.keep and changes.undo. Allow the phone to act; keep src/key.ts; undo the hunk of src/store.ts. Write src/key.ts again on disk and undo it with the hash read before. Hold an undo of src/key.ts at the gate, revoke the phone on the desktop, and release it.
+- Expected result: The read-only calls are refused as read only and nothing changes on disk or in the review marks. Keep marks src/key.ts kept on the desktop and changes.list then shows it kept. Undoing the hunk puts src/store.ts back to its text before the turn byte for byte. The undo with the old hash answers stale and leaves the file as written. The undo held while the phone was revoked fails and leaves the file as it was.
+- Test: `packages/agent-app/tests/mobile-phase5-326.test.ts::keep and undo use the desktop’s review commands; a read-only phone, a stale hash or a revoke mid-action changes nothing`
+- Environment: Node test runner; the real agent service with a fake provider that edits files in a temporary Git repository during its turn, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: Undo all on the phone undoes file by file; a file renamed by the turn is undone as the desktop does it, not exercised here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-24m"></a>
+#### MUS-SPEC-23-24M: A phone that can act stops a running turn
+
+- Precondition: A desktop chat whose fake provider runs a turn until stopped; a paired phone, first read-only.
+- Action: Call chat.stop while read-only; allow the phone to act; call chat.stop.
+- Expected result: The read-only call is refused and the turn keeps running; with act the turn stops and the chat is no longer running.
+- Test: `packages/agent-app/tests/mobile-phase5-326.test.ts::a phone that can act stops a running turn, and a read-only one can’t`
+- Environment: Node test runner; the real agent service with a fake provider, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: None known.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-24n"></a>
+#### MUS-SPEC-23-24N: The changes screen keeps and undoes files
+
+- Precondition: The changes screen with a fake connection whose changes.list answers three files, one already kept; access act, then read-only.
+- Action: Render it; swipe one file right and another left; render it read-only.
+- Expected result: The ring and the header say 1 of 3 kept. Files to review show their counts and the kept one says Kept. Swiping right calls changes.keep with the whole file; swiping left calls changes.undo with the file’s hash, and each row then says Kept or Undone. Read-only shows the files and the ring but no Keep all or Undo all, and swipes do nothing.
+- Test: `packages/mobile/tests/changes-screen.test.tsx::the changes screen shows the review ring and files, keeps and undoes by swipe, and hides actions when read only`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: Swipe feel is checked on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-24o"></a>
+#### MUS-SPEC-23-24O: The diff is built for a phone and pages a 5,000-line file
+
+- Precondition: The diff screen with a fake connection whose changes.diff answers two hunks named after functions, then a 5,000-line file in pages of 400 lines.
+- Action: Render the first file; press Keep in the toolbar, then next and Undo; open the 5,000-line file and scroll to its end.
+- Expected result: Each hunk has a pill named in its function, removed lines have no number and added lines their new number, and the toolbar reads 1 of 2. Keep calls changes.keep with the focused hunk and folds it into a Kept pill; next moves to 2 of 2 and Undo calls changes.undo with that hunk. The 5,000-line file renders its first page with only a window of rows mounted and asks for the next page only as the reader nears the end, until it has all 5,000 lines.
+- Test: `packages/mobile/tests/diff-screen.test.tsx::the diff shows function-named hunks with one gutter, keeps and undoes from the toolbar and pages a 5,000-line file`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: Scrolling frame time is measured on a device.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-24p"></a>
+#### MUS-SPEC-23-24P: Landscape and tablets show the diff side by side
+
+- Precondition: The diff screen with a fake connection answering one hunk with one removed and one added line.
+- Action: Render it 390 points wide, then 844 points wide.
+- Expected result: At 390 the diff is inline (one column). At 844 it is split: the removed line on the left with its old number and the added line on the right with its new number, in the same row.
+- Test: `packages/mobile/tests/diff-screen.test.tsx::landscape and tablet widths show the diff side by side`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: Anchoring the focused hunk through a rotation is checked on a device.
 - Evidence: UNVERIFIED

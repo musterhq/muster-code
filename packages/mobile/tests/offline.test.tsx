@@ -27,7 +27,7 @@ test('with no connection the chats and the open chat come from the cache, with a
   expect(await screen.findByText('Migrate session store to Redis Streams')).toBeTruthy();
   expect(screen.getByText(/^atlas-api · Was running/)).toBeTruthy();
   expect(screen.getByText('Bump React Native')).toBeTruthy();
-  expect(screen.getByText('Offline · last update 14:02')).toBeTruthy();
+  expect(screen.getByText('Showing what it sent at 14:02')).toBeTruthy();
   expect(screen.getByText(/Studio Mac/)).toBeTruthy();
   await act(async () => { fireEvent.press(screen.getByRole('button', {name: 'Retry'})); });
   expect(retry).toHaveBeenCalledTimes(1);
@@ -36,5 +36,5 @@ test('with no connection the chats and the open chat come from the cache, with a
   await layOutTimeline();
   expect(await screen.findByText('Appends now go through XADD.')).toBeTruthy();
   expect(screen.getByText('Move the session store from Redis lists to Streams.')).toBeTruthy();
-  expect(screen.getByText('Offline · last update 14:02')).toBeTruthy();
+  expect(screen.getByText('Showing what it sent at 14:02')).toBeTruthy();
 });

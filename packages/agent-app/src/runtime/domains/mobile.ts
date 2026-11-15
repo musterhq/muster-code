@@ -43,6 +43,8 @@ export const mobileSeams: {secrets?: () => SecretStore | undefined; pairingTtlMs
   maxRequestsInFlight?: number; requestGate?: Promise<void>;
   /** Awaited after upload.finish checked a file and before it is staged. */
   stageGate?: () => Promise<void>;
+  /** Awaited by changes.keep and changes.undo after their reads and before the access check and the write (phase 5). */
+  reviewGate?: () => Promise<void>;
   /** Told how many characters the path scrubber reads (phase 4 cost receipts). */
   onScrub?: (chars: number) => void} = {};
 /** Requests one phone may have in flight at once, over all its sessions; more are refused at once (phase 3). */
@@ -380,6 +382,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       scrub,
       map: (item: TimelineItem) => mapper!.map(item),
       ...(mobileSeams.stageGate ? {beforeStage: mobileSeams.stageGate} : {}),
+      ...(mobileSeams.reviewGate ? {beforeReview: mobileSeams.reviewGate} : {}),
       watch: (chatId: string | null, deltas?: boolean) => { session.watching = chatId; session.stream = chatId && deltas ? {chatId, seq: 0, sent: null, pending: []} : null; },
       streamFrom: (chatId: string, items: MobileItem[]): number => {
         const stream = session.stream;

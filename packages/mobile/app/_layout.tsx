@@ -12,11 +12,13 @@ export default function Layout() {
       <KeyboardProvider>
         <ConnectionProvider>
           <StatusBar style={c.scheme === 'light' ? 'dark' : 'light'} />
-          <Stack screenOptions={{headerStyle: {backgroundColor: c.background}, headerTintColor: c.strong, headerShadowVisible: false, contentStyle: {backgroundColor: c.background}, animation: 'default'}}>
+          <Stack screenOptions={{headerStyle: {backgroundColor: c.background}, headerTintColor: c.text, headerTitleStyle: {fontSize: 17, fontWeight: '600'}, headerShadowVisible: false, contentStyle: {backgroundColor: c.background}, animation: 'default'}}>
             <Stack.Screen name="(tabs)" options={{headerShown: false}} />
             <Stack.Screen name="pair" options={{title: 'Pair with your computer'}} />
             <Stack.Screen name="chat/[id]" options={{title: ''}} />
-            <Stack.Screen name="new-chat" options={{title: 'New chat', presentation: 'formSheet', sheetGrabberVisible: true}} />
+            <Stack.Screen name="new-chat" options={{title: 'New chat', presentation: 'formSheet', sheetGrabberVisible: true, sheetAllowedDetents: [0.6, 1], sheetCornerRadius: 38}} />
+            <Stack.Screen name="changes" options={{title: 'Changes'}} />
+            <Stack.Screen name="diff" options={{title: ''}} />
           </Stack>
         </ConnectionProvider>
       </KeyboardProvider>

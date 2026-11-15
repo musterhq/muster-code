@@ -10,5 +10,5 @@ export default function Pair() {
   const {pair, store, paired} = useLink();
   const router = useRouter();
   const initialLink = pairingLinkFromParams(useLocalSearchParams());
-  return <PairScreen pairWith={pair} store={store} initialLink={initialLink} scanner={onScan => <QrScanner onScan={onScan} />} onPaired={record => { paired(record); router.replace('/'); }} />;
+  return <PairScreen pairWith={pair} store={store} initialLink={initialLink} scanner={onScan => <QrScanner onScan={onScan} />} onPaired={paired} onDone={() => router.replace('/')} />;
 }

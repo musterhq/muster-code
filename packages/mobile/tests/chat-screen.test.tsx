@@ -13,7 +13,7 @@ test('streams a reply, sends when idle and steers while running', async () => {
   await layOutTimeline();
   expect(await screen.findByText('Release notes')).toBeTruthy();
   await fireEvent.changeText(screen.getByPlaceholderText('Message'), 'write the notes');
-  await fireEvent.press(screen.getByText('Send'));
+  await fireEvent.press(screen.getByRole('button', {name: 'Send'}));
   await act(async () => undefined);
   expect(connection.calls.find(call => call.method === 'chat.send')?.params).toMatchObject({id: 'c1', text: 'write the notes'});
   expect(screen.getByPlaceholderText('Message').props.value).toBe('');
@@ -25,8 +25,8 @@ test('streams a reply, sends when idle and steers while running', async () => {
   });
   expect(await screen.findByText('Hello world')).toBeTruthy();
   expect(await screen.findByText('write the notes')).toBeTruthy();
-  await fireEvent.changeText(screen.getByPlaceholderText('Steer the running agent…'), 'also add dates');
-  await fireEvent.press(screen.getByText('Steer'));
+  await fireEvent.changeText(screen.getByPlaceholderText('Steer the agent'), 'also add dates');
+  await fireEvent.press(screen.getByRole('button', {name: 'Steer'}));
   await act(async () => undefined);
   expect(connection.calls.find(call => call.method === 'chat.steer')?.params).toMatchObject({id: 'c1', text: 'also add dates'});
 });
@@ -51,7 +51,8 @@ test('approves or declines in place, and read-only hides the actions', async () 
   expect(await screen.findByText('npm test')).toBeTruthy();
   expect(screen.getAllByText('Read only: allow this phone to act in Settings on your computer').length).toBeGreaterThan(0);
   expect(screen.queryByText('Approve')).toBeNull();
-  expect(screen.getByPlaceholderText('Steer the running agent…').props.editable).toBe(false);
+  // v3: a watch-only phone gets one glass line instead of a field it can't use.
+  expect(screen.queryByTestId('composer-input')).toBeNull();
 });
 
 // Spec: MUS-SPEC-23-12C (docs/spec/clauses/23-mobile.md#mus-spec-23-12c)
@@ -69,13 +70,13 @@ test('attaches a photo from the composer, uploads it in chunks and sends it with
   await layOutTimeline();
   expect(await screen.findByText('Release notes')).toBeTruthy();
   await fireEvent.press(screen.getByLabelText('Attach'));
-  await fireEvent.press(screen.getByText('Photo'));
+  await fireEvent.press(screen.getByRole('button', {name: 'Photo'}));
   expect(await screen.findByText('IMG_0042.jpg')).toBeTruthy();
   expect(pickAttachment).toHaveBeenCalledWith('photo');
   expect(connection.calls.find(call => call.method === 'upload.start')?.params).toMatchObject({chatId: 'c1', name: 'IMG_0042.jpg', mime: 'image/jpeg', size: photo.length});
   expect(received).toEqual([0, 32 * 1024, 64 * 1024]);
   await fireEvent.changeText(screen.getByPlaceholderText('Message'), 'what is this?');
-  await fireEvent.press(screen.getByText('Send'));
+  await fireEvent.press(screen.getByRole('button', {name: 'Send'}));
   await act(async () => undefined);
   expect(connection.calls.find(call => call.method === 'chat.send')?.params).toMatchObject({id: 'c1', text: 'what is this?', attachmentIds: ['att-1']});
   expect(screen.queryByText('IMG_0042.jpg')).toBeNull();
