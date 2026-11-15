@@ -47,14 +47,15 @@ export function useChangeCount(connection: MobileConnection, chatId: string, sta
 /** `header`: how the chat's title is shown. A stack route passes one that sets its native header (one bar, no second header
  *  in the body); a tablet pane or a test leaves it out and the title shows at the top of the screen. `onReview` opens the
  *  turn's changes. */
-export function ChatScreen({connection, chatId, pickAttachment, header, path, onReview}: {connection: MobileConnection; chatId: string; pickAttachment?: PickAttachment; header?: (chat: MobileChat | null, changes: number) => ReactNode; path?: LinkPath; onReview?(): void}) {
+export function ChatScreen({connection, chatId, pickAttachment, header, path, onReview, initialDraft}: {connection: MobileConnection; chatId: string; pickAttachment?: PickAttachment; header?: (chat: MobileChat | null, changes: number) => ReactNode; path?: LinkPath; onReview?(): void; /** Text the composer starts with (Ask about this from a file). */ initialDraft?: string}) {
   const {chat, store, error} = useChat(connection, chatId);
   const styles = useStyles(), c = useTheme();
   const access = useAccess(connection);
   const canAct = access === 'act';
   const offline = offlineOf(connection);
   const queued = useOutbox(connection, chatId);
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState(initialDraft ?? '');
+  useEffect(() => { if (initialDraft) setDraft(initialDraft); }, [initialDraft]);
   const [sendError, setSendError] = useState<string | null>(null);
   const [files, setFiles] = useState<Draft[]>([]);
   const [focused, setFocused] = useState(false);

@@ -19,6 +19,12 @@ export default function Layout() {
             <Stack.Screen name="new-chat" options={{title: 'New chat', presentation: 'formSheet', sheetGrabberVisible: true, sheetAllowedDetents: [0.6, 1], sheetCornerRadius: 38}} />
             <Stack.Screen name="changes" options={{title: 'Changes'}} />
             <Stack.Screen name="diff" options={{title: ''}} />
+            <Stack.Screen name="tools" options={{title: '', presentation: 'formSheet', sheetGrabberVisible: true, sheetAllowedDetents: [0.45], sheetCornerRadius: 38}} />
+            <Stack.Screen name="files" options={{title: ''}} />
+            <Stack.Screen name="file" options={{title: ''}} />
+            <Stack.Screen name="git" options={{title: 'Source control'}} />
+            <Stack.Screen name="branch" options={{title: 'Switch branch', presentation: 'formSheet', sheetGrabberVisible: true, sheetAllowedDetents: [0.6, 1], sheetCornerRadius: 38}} />
+            <Stack.Screen name="pull-request" options={{title: 'Pull request', presentation: 'formSheet', sheetGrabberVisible: true, sheetAllowedDetents: [1], sheetCornerRadius: 38}} />
           </Stack>
         </ConnectionProvider>
       </KeyboardProvider>
