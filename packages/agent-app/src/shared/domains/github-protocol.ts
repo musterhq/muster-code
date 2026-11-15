@@ -1,11 +1,15 @@
 /** GitHub domain contract: in-app pull requests (create, review, checks, merge). Every call runs through the
  *  runtime's GitHub layer, which authenticates with the user's `gh` CLI session; tokens never cross this seam. */
 
+import type {ForgeKind} from '../forge.ts';
+
 export type GitHubMergeMethod = 'merge' | 'squash' | 'rebase';
 export type GitHubReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
 
 /** Repository facts the PR surfaces need. `mergeMethods` follows the repository's settings (all three when GitHub doesn't say). */
-export interface GitHubRepo {nameWithOwner:string; url:string; defaultBranch:string; mergeMethods:GitHubMergeMethod[]; viewerCanPush:boolean}
+export interface GitHubRepo {nameWithOwner:string; url:string; defaultBranch:string; mergeMethods:GitHubMergeMethod[]; viewerCanPush:boolean;
+  /** #329: which code host this repository is on; the surfaces label and gate features by it (absent reads as GitHub). */
+  forge?:ForgeKind}
 
 export interface GitHubPullRequest {
   number:number; nodeId:string; title:string; body:string; url:string;

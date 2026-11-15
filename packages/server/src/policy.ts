@@ -26,8 +26,10 @@ const DESKTOP_EXACT = new Set([
   'plugins.ui.open', 'computer.permissions', 'computer.openPermissionSettings', 'computer.captureSources', 'computer.captureSource',
   'computer.accessibilityText', 'computer.image', 'computer.control', 'computer.lease', 'computer.focusApp', 'providers.captureStatus',
 ]);
-/** Whole families that run on the desktop host: embedded browser, PTY terminals and host processes, Docker scoped computers. */
-const DESKTOP_PREFIX = ['browser.', 'terminal.', 'processes.', 'computer.', 'musterServer.'];
+/** Whole families that run on the desktop host: embedded browser, PTY terminals and host processes, Docker scoped computers.
+ *  `mobile.` (#326): phone pairing gives a phone the whole runtime, bypassing per-person project access, so it is desktop
+ *  only until the server pairs phones per person (docs/mobile/DESIGN.md, phase 3). */
+const DESKTOP_PREFIX = ['browser.', 'terminal.', 'processes.', 'computer.', 'musterServer.', 'mobile.'];
 
 const HOST_EXACT = new Set([
   // Wave 4: the server's agent API acts as one remote agent through these; people never call them.

@@ -5,9 +5,11 @@ import type {GitRepoInfo} from '../../shared/domains/git-protocol';
 import {invoke, subscribe} from '../bridge';
 import {useNewChatDraft} from '../newChatDraft';
 import {branchPullRequest} from '../branchPullRequest';
+import {forgeTerms, type ForgeTerms} from '../../shared/forge';
 import {loadGitChanges, notifyError, openBrowserTab, openChangesTab, openCreatePullRequestTab, openFile, openPullRequestTab, openFilesTab, openProcessesTab, openSubagentsTab, setSummaryLayout} from '../store';
 import {useStoreSelector, useStoreSlice} from '../useStore';
 import {EMPTY_ACTIVITY_ITEMS, getSubagentActivity, subagentState} from '../subagentActivity';
+import {delegatedChildren} from './DelegationRows';
 import {portURL, useListeningPorts, useProcessSummary} from '../processSummary';
 import {isActiveProcess} from '../../shared/process-protocol';
 import {classifyTool} from './toolPresentation';
@@ -181,27 +183,27 @@ function PullRequestChecks({folderId, number, chatId}: {folderId: string; number
   </div>;
 }
 
-function PullRequestRow({pr, current, folderId, chatId}: {pr: PullRequest; current: boolean; folderId: string; chatId?: string}) {
+function PullRequestRow({pr, current, folderId, chatId, terms}: {pr: PullRequest; current: boolean; folderId: string; chatId?: string; terms: ForgeTerms}) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const repair = useCiRepair(folderId, pr.number);
   const repairing = !!repair && ciRepairActive(repair);
   return <div className="summary-pr" data-open={open || undefined}>
-    <button type="button" className="summary-row" aria-expanded={open} aria-controls={id} title={`#${pr.number} · ${pr.headRefName}`} onClick={() => setOpen(value => !value)}>
+    <button type="button" className="summary-row" aria-expanded={open} aria-controls={id} title={`${terms.sigil}${pr.number} · ${pr.headRefName}`} onClick={() => setOpen(value => !value)}>
       <span className="summary-row-icon" aria-hidden="true"><PrStateIcon state={pr.state} draft={pr.isDraft} size={15}/></span>
-      <span className="summary-row-label">{pr.title || `Pull request #${pr.number}`}</span>
+      <span className="summary-row-label">{pr.title || `${terms.Noun} ${terms.sigil}${pr.number}`}</span>
       {repairing && <Loader2 size={12} className="ci-spin" aria-label={`Fixing failing checks: ${repair!.message}`}/>}
-      <span className="summary-muted summary-pr-num">#{pr.number}</span>
+      <span className="summary-muted summary-pr-num">{terms.sigil}{pr.number}</span>
       <ChevronDown size={14} className="summary-chevron" data-open={open || undefined} aria-hidden="true"/>
     </button>
     {open && <div className="summary-pr-detail" id={id}>
-      <p className="summary-pr-title">{pr.title || `Pull request #${pr.number}`}</p>
+      <p className="summary-pr-title">{pr.title || `${terms.Noun} ${terms.sigil}${pr.number}`}</p>
       <dl>
         <div><dt>Status</dt><dd><PrStatePill state={pr.state} draft={pr.isDraft} small/></dd></div>
         <div><dt>Branch</dt><dd className="summary-branch" title={pr.headRefName}>{pr.headRefName || 'unknown'}{current && <span className="summary-muted"> · checked out</span>}</dd></div>
       </dl>
       <PullRequestChecks folderId={folderId} number={pr.number} chatId={current ? chatId : undefined}/>
-      <button type="button" className="summary-pr-open-link" onClick={() => openPullRequestTab(folderId, pr.number, pr.title)}><GitPullRequest size={13} aria-hidden="true"/>Review pull request</button>
+      <button type="button" className="summary-pr-open-link" onClick={() => openPullRequestTab(folderId, pr.number, pr.title)}><GitPullRequest size={13} aria-hidden="true"/>Review {terms.noun}</button>
       <button type="button" className="summary-pr-open-link" onClick={() => openBrowserTab(pr.url)}><ArrowUpRight size={13} aria-hidden="true"/>Open in browser</button>
     </div>}
   </div>;
@@ -210,6 +212,8 @@ function PullRequestRow({pr, current, folderId, chatId}: {pr: PullRequest; curre
 function FolderSection({folder, chat, project, activity}: {folder: Folder; chat: Chat; project?: Project; activity: number}) {
   const state = useStoreSlice('gitChanges');
   const {status, info, error, setStatus, setInfo, refresh} = useGitStatus(folder.id);
+  /** #329: GitLab says merge request and `!5`; GitHub and Bitbucket say pull request and `#5`. */
+  const terms = forgeTerms(status?.forge);
   const [pushing, setPushing] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [picker, setPicker] = useState<{open: boolean; mode: BranchMode}>({open: false, mode: 'switch'});
@@ -298,13 +302,13 @@ function FolderSection({folder, chat, project, activity}: {folder: Folder; chat:
         detail={commit.detail ? <span className={commit.kind === 'fetch' && commit.detail === 'Fetch' ? 'summary-link' : 'summary-muted'}>{commit.detail}</span> : undefined}
         onClick={() => commit.kind === 'changes' ? openChangesTab(folder.id, folder.name) : commit.kind === 'push' ? void push() : commit.kind === 'fetch' ? void fetchRemote() : undefined}
         title={commit.hint}/>
-      {status?.remoteUrl && !status.detached && (branchPr
-        ? <Row icon={<PrStateIcon state={branchPr.state} draft={branchPr.isDraft} size={15}/>} label={`View pull request #${branchPr.number}`} title={branchPr.title || undefined} onClick={() => openPullRequestTab(folder.id, branchPr.number, branchPr.title)}/>
-        : <Row icon={<GitPullRequest size={15}/>} label="Create pull request" onClick={() => openCreatePullRequestTab(folder.id)}/>)}
+      {(status?.remoteUrl || status?.forgeUrl) && !status.detached && (branchPr
+        ? <Row icon={<PrStateIcon state={branchPr.state} draft={branchPr.isDraft} size={15}/>} label={`View ${terms.noun} ${terms.sigil}${branchPr.number}`} title={branchPr.title || undefined} onClick={() => openPullRequestTab(folder.id, branchPr.number, branchPr.title)}/>
+        : <Row icon={<GitPullRequest size={15}/>} label={`Create ${terms.noun}`} onClick={() => openCreatePullRequestTab(folder.id)}/>)}
     </>}
     {openPrs.length > 0 && <div className="summary-subsection">
-      <header className="summary-section-head"><span>Pull requests</span></header>
-      {openPrs.slice(0, 4).map(pr => <PullRequestRow key={pr.number} pr={pr} folderId={folder.id} chatId={chat.id} current={!!status && pr.headRefName === status.branch}/>)}
+      <header className="summary-section-head"><span>{terms.Noun}s</span></header>
+      {openPrs.slice(0, 4).map(pr => <PullRequestRow key={pr.number} pr={pr} folderId={folder.id} chatId={chat.id} terms={terms} current={!!status && pr.headRefName === status.branch}/>)}
     </div>}
   </section>;
 }
@@ -354,6 +358,8 @@ export function SummaryCard() {
   const items = timeline?.value ?? EMPTY_ACTIVITY_ITEMS;
   const {agents, counts} = useMemo(() => getSubagentActivity(items), [items]);
   const agentNames = useMemo(() => agentDisplayNames(agents), [agents]);
+  // #44: chats this one started count with its subagents.
+  const delegated = useMemo(() => delegatedChildren(items, state.snapshot?.chats), [items, state.snapshot?.chats]);
   const sources = useMemo(() => sourceList(items), [items]);
   // This chat's own edits (F23), with lockfiles/generated output counted apart like every other pill (F59).
   const totals = useMemo(() => items.length ? splitChangeTotals(collectFileChanges(items)) : undefined, [items]);
@@ -441,7 +447,8 @@ export function SummaryCard() {
   const shownSources = allSources ? sources.slice(0, 20) : sources.slice(0, 3);
   const openAgents = () => openSubagentsTab(chat.id, chat.folderId ?? folders[0]?.id, chat.title || 'Conversation');
   const attention = chat.status === 'waiting' || chat.status === 'failed' || !!chat.recovery;
-  const agentSummary = [counts.working && `${counts.working} working`, counts.waiting && `${counts.waiting} waiting`, counts.failed && `${counts.failed} failed`, counts.done && `${counts.done} done`].filter(Boolean).join(' · ');
+  const childWorking = delegated.filter(child => ['running', 'stopping', 'waiting', 'queued', 'reconnecting'].includes(child.status)).length;
+  const agentSummary = [counts.working + childWorking && `${counts.working + childWorking} working`, counts.waiting && `${counts.waiting} waiting`, counts.failed && `${counts.failed} failed`, counts.done && `${counts.done} done`, delegated.length - childWorking && `${delegated.length - childWorking} chat${delegated.length - childWorking === 1 ? '' : 's'} started`].filter(Boolean).join(' · ');
   const stats = totals && (totals.adds > 0 || totals.dels > 0 || generatedNote(totals.generated))
     ? <span className="summary-pill-stats"><DiffStat adds={totals.adds} dels={totals.dels}/><GeneratedChanges generated={totals.generated}/></span>
     : null;
@@ -457,10 +464,10 @@ export function SummaryCard() {
         label={<>{port.name} <span className={`summary-port-owner is-${port.owner}`}>{port.owner === 'agent' ? 'Agent' : 'You'}</span></>}
         detail={<span className="summary-muted summary-port">:{port.port}</span>} trailing={<ArrowUpRight size={12} aria-hidden="true"/>} onClick={() => openBrowserTab(portURL(port))}/>)}
     </section>}
-    {agents.length > 0 && <section className="summary-section" aria-label="Subagents">
+    {agents.length + delegated.length > 0 && <section className="summary-section" aria-label="Subagents">
       <header className="summary-section-head"><span>Subagents</span></header>
-      <button type="button" className="summary-row summary-agents" onClick={openAgents} title={agents.map(a => `${agentNames.get(a.id)}: ${subagentState(a.state).label}`).join('\n')}>
-        <span className="summary-agent-dots" aria-hidden="true">{agents.slice(0, 5).map(agent => { const kind = subagentState(agent.state).kind; return <AgentGlyph key={agent.id} name={agentNames.get(agent.id)!} state={kind === 'working' ? 'working' : kind === 'failed' ? 'failed' : kind === 'done' ? 'done' : 'idle'}/>; })}</span>
+      <button type="button" className="summary-row summary-agents" onClick={openAgents} title={[...agents.map(a => `${agentNames.get(a.id)}: ${subagentState(a.state).label}`), ...delegated.map(child => `${child.title}: ${child.status}`)].join('\n')}>
+        <span className="summary-agent-dots" aria-hidden="true">{agents.slice(0, 5).map(agent => { const kind = subagentState(agent.state).kind; return <AgentGlyph key={agent.id} name={agentNames.get(agent.id)!} state={kind === 'working' ? 'working' : kind === 'failed' ? 'failed' : kind === 'done' ? 'done' : 'idle'}/>; })}{delegated.slice(0, Math.max(0, 5 - agents.length)).map(child => <AgentGlyph key={child.childChatId} name={child.title} state={['running', 'stopping', 'waiting', 'queued', 'reconnecting'].includes(child.status) ? 'working' : child.status === 'completed' ? 'done' : child.status === 'failed' || child.status === 'interrupted' ? 'failed' : 'idle'}/>)}</span>
         <span className="summary-row-label">{agentSummary || `${agents.length} reported`}</span>
       </button>
     </section>}

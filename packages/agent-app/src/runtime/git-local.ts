@@ -6,6 +6,8 @@ import {resolveInside} from './paths.ts';
 import type {GitLocalStatus, GitLocalFile, GitPullRequest, GitPullRequestList, GitCompareUrl} from '../shared/protocol.ts';
 import type {GitBranch, GitBranches, GitCommitResult, GitRepoInfo, GitSwitchResult, GitWorktree} from '../shared/domains/git-protocol.ts';
 import {normalizeFsPath, samePath} from '../shared/path-normalize.ts';
+import type {ForgeKind} from '../shared/forge.ts';
+import {detectForge} from './forge/remote.ts';
 
 const queues = new Map<string, Promise<unknown>>();
 const depths = new Map<string, number>();
@@ -130,12 +132,13 @@ async function pushTarget(root: string, branch: string): Promise<{remote?: strin
 }
 
 /** Cheap remote metadata. Any failure (no remote, odd config) leaves the fields absent; status never depends on it. */
-async function remoteInfo(root: string, branch: string, detached: boolean, unborn: boolean): Promise<{remoteUrl?: string; pushRemote?: string}> {
+async function remoteInfo(root: string, branch: string, detached: boolean, unborn: boolean): Promise<{remoteUrl?: string; pushRemote?: string; forge?: ForgeKind; forgeUrl?: string}> {
   try {
     const target = detached || unborn || !branch ? {} : await pushTarget(root, branch);
     const url = (await git(root, ['config', '--get', `remote.${target.remote ?? 'origin'}.url`]).catch(() => '')).trim();
     const remoteUrl = githubWebUrl(url);
-    return {...(remoteUrl ? {remoteUrl} : {}), ...(target.remote ? {pushRemote: target.remote} : {})};
+    const forge = remoteUrl ? {kind: 'github' as const, webUrl: remoteUrl} : detectForge(url);
+    return {...(remoteUrl ? {remoteUrl} : {}), ...(target.remote ? {pushRemote: target.remote} : {}), ...(forge ? {forge: forge.kind, forgeUrl: forge.webUrl} : {})};
   } catch { return {}; }
 }
 
@@ -170,12 +173,8 @@ export async function dirtyFileCount(root: string): Promise<number> {
   return count;
 }
 
-async function snapshot(root: string): Promise<GitLocalStatus> {
-  // 'normal' (git's own default) collapses an untracked directory to one '?? dir/' entry instead of
-  // walking every file inside it — an un-gitignored node_modules must not turn into hundreds of rows.
-  const raw = await git(root, ['status', '--porcelain=v1', '-z', '--branch', '--untracked-files=normal']);
-  const cached = await git(root, ['diff', '--cached', '--raw', '--no-abbrev', '-z', '--no-ext-diff', '--']);
-  const head = await git(root, ['rev-parse', '--verify', 'HEAD']).catch(() => '');
+/** `git status --porcelain=v1 -z --branch` output: the branch line and the changed files. Shared by local and SSH-host folders (#147). */
+export function parseStatus(raw: string) {
   const fields = raw.split('\0');
   let branch = '', detached = false, unborn = false, upstreamGone = false, upstream: string | undefined, ahead: number | undefined, behind: number | undefined;
   const files: GitLocalFile[] = [];
@@ -206,6 +205,16 @@ async function snapshot(root: string): Promise<GitLocalStatus> {
       staged: status[0] !== ' ' && status !== '??', untracked: status === '??',
       conflict: ['DD','AU','UD','UA','DU','AA','UU'].includes(status)});
   }
+  return {branch, detached, unborn, upstreamGone, upstream, ahead, behind, files};
+}
+
+async function snapshot(root: string): Promise<GitLocalStatus> {
+  // 'normal' (git's own default) collapses an untracked directory to one '?? dir/' entry instead of
+  // walking every file inside it — an un-gitignored node_modules must not turn into hundreds of rows.
+  const raw = await git(root, ['status', '--porcelain=v1', '-z', '--branch', '--untracked-files=normal']);
+  const cached = await git(root, ['diff', '--cached', '--raw', '--no-abbrev', '-z', '--no-ext-diff', '--']);
+  const head = await git(root, ['rev-parse', '--verify', 'HEAD']).catch(() => '');
+  const {branch, detached, unborn, upstreamGone, upstream, ahead, behind, files} = parseStatus(raw);
   const fingerprint = createHash('sha256').update(raw).update(cached).update(head);
   // Detect working-file edits even when the two-letter status stays unchanged.
   // Bounded metadata reads avoid hashing multi-gigabyte files during refresh.

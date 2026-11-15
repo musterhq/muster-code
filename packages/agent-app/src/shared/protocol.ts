@@ -1,3 +1,4 @@
+import type {ForgeKind} from './forge.ts';
 import type {UpdateCommands,UpdateEvent} from './update-protocol.ts';
 import type {PendingAttentionSummary} from './attention-protocol.ts';
 import type {ScopedComputerCommands, ScopedComputerEvent} from './scoped-computer-protocol.ts';
@@ -92,8 +93,9 @@ export interface FileAnnotation {id:string;folderId:string;path:string;revision:
 export interface ChangedFile { path: string; previousPath?: string; status: string; adds?: number; dels?: number; untrackedRoot?: string }
 export interface GitLocalFile {path:string;previousPath?:string;index:string;worktree:string;staged:boolean;untracked:boolean;conflict:boolean}
 /** `upstream`/`ahead`/`behind`/`remoteUrl` are best-effort: absent when unknown, never a reason for status to fail.
- *  `remoteUrl` is the normalized https://github.com/owner/repo web URL of the branch's remote (or 'origin'); absent for non-GitHub remotes. */
-export interface GitLocalStatus {branch:string;detached:boolean;unborn:boolean;revision:string;files:GitLocalFile[];truncated:boolean;stagedCount:number;conflicted:boolean;upstream?:string;upstreamGone?:boolean;ahead?:number;behind?:number;remoteUrl?:string;pushRemote?:string}
+ *  `remoteUrl` is the normalized https://github.com/owner/repo web URL of the branch's remote (or 'origin'); absent for non-GitHub remotes.
+ *  `forge`/`forgeUrl` (#329) name the code host of that remote (GitHub, GitLab or Bitbucket Cloud) and its repository web URL; absent when unrecognised. */
+export interface GitLocalStatus {branch:string;detached:boolean;unborn:boolean;revision:string;files:GitLocalFile[];truncated:boolean;stagedCount:number;conflicted:boolean;upstream?:string;upstreamGone?:boolean;ahead?:number;behind?:number;remoteUrl?:string;pushRemote?:string;forge?:ForgeKind;forgeUrl?:string}
 export interface GitPullRequest {number:number;title:string;url:string;state:string;headRefName:string;isDraft:boolean}
 /** `available:false` carries a short human `reason` (gh missing, signed out, no GitHub remote). Never an error. */
 export interface GitPullRequestList {available:boolean;reason?:string;items:GitPullRequest[]}

@@ -1,4 +1,5 @@
 import { applyPendingRestore } from './backups.ts';
+import {isRemoteFolderPath} from '../shared/domains/remote-protocol.ts';
 import { APPROVAL_SHOWN_EVENT } from './turn-ledger.ts';
 import { addMemory, listMemory, searchMemory, inspectMemoryStore, isVisibleInScopes, projectMemoryScope } from './memory-adapter.ts';
 import { createMemoryIdentity } from './memory-identity.ts';
@@ -37,7 +38,8 @@ import {readWorkbook} from './workbook-preview.ts';
 import {FileAnnotations} from './file-annotations.ts';
 import {resolveInside} from './paths.ts';
 import { AgentModeReviewHost } from './review.ts';
-import {dirtyFileCount, gitStatus, mutateGit, pushGit, listPullRequests, compareUrl} from './git-local.ts';
+import {dirtyFileCount, gitStatus, mutateGit, pushGit} from './git-local.ts';
+import {forgeFor} from './forge/index.ts';
 import {createEntry, moveFile} from './file-operations.ts';
 import { isElicitationRequest, elicitationPolicy, elicitationResult, elicitationText, elicitationServer } from '../shared/computer-use.ts';
 import { isCompactCommand } from '../shared/compact-command.ts';
@@ -89,6 +91,9 @@ import { findBinary } from './adapters/shared.ts';
 import { ASK_MCP, ASK_USER_METHOD, ASK_USER_SPEC, ASK_QUESTION_ID, askUserAnswerMessage, askUserCard, askUserReply, askUserRunOverrides, isNonBlockingQuestion, parseAskUser } from './ask-user.ts';
 import { plural } from '../shared/wording.ts';
 import { device } from '../shared/device-noun.ts';
+import type { RemoteAgentRun } from './domains/types.ts';
+/** #147: the commands that touch a folder's files or repository. */
+const REMOTE_ROUTED = /^(?:files|git|review|github|ci)\./;
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid command input.');
@@ -117,7 +122,7 @@ function detail(value: unknown): string {
   if (typeof value === 'string') return value.slice(0, 65536);
   try { return JSON.stringify(value ?? {}).slice(0, 65536); } catch { return 'Details unavailable'; }
 }
-interface ActiveRun { cwd: string; stopped: boolean; prompt?: string; promise?: Promise<void>; retry: AbortController; seal?(): void; /** #448: the run ended on a provider usage limit. */ limit?: {text: string; retryAfterMs?: number; notDispatched: boolean; prompt: string; attachmentIds: string[]}; /** #449: Muster quit under this run (not a user Stop); `shutdown` when it continues after the next start. */ quit?: boolean; shutdown?: boolean }
+interface ActiveRun { cwd: string; stopped: boolean; /** #147 phase 2: the run's CLI works on its folder's SSH host. */ remote?: RemoteAgentRun; prompt?: string; promise?: Promise<void>; retry: AbortController; seal?(): void; /** #448: the run ended on a provider usage limit. */ limit?: {text: string; retryAfterMs?: number; notDispatched: boolean; prompt: string; attachmentIds: string[]}; /** #449: Muster quit under this run (not a user Stop); `shutdown` when it continues after the next start. */ quit?: boolean; shutdown?: boolean }
 interface PendingApproval { chatId: string; createdAt: string; expiresAt: number; resolve(decision: ApprovalDecision): void; timer: ReturnType<typeof setTimeout> }
 /** `null` answers mean the question was dismissed, expired or interrupted: the provider gets a cancel, never empty answers. */
 type QuestionAnswers = Record<string, {answers: string[]}> | null;
@@ -266,6 +271,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (event.type === 'workspaceChanged') forgetQuickOpen();
     if (event.type === 'projectChanged' && event.seq === undefined) { try { event = {...event, seq: projectFeed.append(event.projectId, event.taskId)}; } catch { /* An unsequenced event still reloads; the next replay resets. */ } }
     options.onEvent(event);
+    domainHooks.agentEvent(event);
   };
   setRemoteIconStore(join(options.dataDir, 'plugin-icons'));
   const remoteIcons = options.remotePluginIcons ?? (process.env.NODE_TEST_CONTEXT ? false : {});
@@ -301,6 +307,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   /** A folder moved or deleted outside Muster shows as missing (with Relink) before a send fails. Stat results live 10s. */
   const folderStats = new Map<string, {at: number; missing: boolean}>();
   const folderMissing = (path: string) => {
+    // #147: a folder on an SSH host is never "missing" by a local stat; its host's connection state says where it stands.
+    if (isRemoteFolderPath(path)) return false;
     const at = Date.now(), cached = folderStats.get(path);
     if (cached && at - cached.at < 10_000) return cached.missing;
     let missing = true; try { missing = !statSync(path).isDirectory(); } catch { /* unreadable counts as missing */ }
@@ -457,6 +465,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const toolItemId = typeof item?.data?.toolItemId === 'string' ? item.data.toolItemId : undefined, tool = toolItemId ? store.item(toolItemId) : undefined;
     if (tool?.data?.awaitingApproval === itemId) { const {awaitingApproval: _cleared, ...rest} = tool.data; store.updateItem(tool.id, tool.text, tool.status, {...rest, ...(status === 'declined' ? {executionDenied:true} : status === 'expired' ? {executionDenied:true, deniedReason:'timeout'} : {})}); }
     timeline(pending.chatId); state(); pending.resolve(decision);
+    domainHooks.attention({chatId: pending.chatId, itemId, state: 'settled'});
   }
   /** #844: an MCP app's own tool call. The chat's access level and the Project tool rules decide; a change in an asking
    *  mode waits on the same approval card the agent's MCP calls get. Never tied to a run: the app can ask after the turn. */
@@ -488,6 +497,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (status === 'expired') store.appendItem(pending.chatId, 'notice', 'A question timed out before you answered, so the agent was told it was cancelled. Use Ask again to have it re-ask.', 'completed', {kind:'attention-expired', itemId});
     timeline(pending.chatId); state();
     pending.resolve(answers); pending.waiters.splice(0).forEach(resolve => resolve(answers));
+    domainHooks.attention({chatId: pending.chatId, itemId, state: 'settled'});
   }
   // ── ask_user: non-blocking questions ─────────────────────────────────────
   /** Posts the question card and answers the tool at once with the default. Never waits, in any access mode. */
@@ -497,8 +507,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (disposed || closing || !chat) return reply('This chat is not available.', true);
     const input = parseAskUser(args);
     if (typeof input === 'string') return reply(input, true);
-    store.appendItem(chatId, 'question', input.question, 'pending', {...askUserCard(input)});
-    timeline(chatId); state();
+    const asked = store.appendItem(chatId, 'question', input.question, 'pending', {...askUserCard(input)});
+    timeline(chatId); state(); domainHooks.attention({chatId, itemId: asked.id, state: 'pending'});
     return reply(askUserReply(input));
   }
   // ── #842: private secret and sudo requests ──────────────────────────────
@@ -552,7 +562,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const answer = list[0].trim();
     const question = Array.isArray(item.data?.questions) ? String((item.data.questions[0] as {question?: unknown} | undefined)?.question ?? item.text) : item.text;
     store.updateItem(itemId, item.text, 'answered', {...item.data, answers: {[ASK_QUESTION_ID]: {answers: [answer]}}});
-    timeline(chat.id); state();
+    timeline(chat.id); state(); domainHooks.attention({chatId: chat.id, itemId, state: 'settled'});
     const message = askUserAnswerMessage(question, answer), requestId = `ask-${itemId}`;
     let delivered: 'steered' | 'queued' = 'queued';
     if (runs.has(chat.id) && (await steerRun(chat, message, requestId, {})).steered) delivered = 'steered';
@@ -564,6 +574,13 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const item = store.item(itemId);
     if (!item || item.status !== 'pending') return;
     store.updateItem(itemId, item.text, 'dismissed', item.data); timeline(item.chatId); state();
+    domainHooks.attention({chatId: item.chatId, itemId, state: 'settled'});
+  }
+  /** #44: a delegating chat's copy of a child's card answers the child's own card (`data.delegated.itemId`). */
+  function attentionTarget(itemId: string): string {
+    if (approvals.has(itemId) || questions.has(itemId)) return itemId;
+    const delegated = store.item(itemId)?.data?.delegated as {itemId?: unknown} | undefined;
+    return typeof delegated?.itemId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(delegated.itemId) ? delegated.itemId : itemId;
   }
   function settleApprovals(chatId: string) {
     for (const [itemId, pending] of approvals) if (pending.chatId === chatId) finishApproval(itemId, pending, 'decline', 'interrupted');
@@ -743,9 +760,13 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     let claudeEntry: (typeof attachedSkills)[number] | undefined;
     for (const entry of attachedSkills) if (entry.claude && await claudeReachesByName(entry, folder ? [folder.path] : [])) { claudeEntry = entry; break; }
     const nativeSkillContext = claudeEntry ? [...attachedSkills.filter(entry => entry !== claudeEntry).map(entry => selectedSkillBlock(entry, prompt)), invokedPluginContext(plugins)].filter(Boolean).join('\n\n') : '';
-    const defaultCwd = folder ? canonicalFolderPath(folder.path) : join(options.dataDir, 'scratch', chatId);
-    const cwd = await domainHooks.runEnvironment(chat, defaultCwd);
-    if (folder || cwd !== defaultCwd) { if (!(await fs.stat(cwd)).isDirectory()) throw new Error('Selected folder is unavailable.'); }
+    // #147: a folder on an SSH host. The run's CLI works there (prepared below); nothing here ever reads a local path for it,
+    // so the run's local `cwd` stays the folder's ssh:// address and never names a folder on this computer.
+    const onHost = !!folder && isRemoteFolderPath(folder.path);
+    const defaultCwd = onHost ? folder!.path : folder ? canonicalFolderPath(folder.path) : join(options.dataDir, 'scratch', chatId);
+    const cwd = onHost ? defaultCwd : await domainHooks.runEnvironment(chat, defaultCwd);
+    if (onHost) { /* checked on the host when the run is prepared */ }
+    else if (folder || cwd !== defaultCwd) { if (!(await fs.stat(cwd)).isDirectory()) throw new Error('Selected folder is unavailable.'); }
     else await fs.mkdir(cwd, {recursive: true, mode: 0o700});
     if (closing || disposed) throw new Error('Agent runtime is stopping. No new attempt was dispatched.');
     // File preflight awaits can overlap a future-run access/mode change. Use
@@ -786,7 +807,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     // #401: what this turn runs with, for the transcript's "Switched to …" marker (the effort the composer chose, else the model's default).
     const ranEffort = effort ?? selectedProvider.models.find(entry => entry.id === chat.model)?.defaultEffort;
     const ranWith = {providerId: selectedProvider.id, model: chat.model, ...(ranEffort ? {effort: ranEffort} : {})};
-    const userData = {...(invoked.userData ?? {}), ranWith, ...(files.length ? {attachments: files.map(({path: _path, ...ref}) => ({...ref, state: 'sent'}))} : {})};
+    const userData = {...(invoked.userData ?? {}), ...domainHooks.sendData(chatId, requestId), ranWith, ...(files.length ? {attachments: files.map(({path: _path, ...ref}) => ({...ref, state: 'sent'}))} : {})};
     const accepted = store.recordSend(chatId, requestId, prompt, fingerprint, {...(Object.keys(userData).length ? {userData} : {}), ...(files.length || queued ? {within: () => { if (files.length) attachments.markSent(attachmentIds); if (queued) queue.consume(chatId, queued); }} : {}), ...(invoked.reuseUserItemId ? {reuseUserItemId: invoked.reuseUserItemId} : {})});
     if (accepted.replay) return {runId: accepted.runId};
     if (!digest) store.clearDigest(chatId);
@@ -810,7 +831,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     // #401: the message this turn answers. A retried message gets this run's record, and its old suggestion goes.
     const turnItem = invoked.reuseUserItemId ? store.item(invoked.reuseUserItemId) : store.lastUserItem(chatId);
     if (invoked.reuseUserItemId && turnItem) { const {followUp: _old, ...kept} = turnItem.data ?? {}; store.updateItem(turnItem.id, turnItem.text, turnItem.status, {...kept, ranWith}); }
-    const run: ActiveRun = {cwd, stopped: false, retry: new AbortController(), prompt}; runs.set(chatId, run); state(); timeline(chatId);
+    // #147 phase 2: connect, find the route's CLI on the host and open the tools' connection. A route that cannot run there
+    // (or a CLI that is missing) refuses the send with a sentence; it never runs on this computer instead.
+    const remote = onHost ? await domainHooks.remoteAgent({chat, folder: folder!, provider: selectedProvider}) : undefined;
+    if (remote && (closing || disposed || runs.has(chatId))) { remote.dispose(); throw new Error('Agent runtime is stopping. No new attempt was dispatched.'); }
+    const run: ActiveRun = {cwd, stopped: false, retry: new AbortController(), prompt, ...(remote ? {remote} : {})}; runs.set(chatId, run); state(); timeline(chatId);
     const suggest = turnItem && suggestionsOn() ? (raw: string) => offerSuggestion(chatId, turnItem.id, run, raw) : undefined;
     let segment: TimelineItem | undefined;
     let producedAssistant = false;
@@ -852,6 +877,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     segmentFlushes.set(chatId, flushSegment);
     const seal = () => { if (segment) store.updateItem(segment.id, segment.text, 'completed'); segment = undefined; segmentDirty = false; };
     run.seal = seal;
+    let remoteTools: {close(): void} | undefined, remoteDropped = false;
     run.promise = (async () => {
       try {
         const persistIdentity = (threadId: string, turnId?: string, driver?: string) => {
@@ -865,7 +891,16 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // No registered hooks: dispatch in the same tick, exactly as before the seam existed.
         const hooked = domainHooks.hasRunHooks();
         const contributed = hooked ? await domainHooks.contributePrompt({chat, ...(folder ? {folder} : {}), ...(project ? {project} : {}), prompt}) : {text:'', sources:[] as string[], blocks:[] as ContextBlock[]};
-        const runOptions = withAskUser(chat.id, hooked ? await domainHooks.resolveRunOptions(chat) : {});
+        let runOptions = withAskUser(chat.id, hooked ? await domainHooks.resolveRunOptions(chat) : {});
+        // #147 phase 2: Muster's tools reach the host's CLI through the relay, with this run's own token.
+        if (run.remote) {
+          const tools = run.remote.tools(runOptions.configOverrides, chatId); remoteTools = tools;
+          runOptions = {...runOptions, configOverrides: tools.overrides, developerInstructions: [runOptions.developerInstructions, run.remote.note].filter(Boolean).join('\n\n')};
+          // A new notice when the host, the folder or the sign-in changes (the person may switch to passing their key).
+          const {host, root} = run.remote.run, signIn = run.remote.signIn, last = store.noticesOfKind(chatId, 'remote-run').at(-1);
+          if (!last || last.data?.host !== host || last.data?.root !== root || last.data?.signIn !== signIn)
+            store.appendItem(chatId, 'notice', `Runs on ${host} in ${root}, with ${signIn}.${tools.dropped.length ? ' Computer use, terminal and background tools stay on this computer and are not offered here.' : ''}`, 'completed', {kind: 'remote-run', host, root, signIn});
+        }
         if (hooked) await domainHooks.runStarted({chat, runId: accepted.runId, cwd});
         if (disposed) return;
         let ownership = '';
@@ -907,7 +942,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         let continuationPrompt: string | undefined;
         const attempt = () => {
           producedAssistant = false; attemptActivity = false; lastWasTool = false; assistantText = ''; lastAssistantText = '';
-          return run.stopped ? Promise.resolve(stoppedBeforeDispatch) : provider.run({ chat: {...(continuationPrompt ? store.chat(chatId)! : chat),providerTurnId:undefined,recovery:undefined}, cwd, prompt: continuationPrompt ?? contextualPrompt,
+          return run.stopped ? Promise.resolve(stoppedBeforeDispatch) : provider.run({ chat: {...(continuationPrompt ? store.chat(chatId)! : chat),providerTurnId:undefined,recovery:undefined}, cwd, ...(run.remote ? {remote: run.remote.run} : {}), prompt: continuationPrompt ?? contextualPrompt,
           contextWindow,
           ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) || pluginReloads.wantsConnectors(chatId) ? {connectorsRequested: true, connectorNames: [...requestedConnectorNames(prompt), ...pluginReloads.connectorNames(chatId)]} : {}),
           ...(runOptions.configOverrides ? {configOverrides: runOptions.configOverrides as Record<string, string | number | boolean | string[]>} : {}), ...(runOptions.developerInstructions ? {developerInstructions: runOptions.developerInstructions} : {}),
@@ -1126,7 +1161,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
                 let pending!: PendingQuestionRequest;
                 pending = { chatId, createdAt:item.createdAt, expiresAt, providerKey, itemId: item.id, questions: parsed, resolve: answers => resolve(answers ? { answers } : CANCELLED_REQUEST), waiters: [], timer: undefined as never };
                 armExpiry(item.id, pending, () => questions.get(item.id) === pending, () => finishQuestion(item.id, pending, null, 'expired'));
-                questions.set(item.id, pending); questionsByProviderKey.set(providerKey, item.id); wakeForAttention(chatId); state();
+                questions.set(item.id, pending); questionsByProviderKey.set(providerKey, item.id); wakeForAttention(chatId); state(); domainHooks.attention({chatId, itemId: item.id, state: 'pending'});
               });
             }
             if (isElicitationRequest(method)) {
@@ -1143,7 +1178,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
                 let pending!: PendingApproval;
                 pending = { chatId, createdAt: item.createdAt, expiresAt, resolve, timer: undefined as never };
                 armExpiry(approvalId, pending, () => approvals.get(approvalId) === pending, () => finishApproval(approvalId, pending, 'decline', 'expired'));
-                approvals.set(approvalId, pending); wakeForAttention(chatId); state();
+                approvals.set(approvalId, pending); wakeForAttention(chatId); state(); domainHooks.attention({chatId, itemId: approvalId, state: 'pending'});
               });
               return elicitationResult(decision !== 'decline');
             }
@@ -1167,7 +1202,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             const change = typeof params.itemId === 'string' && toolIds.has(params.itemId) ? store.item(toolIds.get(params.itemId)!)?.data?.changes : params.changes;
             // #841: Auto settles a routine request (a read, an edit inside the folder, a safe or allowlisted command) and says so on its row.
             if (autoOn && !threat && toolPolicy?.effect !== 'ask') {
-              const settled = autoApprove(method, params, change ?? params.changes, {cwd: run.cwd, allowlist: autoAllowlist(), sandboxed: autoSandboxed});
+              const settled = autoApprove(method, params, change ?? params.changes, {cwd: run.remote?.run.root ?? run.cwd, allowlist: autoAllowlist(), sandboxed: autoSandboxed});
               if (settled) {
                 const rowId = typeof params.itemId === 'string' ? toolIds.get(params.itemId) : undefined, row = rowId ? store.item(rowId) : undefined;
                 if (row) { store.updateItem(row.id, row.text, row.status, {...row.data, autoApproved: settled}); timeline(chatId); }
@@ -1190,7 +1225,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               let pending!: PendingApproval;
               pending = {chatId, createdAt:item.createdAt, expiresAt, resolve, timer: undefined as never};
               armExpiry(approvalId, pending, () => approvals.get(approvalId) === pending, () => finishApproval(approvalId, pending, 'decline', 'expired'));
-              approvals.set(approvalId, pending); wakeForAttention(chatId); state();
+              approvals.set(approvalId, pending); wakeForAttention(chatId); state(); domainHooks.attention({chatId, itemId: approvalId, state: 'pending'});
             });
             // Never let the provider remember a stop-the-user's-process approval for the rest of the session.
             return {decision: threat && decision === 'acceptForSession' ? 'accept' : decision};
@@ -1207,6 +1242,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           timeline(chatId);
         }});
         let result = retried.result;
+        // #147 phase 2: a run on a host that failed for the host's reasons says so plainly; a dropped connection is an interruption.
+        if (run.remote && result.status === 'failed' && !run.stopped) {
+          const dropped = run.remote.dropped(), said = run.remote.failure(`${result.errorMessage ?? ''} ${result.recovery?.reason ?? ''}`);
+          if (said) result = {...result, errorMessage: said, recovery: dropped ? {kind: 'cancelled', retryable: false, reason: said} : {kind: 'failed', retryable: true, reason: said}};
+          if (dropped) remoteDropped = true;
+        }
         if (retryNotice && !disposed) {
           const sent = !retried.cancelled && result.recovery?.kind !== 'admission-rejected' && result.recovery?.kind !== 'failed';
           const lead = retryReason === 'transient' ? 'Provider attempt did not start.' : retryDetail ? asSentence(retryDetail) : 'The provider is temporarily unavailable.';
@@ -1308,7 +1349,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // #448: a limited turn that never started re-runs its own prompt at reset, so it is not also handed back as a draft (sent twice).
         const restoreDraft=result.status==='failed' && result.dispatchState==='not-dispatched' && recovery?.kind!=='recovery-needed' && store.chat(chatId)?.draft==='' && !(run.limit && settingOn('chats.resumeAfterLimit'));
         if (restoreDraft && attachmentIds.length) attachments.restage(attachmentIds);
-        store.updateChat(chatId, {status:recovery?.kind === 'recovery-needed' ? 'failed' : run.stopped ? 'interrupted' : result.status,recovery:recovery ?? null,error:recovery?.reason ?? result.errorMessage ?? null,...(restoreDraft?{draft:prompt}:{})});
+        store.updateChat(chatId, {status:recovery?.kind === 'recovery-needed' ? 'failed' : run.stopped || remoteDropped ? 'interrupted' : result.status,recovery:recovery ?? null,error:recovery?.reason ?? result.errorMessage ?? null,...(restoreDraft?{draft:prompt}:{})});
       } catch (error) {
         if (!disposed) {
           seal();
@@ -1336,6 +1377,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // #449: any tool row still running once the run's work has ended settles as interrupted.
         if (settled) store.settleRunningTools(chatId);
         runs.delete(chatId);
+        // #147: the run's relay token and its host command end with the run.
+        remoteTools?.close(); run.remote?.dispose();
         // #426: a compaction asked for during the turn runs now (before any queued message is dispatched).
         const deferred = deferredCompactions.get(chatId);
         if (deferred && !disposed) { deferredCompactions.delete(chatId); void compactChat(chatId, {fresh: deferred.fresh, rowId: deferred.rowId}).catch(() => undefined); }
@@ -1798,6 +1841,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     }
     if (command === 'plugins.inventory') return discoverPlugins();
     const p = input === undefined && domains.handlers.has(command) ? {} : object(input);
+    // #147: file and Git commands for a folder on an SSH host run there, never against a local path.
+    if (typeof p.folderId === 'string' && REMOTE_ROUTED.test(command) && !command.startsWith('files.runActions.')) {
+      const folder = store.folder(p.folderId);
+      if (folder && isRemoteFolderPath(folder.path)) return domainHooks.remoteFolder(command, p, folder);
+    }
     switch (command) {
       case 'folder.add': { const path = await fs.realpath(text(p.path, 'folder path')); if (!(await fs.stat(path)).isDirectory()) throw new Error('Choose a folder.'); const result = store.addFolder(path, basename(path)); state(); return result; }
       case 'chat.create': {
@@ -2245,7 +2293,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           return {chat:updated,resolved:true,reason:result.reason};
         } finally {reconciliations.delete(chatId);}
       }
-      case 'approval.respond': { const approvalId = id(p.id); if (typeof p.approved !== 'boolean') throw new Error('Invalid approval decision.');
+      case 'approval.respond': { const approvalId = attentionTarget(id(p.id)); if (typeof p.approved !== 'boolean') throw new Error('Invalid approval decision.');
         if (p.decision !== undefined && !['accept','acceptForSession','decline'].includes(p.decision as string)) throw new Error('Invalid approval decision.');
         const decision: ApprovalDecision = !p.approved ? 'decline' : p.decision === 'acceptForSession' ? 'acceptForSession' : 'accept';
         const pending = approvals.get(approvalId); if (!pending) throw new Error('This approval is no longer pending.');
@@ -2256,7 +2304,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         finishApproval(approvalId, pending, decision, decision === 'decline' ? 'declined' : decision === 'acceptForSession' ? 'approved-session' : 'approved'); return; }
       case 'attention.sweep': return {expired: await sweepExpired()};
       case 'approval.reask': {
-        const itemId = id(p.id), item = store.item(itemId);
+        const itemId = attentionTarget(id(p.id)), item = store.item(itemId);
         if (!item || (item.kind !== 'approval' && item.kind !== 'question')) throw new Error('This request no longer exists.');
         if (item.status !== 'expired' && item.status !== 'unavailable' && !(item.status === 'interrupted' && item.data?.expiredReason === 'stale')) throw new Error('This request is still open or was already answered.');
         if (item.data?.reaskedAt) throw new Error('The agent was already asked again.');
@@ -2307,7 +2355,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         store.appendItem(chatId, 'notice', 'Continued without confirming the earlier attempt. It may still have been working at the provider; nothing was resent.', 'completed', {kind: 'continue-anyway', providerThreadId: chat.providerThreadId, providerTurnId: chat.providerTurnId});
         timeline(chatId); state(); return updated;
       }
-      case 'question.dismiss': { const questionId = id(p.id); if (!questions.has(questionId) && isNonBlockingQuestion(store.item(questionId)?.data)) return dismissAsked(questionId); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.'); finishQuestion(questionId, pending, null, 'dismissed'); return; }
+      case 'question.dismiss': { const questionId = attentionTarget(id(p.id)); if (!questions.has(questionId) && isNonBlockingQuestion(store.item(questionId)?.data)) return dismissAsked(questionId); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.'); finishQuestion(questionId, pending, null, 'dismissed'); return; }
       case 'chat.compact': await compactChat(id(p.id), {fresh: p.fresh === true}); return;
       case 'secret.answer': {
         if (p.value !== undefined && typeof p.value !== 'string') throw new Error('Enter the value.');
@@ -2317,7 +2365,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'secret.decline': secretRequests.decline(id(p.id)); return;
       case 'secret.forget': secretRequests.forget(id(p.id)); return;
       case 'question.respond': {
-        const questionId = id(p.id);
+        const questionId = attentionTarget(id(p.id));
         if (!questions.has(questionId) && isNonBlockingQuestion(store.item(questionId)?.data)) return answerAsked(questionId, p.answers);
         const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.');
         if (Date.now() >= pending.expiresAt) { finishQuestion(questionId, pending, null, 'expired'); throw new Error('This question timed out before it was answered. Use Ask again.'); }
@@ -2351,7 +2399,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'project.export': { const projectId=id(p.projectId), project=store.project(projectId); if(!project) throw new Error('Project not found.'); const folders=project.folderIds.map(folderId=>store.folder(folderId)).filter((folder):folder is NonNullable<typeof folder>=>Boolean(folder)); const chats=store.projectChats(projectId).map(({id,title,folderId,providerId,model,mode,permissionMode,status,updatedAt,recovery})=>({id,title,...(folderId?{folderId}:{}),providerId:providerId??'',model,mode,...(permissionMode?{permissionMode}:{}),status,updatedAt,...(recovery?{recovery}:{} )})); return projectTasks.exportProject(project,folders,chats); }
       case 'workspace.watch': {
         if (!Array.isArray(p.folderIds) || p.folderIds.length > 32) throw new Error('Invalid watched folders.');
-        const folders = [...new Set(p.folderIds.map(id))].map(folderFor);
+        const folders = [...new Set(p.folderIds.map(id))].map(folderFor).filter(folder => !isRemoteFolderPath(folder.path));
         const desired = new Set(folders.map(folder=>folder.id));
         for (const folderId of watchedFolders) if (!desired.has(folderId)) { watcher.unwatch(folderId); watchedFolders.delete(folderId); }
         await Promise.all(folders.map(async folder => {
@@ -2445,8 +2493,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const result = await pushGit(folder.path, text(p.revision,'revision',64));
         emit({type:'workspaceChanged',folderId:folder.id}); return result;
       }
-      case 'git.pullRequests': return listPullRequests(folderFor(p.folderId).path);
-      case 'git.compareUrl': return compareUrl(folderFor(p.folderId).path);
+      case 'git.pullRequests': { const path = folderFor(p.folderId).path; return (await forgeFor(path)).list(path); }
+      case 'git.compareUrl': { const path = folderFor(p.folderId).path; return (await forgeFor(path)).compareUrl(path); }
       case 'git.diff': { const root = folderFor(p.folderId).path; const result = await new AgentModeReviewHost(() => root).readChange(text(p.path,'path')); if (result.error) throw new Error(result.error); return {path: result.path, before: result.before, after: result.after, truncated: result.truncated}; }
       case 'providers.save': return customProviders.save({id:p.id,name:p.name,endpoint:p.endpoint,apiKeyEnv:p.apiKeyEnv});
       case 'providers.cancelCheck': customProviders.cancel(id(p.id)); return;

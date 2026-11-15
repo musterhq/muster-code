@@ -119,7 +119,7 @@ function nulFields(stdout: Buffer): string[] {
 }
 
 /** Parse `git diff -z -M --name-status` output into path -> {status, previousPath}. */
-function parseNameStatus(stdout: Buffer): Map<string, { status: string; previousPath?: string }> {
+export function parseNameStatus(stdout: Buffer): Map<string, { status: string; previousPath?: string }> {
   const fields = nulFields(stdout);
   const entries = new Map<string, { status: string; previousPath?: string }>();
   for (let index = 0; index < fields.length; ) {
@@ -137,7 +137,7 @@ function parseNameStatus(stdout: Buffer): Map<string, { status: string; previous
 }
 
 /** Parse `git diff -z -M --numstat` output into path -> {adds, dels}. Binary files report `-` and become 0/0. */
-function parseNumstat(stdout: Buffer): Map<string, { adds: number; dels: number }> {
+export function parseNumstat(stdout: Buffer): Map<string, { adds: number; dels: number }> {
   const fields = nulFields(stdout);
   const entries = new Map<string, { adds: number; dels: number }>();
   for (let index = 0; index < fields.length; ) {

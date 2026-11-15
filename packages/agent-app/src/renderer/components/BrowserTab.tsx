@@ -1,11 +1,11 @@
 import {DesktopOnlyState} from './DesktopOnlyState';
 import {isWebHost} from '../webHost.ts';
 import React,{useCallback,useEffect,useRef,useState,useSyncExternalStore} from 'react';
-import {AppWindow,ArrowLeft,ArrowRight,Camera,Check,ChevronDown,Crosshair,Download,ExternalLink,Globe,Monitor,RotateCw,Scan,Shield,ShieldAlert,Smartphone,Square,SquareTerminal,Tablet,UserRound,X} from 'lucide-react';
+import {AppWindow,ArrowLeft,ArrowRight,Camera,Check,ChevronDown,Crosshair,Download,ExternalLink,Globe,KeyRound,Monitor,RotateCw,Scan,Shield,ShieldAlert,Smartphone,Square,SquareTerminal,Tablet,UserRound,X} from 'lucide-react';
 import {invoke,subscribe} from '../bridge';
 import {getState,subscribeStore} from '../store';
 import {stageAttachment,runtimeMessage} from '../composerBridge';
-import {BROWSER_VIEWPORTS,browserAddress,browserScopeProfile,type BrowserConsoleEntry,type BrowserProfile,type BrowserState,type BrowserViewport} from '../../shared/browser-protocol';
+import {BROWSER_VIEWPORTS,browserAddress,browserScopeProfile,type BrowserConsoleEntry,type BrowserLogins,type BrowserProfile,type BrowserState,type BrowserViewport} from '../../shared/browser-protocol';
 import './browser-tab.css';
 import {Tip} from './Tooltip';
 import {PreviewUnreachable} from './PreviewUnreachable';
@@ -52,7 +52,7 @@ const bytes=(value:number)=>value>=1048576?`${(value/1048576).toFixed(1)} MB`:va
 const hostOf=(url:string)=>{try{return new URL(url).host;}catch{return url;}};
 const message=(cause:unknown)=>cause instanceof Error?cause.message:String(cause);
 
-type MenuId='viewport'|'profile';
+type MenuId='viewport'|'profile'|'passwords';
 /** Toolbar menu on the shared Base UI primitive. Its role="menu" popup also detaches the native page while open. */
 function ToolbarMenu({id,open,onOpen,label,button,children}:{id:MenuId;open:MenuId|null;onOpen:(id:MenuId|null)=>void;label:string;button:React.ReactNode;children:React.ReactNode}) {
   const shown=open===id;
@@ -80,6 +80,7 @@ function DesktopBrowserTab({owner,profileId:requestedProfile,initialUrl='about:b
   const [error,setError]=useState(''),[ready,setReady]=useState(false),[attempt,setAttempt]=useState(0);
   const [menu,setMenuState]=useState<MenuId|null>(null),[profiles,setProfiles]=useState<BrowserProfile[]>([]),[confirmClear,setConfirmClear]=useState(false);
   const [consoleOpen,setConsoleOpen]=useState(false),[consoleEntries,setConsoleEntries]=useState<BrowserConsoleEntry[]>([]);
+  const [logins,setLogins]=useState<BrowserLogins|'loading'>('loading');
   const [picking,setPicking]=useState<'element'|'region'|null>(null),[flash,setFlash]=useState('');
   const host=useRef<HTMLDivElement>(null),editing=useRef(false),current=useRef<BrowserState|undefined>(undefined);
   const mountURL=useRef(initialUrl);mountURL.current=initialUrl;
@@ -173,6 +174,13 @@ function DesktopBrowserTab({owner,profileId:requestedProfile,initialUrl='about:b
     return()=>{live=false;};
   },[consoleOpen,ready,owner,browser?.consoleCount,browser?.consoleErrors]);
   useEffect(()=>{const list=consoleList.current;if(list)list.scrollTop=list.scrollHeight;},[consoleEntries]);
+  // #843: the key menu asks main for this site's logins each time it opens (nothing is kept here).
+  useEffect(()=>{
+    if(menu!=='passwords')return;
+    let live=true;setLogins('loading');
+    void invoke('browser.passwords',{owner}).then(list=>{if(live)setLogins(list);}).catch(cause=>{if(live)setLogins({manager:'1password',available:false,logins:[],message:message(cause)});});
+    return()=>{live=false;};
+  },[menu,owner]);
   useEffect(()=>{
     if(menu!=='profile')return;
     let live=true;setConfirmClear(false);
@@ -196,6 +204,12 @@ function DesktopBrowserTab({owner,profileId:requestedProfile,initialUrl='about:b
   const download=async(choice:'save'|'cancel'|'reveal'|'dismiss')=>{
     const id=browser?.download?.id;if(!id)return;
     const next=await guarded(()=>invoke('browser.download',{owner,id,action:choice}));if(next)apply.current(next);
+  };
+  /** #843: the person chose a login; main reads it from 1Password and types it into the page. */
+  const fillLogin=async(id:string,vault:string)=>{
+    setMenu(null);
+    const filled=await guarded(()=>invoke('browser.fillLogin',{owner,id,vault}));
+    if(filled)notify(filled.filled==='login'?`Filled the ${filled.title} login.`:filled.filled==='username'?`Filled the ${filled.title} username.`:`Filled the ${filled.title} password.`);
   };
   const switchProfile=(id:string)=>{
     setMenu(null);if(id===profileId)return;
@@ -265,6 +279,17 @@ function DesktopBrowserTab({owner,profileId:requestedProfile,initialUrl='about:b
         <button className={`browser-icon${consoleOpen?' is-on':''}`} disabled={!ready} aria-pressed={consoleOpen} aria-label={`Console${browser?.consoleErrors?`, ${browser.consoleErrors} errors`:''}`} title="Console and network errors" onClick={()=>setConsoleOpen(value=>!value)}>
           <SquareTerminal size={14}/>{!!browser?.consoleErrors && <span className="browser-badge" aria-hidden="true">{browser.consoleErrors>99?'99+':browser.consoleErrors}</span>}
         </button>
+        <ToolbarMenu id="passwords" open={menu} onOpen={setMenu} label="Fill a login from 1Password" button={<KeyRound size={14}/>}>
+          <div className="ui-menu-label">Logins for {hostOf(browser?.url??'')||'this page'}</div>
+          {logins==='loading'?<p className="browser-menu-note" role="status">Asking 1Password…</p>
+            :!logins.available?<p className="browser-menu-note" role="status">{logins.message}</p>
+            :!logins.logins.length?<p className="browser-menu-note" role="status">1Password has no login saved for this site.</p>
+            :logins.logins.map(login=><Menu.Item key={`${login.vault}:${login.id}`} disabled={!tools} onClick={()=>void fillLogin(login.id,login.vault)}>
+              <span className="browser-menu-icon"><KeyRound size={13}/></span><span className="browser-menu-label">{login.title}</span>
+              {login.username && <span className="browser-menu-detail">{login.username}</span>}
+            </Menu.Item>)}
+          <p className="browser-menu-note">Muster types the login into this page and keeps no copy. Agents never see the password.</p>
+        </ToolbarMenu>
         <ToolbarMenu id="viewport" open={menu} onOpen={setMenu} label={`Viewport: ${viewportLabel(viewport)}`} button={VIEWPORT_ICON[viewport]}>
           <Menu.RadioGroup value={viewport}>{(['fill','mobile','tablet','desktop'] as const).map(preset=><Menu.RadioItem key={preset} value={preset} closeOnClick disabled={!ready} onClick={()=>void setViewport(preset)}>
             <span className="browser-menu-icon">{VIEWPORT_ICON[preset]}</span><span className="browser-menu-label">{viewportLabel(preset)}</span>{viewport===preset && <Check size={13} className="browser-menu-check"/>}

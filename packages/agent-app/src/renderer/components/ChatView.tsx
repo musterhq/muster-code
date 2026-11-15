@@ -30,6 +30,7 @@ import {createTimelineProjection,findTranscriptMatches,turnAtRow,type Transcript
 import {TimelineNavigation} from './TimelineNavigation';
 import {ForkOrigin,MessageEditor,MessageMeta,type MessageActions} from './MessageMeta';
 import {ImportOrigin} from './ImportConversations';
+import {DelegationReportRow, DelegationRow} from './DelegationRows';
 import './chat-continuity.css';
 import {TurnChanges} from './TurnChanges';
 import {useStoreSelector} from '../useStore';
@@ -126,6 +127,8 @@ function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, edi
   switch (item.kind) {
     case 'activity': return <ActivityGroup items={item.items} prior={item.prior} agents={item.agents} reveal={reveal} live={tail}/>;
     case 'user':
+      // #44: a child's report that woke this chat is a notice, not the user's words.
+      if (item.data?.kind === 'delegation-report') return <div className="delegation-report-turn"><DelegationReportRow item={item}/>{turn&&('live' in turn?<LiveTurnHeader since={turn.live}/>:<TurnHeader {...turn}/>)}</div>;
       return (
         <div className="user-message-row">
         {editing?<MessageEditor text={item.text} loadOptions={()=>invoke('chat.editOptions',{id:item.chatId,itemId:item.id})} loadRestore={()=>invoke('chat.editRestorePreview',{id:item.chatId,itemId:item.id})} onSubmit={editing.onSubmit} onCancel={editing.onCancel}/>
@@ -147,6 +150,7 @@ function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, edi
     case 'question': return <PendingQuestion item={item} />;
     case 'notice':
       if (item.data?.kind === 'compaction') return <CompactionRow item={item}/>;
+      if (item.data?.kind === 'delegated-task' || item.data?.kind === 'delegated-from') return <DelegationRow item={item}/>;
       return <div className="timeline-notice">{item.text}</div>;
   }
 }

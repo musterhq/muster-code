@@ -1,0 +1,10 @@
+#!/usr/bin/env node
+/* A stand-in for `ssh-keyscan` (#147 tests): prints the fake host's key line from $MUSTER_FAKE_SSH_ROOT/host_key. Never touches the network. */
+'use strict';
+const fs = require('node:fs'), path = require('node:path');
+const root = process.env.MUSTER_FAKE_SSH_ROOT, args = process.argv.slice(2);
+const host = args[args.length - 1], portAt = args.indexOf('-p'), port = portAt >= 0 ? Number(args[portAt + 1]) : 22;
+fs.appendFileSync(path.join(root, 'log.jsonl'), JSON.stringify({ argv: args, kind: 'keyscan' }) + '\n');
+if (fs.existsSync(path.join(root, 'down'))) process.exit(1);
+const key = fs.readFileSync(path.join(root, 'host_key'), 'utf8').trim();
+process.stdout.write(`${port === 22 ? host : `[${host}]:${port}`} ${key}\n`);

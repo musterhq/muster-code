@@ -20,6 +20,7 @@ export const split = new Set([
   'markdown-table-dom',
   'reply-file-links-837-dom',
   'browser-components',
+  'browser-passwords-843-dom',
   'hub-components',
   'projects-parity-components',
   'paperclip-integration-dom',

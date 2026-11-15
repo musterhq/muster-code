@@ -5,7 +5,8 @@ import { Collapsible as Disclosure } from '@base-ui/react/collapsible';
 import type { TimelineItem } from '../../shared/protocol';
 import { SUBAGENT_STEER_MAX, type SubagentControlAction, type SubagentControlCapabilities, type SubagentTranscript } from '../../shared/domains/subagents-protocol';
 import type { WorkspaceTab } from '../store';
-import { notifyError, notifySuccess, retryTimeline } from '../store';
+import { notifyError, notifySuccess, retryTimeline, selectChat } from '../store';
+import { delegatedChildren, type DelegatedChild } from './DelegationRows';
 import { useStoreSlice } from '../useStore';
 import { invoke } from '../bridge';
 import { copyText } from '../clipboard';
@@ -144,6 +145,25 @@ function AgentCard({agent, chatId, now, controls}: {agent:SubagentActivity; chat
   </article>;
 }
 
+/** #44: a chat this one started through delegate_task. It is a real chat: opening it opens that chat. */
+const CHILD_PHASE: Record<string, {kind:SubagentPhaseKind; label:string}> = {
+  running:{kind:'running', label:'Working'}, stopping:{kind:'running', label:'Stopping'}, reconnecting:{kind:'running', label:'Working'},
+  waiting:{kind:'waiting', label:'Waiting'}, queued:{kind:'waiting', label:'Queued'}, completed:{kind:'completed', label:'Done'},
+  failed:{kind:'failed', label:'Failed'}, interrupted:{kind:'failed', label:'Stopped'}, limited:{kind:'waiting', label:'Waiting'},
+};
+const childPhase = (child: DelegatedChild) => CHILD_PHASE[child.status] ?? {kind:'unknown' as const, label:child.status === 'deleted' ? 'Deleted' : 'Not started'};
+function DelegatedCard({child}: {child:DelegatedChild}) {
+  const phase = childPhase(child);
+  return <article className={`subagent-card is-${phase.kind}`} aria-label={`${child.title}, ${phase.label}`} data-testid="delegated-child">
+    <button type="button" className="subagent-open" disabled={child.status === 'deleted'} onClick={() => void selectChat(child.childChatId)} aria-label={`Open ${child.title} chat`}>
+      <span className="subagent-avatar"><AgentGlyph name={child.title} state={phaseGlyph(phase.kind)} /></span>
+      <span className="subagent-open-text"><strong title={child.title}>{child.title}</strong><span className="subagent-meta">{[child.model, 'Chat'].filter(Boolean).join(' · ')}</span></span>
+      <PhaseBadge {...phase} />
+      <ChevronRight className="subagent-open-chevron" size={13} aria-hidden="true" />
+    </button>
+  </article>;
+}
+
 function ReasoningRow({item}: {item:TimelineItem}) {
   const [open, setOpen] = useDisclosure('reasoning:' + item.id);
   const running = item.status === 'running';
@@ -261,15 +281,18 @@ export function SubagentsTab({tab}: {tab:WorkspaceTab}): React.ReactElement {
   const selectedId = useSyncExternalStore(subscribeSubagentSelection, () => chatId ? selectedSubagent(chatId) : null);
   const selected = selectedId ? agents.find(agent => agent.id === selectedId) : undefined;
   const controls = useSubagentControls(chatId);
+  const delegated = useMemo(() => delegatedChildren(parentItems, state.snapshot?.chats), [parentItems, state.snapshot?.chats]);
   const now = useNow(!selected && agents.some(agent => subagentPhase(agent).kind === 'running'));
   if (selected && chatId) return <div className="subagents-tab is-detail"><SubagentDetail key={selected.id} agent={selected} chatId={chatId} parentItems={parentItems} parentModel={chat?.model} controls={controls} /></div>;
   const counts = phaseCounts(agents);
+  for (const child of delegated) { const kind = childPhase(child).kind; counts[kind] = (counts[kind] ?? 0) + 1; }
+  const total = agents.length + delegated.length;
   return <div className="subagents-tab" aria-label="Subagent activity" aria-busy={loading}>
     <header className="subagents-header">
       <div><h2>Subagents</h2><p title={chat?.title}>{chat?.title || 'Conversation activity'}</p></div>
-      <span className="subagents-count" aria-label={`${agents.length} subagents`}>{agents.length}</span>
+      <span className="subagents-count" aria-label={`${total} subagents`}>{total}</span>
     </header>
-    {agents.length > 0 && <div className="subagent-counts" role="group" aria-label="Subagent states">
+    {total > 0 && <div className="subagent-counts" role="group" aria-label="Subagent states">
       <span>{counts.running} running</span>{counts.waiting > 0 && <span>{counts.waiting} waiting</span>}<span>{counts.completed + counts.verified} completed</span>
       {counts.failed > 0 && <span className="is-failed">{counts.failed} failed or stopped</span>}
       {counts.unknown > 0 && <span>{counts.unknown} not reported</span>}
@@ -278,7 +301,7 @@ export function SubagentsTab({tab}: {tab:WorkspaceTab}): React.ReactElement {
     {!chatId && <p className="subagents-status is-error" role="status">This saved tab has no conversation reference.</p>}
     {loading && <p className="subagents-status" role="status">{agents.length ? 'Refreshing activity…' : 'Loading activity…'}</p>}
     {loadable?.phase === 'error' && <div className="subagents-error"><p className="subagents-status is-error" role="status">Activity unavailable: {loadable.error || 'The conversation could not be loaded.'}{agents.length > 0 ? ' Showing the last available reports.' : ''}</p>{chatId && <button className="subagents-retry" onClick={() => retryTimeline(chatId)} aria-label="Retry loading subagent activity">Retry</button>}</div>}
-    {chatId && !agents.length && !loading && loadable?.phase !== 'error' && <div className="subagents-empty"><Bot size={22} aria-hidden="true" /><p>No subagents reported yet.</p><span>Delegated work appears here when the provider supplies child activity.</span></div>}
-    <div className="subagents-list">{agents.map(agent => <AgentCard key={`${chatId}:${agent.id}`} agent={agent} chatId={chatId!} now={now} controls={controls} />)}</div>
+    {chatId && !total && !loading && loadable?.phase !== 'error' && <div className="subagents-empty"><Bot size={22} aria-hidden="true" /><p>No subagents reported yet.</p><span>Delegated work appears here when the provider supplies child activity.</span></div>}
+    <div className="subagents-list">{agents.map(agent => <AgentCard key={`${chatId}:${agent.id}`} agent={agent} chatId={chatId!} now={now} controls={controls} />)}{delegated.map(child => <DelegatedCard key={child.childChatId} child={child} />)}</div>
   </div>;
 }

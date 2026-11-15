@@ -10,7 +10,8 @@ export interface CiAnnotation {path:string; line:number|null; level:'notice'|'wa
  */
 export interface CiCheckLog {
   checkId:string; name:string; conclusion:string|null;
-  source:'actions-log'|'check-output'|'status'|'none';
+  /** `job-log`: a GitLab job trace (#329). */
+  source:'actions-log'|'job-log'|'check-output'|'status'|'none';
   excerpt:string;
   /** Lines in the excerpt; `truncated` when it is a window of a longer log. */
   lines:number; truncated:boolean;

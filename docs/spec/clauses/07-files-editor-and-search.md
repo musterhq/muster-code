@@ -57,6 +57,8 @@ Boundaries:
 | [MUS-SPEC-07-837B](07-files-editor-and-search.md#mus-spec-07-837b) | An absolute path inside the chat's folder, in inline code and in prose, renders as the file link, and clicking it opens that file, relative to the folder, in a tab. | [`an absolute path inside the chat's folder becomes the file link and opens the file`](../../../packages/agent-app/tests/reply-file-links-837-dom.tsx) |
 | [MUS-SPEC-07-837C](07-files-editor-and-search.md#mus-spec-07-837c) | Existing files outside the chat's folders, named by an absolute path, a ~/ path or an absolute path with spaces, render as the outside-file link for that exact path; each path is checked once. | [`an existing file outside the chat's folders becomes the outside-file link`](../../../packages/agent-app/tests/reply-file-links-837-dom.tsx) |
 | [MUS-SPEC-07-837D](07-files-editor-and-search.md#mus-spec-07-837d) | Absolute and ~/ paths that do not exist stay plain text with no link of either kind, and a relative file name still links through the folder as before. | [`a path that does not exist stays plain text, and a relative name still links in the folder`](../../../packages/agent-app/tests/reply-file-links-837-dom.tsx) |
+| [MUS-SPEC-07-147A](07-files-editor-and-search.md#mus-spec-07-147a) | Adding `~/project` on a host makes an `ssh://` sidebar folder that is not missing; the file tree, read, full read, save (with the revision check), create, rename, trash, name search, quick open and content search all work on the host’s files, and every call after the first reuses one multiplexed connection. | [`a folder on an SSH host lists, reads, writes and searches its files through one connection`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
+| [MUS-SPEC-07-147B](07-files-editor-and-search.md#mus-spec-07-147b) | When the host goes away, the next file call fails within seconds with a sentence and the host’s state becomes `offline` (an event is sent); when it is back, the next call reconnects and works. | [`a dropped connection shows offline, fails fast and reconnects`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
 
 ### Large files
 
@@ -521,4 +523,28 @@ Boundaries:
 - Test: `packages/agent-app/tests/reply-file-links-837-dom.tsx::a path that does not exist stays plain text, and a relative name still links in the folder`
 - Environment: linkedom DOM suite in `scripts/test-renderer.mjs` (`reply-file-links-837-dom`, split build), with a stubbed bridge.
 - Known gaps: An inline-code mention that resolves to nothing shows its file name, as before this change, not the full path.
+- Evidence: UNVERIFIED
+
+### Folders on an SSH host (#147)
+
+<a id="mus-spec-07-147a"></a>
+#### MUS-SPEC-07-147A: A folder on an SSH host lists, reads, writes and searches its files through one connection
+
+- Precondition: A trusted, connected host with `~/project` holding README.md, src/app.ts and .git.
+- Action: Add the folder, then list, read, save, save again with the old revision, create a file and a folder, rename, trash, search names, quick open and search content.
+- Expected result: The folder path is `ssh://devbox/<real path>`; the listing has src before README.md and hides .git; the save lands on the host and a stale save reports a conflict; create, rename and trash change the host’s files (trash moves to the host’s Trash); searches find README.md and the `hello` line; the stand-in logged one new connection for all of it.
+- Test: `packages/agent-app/tests/ssh-workspaces-147.test.ts::a folder on an SSH host lists, reads, writes and searches its files through one connection`
+- Environment: Node test runner with the real agent service, a temp data folder and a temp HOME; a stand-in `ssh` and `ssh-keyscan` on PATH (`tests/fixtures/fake-ssh/`) that run the remote commands under /bin/sh on this machine. No network, no real host.
+- Known gaps: Live file watching is not offered for remote folders yet: the tree refreshes when asked.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-07-147b"></a>
+#### MUS-SPEC-07-147B: A dropped connection shows offline, fails fast and reconnects
+
+- Precondition: A remote folder on a connected host.
+- Action: Drop the connection and make the host unreachable, list the folder, then bring the host back and list again.
+- Expected result: The first list rejects in under 5 seconds with a "could not reach" sentence, a `remoteChanged` event carries `offline`; the second list succeeds and the state is `connected` again.
+- Test: `packages/agent-app/tests/ssh-workspaces-147.test.ts::a dropped connection shows offline, fails fast and reconnects`
+- Environment: Node test runner with the real agent service, a temp data folder and a temp HOME; a stand-in `ssh` and `ssh-keyscan` on PATH (`tests/fixtures/fake-ssh/`) that run the remote commands under /bin/sh on this machine. No network, no real host.
+- Known gaps: The automatic retry timer is not waited for; reconnecting on the next call is what is checked.
 - Evidence: UNVERIFIED

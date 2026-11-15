@@ -6,7 +6,7 @@ This folder is the specification of Muster: what the app does, area by area, and
 
 - The spec is split into one **clause file** per product area, in [`clauses/`](clauses/). Each starts with a short plain-words description of the area: what the user can do and where its boundaries are.
 - Below that, under `## Acceptance cases`, each checkable behaviour is an **acceptance case** with a stable ID such as `MUS-SPEC-04-1A`. A case says what is set up, what is done, what must be true afterwards, which test proves it, and what that test does not show.
-- Clause IDs are `MUS-SPEC-01` to `MUS-SPEC-22`. A case ID adds a topic group number and a letter: `MUS-SPEC-<NN>-<n><L>`. IDs are never reused or renumbered.
+- Clause IDs are `MUS-SPEC-01` to `MUS-SPEC-23`. A case ID adds a topic group number and a letter: `MUS-SPEC-<NN>-<n><L>`. IDs are never reused or renumbered.
 - [acceptance-cases.md](acceptance-cases.md) has the authoring rules and the case template. [test-traceability.md](test-traceability.md) is an index only: it lists the clauses that have cases.
 - `node scripts/check-spec.mjs` checks the case schema, the test links both ways and the index rows. It runs in CI.
 - A link is not coverage. A case whose test was not run on the exact head is `UNVERIFIED`.
@@ -66,3 +66,4 @@ A unit test for a tricky pure function, such as a parser or a regex, is welcome 
 | `MUS-SPEC-20` | Performance | [20-performance.md](clauses/20-performance.md) |
 | `MUS-SPEC-21` | Visuals and artifacts | [21-visuals-and-artifacts.md](clauses/21-visuals-and-artifacts.md) |
 | `MUS-SPEC-22` | Engineering standards | [22-engineering-standards.md](clauses/22-engineering-standards.md) |
+| `MUS-SPEC-23` | Mobile app and phone access | [23-mobile.md](clauses/23-mobile.md) |

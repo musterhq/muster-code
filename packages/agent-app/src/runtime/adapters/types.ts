@@ -6,6 +6,9 @@ import type {Chat} from '../../shared/protocol.ts';
  * of type commandExecution, fileChange, fileRead, webSearch, todoList,
  * collabAgentToolCall, mcpToolCall or dynamicToolCall, plus `thread/tokenUsage/updated`. */
 export interface McpServerSpec { command: string; args?: string[]; env?: Record<string, string> }
+/** #147 phase 2: the run's CLI runs on an SSH host, in `root` there. `command` is the `muster-remote:` name spawnOwned starts
+ *  over ssh (owned-process.ts); the adapter uses it instead of its local binary and `root` as the CLI's folder. */
+export interface RemoteRun { host: string; root: string; command: string }
 export interface AdapterRunInput {
   chat: Chat; cwd: string; prompt: string; model: string;
   images?: string[];
@@ -38,6 +41,8 @@ export interface AdapterRunInput {
   resumeThreadId?: string;
   /** Asked when `resumeThreadId` names a conversation the adapter no longer holds: returns a summary of the earlier messages to send ahead of the prompt. */
   onThreadReset?(previousThreadId: string): string | undefined;
+  /** #147 phase 2: run the CLI on this SSH host instead of here. Routes that cannot are never given one. */
+  remote?: RemoteRun;
   signal: AbortSignal;
   onThreadReady(threadId: string): void;
   onTurnAccepted(identity: {threadId: string; turnId: string}): void;
