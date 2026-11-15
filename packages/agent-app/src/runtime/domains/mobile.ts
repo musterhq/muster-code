@@ -24,7 +24,7 @@ import type {MobileDeviceView, MobileStatus} from '../../shared/domains/mobile-p
 import {equalBytes, fromBase64, fromUtf8, toBase64, utf8} from '../../shared/mobile/bytes.ts';
 import {checkCodeOf, keyFingerprint, MAX_PHONE_FRAME_BYTES, prologue, SecureChannel, MODE_BYTE, type ChannelMode} from '../../shared/mobile/channel.ts';
 import {Handshake, type KeyPair} from '../../shared/mobile/noise.ts';
-import {CLOSE, formatPairingLink, parsePairingLink, MOBILE_ACCESS, MOBILE_PROTOCOL_VERSION, MobileError, RELAY_NEEDS_TLS, relayUrlAllowed, type MobileAccess, type MobileEvent, type MobileFrame, type MobileItem, type PairRequest, type Welcome} from '../../shared/mobile/protocol.ts';
+import {CLOSE, TERMINAL_BURST_BYTES, TERMINAL_BYTES_PER_SECOND, formatPairingLink, parsePairingLink, MOBILE_ACCESS, MOBILE_PROTOCOL_VERSION, MobileError, RELAY_NEEDS_TLS, relayUrlAllowed, type MobileAccess, type MobileEvent, type MobileFrame, type MobileItem, type PairRequest, type Welcome} from '../../shared/mobile/protocol.ts';
 import {device} from '../../shared/device-noun.ts';
 import {activeSecretStore, openSecretStores, type SecretStore} from '../secret-store.ts';
 import {handle, mobileChats, MobileItemMapper, needsList, pathScrubber, type PathScrub} from '../mobile/bridge.ts';
@@ -33,6 +33,7 @@ import {generateRouteKey, nodeNoiseCrypto, signWithRouteKey, type RouteKey} from
 import {RelayLink} from '../mobile/relay-link.ts';
 import {LanListener, lanHosts} from '../mobile/lan-listener.ts';
 import {PhoneUploads} from '../mobile/uploads.ts';
+import {phoneTerminalHost, type PhoneTerminalHost} from '../../shared/mobile/terminal-host.ts';
 import type {DomainContext, DomainModule} from './types.ts';
 
 /** Test seams: the secret store, and shorter or smaller limits. */
@@ -81,7 +82,12 @@ interface Session {
    *  meanwhile wait in `pending`) and the last delta's number. */
   stream: {chatId: string; seq: number; sent: Map<string, MobileItem> | null; pending: Array<[MobileItem[], Set<string> | null]>} | null;
   timer: ReturnType<typeof setTimeout> | undefined;
+  /** The terminal this phone has open (phase 6): output waiting to go, what was skipped to keep up, and the send budget. */
+  terminal?: TerminalFeed | null;
 }
+interface TerminalFeed { id: string; buffer: string; skipped: number; exited: boolean; tokens: number; at: number; timer?: ReturnType<typeof setTimeout> }
+/** How often terminal output is coalesced into one event, and what is kept of it while the budget is spent. */
+const TERMINAL_FLUSH_MS = 50, TERMINAL_KEEP = 16 * 1024, TERMINAL_MIN_SEND = 4096;
 interface Identity { keys: KeyPair; route: RouteKey }
 
 function readJson<T>(path: string, fallback: T): T { try { return JSON.parse(readFileSync(path, 'utf8')) as T; } catch { return fallback; } }
@@ -268,6 +274,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
   function forget(session: Session) {
     if (!sessions.delete(session.conn)) return;
     clearTimeout(session.timer);
+    clearTimeout(session.terminal?.timer);
     if (pairing?.pending?.session === session) pairing.pending = null;
     if (session.deviceId) changed();
   }
@@ -389,6 +396,11 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       ...(mobileSeams.stageGate ? {beforeStage: mobileSeams.stageGate} : {}),
       ...(mobileSeams.reviewGate ? {beforeReview: mobileSeams.reviewGate} : {}),
       ...(mobileSeams.writeGate ? {beforeWrite: mobileSeams.writeGate} : {}),
+      watchTerminal: (terminalId: string | null) => {
+        clearTimeout(session.terminal?.timer);
+        followTerminals();
+        session.terminal = terminalId ? {id: terminalId, buffer: '', skipped: 0, exited: false, tokens: TERMINAL_BURST_BYTES, at: Date.now()} : null;
+      },
       watch: (chatId: string | null, deltas?: boolean) => { session.watching = chatId; session.stream = chatId && deltas ? {chatId, seq: 0, sent: null, pending: []} : null; },
       streamFrom: (chatId: string, items: MobileItem[]): number => {
         const stream = session.stream;
@@ -401,6 +413,52 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       },
       ...(session.deviceId ? {uploads: uploadsFor(session.deviceId)} : {}),
     };
+  }
+
+  // Terminal output → the phone that has that terminal open (phase 6), coalesced and capped: a runaway terminal costs the
+  // phone at most a burst and then a steady rate; the rest is skipped and counted.
+  let terminalHost: PhoneTerminalHost | undefined, offTerminals: (() => void) | undefined;
+  function followTerminals() {
+    const host = phoneTerminalHost();
+    if (host === terminalHost) return;
+    offTerminals?.(); terminalHost = host;
+    offTerminals = host?.subscribe(event => {
+      if (disposed) return;
+      for (const session of ready()) {
+        const feed = session.terminal;
+        if (!feed || feed.id !== event.id) continue;
+        if (event.type === 'exit') feed.exited = true;
+        else {
+          feed.buffer += event.data;
+          if (feed.buffer.length > TERMINAL_BURST_BYTES) { feed.skipped += feed.buffer.length - TERMINAL_KEEP; feed.buffer = feed.buffer.slice(-TERMINAL_KEEP); }
+        }
+        feed.timer ??= setTimeout(() => flushTerminal(session), TERMINAL_FLUSH_MS);
+      }
+    });
+  }
+  function flushTerminal(session: Session) {
+    const feed = session.terminal;
+    if (!feed) return;
+    feed.timer = undefined;
+    if (!sessions.has(session.conn)) return;
+    const now = Date.now();
+    feed.tokens = Math.min(TERMINAL_BURST_BYTES, feed.tokens + (now - feed.at) * TERMINAL_BYTES_PER_SECOND / 1000);
+    feed.at = now;
+    let allowed = Math.floor(feed.tokens);
+    if (feed.buffer.length > allowed) {
+      if (allowed < TERMINAL_MIN_SEND) {
+        // Out of budget: keep the newest output and try again once some budget is back.
+        if (feed.buffer.length > TERMINAL_KEEP) { feed.skipped += feed.buffer.length - TERMINAL_KEEP; feed.buffer = feed.buffer.slice(-TERMINAL_KEEP); }
+        feed.timer = setTimeout(() => flushTerminal(session), 100);
+        return;
+      }
+      feed.skipped += feed.buffer.length - allowed;
+      feed.buffer = feed.buffer.slice(-allowed);
+    }
+    allowed = feed.buffer.length;
+    if (!allowed && !feed.exited) return;
+    sendEvent(session, {type: 'terminal', id: feed.id, data: scrub(feed.buffer), ...(feed.skipped ? {skipped: feed.skipped} : {}), ...(feed.exited ? {exited: true} : {})});
+    feed.tokens -= allowed; feed.buffer = ''; feed.skipped = 0; feed.exited = false;
   }
 
   // Chat changes → open sessions.
@@ -569,6 +627,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       if (pairing) clearTimeout(pairing.timer);
       for (const session of [...sessions.values()]) drop(session, CLOSE.gone, 'closed');
       stopLink();
+      offTerminals?.();
       for (const entry of uploads.values()) entry.dispose();
       uploads.clear();
     },

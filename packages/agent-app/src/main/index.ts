@@ -1,3 +1,4 @@
+import { setPhoneTerminalHost, type PhoneTerminalEvent } from '../shared/mobile/terminal-host.ts';
 import { app, BrowserWindow, ClipboardItem, desktopCapturer, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, protocol, screen, session, shell, clipboard, systemPreferences } from 'electron';
 import {execFile} from 'node:child_process';
 import {downscaleIcon} from './icon-downscale.ts';
@@ -221,7 +222,14 @@ async function main(): Promise<void> {
     toast.show();
   };
   // R3: event delivery runs inside runtime domain code (emit); a delivery fault is logged, never thrown back into it.
-  const onEvent = (event: AgentEvent): void => { try { deliverEvent(event); } catch (error) { console.error(`[muster] event delivery failed (${event.type}):`, error instanceof Error ? error.message : String(error)); } };
+  // #326 phase 6: a paired phone watching a terminal hears its output through the phone terminal host below.
+  const phoneTerminalListeners = new Set<(event: PhoneTerminalEvent) => void>();
+  const onEvent = (event: AgentEvent): void => {
+    if (phoneTerminalListeners.size && (event.type === 'terminalData' || event.type === 'terminalExit')) {
+      const forward: PhoneTerminalEvent = event.type === 'terminalData' ? {type: 'data', id: event.id, data: event.data} : {type: 'exit', id: event.id};
+      for (const listener of phoneTerminalListeners) { try { listener(forward); } catch { /* a phone's feed never breaks the desktop's */ } }
+    }
+    try { deliverEvent(event); } catch (error) { console.error(`[muster] event delivery failed (${event.type}):`, error instanceof Error ? error.message : String(error)); } };
   const deliverEvent = (event: AgentEvent): void => {
     if (event.type === 'settingsChanged') { notifyPrefs = notificationPrefs(event.values); applyBadge(pendingAttention); }
     if (event.type === 'chatWoke') notifyWoke(event);
@@ -267,6 +275,12 @@ async function main(): Promise<void> {
     {terminal:{shell:async()=>(await loaded.service.invoke('settings.get',{})).values['terminal.shell'],
       // #147: a terminal in a folder on an SSH host is `ssh -t` to the host through its shared connection.
       remote:async folderPath=>{const folder=(await loaded.service.invoke('app.snapshot',undefined)).folders.find(item=>item.path===folderPath);if(!folder)throw new Error('The terminal folder no longer exists.');return loaded.service.invoke('remote.terminal.launch',{folderId:folder.id});}},onExit:session=>processContinuations?.exited(session)});
+  setPhoneTerminalHost({
+    list: async chatId => (await processes.terminals.list({chatId})).map(info => ({id: info.id, title: info.title, status: info.status})),
+    snapshot: async id => ({data: (await processes.terminals.snapshot({id})).data}),
+    input: async (id, data) => { await processes.terminals.input({id, data}); },
+    subscribe: listener => { phoneTerminalListeners.add(listener); return () => { phoneTerminalListeners.delete(listener); }; },
+  });
   processContinuations = new ProcessContinuations({
     agentProcesses:chatId=>processes.agentProcesses(chatId),
     // The same queue a typed follow-up goes through: it waits for a running turn and holds while the queue is paused.

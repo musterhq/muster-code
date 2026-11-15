@@ -4,10 +4,11 @@
  */
 import type {ApprovalData, Chat, PendingQuestion, ProviderInfo, Snapshot, TimelineItem} from '../../shared/protocol.ts';
 import {device} from '../../shared/device-noun.ts';
-import {ACTING_METHODS, MAX_SEND_ATTACHMENTS, MOBILE_METHODS, MOBILE_PROTOCOL_VERSION, MobileError, type MobileAccess, type MobileApproval, type MobileChange, type MobileChat, type MobileReviewState, type MobileChatStatus, type MobileItem, type MobileMethod, type MobileMethods, type MobileNeed, type MobilePlace, type MobileProvider, type MobileQuestion} from '../../shared/mobile/protocol.ts';
+import {ACTING_METHODS, MAX_SEND_ATTACHMENTS, TERMINAL_INPUT_MAX, TERMINAL_OPEN_BYTES, MOBILE_METHODS, MOBILE_PROTOCOL_VERSION, MobileError, type MobileAccess, type MobileApproval, type MobileChange, type MobileChat, type MobileReviewState, type MobileChatStatus, type MobileItem, type MobileMethod, type MobileMethods, type MobileNeed, type MobilePlace, type MobileProvider, type MobileQuestion} from '../../shared/mobile/protocol.ts';
 import type {DomainContext} from '../domains/types.ts';
 import type {PhoneUploads} from './uploads.ts';
 import type {ReviewBaselineInfo, ReviewChange, ReviewMark} from '../../shared/domains/review-protocol.ts';
+import {phoneTerminalHost} from '../../shared/mobile/terminal-host.ts';
 import {buildDiff, diffPage, hunkInfo, type BuiltDiff} from './diff.ts';
 import {gitBranches, gitCommit, gitStatus, gitSwitch, listFolder, prCreate, prDraft, readPage, type WorkspaceContext} from './workspace.ts';
 
@@ -169,6 +170,8 @@ export interface BridgeContext {
   beforeStage?(): Promise<void>;
   /** Test seam: awaited after changes.keep or changes.undo read what they need and before the access check and the write. */
   beforeReview?(): Promise<void>;
+  /** Streams this terminal's new output to the session (null stops) (phase 6). */
+  watchTerminal?(terminalId: string | null): void;
   /** Test seam: awaited by phase 6 writes (commit, switch, pull request) after their reads and before the access check. */
   beforeWrite?(): Promise<void>;
 }
@@ -269,6 +272,14 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
   /** Files, Git and pull requests (phase 6) work in the chat's folder. */
   const workspace = async (): Promise<WorkspaceContext> => ({invoke: ctx.invoke, snapshot: ctx.snapshot, chat: await chatOf(id(p.chatId, 'chatId')), recheck,
     ...(ctx.beforeWrite ? {beforeWrite: ctx.beforeWrite} : {}), ...(ctx.scrub ? {scrub: ctx.scrub} : {})});
+  /** The desktop's terminal sessions, and one of this chat's terminals (phase 6). */
+  const terminalsOf = () => { const host = phoneTerminalHost(); if (!host) throw new MobileError('refused', `Terminals aren’t available from ${device().your} right now.`); return host; };
+  const terminalOf = async () => {
+    const chat = await chatOf(id(p.chatId, 'chatId')), host = terminalsOf(), terminalId = id(p.id, 'terminal id');
+    const entry = (await host.list(chat.id)).find(item => item.id === terminalId);
+    if (!entry) throw new MobileError('not-found', 'That terminal is not one of this chat’s.');
+    return {host, entry};
+  };
   try {
     switch (m) {
       case 'ping': return {} satisfies MobileMethods['ping']['result'];
@@ -447,6 +458,26 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
       case 'git.switch': return gitSwitch(await workspace(), p) satisfies Promise<MobileMethods['git.switch']['result']>;
       case 'pr.draft': return prDraft(await workspace()) satisfies Promise<MobileMethods['pr.draft']['result']>;
       case 'pr.create': return prCreate(await workspace(), p) satisfies Promise<MobileMethods['pr.create']['result']>;
+      case 'terminal.list': {
+        const chat = await chatOf(id(p.chatId, 'chatId'));
+        return {terminals: (await terminalsOf().list(chat.id)).slice(0, 20).map(entry => ({id: entry.id, title: entry.title.slice(0, 80), running: entry.status === 'running'}))} satisfies MobileMethods['terminal.list']['result'];
+      }
+      case 'terminal.open': {
+        const {host, entry} = await terminalOf();
+        // Watching starts before the read, so output printed while it runs is not lost (it may show twice).
+        ctx.watchTerminal?.(entry.id);
+        const {data} = await host.snapshot(entry.id);
+        return {text: (ctx.scrub ?? (value => value))(data.slice(-TERMINAL_OPEN_BYTES)), running: entry.status === 'running'} satisfies MobileMethods['terminal.open']['result'];
+      }
+      case 'terminal.close': ctx.watchTerminal?.(null); return {};
+      case 'terminal.input': {
+        if (typeof p.data !== 'string' || !p.data || p.data.length > TERMINAL_INPUT_MAX) throw new MobileError('bad-request', 'Missing or invalid input.');
+        const {host, entry} = await terminalOf();
+        await ctx.beforeWrite?.();
+        recheck();
+        await host.input(entry.id, p.data);
+        return {} satisfies MobileMethods['terminal.input']['result'];
+      }
       case 'needs.list': return {needs: await needsList(ctx.invoke, await ctx.snapshot(), ctx.scrub)} satisfies MobileMethods['needs.list']['result'];
     }
   } catch (error) {
