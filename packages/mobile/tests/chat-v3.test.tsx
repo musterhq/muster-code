@@ -20,7 +20,8 @@ const press = (label: string | RegExp) => fireEvent.press(screen.getByRole('butt
 // Spec: MUS-SPEC-23-24C (docs/spec/clauses/23-mobile.md#mus-spec-23-24c)
 test('a turn’s steps fold into one capsule, the live line names the running step, and a finished run shows its summary', async () => {
   const connection = fakeConnection({'chat.open': open('running'), 'changes.list': {runId: 'run-1', files: [{path: 'src/session/store.ts', status: 'modified', adds: 3, dels: 1, state: 'review', afterHash: 'a'.repeat(40)}], truncated: false}});
-  await render(<ChatScreen connection={connection} chatId="c1" />);
+  const review = jest.fn();
+  await render(<ChatScreen connection={connection} chatId="c1" onReview={review} />);
   await layOutTimeline();
   await layOutRows();
   expect(await screen.findByText('Appends now go through XADD')).toBeTruthy();
@@ -44,7 +45,8 @@ test('a turn’s steps fold into one capsule, the live line names the running st
   expect(screen.queryByTestId('caret')).toBeNull();
   expect(screen.getByRole('button', {name: /^Worked 2m 14s, 4 steps/})).toBeTruthy();
   expect(screen.getByText('1 file changed')).toBeTruthy();
-  expect(screen.getByRole('button', {name: 'Review'})).toBeTruthy();
+  await press('Review');
+  expect(review).toHaveBeenCalled();
   expect((Haptics.notificationAsync as jest.Mock).mock.calls.filter(([kind]) => kind === 'success')).toHaveLength(1);
 });
 

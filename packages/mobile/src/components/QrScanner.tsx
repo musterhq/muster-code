@@ -3,10 +3,10 @@ import {useRef} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {CameraView, useCameraPermissions} from 'expo-camera';
 import {Button} from './Button';
-import {space, themed, useTheme} from '../theme';
+import {space, themed, type} from '../theme';
 
 export function QrScanner({onScan}: {onScan(text: string): void}) {
-  const styles = useStyles(), colors = useTheme();
+  const styles = useStyles();
   const [permission, request] = useCameraPermissions();
   const done = useRef(false);
   if (!permission) return null;
@@ -21,5 +21,5 @@ export function QrScanner({onScan}: {onScan(text: string): void}) {
 }
 const useStyles = themed(colors => StyleSheet.create({
   ask: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.m, padding: space.l},
-  muted: {color: colors.text, textAlign: 'center'},
+  muted: {color: colors.text, ...type.callout, textAlign: 'center'},
 }));

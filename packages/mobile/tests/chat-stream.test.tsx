@@ -28,7 +28,8 @@ test('applies stream deltas in order, resyncs after a gap, and reopens the chat 
     connection.emit({type: 'delta', chatId: 'c1', seq: 3, ops: [{item: item('t1', 'tool', 'Ran npm test')}]});
   });
   expect(await screen.findByText('Hello world')).toBeTruthy();
-  expect(await screen.findByText('Ran npm test')).toBeTruthy();
+  // v3: the tool step folds into the turn's work capsule (MUS-SPEC-23-24C).
+  expect(await screen.findByRole('button', {name: /1 step/})).toBeTruthy();
   expect(opens).toHaveLength(1);
   // Delta 4 never came: the screen reopens the chat and shows the desktop's state.
   await act(async () => { connection.emit({type: 'delta', chatId: 'c1', seq: 5, ops: [{id: 'm1', append: ' lost'}]}); });

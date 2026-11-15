@@ -12,7 +12,7 @@ test('approve is sent once, settles to Approved with a haptic, and a failure bri
   let release: () => void = () => undefined;
   const connection = fakeConnection({'approval.respond': () => new Promise<object>(resolve => { release = () => resolve({}); })});
   const view = await render(<ApprovalCard connection={connection} itemId="a1" approval={{kind: 'command', command: 'npm publish'}} canAct fallback="" />);
-  for (const label of ['Approve', 'Decline']) expect((StyleSheet.flatten(button(label).props.style) as {minHeight?: number}).minHeight).toBeGreaterThanOrEqual(44);
+  for (const label of ['Approve', 'Decline']) expect((StyleSheet.flatten(button(label).props.style) as {height?: number}).height).toBeGreaterThanOrEqual(44);
   await fireEvent.press(screen.getByText('Approve'));
   await fireEvent.press(screen.getByText('Approve'));
   expect(connection.calls.filter(call => call.method === 'approval.respond')).toEqual([{method: 'approval.respond', params: {itemId: 'a1', decision: 'accept'}}]);

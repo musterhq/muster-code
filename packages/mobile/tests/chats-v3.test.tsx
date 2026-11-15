@@ -1,4 +1,5 @@
 import {act, render, screen} from '@testing-library/react-native';
+import {StyleSheet} from 'react-native';
 import * as Haptics from 'expo-haptics';
 import {ChatsScreen} from '../src/screens/ChatsScreen';
 import type {MobileChat} from '../src/shared';
@@ -11,8 +12,10 @@ const chats: MobileChat[] = [
   {id: 'fail', title: 'Nightly ETL out of memory', status: 'failed', updatedAt: minutes(180), place: null, needsYou: 0},
   {id: 'done', title: 'Bump React Native to 0.88', status: 'completed', updatedAt: minutes(60), place: 'atlas-api', needsYou: 0},
 ];
-/** The section headers and rows in screen order, as a reader would meet them. */
+/** The section headers and rows in screen order (by where the list placed them), as a reader would meet them. */
+const topOf = (node: any) => StyleSheet.flatten(node.parent?.props.style)?.top ?? 0;
 const outline = () => screen.getByTestId('chats-list').queryAll(node => typeof node.type === 'string' && (node.props.accessibilityRole === 'header' || node.props.testID?.startsWith?.('chat-row-')))
+  .sort((a, b) => topOf(a) - topOf(b))
   .map(node => node.props.accessibilityRole === 'header' ? `# ${node.props.accessibilityLabel}` : node.props.testID.slice('chat-row-'.length));
 
 // Spec: MUS-SPEC-23-24B (docs/spec/clauses/23-mobile.md#mus-spec-23-24b)

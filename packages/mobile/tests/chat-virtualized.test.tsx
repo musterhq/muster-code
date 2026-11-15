@@ -39,6 +39,9 @@ test('a 2,000-row chat mounts a window and streaming re-renders only the streami
   renders.clear();
   await act(async () => { connection.emit({type: 'delta', chatId: 'c1', seq: 71, ops: [{item: {id: 'tool-1', kind: 'tool', text: 'Ran npm test', createdAt: at}}]}); });
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
-  expect(screen.getByText('Ran npm test')).toBeTruthy();
-  expect([...renders.keys()]).toEqual(['tool-1']);
+  // v3: a new tool step is a work capsule row (MUS-SPEC-23-24C). It renders, and the reply renders once more only to hand
+  // over the streaming caret; no other row renders.
+  expect(screen.getByRole('button', {name: /1 step/})).toBeTruthy();
+  expect([...renders.keys()].sort()).toEqual(['reply', 'work:tool-1']);
+  expect(renders.get('reply')).toBe(1);
 });

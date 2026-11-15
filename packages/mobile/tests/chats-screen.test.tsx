@@ -12,9 +12,9 @@ test('lists chats with status and needs-you, and updates live', async () => {
   await layOutTimeline('chats-list');
   expect(await screen.findByText('Release notes')).toBeTruthy();
   expect(screen.getByText('Deploy')).toBeTruthy();
-  expect(screen.getByLabelText('1 waiting on you')).toBeTruthy();
-  expect(screen.getByText(/^muster-code · Waiting for you$/)).toBeTruthy();
-  expect(screen.getAllByText(/^muster-code · /).length).toBe(2);
+  // v3 rows: the lead word says the chat needs the person (MUS-SPEC-23-24B).
+  expect(screen.getByLabelText(/^Deploy, Needs you, Needs you · muster-code$/)).toBeTruthy();
+  expect(screen.getByText('muster-code')).toBeTruthy();
   await act(async () => { connection.emit({type: 'chats', chats: [chat('a', 'Release notes v2', {status: 'running'}), chat('b', 'Deploy', {status: 'waiting', needsYou: 1})]}); });
   expect(await screen.findByText('Release notes v2')).toBeTruthy();
   expect(screen.getByText(/^muster-code · Working/)).toBeTruthy();

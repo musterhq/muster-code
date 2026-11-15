@@ -8,7 +8,7 @@ import * as Clipboard from 'expo-clipboard';
 import {splitBlocks, sameBlock, type Block} from '../markdown/blocks';
 import {haptics} from '../haptics';
 import {reportRender} from '../perf';
-import {font, space, themed, touch, type, useTheme, type Palette} from '../theme';
+import {font, radius, space, themed, touch, type, useTheme, type Palette} from '../theme';
 
 /** Cards keep this height before anything renders, so text below never jumps. */
 export const CARD_HEIGHT = 180;
@@ -16,9 +16,9 @@ const CARD_TITLE = {diagram: 'Diagram', chart: 'Chart'} as const;
 type Card = Extract<Block, {kind: 'card'}>;
 
 const markdownStyle = (c: Palette) => ({
-  paragraph: {color: c.text, fontSize: type.body.fontSize, lineHeight: type.body.lineHeight},
+  paragraph: {color: c.text, fontSize: type.prose.fontSize, lineHeight: type.prose.lineHeight},
   h1: {color: c.strong, fontSize: 22}, h2: {color: c.strong, fontSize: 19}, h3: {color: c.strong, fontSize: 17},
-  link: {color: c.accent}, code: {color: c.text, backgroundColor: c.raised, fontFamily: font.mono},
+  link: {color: c.accent}, code: {color: c.text, backgroundColor: c.inline, fontFamily: font.mono},
   blockquote: {color: c.muted, borderColor: c.control},
 });
 
@@ -27,7 +27,7 @@ function CodeBlock({lang, code}: {lang: string; code: string}) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const copy = () => {
-    void Clipboard.setStringAsync(code); haptics.tap(); setCopied(true);
+    void Clipboard.setStringAsync(code); haptics.light(); setCopied(true);
     clearTimeout(timer.current); timer.current = setTimeout(() => setCopied(false), 1200);
   };
   const lines = code.split('\n');
@@ -90,15 +90,15 @@ export const Markdown = memo(function Markdown({text}: {text: string}) {
 const useStyles = themed(c => StyleSheet.create({
   blocks: {gap: space.s},
   prose: {flexShrink: 1},
-  code: {backgroundColor: c.surface, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, overflow: 'hidden'},
+  code: {backgroundColor: c.code, borderRadius: radius.well, overflow: 'hidden'},
   codeHead: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: space.m, paddingTop: space.s},
   lang: {color: c.faint, ...type.caption, fontFamily: font.mono},
   copy: {color: c.muted, ...type.caption, fontWeight: '600'},
   codeBody: {padding: space.m},
   codeLine: {flexDirection: 'row', gap: space.m},
-  number: {color: c.faint, ...type.label, fontFamily: font.mono, minWidth: 18, textAlign: 'right'},
-  codeText: {color: c.text, ...type.label, fontFamily: font.mono},
-  card: {height: CARD_HEIGHT, backgroundColor: c.surface, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, overflow: 'hidden', gap: space.s},
+  number: {color: c.faint, ...type.caption, lineHeight: 21, fontFamily: font.mono, minWidth: 18, textAlign: 'right'},
+  codeText: {color: c.text, ...type.codeBlock},
+  card: {height: CARD_HEIGHT, backgroundColor: c.surface, borderRadius: radius.card, overflow: 'hidden', gap: space.s},
   cardSource: {color: c.faint, ...type.caption, fontFamily: font.mono, paddingHorizontal: space.m},
   full: {flex: 1, backgroundColor: c.background, paddingTop: space.xl + space.l, gap: space.s},
   fullHead: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', minHeight: touch, paddingHorizontal: space.l},

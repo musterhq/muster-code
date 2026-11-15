@@ -41,8 +41,8 @@ test('two computers are paired side by side, the switcher shows each one’s sta
   expect(sheet.getByText('Studio Mac')).toBeTruthy();
   expect(sheet.getByText(/Connected · LAN direct/)).toBeTruthy();
   expect(sheet.getByText(/Connected · Relay/)).toBeTruthy();
-  expect(sheet.getByText('Can act')).toBeTruthy();
-  expect(sheet.getByText('Read only')).toBeTruthy();
+  // v3: a watch-only computer carries an eye instead of an access pill (MUS-SPEC-23-24I).
+  expect(sheet.getAllByLabelText('Watch only')).toHaveLength(1);
   expect(sheet.getByText('Pair another computer')).toBeTruthy();
   await act(async () => { fireEvent.press(sheet.getByLabelText('Build box')); });
   await layOutTimeline('chats-list');
