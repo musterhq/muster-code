@@ -110,6 +110,34 @@ export const UPLOADS_AT_ONCE = 2;
 export const MAX_SEND_ATTACHMENTS = 10;
 export interface MobileAttachment { id: string; name: string; mime: string; size: number; kind: 'image' | 'file' }
 
+
+/** A file the chat's latest turn changed (phase 5), by its path inside the chat's folder. `state` is what the person decided:
+ *  still to review, kept or undone. An undone file is listed from the review marks after it left the change list. */
+export type MobileReviewState = 'review' | 'kept' | 'undone';
+export interface MobileChange {
+  path: string; previousPath?: string; status: 'modified' | 'added' | 'deleted' | 'renamed'; adds: number; dels: number;
+  binary?: boolean; state: MobileReviewState; afterHash: string;
+}
+/** A run of code with one colour: the text and an index into the diff's `palette` (no index: the text colour). */
+export type MobileToken = [text: string, color?: number];
+/** One diff line (phase 5): added, removed or context, the hunk it belongs to, its new line number (none for a removed line),
+ *  its code as coloured tokens, and the changed words as [start, end) character ranges. */
+export interface MobileDiffLine { k: 'a' | 'd' | 'c'; h: number; n?: number; old?: number; t: MobileToken[]; w?: Array<[number, number]> }
+/** A hunk: its id for keep and undo, the function it is in (or null), its first new line and its size. */
+export interface MobileHunk { id: string; fn: string | null; newStart: number; adds: number; dels: number; state: MobileReviewState }
+/** Lines one changes.diff page holds at most. */
+export const DIFF_PAGE_LINES = 400;
+export interface MobileDiffPage {
+  runId: string; path: string; status: MobileChange['status']; afterHash: string; adds: number; dels: number;
+  /** Too large or binary: no lines; open it on the computer. */
+  binary?: boolean; tooLarge?: boolean;
+  /** Token colours as [dark, light]. */
+  palette: Array<[string, string]>;
+  hunks: MobileHunk[];
+  /** Lines `from` to `from + lines.length` of `total`; `next` is where the next page starts, null at the end. */
+  lines: MobileDiffLine[]; from: number; total: number; next: number | null;
+}
+
 /** Methods the phone may call. Every one is checked on the desktop against the phone's access. */
 export interface MobileMethods {
   /** `lan`: the desktop's current direct addresses (phase 2), so the phone's record follows network changes. */
@@ -142,11 +170,21 @@ export interface MobileMethods {
   'upload.cancel': {params: {uploadId: string}; result: Record<string, never>};
   /** Removes a file this phone uploaded and has not sent (the person took it out of the composer). */
   'upload.discard': {params: {chatId: string; attachmentId: string}; result: Record<string, never>};
+  /** The chat's latest turn's changed files (phase 5); runId is null when the chat has no turn with a snapshot. */
+  'changes.list': {params: {chatId: string}; result: {runId: string | null; files: MobileChange[]; truncated: boolean}};
+  /** One page of a changed file's diff, highlighted on the computer. `from` is a line index (0 for the first page). */
+  'changes.diff': {params: {chatId: string; path: string; from?: number}; result: MobileDiffPage};
+  /** Keeps hunks of a file of the turn ('*' for the whole file); the computer records it as its own Keep does. */
+  'changes.keep': {params: {chatId: string; runId: string; path: string; hunkIds: string[]}; result: {state: MobileReviewState}};
+  /** Undoes one hunk, or the whole file without a hunk id, if the file is still as the phone read it (`afterHash`). */
+  'changes.undo': {params: {chatId: string; runId: string; path: string; afterHash: string; hunkId?: string}; result: {stale: boolean}};
+  /** Stops the chat's running turn. */
+  'chat.stop': {params: {id: string}; result: Record<string, never>};
 }
 export type MobileMethod = keyof MobileMethods;
-export const MOBILE_METHODS: readonly MobileMethod[] = ['hello', 'ping', 'chats.list', 'chat.open', 'chat.close', 'chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'needs.list', 'chat.options', 'chat.create', 'upload.start', 'upload.chunk', 'upload.finish', 'upload.cancel', 'upload.discard'];
+export const MOBILE_METHODS: readonly MobileMethod[] = ['hello', 'ping', 'chats.list', 'chat.open', 'chat.close', 'chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'needs.list', 'chat.options', 'chat.create', 'upload.start', 'upload.chunk', 'upload.finish', 'upload.cancel', 'upload.discard', 'changes.list', 'changes.diff', 'changes.keep', 'changes.undo', 'chat.stop'];
 /** Methods a read-only phone may not call. chat.options is only for starting a chat, so it is acting too. */
-export const ACTING_METHODS: ReadonlySet<MobileMethod> = new Set(['chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'chat.options', 'chat.create', 'upload.start', 'upload.chunk', 'upload.finish', 'upload.cancel', 'upload.discard']);
+export const ACTING_METHODS: ReadonlySet<MobileMethod> = new Set(['chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'chat.options', 'chat.create', 'upload.start', 'upload.chunk', 'upload.finish', 'upload.cancel', 'upload.discard', 'changes.keep', 'changes.undo', 'chat.stop']);
 
 export type MobileEvent =
   | {type: 'chats'; chats: MobileChat[]}
