@@ -12,14 +12,14 @@ What the user can do:
 - connect straight to the desktop when both are on the same network, with the relay as the fallback (phase 2);
 - pair several computers and switch between them or see all at once, read the last known state with no connection, write messages that go out on reconnect, read replies as native Markdown, and use the app on tablets and in landscape (phase 4);
 - review a chat’s changed files and their diffs and keep or undo each file or change, and stop a running turn (phase 5);
-- browse and read the chat’s folder, see its branch and commit, push, switch branches and open a pull request (phase 6).
+- browse and read the chat’s folder, see its branch and commit, push, switch branches and open a pull request, and watch and type into its terminals (phase 6).
 
 Boundaries:
 - The phone talks to the desktop through a relay, or directly on the same network, with end-to-end encryption (Noise IK) either way; the relay and the network see only ciphertext.
 - A new phone is read-only. The phone can never raise a chat's access level or approve for a whole session.
 - Pairing needs secure storage on the desktop and a one-time code that expires.
 - Each computer keeps its own keys and its own cached data; the phone caches only what it was shown and wipes a computer’s cache when that computer revokes it or is unpaired. Approvals are never queued offline.
-- Keeping, undoing, stopping, committing, pushing, switching branches and opening pull requests need act access, checked again right before the desktop runs them; the phone sees folder-relative paths only and gets diffs already highlighted, in pages.
+- Keeping, undoing, stopping, committing, pushing, switching branches, opening pull requests and typing into a terminal need act access, checked again right before the desktop runs them; the phone sees folder-relative paths only and gets diffs already highlighted, in pages.
 - Production relay hosting, push notifications, Projects and dictation are later phases (see the design).
 
 ## Acceptance cases
@@ -130,6 +130,9 @@ Boundaries:
 | [MUS-SPEC-23-25I](23-mobile.md#mus-spec-23-25i) | The draft gives the head, the base and the title and holds no token. The read-only create is refused and reaches no GitHub command. The create calls the desktop’s github.pr.create for the chat’s folder with the title, description, draft and push, then github.pr.requestReview with the reviewer, and answers the pull request’s number and address. | [`a pull request opens through the desktop’s own GitHub commands, only with act and with no token sent`](../../../packages/agent-app/tests/mobile-phase6-326.test.ts) |
 | [MUS-SPEC-23-25J](23-mobile.md#mus-spec-23-25j) | The branch line reads feat/session-streams and 2 ahead, To commit reads 3 of 3 and then 2 of 3, and the message shows Written by the agent. Commit and push calls git.commit with the revision, the two ticked paths, the edited message and push. Read-only shows the files and the message but no Commit buttons. | [`source control chooses files, edits the agent’s message and commits and pushes, and hides commit when read only`](../../../packages/mobile/tests/source-control.test.tsx) |
 | [MUS-SPEC-23-25K](23-mobile.md#mus-spec-23-25k) | The sheet says 2 uncommitted files move with you and that the agent pauses first. Typing filters the list and offers Create “fix”, which calls git.switch with create. Pressing the remote branch calls git.switch with remote. The pull request sheet reads head into base, and Open pull request calls pr.create with the title, the description, draft and the reviewer. | [`the branch sheet finds, creates and switches, and the pull request sheet opens a draft with reviewers`](../../../packages/mobile/tests/branch-and-pr.test.tsx) |
+| [MUS-SPEC-23-25L](23-mobile.md#mus-spec-23-25l) | terminal.list names both terminals by title with their status. terminal.open answers what the terminal printed so far, and the printed line reaches the phone as a terminal event for that terminal. The read-only input is refused and reaches no terminal. With act the input reaches the desktop’s terminal exactly. The input held while the phone was revoked fails and reaches no terminal. | [`a phone watches the chat’s terminals and types into one only with act`](../../../packages/agent-app/tests/mobile-terminal-326.test.ts) |
+| [MUS-SPEC-23-25M](23-mobile.md#mus-spec-23-25m) | The phone receives at most 1 MB of terminal output in total, a note that says how much was skipped, and the last line. Every ping answers in under 500 ms. | [`a runaway terminal is capped and coalesced before it reaches the phone`](../../../packages/agent-app/tests/mobile-terminal-326.test.ts) |
+| [MUS-SPEC-23-25N](23-mobile.md#mus-spec-23-25n) | Both terminals show as tabs and the first is open. The earlier output and the emitted output show without their colour codes. Ctrl then c sends the control character 0x03; tab sends a tab and up the arrow’s escape sequence; ls sends ls and a return. The second tab calls terminal.open for it. Read-only shows the output but no key row and no input line. | [`the terminal shows live output in tabs and sends keys with a ctrl latch, and only watches when read only`](../../../packages/mobile/tests/terminal-screen.test.tsx) |
 
 ### Pairing, the device registry and access
 
@@ -1327,4 +1330,39 @@ Boundaries:
 - Test: `packages/mobile/tests/branch-and-pr.test.tsx::the branch sheet finds, creates and switches, and the pull request sheet opens a draft with reviewers`
 - Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
 - Known gaps: Sheet detents are checked on a device.
+- Evidence: UNVERIFIED
+
+### Terminal (phase 6)
+
+<a id="mus-spec-23-25l"></a>
+#### MUS-SPEC-23-25L: A phone watches the chat’s terminals and types into one only with act
+
+- Precondition: A desktop chat with two terminals in the desktop’s terminal sessions (stood in for by a recording host), one of which has printed a line; a paired phone, first read-only; a gate that holds a write after its reads.
+- Action: Call terminal.list and terminal.open for the first terminal; print a line on it; call terminal.input while read-only; allow the phone to act and send ls and a return; hold another input at the gate, revoke the phone and release it.
+- Expected result: terminal.list names both terminals by title with their status. terminal.open answers what the terminal printed so far, and the printed line reaches the phone as a terminal event for that terminal. The read-only input is refused and reaches no terminal. With act the input reaches the desktop’s terminal exactly. The input held while the phone was revoked fails and reaches no terminal.
+- Test: `packages/agent-app/tests/mobile-terminal-326.test.ts::a phone watches the chat’s terminals and types into one only with act`
+- Environment: Node test runner; the real agent service with a fake provider, the desktop’s terminal sessions stood in for by a recording host registered the way the desktop registers its own, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: The desktop app’s own terminal sessions are wired to the same host in the main process; that wiring is checked by the type checker and on a device, not here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-25m"></a>
+#### MUS-SPEC-23-25M: A runaway terminal does not flood the phone
+
+- Precondition: The phone of 25L watching a terminal.
+- Action: Print 8 MB on the terminal as fast as the host can, then one last line; ping the desktop meanwhile.
+- Expected result: The phone receives at most 1 MB of terminal output in total, a note that says how much was skipped, and the last line. Every ping answers in under 500 ms.
+- Test: `packages/agent-app/tests/mobile-terminal-326.test.ts::a runaway terminal is capped and coalesced before it reaches the phone`
+- Environment: Node test runner; the real agent service with a fake provider, the desktop’s terminal sessions stood in for by a recording host registered the way the desktop registers its own, the dev relay from packages/relay on 127.0.0.1, and Node phones built from the same MobileClient and Noise code the app uses, with Node crypto.
+- Known gaps: Times are measured on the CI runner.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-25n"></a>
+#### MUS-SPEC-23-25N: The terminal screen shows live output in tabs with a key row that latches ctrl
+
+- Precondition: The terminal screen with a fake connection whose terminal.list answers two terminals and whose terminal.open answers earlier output with colour codes; access act, then read-only.
+- Action: Render it; emit output for the open terminal; press ctrl, then type c in the input line; press tab and the up arrow; type ls and send; switch to the second tab; render it read-only.
+- Expected result: Both terminals show as tabs and the first is open. The earlier output and the emitted output show without their colour codes. Ctrl then c sends the control character 0x03; tab sends a tab and up the arrow’s escape sequence; ls sends ls and a return. The second tab calls terminal.open for it. Read-only shows the output but no key row and no input line.
+- Test: `packages/mobile/tests/terminal-screen.test.tsx::the terminal shows live output in tabs and sends keys with a ctrl latch, and only watches when read only`
+- Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
+- Known gaps: Colours are taken out, not drawn; the key row riding the keyboard is checked on a device.
 - Evidence: UNVERIFIED

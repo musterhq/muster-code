@@ -173,6 +173,14 @@ export interface MobilePullRequestDraft {
   available: boolean; reason?: string; head: string; base: string; bases: string[]; title: string; body: string;
   needsPush: boolean; existing?: {number: number; url: string; title: string};
 }
+/** A terminal of the chat on the computer (phase 6), by its title. */
+export interface MobileTerminal { id: string; title: string; running: boolean }
+/** What terminal.open answers of a terminal's earlier output at most, and what a phone is sent of new output: at most
+ *  TERMINAL_BURST_BYTES at once and TERMINAL_BYTES_PER_SECOND after it, the rest skipped and counted. */
+export const TERMINAL_OPEN_BYTES = 64 * 1024;
+export const TERMINAL_BURST_BYTES = 256 * 1024;
+export const TERMINAL_BYTES_PER_SECOND = 128 * 1024;
+export const TERMINAL_INPUT_MAX = 4096;
 
 /** Methods the phone may call. Every one is checked on the desktop against the phone's access. */
 export interface MobileMethods {
@@ -227,14 +235,21 @@ export interface MobileMethods {
   'git.branches': {params: {chatId: string}; result: {current: string | null; local: MobileBranch[]; remote: MobileBranch[]; uncommitted: number; running: boolean}};
   /** Switches to a local branch, creates one (`create`) or checks out a remote one (`remote`); a running chat is stopped first. */
   'git.switch': {params: {chatId: string; branch: string; create?: boolean; remote?: boolean}; result: {status: MobileGitStatus; paused: boolean}};
+  'terminal.list': {params: {chatId: string}; result: {terminals: MobileTerminal[]}};
+  /** Answers the terminal's recent output and streams `terminal` events for it to this phone until terminal.close or another
+   *  terminal.open. */
+  'terminal.open': {params: {chatId: string; id: string}; result: {text: string; running: boolean}};
+  'terminal.close': {params: Record<string, never>; result: Record<string, never>};
+  /** Writes keys to the terminal as typed (at most TERMINAL_INPUT_MAX characters). */
+  'terminal.input': {params: {chatId: string; id: string; data: string}; result: Record<string, never>};
   'pr.draft': {params: {chatId: string}; result: MobilePullRequestDraft};
   /** Opens a pull request on the computer with its own credentials (pushing first when needed). */
   'pr.create': {params: {chatId: string; base: string; title: string; body: string; draft: boolean; reviewers?: string[]}; result: {number: number; url: string; title: string; draft: boolean}};
 }
 export type MobileMethod = keyof MobileMethods;
-export const MOBILE_METHODS: readonly MobileMethod[] = ['hello', 'ping', 'chats.list', 'chat.open', 'chat.close', 'chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'needs.list', 'chat.options', 'chat.create', 'upload.start', 'upload.chunk', 'upload.finish', 'upload.cancel', 'upload.discard', 'changes.list', 'changes.diff', 'changes.keep', 'changes.undo', 'chat.stop', 'files.list', 'files.read', 'git.status', 'git.commit', 'git.branches', 'git.switch', 'pr.draft', 'pr.create'];
+export const MOBILE_METHODS: readonly MobileMethod[] = ['hello', 'ping', 'chats.list', 'chat.open', 'chat.close', 'chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'needs.list', 'chat.options', 'chat.create', 'upload.start', 'upload.chunk', 'upload.finish', 'upload.cancel', 'upload.discard', 'changes.list', 'changes.diff', 'changes.keep', 'changes.undo', 'chat.stop', 'files.list', 'files.read', 'git.status', 'git.commit', 'git.branches', 'git.switch', 'pr.draft', 'pr.create', 'terminal.list', 'terminal.open', 'terminal.close', 'terminal.input'];
 /** Methods a read-only phone may not call. chat.options is only for starting a chat, so it is acting too. */
-export const ACTING_METHODS: ReadonlySet<MobileMethod> = new Set(['chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'chat.options', 'chat.create', 'upload.start', 'upload.chunk', 'upload.finish', 'upload.cancel', 'upload.discard', 'changes.keep', 'changes.undo', 'chat.stop', 'git.commit', 'git.switch', 'pr.create']);
+export const ACTING_METHODS: ReadonlySet<MobileMethod> = new Set(['chat.send', 'chat.steer', 'approval.respond', 'question.respond', 'chat.options', 'chat.create', 'upload.start', 'upload.chunk', 'upload.finish', 'upload.cancel', 'upload.discard', 'changes.keep', 'changes.undo', 'chat.stop', 'git.commit', 'git.switch', 'pr.create', 'terminal.input']);
 
 export type MobileEvent =
   | {type: 'chats'; chats: MobileChat[]}
@@ -244,6 +259,9 @@ export type MobileEvent =
   | {type: 'delta'; chatId: string; seq: number; ops: MobileItemOp[]}
   | {type: 'needs'; needs: MobileNeed[]}
   | {type: 'access'; access: MobileAccess}
+  /** New output of the terminal this phone has open (phase 6), coalesced; `skipped` counts characters left out to keep up,
+   *  `exited` says the shell ended. */
+  | {type: 'terminal'; id: string; data: string; skipped?: number; exited?: boolean}
   /** The desktop confirmed this phone's check code: it is paired (read-only) from now on. */
   | {type: 'paired'};
 
