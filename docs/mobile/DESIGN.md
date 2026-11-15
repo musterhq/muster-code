@@ -1,6 +1,6 @@
 # Muster mobile app: design
 
-Status: phases 1 to 3 built, phase 4 (several computers, offline history and the outbox, native Markdown, tablets) built (issue #326); later phases planned below. This document is the plan of record for the phone app: how a phone reaches the
+Status: phases 1 to 4 built, phase 5 (the v3 design, diff review with keep and undo, Stop) built (issue #326); later phases planned below. This document is the plan of record for the phone app: how a phone reaches the
 person's desktop Muster from anywhere, how the traffic is protected, which stack the app uses, the screens, the phases and the
 threat model. The acceptance cases live in [docs/spec/clauses/23-mobile.md](../spec/clauses/23-mobile.md).
 
@@ -340,6 +340,20 @@ come) (21A, 21B). Width classes (compact under 600, medium 600 to 839, expanded 
 column capped at 760 and a Needs-you inspector, and every orientation allowed (22A); splitting at a foldable's hinge needs a
 WindowManager module and is deferred. On the desktop: rows mapped once per version for all sessions and only for watched
 chats, `remove` ops for deleted rows, and a fixed note on replies past the 64 KB item cap (23A to 23D).
+
+**Phase 5: the v3 design and diff review (built).** The binding v3 design: tonal surfaces, the iOS type scale (nothing under
+12 pt, prose 17 on 26, code 13 on 21), capsule buttons, three springs with Reduce Motion turning them into a 150 ms crossfade,
+and glass (iOS 26 Liquid Glass through expo-glass-effect, a blur below it, a tonal surface on Android) on the tab bar, the
+composer and toolbars (24A). Chats are two-line rows in Active and Earlier (24B); a turn's steps fold into one capsule with a live
+line and the caret, and a finished run resolves into its summary (24C); Send turns into Stop (`chat.stop`, act only) (24D, 24M);
+the composer shows its chips only while focused (24E); approvals lead with their question (24F); All clear, paired and
+run-finished moments (24G, 24I); search sits in its own glass circle (24H). Diff review reuses the desktop's review domain:
+`changes.list` (the chat's latest turn, as the changed-files card shows it), `changes.diff` (the desktop's own hunks with their
+ids, named after their function, changed words marked, highlighted on the desktop with Shiki's JavaScript engine and the
+desktop's themes as [dark, light] colour pairs, in pages of 400 lines), `changes.keep` and `changes.undo` (act only, access
+checked again right before the write, a stale hash writes nothing) (24J to 24L). The phone shows a review ring and swipeable
+files, an inline diff with one gutter and a glass hunk toolbar, and a split diff from 600 points wide (24N to 24P). The file
+viewer, git actions and the terminal come next.
 
 **Phase 3b: needs-you everywhere.** Push relay and generic pushes; Projects (tasks, runs, Inbox) read and act; a relay mounted
 in Muster Server. Acceptance: an approval on the desktop produces exactly one generic push whose payload holds no chat text;
