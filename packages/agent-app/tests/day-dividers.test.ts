@@ -35,12 +35,22 @@ test('labels: Today, Yesterday, weekday within a week, then the date, with the y
   assert.equal(dividerLabel(new Date(2026, 9, 18, 14, 5).getTime(), now, 'en-US').time, '2:05 PM');
 });
 
-test('cheap enough to run on every streamed update of a long chat', () => {
+// Spec: MUS-SPEC-20-770A (docs/spec/clauses/20-performance.md#mus-spec-20-770a)
+test('cheap enough to run on every streamed update of a long chat', t => {
+  // #770: count the work (timestamp parses) instead of timing it, so a busy CI runner cannot fail this.
+  let parses = 0;
+  const parse = Date.parse;
+  Date.parse = (text: string) => { parses++; return parse(text); };
+  t.after(() => { Date.parse = parse; });
   const rows = Array.from({length: 2000}, (_, i) => row(i % 2 ? 'assistant' : 'user', new Date(2026, 0, 1, 0, i).toISOString()));
-  dividerRows(rows); // first projection parses every timestamp once
+  const first = dividerRows(rows);
+  assert.equal(parses, 2000, 'the first projection parses each timestamp once');
+  parses = 0;
   const start = performance.now();
   for (let i = 0; i < 100; i++) dividerRows(rows);
   const perCall = (performance.now() - start) / 100;
-  assert.ok(perCall < 0.5, `dividerRows took ${perCall.toFixed(3)} ms for 2000 rows`);
-  console.log(`dividerRows: ${perCall.toFixed(3)} ms per call on 2000 rows`);
+  assert.equal(parses, 0, 're-projecting the same rows parses no timestamp');
+  assert.deepEqual(dividerRows(rows), first, 'later projections give the same dividers');
+  // Backstop for a gross slowdown only: ten times the 0.5 ms a loaded runner measured.
+  assert.ok(perCall < 5, `dividerRows took ${perCall.toFixed(3)} ms per call for 2000 rows`);
 });

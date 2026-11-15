@@ -59,13 +59,20 @@ function router(backend: Record<string, string>, answer?: (sent: Sent, turn: num
 type RouterAnswer = (sent: Sent, turn: number) => Response | undefined;
 interface Harness {service: AgentService; router: Router; codex: Array<Record<string, unknown>>; overrides: Array<Record<string, unknown> | undefined>; clock: {now: number}; dataDir: string; chat(model: string, access?: 'read-only' | 'workspace' | 'full'): Promise<Chat>; send(chatId: string, text: string): Promise<void>; items(chatId: string): Promise<TimelineItem[]>; snapshot(chatId: string): Promise<Chat>}
 
-async function harness(t: TestContext, options: {backend?: Record<string, string>; answer?: RouterAnswer; headers?: (force?: boolean) => Promise<Record<string, string>>; userServer?: () => boolean; askUser?: boolean} = {}): Promise<Harness> {
+/** Every tool launcher the service reads from the environment. The harness sets or clears each one, so a launcher in the
+ *  caller's environment (Muster sets them for the chats it runs) never changes which route a turn takes (#866). */
+const LAUNCHER_ENV = ['MUSTER_BROWSER_MCP_LAUNCHER', 'MUSTER_BACKGROUND_MCP_LAUNCHER', 'MUSTER_COMPUTER_MCP_LAUNCHER', 'MUSTER_DEVICE_MCP_LAUNCHER'] as const;
+
+async function harness(t: TestContext, options: {backend?: Record<string, string>; answer?: RouterAnswer; headers?: (force?: boolean) => Promise<Record<string, string>>; userServer?: () => boolean; askUser?: boolean; devices?: boolean} = {}): Promise<Harness> {
   const dataDir = await mkdtemp(join(tmpdir(), 'muster-lane-'));
   // The service adds the browser and background-command tool servers only when their launchers exist.
   const launcher = join(dataDir, 'launcher.sh');
   await writeFile(launcher, '#!/bin/sh\nexit 0\n'); await chmod(launcher, 0o700);
-  const saved = {browser: process.env.MUSTER_BROWSER_MCP_LAUNCHER, background: process.env.MUSTER_BACKGROUND_MCP_LAUNCHER};
+  const saved = Object.fromEntries(LAUNCHER_ENV.map(name => [name, process.env[name]]));
+  for (const name of LAUNCHER_ENV) delete process.env[name];
   process.env.MUSTER_BROWSER_MCP_LAUNCHER = launcher; process.env.MUSTER_BACKGROUND_MCP_LAUNCHER = launcher;
+  // "Let agents use devices": main sets the device launcher only while the user allows it.
+  if (options.devices) process.env.MUSTER_DEVICE_MCP_LAUNCHER = launcher;
   // The background-command server also needs its token issuer (a started host registers one).
   const unissue = registerChatTokenIssuer(BACKGROUND_MCP, id => `token-for-${id}`);
   const fake = router(options.backend ?? {'intelligent-planner': 'claude-opus-5-5', executor: 'gpt-5.6-terra'}, options.answer);
@@ -92,7 +99,7 @@ async function harness(t: TestContext, options: {backend?: Record<string, string
   t.after(async () => {
     unissue();
     await service.dispose(); inner.dispose();
-    for (const [name, value] of [['MUSTER_BROWSER_MCP_LAUNCHER', saved.browser], ['MUSTER_BACKGROUND_MCP_LAUNCHER', saved.background]] as const) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    for (const name of LAUNCHER_ENV) { const value = saved[name]; if (value === undefined) delete process.env[name]; else process.env[name] = value; }
     await rm(dataDir, {recursive: true, force: true});
   });
   const items = async (chatId: string) => (await service.invoke('chat.timeline', {id: chatId})).items;
@@ -268,6 +275,22 @@ test('a Full access Claude turn still runs over the Messages API when the servic
   const card = (await h.items(chat.id)).find(item => item.kind === 'question');
   assert.equal(card?.data?.nonBlocking, true, 'the question card was posted');
   assert.equal(card?.data?.defaultAnswer, 'SQLite');
+  const after = await h.snapshot(chat.id);
+  assert.equal(after.status, 'completed', after.error ?? 'turn did not complete');
+  assert.equal(after.providerThreadDriver, LANE);
+});
+
+// Spec: MUS-SPEC-03-866A (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-866a)
+test('a Full access Claude turn with device tools on still runs over the Messages API, without the device server or its note', async t => {
+  const h = await harness(t, {devices: true});
+  const chat = await h.chat('cc/claude-opus-5-5');
+  await h.send(chat.id, 'Check the login screen.');
+  assert.ok(Object.keys(h.overrides[0] ?? {}).some(key => key.startsWith('mcp_servers.muster_device.')), 'the service added the device tool server');
+  assert.equal(h.codex.length, 0, 'the Codex client never ran');
+  assert.equal(h.router.turns.length, 1, 'the turn went to the Messages API');
+  const request = h.router.turns[0]!;
+  assert.ok(!request.body.tools!.some(tool => tool.name.startsWith('device_')), 'no device tool is offered on this route');
+  assert.doesNotMatch(request.body.system ?? '', /muster_device|iOS Simulators/, 'no device note for tools this route lacks');
   const after = await h.snapshot(chat.id);
   assert.equal(after.status, 'completed', after.error ?? 'turn did not complete');
   assert.equal(after.providerThreadDriver, LANE);

@@ -1,8 +1,10 @@
 // #160: a fake Agent Client Protocol agent (JSON-RPC 2.0 over stdio, protocol version 1) for Muster's ACP route tests.
-// Flags: --log=<file> (every message it receives, one JSON per line), --no-load, --resume, --legacy-models, --auth-required, --not-acp.
+// Flags: --log=<file> (every message it receives, one JSON per line), --end-delay=<ms> (answer each prompt that long after
+// its last words, like an agent that still finishes up after it has spoken: #877), --no-load, --resume, --legacy-models, --auth-required, --not-acp.
 // The prompt text picks the scenario: STREAM, EDIT <file>, WRITE <file>, READ <file>, RUN <command>, HANG, otherwise an echo.
 const fs = require('node:fs'), readline = require('node:readline');
 const flags = process.argv.slice(2), flag = (name) => flags.includes(`--${name}`), log = (flags.find(f => f.startsWith('--log=')) || '').slice(6);
+const endDelay = Number((flags.find(f => f.startsWith('--end-delay=')) || '').slice(12)) || 0;
 if (flag('not-acp')) { console.log('Welcome to an interactive agent. Type /help to begin.'); process.exit(1); }
 const record = (m) => { if (log) fs.appendFileSync(log, JSON.stringify(m) + '\n'); };
 const send = (m) => process.stdout.write(JSON.stringify({jsonrpc: '2.0', ...m}) + '\n');
@@ -18,7 +20,7 @@ const permission = (sessionId, toolCall) => request('session/request_permission'
 async function prompt(m) {
   const sessionId = m.params.sessionId, text = m.params.prompt.map(block => block.text || '').join('\n'), last = text.split('\n').pop();
   const say = (t) => update(sessionId, {sessionUpdate: 'agent_message_chunk', content: {type: 'text', text: t}});
-  const done = (stopReason = 'end_turn', extra = {}) => send({id: m.id, result: {stopReason, ...extra}});
+  const done = (stopReason = 'end_turn', extra = {}) => { const answer = () => send({id: m.id, result: {stopReason, ...extra}}); if (endDelay && stopReason !== 'cancelled') setTimeout(answer, endDelay); else answer(); };
   if (/^STREAM/.test(last)) {
     update(sessionId, {sessionUpdate: 'agent_thought_chunk', content: {type: 'text', text: 'Thinking about it'}});
     update(sessionId, {sessionUpdate: 'plan', entries: [{content: 'Read the notes', priority: 'high', status: 'completed'}, {content: 'Answer', priority: 'medium', status: 'in_progress'}]});

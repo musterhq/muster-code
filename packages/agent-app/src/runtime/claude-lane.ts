@@ -15,6 +15,7 @@ import {ASK_MCP} from './ask-user.ts';
 import {OFFICE_MCP, OFFICE_NOTE_PATTERN} from './office-agent-tools.ts';
 import {CANVAS_MCP, CANVAS_NOTE} from './canvas-agent-tools.ts';
 import {DELEGATION_MCP} from '../shared/domains/delegation-protocol.ts';
+import {DEVICE_MCP, DEVICE_NOTE} from '../shared/device-protocol.ts';
 import {ClaudeConversationMemory, claudeMessagesAdapter} from './adapters/claude-messages.ts';
 import {sseEvents} from './adapters/shared.ts';
 import type {RunnableAdapter} from './adapters/types.ts';
@@ -27,8 +28,9 @@ const MAX_PROBES = 256;
 /** Tool servers the service adds to every Agent chat. The Messages lane has no MCP client: the browser and ask_user are
  *  offered as native tools, the others are simply not offered (their notes are dropped). Any other server carries user or
  *  Project state (mailbox, terminal consent, SSH, sandbox, Project tasks, the user's own servers) and keeps the turn on Codex.
- *  #44: delegation is offered to every agent chat above read-only, so it never holds a turn back; this route has no delegation tools. */
-const LANE_SERVERS: Record<string, true> = {[BROWSER_MCP]: true, [CANVAS_MCP]: true, [BACKGROUND_MCP]: true, [ASK_MCP]: true, [COMPUTER_MCP]: true, [OFFICE_MCP]: true, [DELEGATION_MCP]: true};
+ *  #44: delegation is offered to every agent chat above read-only, so it never holds a turn back; this route has no delegation tools.
+ *  #866: the device tools ("Let agents use devices") are dropped the same way; Claude Code keeps them. */
+const LANE_SERVERS: Record<string, true> = {[BROWSER_MCP]: true, [CANVAS_MCP]: true, [BACKGROUND_MCP]: true, [ASK_MCP]: true, [COMPUTER_MCP]: true, [OFFICE_MCP]: true, [DELEGATION_MCP]: true, [DEVICE_MCP]: true};
 const SERVER_KEY = /^(?:secret\.)?mcp_servers\.([^.]+)\./;
 
 /** Whether a turn may leave Codex: Full access, and no tool server or goal that only the Codex client can run. */
@@ -43,11 +45,11 @@ export function claudeLaneAllowed(access: ChatPermissionMode, overrides: Record<
 /** The run's notes without those for tools the Messages lane does not offer. */
 export function withoutUnavailableToolNotes(instructions: string | undefined): string | undefined {
   if (!instructions) return instructions;
-  const text = [CANVAS_NOTE, BACKGROUND_TOOL_NOTE, COMPUTER_USE_NOTE, MUSTER_COMPUTER_NOTE].reduce((out, note) => out.replace(note, ''), instructions).replace(OFFICE_NOTE_PATTERN, '').replace(/\n{3,}/g, '\n\n').trim();
+  const text = [CANVAS_NOTE, BACKGROUND_TOOL_NOTE, COMPUTER_USE_NOTE, MUSTER_COMPUTER_NOTE, DEVICE_NOTE].reduce((out, note) => out.replace(note, ''), instructions).replace(OFFICE_NOTE_PATTERN, '').replace(/\n{3,}/g, '\n\n').trim();
   return text || undefined;
 }
 /** Server names the lane drops from the run's tool servers (the browser has its own native tools). */
-export const LANE_DROPPED_SERVERS: readonly string[] = [BROWSER_MCP, CANVAS_MCP, BACKGROUND_MCP, ASK_MCP, COMPUTER_MCP, OFFICE_MCP, DELEGATION_MCP];
+export const LANE_DROPPED_SERVERS: readonly string[] = [BROWSER_MCP, CANVAS_MCP, BACKGROUND_MCP, ASK_MCP, COMPUTER_MCP, OFFICE_MCP, DELEGATION_MCP, DEVICE_MCP];
 
 export interface ClaudeLaneConfig {
   /** Router base URL, e.g. https://router.example/v1 ( /messages is appended). */

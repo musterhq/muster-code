@@ -61,12 +61,17 @@ interface Harness {
   send(chatId: string, text: string): Promise<void>; items(chatId: string): Promise<TimelineItem[]>; snapshot(chatId: string): Promise<Chat>;
 }
 
-async function harness(t: TestContext, options: {userServer?: boolean} = {}): Promise<Harness> {
+const LAUNCHER_ENV = ['MUSTER_BROWSER_MCP_LAUNCHER', 'MUSTER_BACKGROUND_MCP_LAUNCHER', 'MUSTER_COMPUTER_MCP_LAUNCHER', 'MUSTER_DEVICE_MCP_LAUNCHER'] as const;
+
+async function harness(t: TestContext, options: {userServer?: boolean; devices?: boolean} = {}): Promise<Harness> {
   const dataDir = await mkdtemp(join(tmpdir(), 'muster-router-cc-'));
   const launcher = join(dataDir, 'launcher.sh');
   await writeFile(launcher, '#!/bin/sh\nexit 0\n'); await chmod(launcher, 0o700);
-  const saved = {browser: process.env.MUSTER_BROWSER_MCP_LAUNCHER, background: process.env.MUSTER_BACKGROUND_MCP_LAUNCHER};
+  // Every launcher is set or cleared here, so one in the caller's environment does not change the result (#866).
+  const saved = Object.fromEntries(LAUNCHER_ENV.map(name => [name, process.env[name]]));
+  for (const name of LAUNCHER_ENV) delete process.env[name];
   process.env.MUSTER_BROWSER_MCP_LAUNCHER = launcher; process.env.MUSTER_BACKGROUND_MCP_LAUNCHER = launcher;
+  if (options.devices) process.env.MUSTER_DEVICE_MCP_LAUNCHER = launcher;
   const unissue = registerChatTokenIssuer(BACKGROUND_MCP, id => `token-for-${id}`);
   const log = join(dataDir, 'claude-launches.json'), binary = join(dataDir, 'claude.cjs');
   await writeFile(binary, fakeClaude(log));
@@ -105,7 +110,7 @@ async function harness(t: TestContext, options: {userServer?: boolean} = {}): Pr
   t.after(async () => {
     unissue();
     await service.dispose(); inner.dispose();
-    for (const [name, value] of [['MUSTER_BROWSER_MCP_LAUNCHER', saved.browser], ['MUSTER_BACKGROUND_MCP_LAUNCHER', saved.background]] as const) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    for (const name of LAUNCHER_ENV) { const value = saved[name]; if (value === undefined) delete process.env[name]; else process.env[name] = value; }
     await rm(dataDir, {recursive: true, force: true});
   });
   const items = async (chatId: string) => (await service.invoke('chat.timeline', {id: chatId})).items;
@@ -216,4 +221,18 @@ test('a chat whose earlier turn ran on the Codex client moves to Claude Code wit
   const after = await h.snapshot(chat.id);
   assert.equal(after.providerThreadDriver, 'claude-code-cli');
   assert.equal(after.status, 'completed');
+});
+
+// Spec: MUS-SPEC-03-866B (docs/spec/clauses/03-providers-models-and-accounts.md#mus-spec-03-866b)
+test('with device tools on, a router Claude turn through Claude Code keeps the device server', async t => {
+  const h = await harness(t, {userServer: true, devices: true});
+  const chat = await h.chat('cc/claude-opus-5-5', 'workspace');
+  await h.send(chat.id, 'Open the simulator.');
+  const after = await h.snapshot(chat.id);
+  assert.equal(after.status, 'completed', after.error ?? 'the turn did not complete');
+  assert.equal(after.providerThreadDriver, 'claude-code-cli', 'the turn ran through Claude Code');
+  const [run] = await h.launches();
+  const servers = Object.keys(JSON.parse(run!.mcpConfig!).mcpServers);
+  assert.ok(servers.includes('muster_device'), `Claude Code loads the device server (got ${servers.join(', ')})`);
+  assert.ok(servers.includes('projectdb'), 'and the user tool server');
 });

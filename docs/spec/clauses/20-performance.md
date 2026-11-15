@@ -19,6 +19,7 @@ Boundaries:
 | [MUS-SPEC-20-553B](20-performance.md#mus-spec-20-553b) | After 20 streamed reply tokens, links in the transcript have re-rendered at most 2 times. | [`streaming 20 tokens does not re-render resource links`](../../../packages/agent-app/tests/chat-render-bounds-dom.tsx) |
 | [MUS-SPEC-20-553C](20-performance.md#mus-spec-20-553c) | After 20 streamed reply tokens, the Changes view has re-rendered at most 2 times. | [`streaming 20 tokens does not re-render the changes view`](../../../packages/agent-app/tests/chat-render-bounds-dom.tsx) |
 | [MUS-SPEC-20-813A](20-performance.md#mus-spec-20-813a) | A panel that opens while the window is inactive ends its fade-in at full opacity, and no animation keeps ticking while inactive; a focused window still fades in and spins. | [`a panel that opens while the window is inactive is visible, and nothing keeps animating`](../../../packages/agent-app/tests/idle-animations-813.test.ts) |
+| [MUS-SPEC-20-770A](20-performance.md#mus-spec-20-770a) | The first pass over 2,000 rows parses each timestamp once; 100 more passes over the same rows parse none, and the dividers stay the same. | [`cheap enough to run on every streamed update of a long chat`](../../../packages/agent-app/tests/day-dividers.test.ts) |
 
 ### Startup size
 
@@ -77,4 +78,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/idle-animations-813.test.ts::a panel that opens while the window is inactive is visible, and nothing keeps animating`
 - Environment: Headless Chrome over CDP with the real styles.css, app-shell.css and message-body.css; skipped when Chrome is not installed.
 - Known gaps: windowActivity.ts, which sets the attribute, is not driven here; the test sets it directly.
+- Evidence: UNVERIFIED
+
+### Day dividers on a long chat (#770)
+
+<a id="mus-spec-20-770a"></a>
+#### MUS-SPEC-20-770A: Day dividers do not re-parse timestamps on each streamed update
+
+- Precondition: A chat with 2,000 rows, alternating user and assistant messages one minute apart.
+- Action: Work out the day dividers once, then 100 more times over the same rows, as the chat does on every streamed update.
+- Expected result: The first pass parses each row's timestamp exactly once. The 100 later passes parse no timestamp at all and return the same dividers. As a backstop for a gross slowdown, the later passes average under 5 ms each.
+- Test: `packages/agent-app/tests/day-dividers.test.ts::cheap enough to run on every streamed update of a long chat`
+- Environment: Node test runner; the real `dividerRows` with `Date.parse` counted for the duration of the test. The main check counts work, so a busy CI runner does not change it; the time ceiling is ten times the cost seen on a loaded runner.
+- Known gaps: Only timestamp parsing is counted. Other per-row work (the day boundary of each user message) is bounded only by the time ceiling.
 - Evidence: UNVERIFIED
