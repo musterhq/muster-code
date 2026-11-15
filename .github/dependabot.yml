@@ -1,5 +1,10 @@
 version: 2
+# One entry per project that has its own lockfile, so every bump updates the lockfile that project installs from.
+# The root entry covers only the pnpm workspace (pnpm-lock.yaml); the standalone projects are excluded from it,
+# because Dependabot does not honour the "!" exclusions in pnpm-workspace.yaml.
+# The minor-and-patch groups take minor and patch updates only; a major update always comes as its own pull request.
 updates:
+  # Muster Agent: standalone npm project (packages/agent-app/package-lock.json).
   - package-ecosystem: npm
     directory: /packages/agent-app
     schedule:
@@ -8,8 +13,49 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # 3.14.26 (with @tanstack/virtual-core 3.19.11) broke the git-history-components DOM suite: the virtualized
+      # History list painted "Commit 38" as its first row instead of "Commit 0". It drives the History tab and long
+      # chats (ChatView, TaskList, HubTask, HubPages, ToolOutput); check both in the real app before lifting this.
+      - dependency-name: "@tanstack/react-virtual"
+        versions: [">3.14.22"]
+  # Muster Server: standalone npm project (packages/server/package-lock.json).
+  - package-ecosystem: npm
+    directory: /packages/server
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  # Muster Paperclip plugin: standalone npm project (packages/paperclip-plugin-muster/package-lock.json).
+  - package-ecosystem: npm
+    directory: /packages/paperclip-plugin-muster
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  # Muster mobile app: standalone pnpm project (packages/mobile/pnpm-lock.yaml). Dependabot's npm ecosystem
+  # updates pnpm lockfiles.
+  - package-ecosystem: npm
+    directory: /packages/mobile
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  # The pnpm workspace at the root (pnpm-lock.yaml): packages/builtin and packages/theme.
   - package-ecosystem: npm
     directory: /
+    exclude-paths:
+      - packages/agent-app/**
+      - packages/server/**
+      - packages/mobile/**
+      - packages/paperclip-plugin-muster/**
+      - packages/relay/**
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
