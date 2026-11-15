@@ -42,7 +42,7 @@ const AGENT_BUTTONS: Record<string, 'home' | 'back' | 'appSwitcher'> = {home: 'h
 export interface DeviceToolTarget {
   agentAccess(): boolean;
   chat(chatId: string): Promise<{mode: string; permissionMode?: string} | undefined>;
-  list(): Promise<{id: string; name: string; platform: string; osVersion: string; state: string}[]>;
+  list(): Promise<{id: string; name: string; platform: string; osVersion: string; state: string; physical?: boolean}[]>;
   session(id: string): DeviceSession | undefined;
   open(id: string, chatId: string): Promise<DeviceSession>;
   close(id: string): Promise<void>;
@@ -54,6 +54,8 @@ export interface DeviceToolTarget {
   launchApp(id: string, app: string): Promise<void>;
   button(id: string, button: 'home' | 'back' | 'appSwitcher'): Promise<void>;
 }
+/** A real phone over USB holds the person's own apps and messages: agents never list, open, watch or drive it. */
+const USB_PHONE = 'A phone connected over USB is the person’s own, so agents do not use it. Use an Android Emulator or iOS Simulator instead.';
 const shotSizes = new Map<string, {width: number; height: number}>();
 const id = (value: unknown): string | null => typeof value === 'string' && /^[A-Za-z0-9._:-]{1,140}$/.test(value) && !value.startsWith('-') ? value : null;
 
@@ -66,13 +68,16 @@ export async function runDeviceTool(target: DeviceToolTarget, chatId: string, to
   if (MUTATING.has(tool) && (chat.permissionMode ?? 'workspace') === 'read-only') return text('This chat is read-only: you may list devices and take screenshots, but not open, tap or type.', true);
   try {
     if (tool === 'device_list') {
-      const devices = await target.list();
-      if (!devices.length) return text('No iOS Simulators or Android Emulators were found on this computer.');
-      return text(devices.map(device => `${device.id} · ${device.name} · ${device.osVersion} · ${device.state}${target.session(device.id) ? ' · live session open' : ''}`).join('\n'));
+      const all = await target.list(), devices = all.filter(device => !device.physical);
+      const phones = all.length > devices.length ? `\n${USB_PHONE}` : '';
+      if (!devices.length) return text(`No iOS Simulators or Android Emulators were found on this computer.${phones}`);
+      return text(devices.map(device => `${device.id} · ${device.name} · ${device.osVersion} · ${device.state}${target.session(device.id) ? ' · live session open' : ''}`).join('\n') + phones);
     }
     const device = id(args.device);
     if (!device) return text('Pass the device id from device_list.', true);
     const session = target.session(device);
+    // A session says whether it is a phone; without one (or before opening) the list does.
+    if (session?.physical || ((tool === 'device_open' || !session) && (await target.list()).some(item => item.id === device && item.physical))) return text(USB_PHONE, true);
     const foreign = session?.chatId && session.chatId !== chatId;
     switch (tool) {
       case 'device_open': {

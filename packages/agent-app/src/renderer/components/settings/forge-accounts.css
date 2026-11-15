@@ -1,0 +1,18 @@
+/* Settings › Integrations › Git hosts (#329): GitLab and Bitbucket sign-ins. Same rows and fields as the other Integrations cards. */
+.forge-accounts { display: flex; flex-direction: column; gap: 10px; max-width: 640px; margin: 0 0 18px; }
+.forge-account-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border: 1px solid var(--hairline); border-radius: var(--radius-10); }
+.forge-account-list:empty { display: none; }
+.forge-account { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 12px; font-size: var(--fs-13); color: var(--text); }
+.forge-account + .forge-account { border-top: 1px solid var(--hairline); }
+.forge-account-host { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.forge-account-meta { color: var(--text-dim); font-size: var(--fs-12); white-space: nowrap; }
+.forge-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; align-items: end; }
+.forge-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-12); color: var(--text-dim); min-width: 0; }
+.forge-form .is-wide { grid-column: 1 / -1; }
+.forge-form-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
+.forge-button { height: 30px; padding: 0 12px; border: 1px solid var(--hairline); border-radius: var(--radius-8); background: var(--bg-raised); color: var(--text); font: inherit; font-size: var(--fs-13); cursor: pointer; }
+.forge-button:hover:not(:disabled) { background: var(--bg-hover); }
+.forge-button.is-primary { border-color: transparent; background: var(--accent); color: var(--on-accent); }
+.forge-button:disabled { opacity: .55; cursor: default; }
+.forge-error { margin: 0; color: var(--danger); font-size: var(--fs-12); }
+.forge-note { margin: 0; color: var(--text-faint); font-size: var(--fs-12); }

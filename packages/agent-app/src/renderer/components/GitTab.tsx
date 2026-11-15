@@ -3,6 +3,7 @@ import {GitCommitHorizontal, GitCompare, GitPullRequestCreate, XCircle} from 'lu
 import type {GitPullRequest} from '../../shared/protocol';
 import type {GitHubChecks} from '../../shared/domains/github-protocol';
 import {invoke} from '../bridge';
+import {forgeTerms} from '../../shared/forge';
 import {branchPullRequest} from '../branchPullRequest';
 import {openGitTab, setGitView, type GitView, type WorkspaceTab} from '../store';
 import {useStoreSelector} from '../useStore';
@@ -46,14 +47,14 @@ function useChecks(folderId: string, number: number | undefined): GitHubChecks |
 }
 
 /** "CI failing on #7 → Fix": the repair task starts here; View checks opens the PR on its Checks section. */
-function CiFailingBanner({folderId, number, checks, chatId, onViewChecks}: {folderId: string; number: number; checks: GitHubChecks; chatId?: string; onViewChecks: () => void}): React.ReactElement | null {
+function CiFailingBanner({folderId, number, checks, chatId, onViewChecks, sigil = '#'}: {folderId: string; number: number; checks: GitHubChecks; chatId?: string; onViewChecks: () => void; sigil?: string}): React.ReactElement | null {
   const failing = checks.summary.failed;
   if (checksTone(checks.summary) !== 'failure') return null;
   const names = checks.items.filter(check => check.status === 'completed' && !['success', 'skipped', 'neutral', 'stale'].includes(check.conclusion ?? '')).map(check => check.name);
   return <section className="git-banner is-ci-failure" data-testid="ci-banner" aria-label="CI failing">
     <header>
       <XCircle size={14} className="git-state-icon ci-state is-failure" aria-hidden="true"/>
-      <span className="git-banner-title">{failing === 1 ? '1 check failing' : `${failing} checks failing`} on #{number}</span>
+      <span className="git-banner-title">{failing === 1 ? '1 check failing' : `${failing} checks failing`} on {sigil}{number}</span>
       {names.length > 0 && <span className="git-banner-detail" title={names.join('\n')}>{names.slice(0, 2).join(', ')}{names.length > 2 ? ` +${names.length - 2}` : ''}</span>}
       <button type="button" className="git-banner-link" onClick={onViewChecks}>View checks</button>
     </header>
@@ -78,6 +79,8 @@ export function GitTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
   const status = repo.status;
   const prs = usePullRequests(folderId, status?.branch);
   const branchPr = status && prs ? branchPullRequest(prs, status) : undefined;
+  /** #329: GitLab labels it Merge request / MR / `!5`. */
+  const terms = forgeTerms(status?.forge);
   // An explicit PR (summary card, side chat) wins; otherwise the checked-out branch's open PR; otherwise the create form.
   const prNumber = tab.prNumber ?? branchPr?.number;
   const shownPr = prs?.find(pr => pr.number === prNumber);
@@ -88,7 +91,7 @@ export function GitTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
   const go = useCallback((next: GitView) => { if (tab.kind === 'git') setGitView(tab.id, next); else openGitTab(folderId, folderName, next, next === 'pullRequest' && tab.prNumber ? {prNumber: tab.prNumber} : {}); }, [tab.id, tab.kind, tab.prNumber, folderId, folderName]);
   if (repo.notRepo) return <div className="git-tab" data-testid="git-tab"><NotARepository what="Changes, history and pull requests appear"/></div>;
   const branch = status ? (status.detached ? 'Detached HEAD' : status.branch || 'No branch') : undefined;
-  const canCreate = !!status?.remoteUrl && !status.detached && !showPr;
+  const canCreate = !!(status?.remoteUrl || status?.forgeUrl) && !status.detached && !showPr;
   const segments: GitView[] = ['changes', 'history', ...(showPr ? ['pullRequest' as const] : [])];
   const current = segments.includes(view) ? view : 'changes';
   const onKey = (event: React.KeyboardEvent) => {
@@ -104,20 +107,20 @@ export function GitTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
       <div className="git-segments" role="tablist" aria-label="Git views" onKeyDown={onKey}>
         {segments.map(id => <button key={id} type="button" role="tab" id={`git-segment-${folderId}-${id}`} aria-selected={current === id} tabIndex={current === id ? 0 : -1} className="git-segment" data-view={id} onClick={() => go(id)}>
           {id === 'changes' ? <GitCompare size={13} aria-hidden="true"/> : id === 'history' ? <GitCommitHorizontal size={13} aria-hidden="true"/> : creating ? <GitPullRequestCreate size={13} aria-hidden="true"/> : <PrStateIcon state={shownPr?.state ?? 'open'} draft={shownPr?.isDraft} size={13}/>}
-          <span>{id === 'pullRequest' ? (creating ? 'New pull request' : <>{VIEW_LABEL.pullRequest} <span className="git-segment-num">#{prNumber}</span></>) : VIEW_LABEL[id]}</span>
+          <span>{id === 'pullRequest' ? (creating ? `New ${terms.noun}` : <>{terms.Noun} <span className="git-segment-num">{terms.sigil}{prNumber}</span></>) : VIEW_LABEL[id]}</span>
           {id === 'changes' && !!changeCount && <span className="git-segment-count">{changeCount}</span>}
           {id === 'pullRequest' && checks && checksTone(checks.summary) && <span className={`git-dot ci-state is-${checksTone(checks.summary)}`} data-check={checksTone(checks.summary)} title={`Checks: ${checks.summary.passed} passed, ${checks.summary.failed} failing, ${checks.summary.pending} running`}/>}
         </button>)}
       </div>
       <span className="git-tab-spacer"/>
-      {canCreate && <Tip label={`Open a pull request for ${status!.branch}`}><button type="button" className="git-head-action" onClick={() => go('pullRequest')}><GitPullRequestCreate size={13} aria-hidden="true"/><span>Create PR</span></button></Tip>}
+      {canCreate && <Tip label={`Open a ${terms.noun} for ${status!.branch}`}><button type="button" className="git-head-action" onClick={() => go('pullRequest')}><GitPullRequestCreate size={13} aria-hidden="true"/><span>Create {terms.short}</span></button></Tip>}
       {branch && <Tip label={status?.upstream ? `${branch} tracks ${status.upstream}${status.upstreamGone ? ' (deleted on the remote)' : ''}` : status?.detached ? 'No branch is checked out' : `${branch} is not published to a remote yet`}>
         <span className="git-tab-branch"><GitRefChip name={branch} kind={status?.detached ? 'head' : 'current'}/><GitSync ahead={status?.ahead} behind={status?.behind}/></span>
       </Tip>}
     </header>
     <div className="git-banners">
       <GitConflictBanner folderId={folderId}/>
-      {checks && prNumber && <CiFailingBanner folderId={folderId} number={prNumber} checks={checks} chatId={chatId} onViewChecks={() => { setPrSection(value => ({section: 'checks', n: (value?.n ?? 0) + 1})); go('pullRequest'); }}/>}
+      {checks && prNumber && <CiFailingBanner folderId={folderId} number={prNumber} checks={checks} chatId={chatId} sigil={terms.sigil} onViewChecks={() => { setPrSection(value => ({section: 'checks', n: (value?.n ?? 0) + 1})); go('pullRequest'); }}/>}
     </div>
     <div className="git-tab-body" role="tabpanel" aria-labelledby={`git-segment-${folderId}-${current}`}>
       {current === 'changes' && <ChangesView folderId={folderId} repo={repo}/>}

@@ -21,6 +21,9 @@ export const SECRET_PATTERNS: readonly RegExp[] = [
   /\bsk-(?:(?:ant-(?:api\d+-|admin\d+-)?|proj-|svcacct-|admin-)[A-Za-z0-9_-]{20,}|(?:live-|test-)?(?=[A-Za-z0-9_-]{0,64}\d)[A-Za-z0-9_-]{20,})\b/g,
   /\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}\b/g,
   /\bnpm_[A-Za-z0-9]{36}\b/g,
+  // GitLab tokens (personal, OAuth, deploy, runner, CI job, trigger, feed…) and Bitbucket app passwords / Atlassian API tokens (#329).
+  /\b(?:glpat|gloas|gldt|glrt|glcbt|glptt|glft|glimt|glagent|glsoat)-[A-Za-z0-9_-]{20,}/g,
+  /\bAT(?:BB|ATT)[A-Za-z0-9_=-]{24,}/g,
   /\bhf_[A-Za-z0-9]{30,}\b/g,
   /\bya29\.[0-9A-Za-z_-]{20,}/g,
   /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,

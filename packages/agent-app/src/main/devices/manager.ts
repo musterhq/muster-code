@@ -142,6 +142,11 @@ export class DeviceManager {
   }
 
   // --- Helper process ---------------------------------------------------------------------------------------------
+  /** The helper's environment, with the same adb Muster uses first on its PATH (the SDK's, or Homebrew's without an SDK). */
+  private hubEnvironment(): NodeJS.ProcessEnv {
+    const tools = androidTools(this.deps);
+    return hubEnv(this.deps.env, this.paths.stateDir, tools.sdk, this.deps.platform, path.dirname(tools.adb));
+  }
   /** The running hub, starting it when needed. */
   hubEndpoint(): Promise<HubEndpoint> {
     this.ready();
@@ -150,7 +155,7 @@ export class DeviceManager {
     if (this.hubStarting) return this.hubStarting;
     const node = this.deps.locate('node');
     if (!node) return Promise.reject(new Error('Node.js was not found, so the device helper cannot run. Install Node.js 20 or later and restart Muster.'));
-    const env = hubEnv(this.deps.env, this.paths.stateDir, androidTools(this.deps).sdk, this.deps.platform);
+    const env = this.hubEnvironment();
     const start = () => startHub({node, paths: this.paths, env, spawn: this.deps.spawn, fetch: this.deps.fetch, onExit: () => this.hubExited()});
     // A first start right after a cold simulator boot can stall without printing anything (seen in CI); one fresh try clears it.
     this.hubStarting = start().catch(error => /did not start in time/.test(error instanceof Error ? error.message : String(error)) ? start() : Promise.reject(error))
@@ -184,7 +189,7 @@ export class DeviceManager {
     if (hub) {
       try { hub.child.kill('SIGTERM'); } catch {}
       const node = this.deps.locate('node');
-      if (node) await killServeSimHelpers({node, paths: this.paths, env: hubEnv(this.deps.env, this.paths.stateDir, androidTools(this.deps).sdk, this.deps.platform), spawn: this.deps.spawn});
+      if (node) await killServeSimHelpers({node, paths: this.paths, env: this.hubEnvironment(), spawn: this.deps.spawn});
     }
     if (!this.disposed) void this.publishSetup();
   }
@@ -225,6 +230,7 @@ export class DeviceManager {
     this.ready();
     const device = await this.find(validId(rawId));
     if (device.state === 'booted') return device;
+    if (device.physical) throw new Error(usable(device));
     this.patchDevice(device.id, {state: 'booting'});
     try {
       if (device.platform === 'ios') {
@@ -248,6 +254,7 @@ export class DeviceManager {
   async shutdown(rawId: unknown): Promise<void> {
     this.ready();
     const id = validId(rawId), device = await this.find(id);
+    if (device.physical) throw new Error(`${deviceTitle(device)} is a phone connected over USB: Muster doesn't turn it off. Unplug it, or use its own power button.`);
     await this.close(id);
     this.patchDevice(id, {state: 'shutting-down'});
     try {
@@ -279,8 +286,10 @@ export class DeviceManager {
       if (existing.session.state === 'error') existing.link.reconnect();
       return existing.session;
     }
+    // A USB phone is never booted: it streams through the same helper socket as an emulator (scrcpy by its serial).
+    if (device.physical && device.state !== 'booted') throw new Error(usable(device));
     if (device.state !== 'booted') device = await this.boot(device.id);
-    const session: DeviceSession = {deviceId: device.id, name: deviceTitle(device), platform: device.platform, formFactor: device.formFactor, ...(device.frame ? {frame: device.frame} : {}), ...(by.chatId ? {chatId: by.chatId} : {}),
+    const session: DeviceSession = {deviceId: device.id, name: deviceTitle(device), platform: device.platform, formFactor: device.formFactor, ...(device.frame ? {frame: device.frame} : {}), ...(device.physical ? {physical: true} : {}), ...(by.chatId ? {chatId: by.chatId} : {}),
       openedBy: by.chatId ? 'agent' : 'user', control: 'agent', state: 'starting', inputReady: false, openedAt: Date.now()};
     const live: Live = {session, viewers: new Set(), link: undefined as unknown as DeviceLink};
     live.link = new DeviceLink(device.platform, device.id, {hub: () => this.hubEndpoint(), fetch: this.deps.fetch, socket: this.deps.socket, setTimeout: this.timers.set, clearTimeout: this.timers.clear}, {
@@ -388,8 +397,26 @@ export class DeviceManager {
   async rotate(rawId: unknown): Promise<void> {
     const id = validId(rawId), live = this.live.get(id);
     if (!live) throw new Error('Open the device first.');
+    if (live.session.physical) throw new Error(`${live.session.name} is a phone connected over USB: turn the phone itself to rotate it.`);
     if (live.session.platform === 'android') { await this.deps.run(androidTools(this.deps).adb, ['-s', id, 'emu', 'rotate'], {timeoutMs: 10_000}); return; }
     if (!live.link.rotate()) throw new Error('The simulator is not accepting input yet. Try again in a moment.');
+  }
+  /** `adb install -r <file>` on an Android device. `file` comes from the main process's own file chooser; it must be an
+   *  existing absolute .apk path and reaches adb as one argument (never a shell). */
+  async installApk(rawId: unknown, file: unknown): Promise<{installed: true}> {
+    this.ready();
+    const device = await this.find(validId(rawId));
+    if (device.platform !== 'android') throw new Error('Only Android devices install APK files.');
+    if (device.state !== 'booted') throw new Error(device.physical ? usable(device) : `${deviceTitle(device)} is not running.`);
+    if (typeof file !== 'string' || !path.isAbsolute(file) || !/\.apk$/i.test(file)) throw new Error('Choose an .apk file.');
+    if (!this.deps.exists(file)) throw new Error(`${path.basename(file)} was not found.`);
+    const failed = (text: string) => new Error(`Could not install ${path.basename(file)} on ${deviceTitle(device)}: ${/Failure \[[^\]\n]{1,200}\]/.exec(text)?.[0] ?? errorLine(text)}`);
+    let out: string;
+    try { out = await this.deps.run(androidTools(this.deps).adb, ['-s', device.id, 'install', '-r', file], {timeoutMs: 300_000}); }
+    catch (error) { throw failed(error instanceof Error ? error.message : String(error)); }
+    // Older adb prints the failure and still exits 0.
+    if (/Failure \[/.test(out)) throw failed(out);
+    return {installed: true};
   }
   control(rawId: unknown, owner: unknown): DeviceSession {
     const id = validId(rawId), live = this.live.get(id);
@@ -462,6 +489,11 @@ export class DeviceManager {
   async dispose(): Promise<void> { this.disposed = true; await this.stopAll(); }
 }
 
+/** Why a USB phone can't be used yet, and what to do. */
+function usable(device: DeviceInfo): string {
+  if (device.state === 'unauthorized') return `${deviceTitle(device)} has not allowed USB debugging from this computer. ${device.fix ?? ''}`.trim();
+  return `${deviceTitle(device)} is still starting. Unlock it and try again.`;
+}
 function bootFailure(device: DeviceInfo, error: unknown): string {
   const text = errorLine(error);
   const name = deviceTitle(device);

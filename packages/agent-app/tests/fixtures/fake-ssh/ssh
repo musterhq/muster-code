@@ -10,22 +10,29 @@
  *   master           present while the multiplexed master connection is up
  *   log.jsonl        one line per invocation: { argv, kind, fresh }
  * Port forwards (`-O forward -L`) run a small TCP relay child whose pid is kept in fwd-<port>.pid until `-O cancel` or `-O exit`.
+ * Phase 2 (agents on the host): a reverse forward (`-O forward -R 127.0.0.1:0:127.0.0.1:<local>`) runs the same relay on a
+ * new port "on the host" and prints that port, as ssh does for a remote port 0. When <state>/host-path exists, remote
+ * commands get that PATH instead of this machine's, so a CLI is "installed on the host" only if a test put it there. A
+ * session runs in its own process group (sshd starts each session with setsid), and outlives a killed local ssh, as a
+ * command without a TTY does on a real host.
  */
 'use strict';
 const fs = require('node:fs'), path = require('node:path'), { spawn, spawnSync } = require('node:child_process'), net = require('node:net');
 const root = process.env.MUSTER_FAKE_SSH_ROOT;
 if (!root) { process.stderr.write('fake ssh: MUSTER_FAKE_SSH_ROOT is not set\n'); process.exit(255); }
 
-// The relay child: `ssh --muster-fake-relay <localPort> <remotePort>`.
+// The relay child: `ssh --muster-fake-relay <listenPort> <targetPort> <name>`; port 0 listens on a new port.
 if (process.argv[2] === '--muster-fake-relay') {
-  const [lp, rp] = [Number(process.argv[3]), Number(process.argv[4])];
-  const server = net.createServer(sock => { const up = net.connect(rp, '127.0.0.1'); sock.pipe(up).pipe(sock); up.on('error', () => sock.destroy()); sock.on('error', () => up.destroy()); });
-  server.listen(lp, '127.0.0.1', () => { fs.writeFileSync(path.join(root, `fwd-${lp}.ready`), ''); });
+  const [lp, rp, name] = [Number(process.argv[3]), Number(process.argv[4]), process.argv[5] || `fwd-${process.argv[3]}`];
+  const server = net.createServer({ allowHalfOpen: true }, sock => { const up = net.connect({ port: rp, host: '127.0.0.1', allowHalfOpen: true }); sock.pipe(up).pipe(sock); up.on('error', () => sock.destroy()); sock.on('error', () => up.destroy()); });
+  server.listen(lp, '127.0.0.1', () => { fs.writeFileSync(path.join(root, `${name}.ready`), String(server.address().port)); });
+  // A test that removed its host folder without `-O exit` leaves no relay behind.
+  setInterval(() => { if (!fs.existsSync(root)) process.exit(0); }, 500);
   return;
 }
 
 const WITH_VALUE = new Set(['-o', '-F', '-p', '-i', '-l', '-S', '-O', '-L', '-R', '-D', '-E', '-c', '-m', '-b', '-J', '-W', '-w', '-Q', '-B', '-e', '-I', '-P']);
-const argv = process.argv.slice(2), opts = {}, flags = new Set(), lists = { L: [] };
+const argv = process.argv.slice(2), opts = {}, flags = new Set(), lists = { L: [], R: [] };
 let control, i = 0;
 for (; i < argv.length; i++) {
   const a = argv[i];
@@ -36,6 +43,7 @@ for (; i < argv.length; i++) {
     if (a === '-o') { const at = v.indexOf('='); opts[v.slice(0, at).toLowerCase()] = v.slice(at + 1); }
     else if (a === '-O') control = v;
     else if (a === '-L') lists.L.push(v);
+    else if (a === '-R') lists.R.push(v);
     else opts[a] = v;
   } else for (const c of a.slice(1)) flags.add(c);
 }
@@ -57,12 +65,26 @@ if (flags.has('G')) {
   process.exit(0);
 }
 
-const relayPids = () => fs.readdirSync(root).filter(n => /^fwd-\d+\.pid$/.test(n));
+const relayPids = () => fs.readdirSync(root).filter(n => /^(?:fwd|rev)-\d+\.pid$/.test(n));
 if (control) {
   log(`control:${control}`);
   if (control === 'check') { if (exists('master')) { process.stderr.write('Master running (pid=1)\n'); process.exit(0); } die('Control socket connect(/tmp/x): No such file or directory'); }
   if (control === 'exit') { for (const f of relayPids()) { try { process.kill(Number(read(f)), 'SIGTERM'); } catch {} fs.rmSync(path.join(root, f), { force: true }); } fs.rmSync(path.join(root, 'master'), { force: true }); process.stderr.write('Exit request sent.\n'); process.exit(0); }
   if (!exists('master')) die('Control socket connect(/tmp/x): No such file or directory');
+  if (lists.R.length) {
+    // Reverse: listen "on the host" (this machine) and relay to the local port. The spec's remote port may be 0.
+    const parts = lists.R[0].split(':'), want = Number(parts[parts.length - 3]), target = Number(parts[parts.length - 1]);
+    if (parts.length !== 4 || parts[0] !== '127.0.0.1') die(`fake ssh: reverse forwards must bind 127.0.0.1 (${lists.R[0]})`);
+    if (control === 'forward') {
+      const name = `rev-${target}`; fs.rmSync(path.join(root, `${name}.ready`), { force: true });
+      const child = spawn(process.execPath, [__filename, '--muster-fake-relay', String(want), String(target), name], { detached: true, stdio: 'ignore', env: process.env });
+      child.unref(); fs.writeFileSync(path.join(root, `${name}.pid`), String(child.pid));
+      for (let n = 0; n < 200 && !exists(`${name}.ready`); n++) spawnSync('sleep', ['0.02']);
+      if (!want) process.stdout.write(`${read(`${name}.ready`)}\n`);
+      process.exit(0);
+    }
+    if (control === 'cancel') { const name = `rev-${target}`; try { process.kill(Number(read(`${name}.pid`)), 'SIGTERM'); } catch {} fs.rmSync(path.join(root, `${name}.pid`), { force: true }); fs.rmSync(path.join(root, `${name}.ready`), { force: true }); process.exit(0); }
+  }
   const spec = lists.L[0] || '', parts = spec.split(':'), lp = Number(parts[parts.length - 3]), rp = Number(parts[parts.length - 1]);
   if (control === 'forward') {
     const child = spawn(process.execPath, [__filename, '--muster-fake-relay', String(lp), String(rp)], { detached: true, stdio: 'ignore', env: process.env });
@@ -91,5 +113,15 @@ if (fresh) {
 }
 log('exec', { fresh, tty: flags.has('t') });
 const home = path.join(root, 'home'); fs.mkdirSync(home, { recursive: true });
-const child = spawn('/bin/sh', ['-c', command || 'exec /bin/sh -l'], { cwd: home, stdio: 'inherit', env: { PATH: process.env.PATH, HOME: home, SHELL: '/bin/sh', USER: user, LANG: 'C', TERM: process.env.TERM || 'dumb', MUSTER_FAKE_SSH_ROOT: root } });
-child.on('exit', (code, signal) => process.exit(signal ? 255 : code ?? 255));
+const hostPath = exists('host-path') ? read('host-path').trim() : process.env.PATH;
+const tty = flags.has('t');
+// Without a TTY the session's streams are relayed, as over a real connection: when this ssh ends, its pipes close here,
+// while the command on the "host" keeps running until it notices.
+const child = spawn('/bin/sh', ['-c', command || 'exec /bin/sh -l'], { cwd: home, stdio: tty ? 'inherit' : ['pipe', 'pipe', 'pipe'], detached: !tty, env: { PATH: hostPath, HOME: home, SHELL: '/bin/sh', USER: user, LANG: 'C', TERM: process.env.TERM || 'dumb', MUSTER_FAKE_SSH_ROOT: root } });
+if (tty) child.on('exit', (code, signal) => process.exit(signal ? 255 : code ?? 255));
+else {
+  child.stdin.on('error', () => undefined); process.stdin.pipe(child.stdin); child.stdout.pipe(process.stdout); child.stderr.pipe(process.stderr);
+  child.on('close', (code, signal) => { process.exitCode = signal ? 255 : code ?? 255; process.stdin.destroy(); });
+}
+// The connection dropped (the test removed `master` and marked the host down): the session ends with 255, as ssh does.
+const watch = setInterval(() => { if (exists('down') && !exists('master')) { process.stderr.write('Connection to host closed by remote host.\n'); process.exit(255); } }, 50); watch.unref();

@@ -49,6 +49,7 @@ Boundaries:
 | [MUS-SPEC-19-842J](19-security-and-redaction.md#mus-spec-19-842j) | The field is a password field with autocomplete off; Remember is unchecked; Send is disabled until a value is typed; one secret.answer call carries the value with remember false; the field is cleared; Decline sends secret.decline. | [`the secret card takes a masked value, sends it once and clears the field`](../../../packages/agent-app/tests/secret-request-card-842-dom.tsx) |
 | [MUS-SPEC-19-842K](19-security-and-redaction.md#mus-spec-19-842k) | The sudo card offers keychain storage; the 1Password reference is sent instead of a value; an answered card says Sent privately with no field; a saved-value card offers Forget; an expired card says No answer in time. | [`a sudo card, a 1Password pick and a settled card read plainly and never show a value`](../../../packages/agent-app/tests/secret-request-card-842-dom.tsx) |
 | [MUS-SPEC-19-147A](19-security-and-redaction.md#mus-spec-19-147a) | Relative paths with `..`, absolute paths, newlines and links that lead out of the folder are refused for reads and writes; names holding quotes, `;` and `$(…)` are written literally and run nothing. | [`remote file paths stay inside the folder and are never run by the shell`](../../../packages/agent-app/tests/ssh-workspaces-147.test.ts) |
+| [MUS-SPEC-19-147B](19-security-and-redaction.md#mus-spec-19-147b) | Local-only servers and local paths are left out and the chat token stays here. | [`the relay wants a live run token, binds loopback, writes no secret on the host and leaves local-only tools out`](../../../packages/agent-app/tests/ssh-agents-147.test.ts) |
 
 ### Known secret values
 
@@ -423,4 +424,17 @@ Boundaries:
 - Test: `packages/agent-app/tests/ssh-workspaces-147.test.ts::remote file paths stay inside the folder and are never run by the shell`
 - Environment: Node test runner with the real agent service, a temp data folder and a temp HOME; a stand-in `ssh` and `ssh-keyscan` on PATH (`tests/fixtures/fake-ssh/`) that run the remote commands under /bin/sh on this machine. No network, no real host.
 - Known gaps: The check is done by the host’s /bin/sh (`cd -P`/`pwd -P`); a link swapped in between the check and the write is not covered.
+- Evidence: UNVERIFIED
+
+### Agents on an SSH host (#147)
+
+<a id="mus-spec-19-147b"></a>
+#### MUS-SPEC-19-147B: The tool relay wants a live run token, binds loopback, writes no secret on the host and leaves local-only tools out
+
+- Precondition: A prepared run on a host with Muster’s question server and the computer-use and terminal servers in its options.
+- Action: Connect with a wrong token, a server the run lacks and the right one; run the relay script on the host; end the run and connect again.
+- Expected result: Local-only servers and local paths are left out and the chat token stays here; a wrong token or server starts nothing; the run’s server answers, also through the relay script on the host with the token only in its environment; the private folder and relay script are 0700 and hold no token; after the run ends the token starts nothing.
+- Test: `packages/agent-app/tests/ssh-agents-147.test.ts::the relay wants a live run token, binds loopback, writes no secret on the host and leaves local-only tools out`
+- Environment: Node test runner with the real agent service (Claude Code, Codex and ACP routes whose local binaries do not exist), a temp data folder and a temp HOME; a stand-in `ssh` on PATH (`tests/fixtures/fake-ssh/`) that runs the remote commands under /bin/sh on this machine with a host PATH of its own, relays reverse forwards over real 127.0.0.1 sockets, and starts each session in its own process group; the fake Claude Code (`fake-ssh/fake-claude.cjs`), the fake Codex app-server and the fake ACP agent "installed on the host". No network, no real host.
+- Known gaps: The python3 and nc fallbacks of the relay script were checked by hand, not in this suite.
 - Evidence: UNVERIFIED
