@@ -4,9 +4,11 @@
  */
 import type {ApprovalData, Chat, PendingQuestion, ProviderInfo, Snapshot, TimelineItem} from '../../shared/protocol.ts';
 import {device} from '../../shared/device-noun.ts';
-import {ACTING_METHODS, MAX_SEND_ATTACHMENTS, MOBILE_METHODS, MOBILE_PROTOCOL_VERSION, MobileError, type MobileAccess, type MobileApproval, type MobileChat, type MobileChatStatus, type MobileItem, type MobileMethod, type MobileMethods, type MobileNeed, type MobilePlace, type MobileProvider, type MobileQuestion} from '../../shared/mobile/protocol.ts';
+import {ACTING_METHODS, MAX_SEND_ATTACHMENTS, MOBILE_METHODS, MOBILE_PROTOCOL_VERSION, MobileError, type MobileAccess, type MobileApproval, type MobileChange, type MobileChat, type MobileReviewState, type MobileChatStatus, type MobileItem, type MobileMethod, type MobileMethods, type MobileNeed, type MobilePlace, type MobileProvider, type MobileQuestion} from '../../shared/mobile/protocol.ts';
 import type {DomainContext} from '../domains/types.ts';
 import type {PhoneUploads} from './uploads.ts';
+import type {ReviewBaselineInfo, ReviewChange, ReviewMark} from '../../shared/domains/review-protocol.ts';
+import {buildDiff, diffPage, hunkInfo, type BuiltDiff} from './diff.ts';
 
 const MAX_ITEM_TEXT = 64 * 1024;
 const OPEN_ITEMS = 200;
@@ -164,6 +166,49 @@ export interface BridgeContext {
   map?(item: TimelineItem): MobileItem;
   /** Test seam: awaited after upload.finish checked the file and before it is staged. */
   beforeStage?(): Promise<void>;
+  /** Test seam: awaited after changes.keep or changes.undo read what they need and before the access check and the write. */
+  beforeReview?(): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Diff review (phase 5): the chat's latest turn, as the desktop's changed-files card shows it, through the review domain.
+
+const STATUS: Record<string, MobileChange['status']> = {added: 'added', untracked: 'added', copied: 'added', deleted: 'deleted', renamed: 'renamed'};
+const HASH = /^[0-9a-f]{40,64}$/;
+/** A turn of the chat with a snapshot: the latest by default, or the one named (it must be this chat's). */
+async function turnOf(invoke: DomainContext['invoke'], chat: Chat, runId?: string): Promise<ReviewBaselineInfo | null> {
+  const turns = await invoke('review.baselines', {chatId: chat.id});
+  if (runId) {
+    const named = turns.find(turn => turn.runId === runId);
+    if (!named || !named.treeSha || !named.folderId) throw new MobileError('not-found', 'That turn is not one of this chat’s.');
+    return named;
+  }
+  for (let index = turns.length - 1; index >= 0; index--) {
+    const turn = turns[index]!;
+    if (!chat.folderId || !turn.folderId || turn.folderId === chat.folderId) return turn.treeSha && turn.folderId ? turn : null;
+  }
+  return null;
+}
+const keptOf = (marks: readonly ReviewMark[], path: string) => new Set(marks.filter(mark => mark.path === path && mark.state === 'kept').map(mark => mark.hunkId));
+function mobileChanges(files: ReviewChange[], marks: readonly ReviewMark[]): MobileChange[] {
+  const out = files.map((file): MobileChange => {
+    const kept = keptOf(marks, file.path).has('*');
+    return {path: file.path, ...(file.previousPath ? {previousPath: file.previousPath} : {}), status: STATUS[file.status] ?? 'modified', adds: file.adds, dels: file.dels,
+      ...(file.binary ? {binary: true} : {}), state: kept ? 'kept' : 'review', afterHash: file.afterHash};
+  });
+  // A file undone as a whole is back to its text before the turn, so Git no longer lists it: the marks still do.
+  const listed = new Set(files.map(file => file.path));
+  for (const mark of marks) if (mark.hunkId === '*' && mark.state === 'undone' && !listed.has(mark.path)) { listed.add(mark.path); out.push({path: mark.path, status: 'modified', adds: 0, dels: 0, state: 'undone', afterHash: ''}); }
+  return out;
+}
+/** Built diffs of the last few files read, by file version: paging through one file builds it once. */
+const built = new Map<string, BuiltDiff | null>();
+function builtDiff(key: string, make: () => BuiltDiff | null): BuiltDiff | null {
+  if (built.has(key)) { const value = built.get(key)!; built.delete(key); built.set(key, value); return value; }
+  const value = make();
+  built.set(key, value);
+  if (built.size > 6) built.delete(built.keys().next().value!);
+  return value;
 }
 
 export async function needsList(invoke: DomainContext['invoke'], snapshot: Snapshot, scrub?: PathScrub): Promise<MobileNeed[]> {
@@ -319,6 +364,74 @@ export async function handle(ctx: BridgeContext, method: unknown, rawParams: unk
         try { recheck(); } catch (error) { await ctx.invoke('attachments.discard', {chatId: file.chatId, id: ref.id}).catch(() => undefined); throw error; }
         uploads.own(ref.id, file.chatId);
         return {attachment: {id: ref.id, name: ref.name, mime: ref.mime, size: ref.size, kind: ref.kind}} satisfies MobileMethods['upload.finish']['result'];
+      }
+      case 'changes.list': {
+        const chat = await chatOf(id(p.chatId, 'chatId'));
+        const turn = await turnOf(ctx.invoke, chat);
+        if (!turn) return {runId: null, files: [], truncated: false} satisfies MobileMethods['changes.list']['result'];
+        const [changes, marks] = await Promise.all([ctx.invoke('review.changes', {folderId: turn.folderId!, baseline: {runId: turn.runId}}), ctx.invoke('review.marks', {runId: turn.runId})]);
+        return {runId: turn.runId, files: mobileChanges(changes.files, marks), truncated: changes.truncated} satisfies MobileMethods['changes.list']['result'];
+      }
+      case 'changes.diff': {
+        const chat = await chatOf(id(p.chatId, 'chatId')), path = text(p.path, 'path', 4096);
+        const from = p.from === undefined ? 0 : typeof p.from === 'number' && Number.isInteger(p.from) && p.from >= 0 ? p.from : -1;
+        if (from < 0) throw new MobileError('bad-request', 'Missing or invalid from.');
+        const turn = await turnOf(ctx.invoke, chat);
+        if (!turn) throw new MobileError('not-found', 'This chat has no changes to review.');
+        const baseline = {runId: turn.runId};
+        const changes = await ctx.invoke('review.changes', {folderId: turn.folderId!, baseline});
+        const change = changes.files.find(file => file.path === path);
+        if (!change) throw new MobileError('not-found', 'That file is not one of this turn’s changes.');
+        const [diff, marks] = await Promise.all([ctx.invoke('review.fileDiff', {folderId: turn.folderId!, path, baseline}), ctx.invoke('review.marks', {runId: turn.runId})]);
+        const base = {runId: turn.runId, path, status: STATUS[change.status] ?? 'modified', afterHash: diff.afterHash, adds: change.adds, dels: change.dels};
+        const empty = {palette: [], hunks: [], lines: [], from: 0, total: 0, next: null};
+        if (diff.binary || diff.image) return {...base, ...empty, binary: true} satisfies MobileMethods['changes.diff']['result'];
+        const lines = diff.truncated ? null : builtDiff(`${turn.runId}:${path}:${diff.beforeHash}:${diff.afterHash}`, () => buildDiff(path, diff.before, diff.after));
+        if (!lines) return {...base, ...empty, tooLarge: true} satisfies MobileMethods['changes.diff']['result'];
+        const page = await diffPage(lines, from);
+        return {...base, palette: page.palette, hunks: hunkInfo(lines, keptOf(marks, path)), lines: page.lines, from: Math.min(from, lines.lines.length), total: lines.lines.length, next: page.next} satisfies MobileMethods['changes.diff']['result'];
+      }
+      case 'changes.keep': {
+        const chat = await chatOf(id(p.chatId, 'chatId')), path = text(p.path, 'path', 4096);
+        const hunkIds = Array.isArray(p.hunkIds) && p.hunkIds.length && p.hunkIds.length <= 500 ? p.hunkIds.map(value => value === '*' ? '*' : id(value, 'hunk id')) : null;
+        if (!hunkIds) throw new MobileError('bad-request', 'Choose between 1 and 500 changes.');
+        const turn = await turnOf(ctx.invoke, chat, id(p.runId, 'runId'));
+        const changes = await ctx.invoke('review.changes', {folderId: turn!.folderId!, baseline: {runId: turn!.runId}});
+        if (!changes.files.some(file => file.path === path)) throw new MobileError('not-found', 'That file is not one of this turn’s changes.');
+        // Keeping the last hunk still to review keeps the whole file, as the desktop's file view does.
+        let all = hunkIds.includes('*');
+        if (!all) {
+          const diff = await ctx.invoke('review.fileDiff', {folderId: turn!.folderId!, path, baseline: {runId: turn!.runId}});
+          const lines = diff.binary || diff.truncated ? null : buildDiff(path, diff.before, diff.after);
+          const kept = keptOf(await ctx.invoke('review.marks', {runId: turn!.runId}), path);
+          all = Boolean(lines && lines.hunks.every(hunk => kept.has(hunk.id) || hunkIds.includes(hunk.id)));
+        }
+        await ctx.beforeReview?.();
+        recheck();
+        const marks = await ctx.invoke('review.keep', {runId: turn!.runId, path, hunkIds: all && !hunkIds.includes('*') ? [...hunkIds, '*'] : hunkIds});
+        const state: MobileReviewState = keptOf(marks, path).has('*') ? 'kept' : 'review';
+        return {state} satisfies MobileMethods['changes.keep']['result'];
+      }
+      case 'changes.undo': {
+        const chat = await chatOf(id(p.chatId, 'chatId')), path = text(p.path, 'path', 4096);
+        if (typeof p.afterHash !== 'string' || !HASH.test(p.afterHash)) throw new MobileError('bad-request', 'Read the file again and retry.');
+        const hunkId = p.hunkId === undefined ? undefined : id(p.hunkId, 'hunk id');
+        const turn = await turnOf(ctx.invoke, chat, id(p.runId, 'runId'));
+        const baseline = {runId: turn!.runId}, folderId = turn!.folderId!;
+        const changes = await ctx.invoke('review.changes', {folderId, baseline});
+        if (!changes.files.some(file => file.path === path)) throw new MobileError('not-found', 'That file is not one of this turn’s changes.');
+        await ctx.beforeReview?.();
+        recheck();
+        const result = hunkId
+          ? await ctx.invoke('review.undoHunk', {folderId, path, baseline, hunkId, expectedAfterHash: p.afterHash})
+          : await ctx.invoke('review.undoFile', {folderId, path, baseline, expectedAfterHash: p.afterHash});
+        return {stale: result.stale} satisfies MobileMethods['changes.undo']['result'];
+      }
+      case 'chat.stop': {
+        const chatId = id(p.id); await chatOf(chatId);
+        recheck();
+        await ctx.invoke('chat.stop', {id: chatId});
+        return {} satisfies MobileMethods['chat.stop']['result'];
       }
       case 'needs.list': return {needs: await needsList(ctx.invoke, await ctx.snapshot(), ctx.scrub)} satisfies MobileMethods['needs.list']['result'];
     }

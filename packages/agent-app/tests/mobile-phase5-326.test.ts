@@ -14,7 +14,7 @@ import {SecretStore} from '../src/runtime/secret-store.ts';
 import {mobileSeams} from '../src/runtime/domains/mobile.ts';
 import {nodeNoiseCrypto} from '../src/runtime/mobile/node-crypto.ts';
 import {connectPhone, pairPhone, MobileError, type MobileConnection, type PairedRecord} from '../src/shared/mobile/client.ts';
-import {DIFF_PAGE_LINES, type MobileDiffLine} from '../src/shared/mobile/protocol.ts';
+import {DIFF_PAGE_LINES, type MobileDiffLine, type MobileDiffPage} from '../src/shared/mobile/protocol.ts';
 
 const makeBox = () => ({isEncryptionAvailable: () => true, encryptString: (value: string) => Buffer.from(`box:${value}`), decryptString: (value: Buffer) => value.toString().slice(4)});
 const socket = (url: string) => new WebSocket(url);
@@ -46,7 +46,7 @@ const KEY = 'export const streamKey = (id: string) => `session:${id}`;\n';
 
 interface Desktop { relay: DevRelay; service: ReturnType<typeof createAgentService>; root: string; chatId: string }
 /** A desktop with a Git folder and a chat in it whose turn runs `edit` after its review baseline is taken. */
-async function desktop(t: TestContext, edit: (root: string, input: ProviderInput) => Promise<ProviderResult | void>): Promise<Desktop> {
+async function desktop(t: TestContext, edit: (root: string, input: ProviderInput) => Promise<ProviderResult | void>, onStop?: () => void): Promise<Desktop> {
   const relay = await startRelay({test: true});
   const dataDir = await mkdtemp(join(tmpdir(), 'muster-mobile-p5-'));
   const root = join(dataDir, 'atlas-api');
@@ -62,7 +62,7 @@ async function desktop(t: TestContext, edit: (root: string, input: ProviderInput
   let service!: ReturnType<typeof createAgentService>;
   const provider: ProviderAdapter = {
     info: () => [{id: 'fake', name: 'Fake', available: true, identityMasked: 'Hidden', models: [{id: 'fake-model', name: 'Fake model'}]}],
-    stop: async () => true, dispose() {}, async steer() { return true; },
+    stop: async () => { onStop?.(); return true; }, dispose() {}, async steer() { return true; },
     async run(input) {
       input.onThreadReady?.('thread-1');
       // A real turn's first write comes after a model round trip; waiting for the baseline stands in for it.
@@ -169,7 +169,7 @@ test('a 5,000-line diff comes in pages without holding up the desktop', async t 
     const started = performance.now();
     let pinging = true;
     const pinger = (async () => { while (pinging) { const at = performance.now(); await other.call('ping', {}); pings.push(performance.now() - at); await delay(20); } })();
-    const page = await client.call('changes.diff', {chatId: d.chatId, path: 'src/big.ts', from});
+    const page: MobileDiffPage = await client.call('changes.diff', {chatId: d.chatId, path: 'src/big.ts', from});
     pages.push(performance.now() - started);
     pinging = false; await pinger;
     assert.equal(page.from, from, 'the page starts where it was asked');
@@ -233,11 +233,12 @@ test('keep and undo use the desktop’s review commands; a read-only phone, a st
 
 // Spec: MUS-SPEC-23-24M (docs/spec/clauses/23-mobile.md#mus-spec-23-24m)
 test('a phone that can act stops a running turn, and a read-only one can’t', async t => {
-  const d = await desktop(t, async (_root, input) => {
+  let stopped!: () => void;
+  const d = await desktop(t, async () => {
     // Runs until stopped (or 20 s, so a failing test never hangs the suite).
-    await new Promise<void>(resolve => { const timer = setTimeout(resolve, 20_000); if (input.signal?.aborted) resolve(); input.signal?.addEventListener('abort', () => { clearTimeout(timer); resolve(); }); });
-    return {status: 'interrupted', finalMessage: ''};
-  });
+    await new Promise<void>(resolve => { const timer = setTimeout(resolve, 20_000); stopped = () => { clearTimeout(timer); resolve(); }; });
+    return {status: 'completed', finalMessage: ''};
+  }, () => stopped?.());
   const {client} = await pair(t, d);
   await d.service.invoke('chat.send', {id: d.chatId, text: 'run until stopped', requestId: 'p5-stop'});
   const status = async () => (await d.service.invoke('app.snapshot', undefined)).chats.find(chat => chat.id === d.chatId)?.status;
