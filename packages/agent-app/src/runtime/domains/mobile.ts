@@ -14,6 +14,9 @@
  * - Requests go through bridge.ts (allowlist, access checked again right before each runtime command, slim wire types).
  *
  * Non-secret state is in dataDir/mobile/{config,devices}.json.
+ *
+ * Phone access is off until the phone app ships (`integrations.phoneAccess`, off by default): while it is off the relay link
+ * and the same-network listener never start and the pairing commands refuse. Paired phones keep their records.
  */
 import {randomUUID} from 'node:crypto';
 import {chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
@@ -26,6 +29,7 @@ import {checkCodeOf, keyFingerprint, MAX_PHONE_FRAME_BYTES, prologue, SecureChan
 import {Handshake, type KeyPair} from '../../shared/mobile/noise.ts';
 import {CLOSE, formatPairingLink, parsePairingLink, MOBILE_ACCESS, MOBILE_PROTOCOL_VERSION, MobileError, RELAY_NEEDS_TLS, relayUrlAllowed, type MobileAccess, type MobileEvent, type MobileFrame, type MobileItem, type PairRequest, type Welcome} from '../../shared/mobile/protocol.ts';
 import {device} from '../../shared/device-noun.ts';
+import {normalizeSettings} from '../../shared/domains/settings-protocol.ts';
 import {activeSecretStore, openSecretStores, type SecretStore} from '../secret-store.ts';
 import {handle, mobileChats, MobileItemMapper, needsList, pathScrubber, type PathScrub} from '../mobile/bridge.ts';
 import {itemOps} from '../../shared/mobile/stream.ts';
@@ -93,8 +97,17 @@ export const desktopName = (): string => cleanName(hostname().replace(/\.local$/
 const pair64 = (a: Uint8Array, b: Uint8Array) => `${toBase64(a, true)}.${toBase64(b, true)}`;
 const unpair64 = (text: string | undefined) => { const [a, b] = (text ?? '').split('.'); return a && b ? [fromBase64(a), fromBase64(b)] as const : null; };
 
+/** The refusal while phone access is off. */
+export const PHONE_ACCESS_OFF = 'Phone access is off in this version of Muster.';
+
 export function createMobileDomain(context: DomainContext): DomainModule {
   const crypto = nodeNoiseCrypto();
+  /** Read from the saved settings file, so it holds from the first moment whatever order the domains start in. */
+  const phoneAccessSetting = (): boolean => {
+    try { return normalizeSettings((JSON.parse(readFileSync(join(context.dataDir, 'settings.json'), 'utf8')) as {values?: unknown}).values)['integrations.phoneAccess']; } catch { return false; }
+  };
+  let accessOn = phoneAccessSetting();
+  const requireAccess = () => { if (!accessOn) throw new Error(PHONE_ACCESS_OFF); };
   const dir = join(context.dataDir, 'mobile');
   const configPath = join(dir, 'config.json'), devicesPath = join(dir, 'devices.json');
   /** `lan`: direct connections on the same network (on unless turned off); `lanPort`: kept so phones' saved addresses work after a restart. */
@@ -195,7 +208,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
 
   /** Opens or closes the relay link: on while a relay is set and this computer has its keys. */
   function syncLink(): RelayLink | null {
-    const want = Boolean(config.relayUrl) && !disposed;
+    const want = accessOn && Boolean(config.relayUrl) && !disposed;
     let id: Identity | null = null;
     identityError = null;
     if (want) { try { id = identity(false); } catch (error) { identityError = (error as Error).message; } }
@@ -229,7 +242,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
   }
   /** Direct connections on the same network: on while phone access is on, unless turned off in Settings. */
   function startLan(id: Identity) {
-    if (lan || config.lan === false || disposed) return;
+    if (lan || !accessOn || config.lan === false || disposed) return;
     const hosts = () => mobileSeams.lanHosts ?? lanHosts(networkInterfaces());
     const listener: LanListener = new LanListener(routeOf(id.route.publicKey), phones(() => listener), {hosts: hosts(), port: config.lanPort ?? 0});
     lan = listener;
@@ -449,8 +462,18 @@ export function createMobileDomain(context: DomainContext): DomainModule {
   }
   const offEvents = context.hooks.onAgentEvent?.(fanOut);
 
-  // A computer with paired phones reconnects to the relay on start.
+  // A computer with paired phones reconnects to the relay on start (only while phone access is on).
   syncLink();
+  // Turning phone access on opens the link; turning it off ends pairing and closes every connection.
+  const offSettings = context.hooks.onCommand?.(({command}) => {
+    if (command !== 'settings.set' && command !== 'settings.reset' && command !== 'settings.import') return;
+    const next = phoneAccessSetting();
+    if (next === accessOn) return;
+    accessOn = next;
+    if (!next) { endPairing('cancelled'); for (const session of [...sessions.values()]) drop(session, CLOSE.gone, 'closed'); stopLink(); }
+    else syncLink();
+    changed();
+  });
 
   const byId = (value: unknown): Device => {
     const found = devices.find(d => d.id === value);
@@ -462,6 +485,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
     handlers: {
       'mobile.status': () => status(),
       'mobile.relay.set': input => {
+        requireAccess();
         const url = input.url === null || input.url === '' ? null : String(input.url ?? '').trim().replace(/\/+$/, '');
         if (url !== null && !relayUrlAllowed(url)) throw new Error(/^ws:\/\//.test(url) ? RELAY_NEEDS_TLS : 'Enter the relay address as wss:// followed by its host.');
         config = {...config, relayUrl: url};
@@ -471,6 +495,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
         return status();
       },
       'mobile.pair.start': async () => {
+        requireAccess();
         if (!config.relayUrl) throw new Error('Set the relay address first.');
         const id = identity(true)!;
         endPairing('cancelled');
@@ -495,6 +520,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       /** The QR panel's own read of the link (mobile.status never carries it). */
       'mobile.pair.link': () => { const open = pairingOpen(); return open ? {link: open.link, expiresAt: new Date(open.expiresAt).toISOString()} : null; },
       'mobile.pair.confirm': input => {
+        requireAccess();
         const open = pairingOpen();
         const pending = open?.pending;
         if (!open || !pending) throw new Error('No phone is waiting to be added.');
@@ -515,6 +541,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
       'mobile.pair.cancel': () => { endPairing('cancelled'); return status(); },
       /** Direct connections on the same network. Off closes the listener and its sessions; phones then use the relay. */
       'mobile.lan.set': async input => {
+        requireAccess();
         if (typeof input.enabled !== 'boolean') throw new Error('Choose on or off.');
         config = {...config, lan: input.enabled};
         saveConfig();
@@ -533,6 +560,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
         return status();
       },
       'mobile.devices.setAccess': input => {
+        requireAccess();
         const target = byId(input.id);
         if (!(MOBILE_ACCESS as readonly unknown[]).includes(input.access)) throw new Error('Access must be read-only or act.');
         target.access = input.access as MobileAccess;
@@ -559,7 +587,7 @@ export function createMobileDomain(context: DomainContext): DomainModule {
     },
     dispose() {
       disposed = true;
-      offEvents?.();
+      offEvents?.(); offSettings?.();
       if (pairing) clearTimeout(pairing.timer);
       for (const session of [...sessions.values()]) drop(session, CLOSE.gone, 'closed');
       stopLink();
