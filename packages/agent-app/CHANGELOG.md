@@ -3,7 +3,7 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
-## Unreleased
+## 0.3.20
 
 - **Sign in to Multica from its server address.** Enter your Multica hostname in Settings › Integrations and sign in on its own page. Muster stores the resulting token in the system credential store. Token paste is available under Other ways to connect.
 - **Multica named as Multica.** Issues, projects, the top bar, the Projects list and the sidebar now say Multica for a Multica server.

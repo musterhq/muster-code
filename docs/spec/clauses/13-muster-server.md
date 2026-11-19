@@ -290,7 +290,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/multica-signin.test.ts::signing in on a Multica server’s own page connects it: the sign-in comes back to a loopback listener, is swapped for a personal access token and stored like a pasted one`
 - Environment: Node test runner; the runtime’s paperclip and musterServer handlers with real timers; a fake Multica server on loopback HTTP (tests/fixtures/multica-fake-server.ts); a fake secret store; the stand-in window is fetch following redirects.
 - Known gaps: The fake server’s /login redirects at once; Multica’s real page asks for an email code or Google first, and its web app performs the redirect in the page. The real Electron window is covered by MUS-SPEC-13-894H with Electron faked.
-- Evidence: UNVERIFIED
+- Evidence: local; tests/multica-signin.test.ts (loopback Multica fixture); exit 0; 7 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
 
 <a id="mus-spec-13-894b"></a>
 #### MUS-SPEC-13-894B: A callback with the wrong state is refused
@@ -301,7 +301,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/multica-signin.test.ts::a Multica sign-in callback with the wrong state is refused and makes no token`
 - Environment: Node test runner; the runtime’s paperclip handlers; a fake Multica server on loopback HTTP.
 - Known gaps: That the comparison takes constant time is checked by reading the code, not measured.
-- Evidence: UNVERIFIED
+- Evidence: local; tests/multica-signin.test.ts (loopback Multica fixture); exit 0; 7 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
 
 <a id="mus-spec-13-894c"></a>
 #### MUS-SPEC-13-894C: Only the first callback counts
@@ -312,7 +312,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/multica-signin.test.ts::only the first Multica sign-in callback counts: a second one is ignored and makes no second token`
 - Environment: Node test runner; the runtime’s paperclip handlers; a fake Multica server on loopback HTTP.
 - Known gaps: None known.
-- Evidence: UNVERIFIED
+- Evidence: local; tests/multica-signin.test.ts (loopback Multica fixture); exit 0; 7 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
 
 <a id="mus-spec-13-894d"></a>
 #### MUS-SPEC-13-894D: Cancel and the time limit shut the listener
@@ -323,7 +323,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/multica-signin.test.ts::cancelling or timing out a Multica sign-in shuts its loopback listener`
 - Environment: Node test runner; the runtime’s paperclip handlers with real timers and a shortened time limit; a fake Multica server on loopback HTTP.
 - Known gaps: The real limit is 5 minutes; the test shortens it. Closing the window is covered by MUS-SPEC-13-894H (the window reports it) and the main process then cancels, which is not run here.
-- Evidence: UNVERIFIED
+- Evidence: local; tests/multica-signin.test.ts (loopback Multica fixture); exit 0; 7 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
 
 <a id="mus-spec-13-894e"></a>
 #### MUS-SPEC-13-894E: Neither token reaches the window or another address
@@ -334,7 +334,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/multica-signin.test.ts::neither Multica token ever reaches the window, the server files or another address`
 - Environment: Node test runner; the runtime’s paperclip and musterServer handlers; two fake Multica servers on loopback HTTP.
 - Known gaps: That the sign-in token is dropped from memory after the swap is checked by reading the code. Logs are not captured; the code writes neither token to a log.
-- Evidence: UNVERIFIED
+- Evidence: local; tests/multica-signin.test.ts (loopback Multica fixture); exit 0; 7 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
 
 <a id="mus-spec-13-894f"></a>
 #### MUS-SPEC-13-894F: A server too old for this sign-in falls back clearly
@@ -345,7 +345,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/multica-signin.test.ts::a Multica server too old for sign-in from Muster ends with Multica’s words and points to the token fallback`
 - Environment: Node test runner; the runtime’s paperclip handlers with a shortened time limit; fake Multica servers on loopback HTTP.
 - Known gaps: Which Multica release added `cli_callback` is not checked; the behaviour is shown for a server without it.
-- Evidence: UNVERIFIED
+- Evidence: local; tests/multica-signin.test.ts (loopback Multica fixture); exit 0; 7 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
 
 <a id="mus-spec-13-894g"></a>
 #### MUS-SPEC-13-894G: Connect on a Multica address opens Multica’s sign-in page
@@ -356,7 +356,7 @@ Boundaries:
 - Test: `packages/agent-app/tests/multica-signin-dom.tsx::Connect on a Multica address opens Multica’s sign-in page in the window, and a failed sign-in points to the token path`
 - Environment: DOM suite (linkedom) rendering the real ServerList and ConnectionPanel with a stubbed bridge.
 - Known gaps: The runtime answers are stubbed; MUS-SPEC-13-894A to 894F cover the runtime side.
-- Evidence: UNVERIFIED
+- Evidence: local; multica-signin-dom (real renderer components, stubbed bridge); exit 0; 1 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
 
 <a id="mus-spec-13-894h"></a>
 #### MUS-SPEC-13-894H: The Multica sign-in window is isolated and goes only to its own callback
@@ -367,4 +367,4 @@ Boundaries:
 - Test: `packages/agent-app/tests/multica-signin.test.ts::the Multica sign-in window goes only to its own loopback callback, and closing it early abandons the sign-in`
 - Environment: Node test runner; the main-process ServerSignInWindows with a fake Electron runtime.
 - Known gaps: The main process’s reaction (cancel the waiting sign-in when it is this window’s) is wiring in src/main/index.ts and is not run here.
-- Evidence: UNVERIFIED
+- Evidence: local; tests/multica-signin.test.ts (loopback Multica fixture); exit 0; 7 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
