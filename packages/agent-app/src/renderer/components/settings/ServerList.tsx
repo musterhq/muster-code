@@ -99,7 +99,7 @@ export function ServerList({ signInAvailable = true }: { signInAvailable?: boole
           <tr data-server-id={server.id}>
             <td data-cell="name">{editing
               ? <span className="server-inline"><input type="text" aria-label="Server name" value={renaming.name} maxLength={80} autoFocus onChange={e => setRenaming({ id: server.id, name: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') void saveName(server); if (e.key === 'Escape') setRenaming(null); }}/></span>
-              : <strong>{server.name}</strong>}</td>
+              : <><strong>{server.name}</strong>{server.kind === 'multica' && <span className="ws-faint"> · Multica</span>}</>}</td>
             <td data-cell="url">{server.url}</td>
             <td data-cell="account" className={server.account ? undefined : 'ws-faint'}>{server.account ?? 'Not signed in'}</td>
             <td data-cell="status"><span className="ws-faint" data-state={server.state}>{STATUS[server.state]}</span>{failed && <> <button type="button" className="ws-link" disabled={busy !== null} onClick={() => void act(`${server.id}:check`, () => check(server.id))}>Retry</button></>}</td>

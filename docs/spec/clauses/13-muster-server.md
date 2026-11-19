@@ -31,6 +31,11 @@ Boundaries:
 | [MUS-SPEC-13-804C](13-muster-server.md#mus-spec-13-804c) | The app rides out the server going away and coming back. | [`handles the server going away and coming back: the error is shown, then reads, the live socket and the sign-in resume`](../../../packages/agent-app/tests/server-e2e/server-workflows.e2e.ts) |
 | [MUS-SPEC-13-804D](13-muster-server.md#mus-spec-13-804d) | Two real servers serve two app profiles at once without mixing their work. | [`two servers at once: two app profiles, each signed in to its own server, see only their own server’s work`](../../../packages/agent-app/tests/server-e2e/server-workflows.e2e.ts) |
 | [MUS-SPEC-13-804E](13-muster-server.md#mus-spec-13-804e) | One app profile lists two real servers in Settings and shows both. | not written yet (#803) |
+| [MUS-SPEC-13-890A](13-muster-server.md#mus-spec-13-890a) | Both Multica servers are listed online with their address, kind and “· API token” account; each token is in the secret store, in no file, never in the window, and only ever sent to its own server. | [`two Multica servers added with personal access tokens are both listed online, each token kept in the secret store and sent only to its own server`](../../../packages/agent-app/tests/multica-integration.test.ts) |
+| [MUS-SPEC-13-890B](13-muster-server.md#mus-spec-13-890b) | A bad address, a refused token (in Multica’s words), a missing token (no browser sign-in offered) and a closed port each give their own stage and sentence. | [`Test connection to a Multica server says what is wrong: a bad address, a token Multica refuses, a server that does not answer`](../../../packages/agent-app/tests/multica-integration.test.ts) |
+| [MUS-SPEC-13-890C](13-muster-server.md#mus-spec-13-890c) | A server answering 302 to another address gets its own token, the other address gets no request at all, and the test fails. | [`a Multica server that redirects never passes the token on: the redirect target receives nothing and the test fails`](../../../packages/agent-app/tests/multica-integration.test.ts) |
+| [MUS-SPEC-13-890D](13-muster-server.md#mus-spec-13-890d) | No sign-in window is started; Multica’s instruction is shown word for word and the token field under Other ways to connect is open. | [`Connect on a Multica address opens the token field with Multica’s instructions and no sign-in window`](../../../packages/agent-app/tests/multica-connect-dom.tsx) |
+| [MUS-SPEC-13-890E](13-muster-server.md#mus-spec-13-890e) | A refused token shows Multica’s sentence and saves nothing; a good one saves the address, token and kind, and the row reads “Acme · Multica” without showing the token. | [`a refused Multica token shows Multica’s words; a good one adds the server, listed as Multica`](../../../packages/agent-app/tests/multica-connect-dom.tsx) |
 
 <a id="mus-spec-13-575a"></a>
 #### MUS-SPEC-13-575A: A server value named like an object key falls back to the default
@@ -195,4 +200,61 @@ Boundaries:
 - Test: not written yet (#803)
 - Environment: Real Muster Server processes from packages/server on loopback, as MUS-SPEC-13-804D.
 - Known gaps: Today's client holds one server per profile. The pending test in server-workflows.e2e.ts names #803.
+- Evidence: UNVERIFIED
+
+### Multica servers in Settings › Integrations
+
+<a id="mus-spec-13-890a"></a>
+#### MUS-SPEC-13-890A: Two Multica servers added with tokens
+
+- Precondition: Two Multica servers on loopback, each with its own personal access token, and nothing in Settings › Integrations.
+- Action: Connect each one with “Connect with token”, rename the second, then check every server.
+- Expected result: Test connection recognises the address as Multica and lists its workspaces as orgs (“Connected to Multica. 2 workspaces.”). Both servers are listed online, with their address, the kind Multica and “Dana Founder · API token”. Each token is in the secret store under its own entry and in neither servers.json nor server.json, and the connection view the window reads does not hold it. Every request that carried a token went to the server that issued it.
+- Test: `packages/agent-app/tests/multica-integration.test.ts::two Multica servers added with personal access tokens are both listed online, each token kept in the secret store and sent only to its own server`
+- Environment: Node test runner; the runtime’s musterServer and paperclip handlers; two fake Multica servers on loopback HTTP (tests/fixtures/multica-fake-server.ts); a fake secret store.
+- Known gaps: The fake server is modelled on real Multica answers but is not Multica itself. The keychain is faked; the real secret store’s encryption is the one Paperclip tokens already use and is not retested here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-13-890b"></a>
+#### MUS-SPEC-13-890B: Test connection says what is wrong with a Multica server
+
+- Precondition: A fake Multica server on loopback, and a closed loopback port.
+- Action: Test connection with an address that is not a URL, with a wrong token, with no token, and against the closed port.
+- Expected result: The bad address fails at the config stage saying it is not a valid URL. The wrong token fails at the auth stage, names Multica, and includes Multica’s own error (“invalid token”). With no token the answer says Multica needs a personal access token and offers no browser sign-in. The closed port fails at the network stage saying nothing answered.
+- Test: `packages/agent-app/tests/multica-integration.test.ts::Test connection to a Multica server says what is wrong: a bad address, a token Multica refuses, a server that does not answer`
+- Environment: Node test runner; the runtime’s paperclip.test handler; a fake Multica server on loopback HTTP.
+- Known gaps: Does not cover a TLS failure or a slow server timing out.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-13-890c"></a>
+#### MUS-SPEC-13-890C: A redirect never carries a Multica token away
+
+- Precondition: A fake Multica server whose API answers 302 to a second fake server.
+- Action: Test connection with the first server’s token.
+- Expected result: The token goes to the first server only. The redirect is not followed, so the second server receives no request at all, and the test fails at the network stage.
+- Test: `packages/agent-app/tests/multica-integration.test.ts::a Multica server that redirects never passes the token on: the redirect target receives nothing and the test fails`
+- Environment: Node test runner; the runtime’s paperclip.test handler; two fake Multica servers on loopback HTTP.
+- Known gaps: The redirect is refused outright, so its message says the server is not reachable rather than naming the redirect.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-13-890d"></a>
+#### MUS-SPEC-13-890D: Connect on a Multica address asks for a token
+
+- Precondition: Settings › Integrations with no servers; the address is a Multica server that needs a token.
+- Action: Type the address and press Connect.
+- Expected result: No browser sign-in is started and no sign-in window opens. The error line shows Multica’s instruction to create a personal access token, Other ways to connect is open with the token field on screen, and its hint says a Multica token starts with mul_.
+- Test: `packages/agent-app/tests/multica-connect-dom.tsx::Connect on a Multica address opens the token field with Multica’s instructions and no sign-in window`
+- Environment: DOM suite (linkedom) rendering the real ServerList and ConnectionPanel with a stubbed bridge.
+- Known gaps: The runtime answer is stubbed here; case MUS-SPEC-13-890B checks the runtime gives that answer.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-13-890e"></a>
+#### MUS-SPEC-13-890E: A Multica token is refused in Multica’s words, or added
+
+- Precondition: The token field is open for a Multica address.
+- Action: Paste a wrong token and press Connect with token, then paste a good one and press it again.
+- Expected result: The wrong token shows Multica’s own refusal and nothing is saved. The good token is saved as a custom server of kind multica for its first workspace, and the list shows the row named “Acme · Multica”, signed in as “Dana Founder · API token”. The token is not shown anywhere on screen.
+- Test: `packages/agent-app/tests/multica-connect-dom.tsx::a refused Multica token shows Multica’s words; a good one adds the server, listed as Multica`
+- Environment: DOM suite (linkedom) rendering the real ServerList and ConnectionPanel with a stubbed bridge.
+- Known gaps: The runtime answers are stubbed; MUS-SPEC-13-890A covers the runtime side.
 - Evidence: UNVERIFIED

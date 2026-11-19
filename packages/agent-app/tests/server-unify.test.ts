@@ -29,7 +29,8 @@ test('detection: Paperclip answers /api/health, a Muster Server answers /healthz
   const seen:{url:string;headers:Record<string,string>}[]=[];
   const found=await detectBackend('https://muster.example.com/',async(input,init)=>{seen.push({url:input,headers:init?.headers as Record<string,string>});return input.endsWith('/healthz')?json(200,MUSTER_HEALTH):json(404,{ok:false});});
   assert.equal((found as {kind:string}).kind,'muster-server');
-  assert.deepEqual(seen.map(s=>new URL(s.url).pathname).sort(),['/api/health','/healthz']);
+  // #890: a third probe, /api/config, recognises a Multica server; it carries no credentials either.
+  assert.deepEqual(seen.map(s=>new URL(s.url).pathname).sort(),['/api/config','/api/health','/healthz']);
   assert.ok(seen.every(s=>!s.headers.authorization&&s.headers['x-muster-probe']==='detect'));
 });
 

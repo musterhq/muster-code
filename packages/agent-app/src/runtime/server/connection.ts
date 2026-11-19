@@ -17,8 +17,11 @@ import { liveMode, validSessionCookie, type SessionState } from './session.ts';
 import { detectBackend, type Detection } from './detect.ts';
 import { MusterServerBackend } from './muster-server-backend.ts';
 import { PaperclipBackend } from './paperclip-backend.ts';
+import { MulticaBackend } from './multica-backend.ts';
 import { device } from '../../shared/device-noun.ts';
 
+/** The one line that names what kind of server a connection is (connection details only). */
+export const compatibilityOf = (kind: ServerBackendKind | null): string | null => kind === 'paperclip' ? 'Paperclip-compatible' : kind === 'multica' ? 'Multica' : null;
 export const MUSTER_LOCAL_URL = 'http://127.0.0.1:7470';
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1']);
 export const isLoopback = (baseUrl: unknown): boolean => { try { const host = new URL(normalizeBaseUrl(baseUrl)).hostname.replace(/^\[|\]$/g, '').toLowerCase(); return LOOPBACK.has(host) || host.endsWith('.localhost') || /^127(\.\d{1,3}){3}$/.test(host); } catch { return false; } };
@@ -81,7 +84,7 @@ export class ServerConnection {
     let baseUrl = c.baseUrl; try { baseUrl = this.baseUrl(); } catch { /* keep what was typed */ }
     const hasToken = status.stored && c.tokenOrigin !== null && c.tokenOrigin === originOf(baseUrl);
     return { mode: c.mode, baseUrl, hasToken, secureStorage: status.secureStorage, companyId: c.companyId, backend: c.backend,
-      compatibility: c.backend === 'paperclip' ? 'Paperclip-compatible' : null, user: hasToken ? c.user : null, signedIn: hasToken ? c.signedIn : null, signInNotice: c.signInNotice, session: this.sessionState(), reconnect: hasToken && c.signedIn !== null && c.backend === 'paperclip' && this.sessionState() !== 'active', serverVersion: c.serverVersion, connectedAt: c.connectedAt, signIn: signInMethods(c.backend) };
+      compatibility: compatibilityOf(c.backend), user: hasToken ? c.user : null, signedIn: hasToken ? c.signedIn : null, signInNotice: c.signInNotice, session: this.sessionState(), reconnect: hasToken && c.signedIn !== null && c.backend === 'paperclip' && this.sessionState() !== 'active', serverVersion: c.serverVersion, connectedAt: c.connectedAt, signIn: signInMethods(c.backend) };
   }
 
   // --- the hosted-server browser session (what a hosted server's live socket accepts) -------------------------------------------
@@ -152,7 +155,7 @@ export class ServerConnection {
   makeBackend(kind: ServerBackendKind, endpoint: ServerEndpoint, extra: BackendOptions = {}): ServerBackend {
     const session = kind === 'paperclip' && this.config.signedIn ? this.sessionCookie() : null;
     const options = { fetch: this.options.fetch, onUnauthorized: this.guardFor(endpoint.baseUrl, endpoint.token), ...(session ? { session } : {}), ...extra };
-    return kind === 'muster-server' ? new MusterServerBackend(endpoint, options) : new PaperclipBackend(endpoint, options);
+    return kind === 'muster-server' ? new MusterServerBackend(endpoint, options) : kind === 'multica' ? new MulticaBackend(endpoint, options) : new PaperclipBackend(endpoint, options);
   }
   /** Ticks or unticks an org and sets its sidebar view. Saved to server.json; the connection itself (token, URL) is untouched, so nothing is re-read. */
   setOrg(companyId: string, patch: { enabled?: boolean; sidebar?: OrgSetting['sidebar'] }): void {
@@ -198,7 +201,7 @@ export class ServerConnection {
       this.secrets().set(tokenSecret, input.token); tokenOrigin = originOf(baseUrl); user = null; serverVersion = null; connectedAt = null; signedIn = null; signInNotice = null; apiToken = true;
     } else if (tokenOrigin !== null && tokenOrigin !== originOf(baseUrl)) forget();
     const companyId = input.companyId === null ? null : typeof input.companyId === 'string' ? id(input.companyId) : c.companyId;
-    const backend: ServerBackendKind | null = input.backend === 'paperclip' || input.backend === 'muster-server' ? input.backend : originChanged ? null : c.backend;
+    const backend: ServerBackendKind | null = input.backend === 'paperclip' || input.backend === 'muster-server' || input.backend === 'multica' ? input.backend : originChanged ? null : c.backend;
     this.save({ ...c, mode, baseUrl, companyId, backend, tokenOrigin, tokenSecret, user, serverVersion, connectedAt, signedIn, signInNotice, apiToken, sessionOrigin: this.config.sessionOrigin });
     return this.view();
   }
@@ -277,16 +280,16 @@ export class ServerConnection {
       const local = mode === 'local' ? 'No server is answering on '+device().lower+'. Start Muster Server (`muster-server start`) or a Paperclip-compatible server, then test again.' : null;
       return { ok: false, stage: detection.stage, message: local ?? detection.message, ...(warning ? { warning } : {}), latencyMs: Date.now() - started, baseUrl };
     }
-    const kind = detection.kind, compatibility = kind === 'paperclip' ? 'Paperclip-compatible' : null;
+    const kind = detection.kind, compatibility = compatibilityOf(kind);
     const signIn = signInMethods(kind);
     try {
       const backend = this.makeBackend(kind, { baseUrl, token }, { cache: false });
       const health = await backend.health();
       const companies = await backend.companies();
-      const where = kind === 'muster-server' ? 'Connected to Muster Server' : 'Connected to Muster Server';
+      const where = kind === 'multica' ? 'Connected to Multica' : 'Connected to Muster Server';
       const how = kind === 'paperclip' ? (health.deploymentMode === 'local_trusted' ? ' (local, no sign-in)' : health.deploymentMode ? ` (${health.deploymentMode})` : '') : '';
       return { ok: true, stage: 'ok', ...(warning ? { warning } : {}), latencyMs: Date.now() - started, version: health.version ?? detection.version, deploymentMode: health.deploymentMode ?? detection.deploymentMode, companies, backend: kind, compatibility, signIn, baseUrl,
-        message: `${where}${health.version ? ` ${health.version}` : ''}${how}. ${companies.length} ${companies.length === 1 ? 'org' : 'orgs'}.` };
+        message: kind === 'multica' ? `${where}. ${companies.length} ${companies.length === 1 ? 'workspace' : 'workspaces'}.` : `${where}${health.version ? ` ${health.version}` : ''}${how}. ${companies.length} ${companies.length === 1 ? 'org' : 'orgs'}.` };
     } catch (cause) {
       const stage = cause instanceof PaperclipError ? cause.stage : 'network';
       // A Muster Server always needs a sign-in: say what to do instead of a bare 401.

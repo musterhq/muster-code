@@ -26,6 +26,7 @@ export const split = new Set([
   'paperclip-integration-dom',
   'paperclip-signin-dom',
   'muster-server-list-dom',
+  'multica-connect-dom',
   'work-components',
   'nav-components',
   'org-components',
