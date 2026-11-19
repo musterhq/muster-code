@@ -46,6 +46,8 @@ async function desktop(t: TestContext, provider: ProviderAdapter): Promise<Deskt
   const secrets = new SecretStore(dataDir, () => makeBox());
   mobileSeams.secrets = () => secrets;
   mobileSeams.lanHosts = [];
+  // Phone access is off until the phone app ships; these tests run with it on, as a saved settings file turns it on.
+  await writeFile(join(dataDir, 'settings.json'), JSON.stringify({version: 1, values: {'integrations.phoneAccess': true}}));
   const service = createAgentService({dataDir, provider, onEvent() {}});
   t.after(async () => {
     await service.dispose();

@@ -17,6 +17,7 @@ import {splitSecretOverrides} from './thread-config.ts';
 import {CODEX_LAUNCHER, envFromOverrides, mcpServersFromOverrides} from './adapters/shared.ts';
 import type {RemoteRun} from './adapters/types.ts';
 import { device } from '../shared/device-noun.ts';
+import { REQUEST_TOO_LARGE } from '../shared/context-window.ts';
 import { RICH_CONTENT_GUIDANCE } from '../shared/rich-block.ts';
 import {codexSubagentOverrides,subagentSupport} from './subagent-routes.ts';
 import {codexWindowOverrides, userCompactionKeys} from './codex-window-overrides.ts';
@@ -323,7 +324,8 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         : result.status === 'completed' ? undefined
         : notDispatched && (result.statusCode === 429 || result.statusCode === 503) ? {kind: 'admission-rejected', retryable: true, reason: `${asSentence(result.errorMessage ?? 'The provider is temporarily unavailable.')} The request was not accepted. Try again later.`}
         : authFailureStatus(result.statusCode, notDispatched ? result.errorMessage : '') ? authRecovery(route.info, authFailureStatus(result.statusCode, notDispatched ? result.errorMessage : '')!, result.errorMessage)
-        : {kind: 'failed', retryable: notDispatched, reason: result.errorMessage ? `The provider attempt failed: ${result.errorMessage}` : 'The provider attempt failed.'};
+        // #887: a request refused for its size fails the same way every time; it is never resent automatically.
+        : {kind: 'failed', retryable: notDispatched && result.statusCode !== 413 && !REQUEST_TOO_LARGE.test(result.errorMessage ?? ''), reason: result.errorMessage ? `The provider attempt failed: ${result.errorMessage}` : 'The provider attempt failed.'};
       return {status: cancelled ? 'failed' : result.status, finalMessage: result.finalMessage, dispatchState: result.dispatchState, ...(lane ? {driver: lane.driver} : {}), ...(native ? {nativeCommand: true} : {}),
         ...(result.threadId ? {threadId: result.threadId} : {}), ...(result.turnId ? {turnId: result.turnId} : {}),
         ...(recovery ? {recovery, errorMessage: result.errorMessage ?? recovery.reason} : {}),

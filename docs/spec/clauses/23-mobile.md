@@ -20,6 +20,7 @@ Boundaries:
 - Each computer keeps its own keys and its own cached data; the phone caches only what it was shown and wipes a computer’s cache when that computer revokes it or is unpaired. Approvals are never queued offline.
 - Keeping, undoing and stopping need act access, checked again right before the desktop runs them; the phone sees folder-relative paths only and gets diffs already highlighted, in pages.
 - Production relay hosting, push notifications, Projects and dictation are later phases (see the design).
+- Phone access is off until the phone app ships: a setting (`integrations.phoneAccess`, off by default) turns it on. While it is off, Settings shows no Phone section, the relay link and the same-network listener never start, and pairing commands refuse. Phones paired earlier keep their records.
 
 ## Acceptance cases
 
@@ -118,6 +119,8 @@ Boundaries:
 | [MUS-SPEC-23-24N](23-mobile.md#mus-spec-23-24n) | The ring and the header say 1 of 3 kept. Files to review show their counts and the kept one says Kept. Swiping right calls changes.keep with the whole file; swiping left calls changes.undo with the file’s hash, and each row then says Kept or Undone. Read-only shows the files and the ring but no Keep all or Undo all, and swipes do nothing. | [`the changes screen shows the review ring and files, keeps and undoes by swipe, and hides actions when read only`](../../../packages/mobile/tests/changes-screen.test.tsx) |
 | [MUS-SPEC-23-24O](23-mobile.md#mus-spec-23-24o) | Each hunk has a pill named in its function, removed lines have no number and added lines their new number, and the toolbar reads 1 of 2. Keep calls changes.keep with the focused hunk and folds it into a Kept pill; next moves to 2 of 2 and Undo calls changes.undo with that hunk. The 5,000-line file renders its first page with only a window of rows mounted and asks for the next page only as the reader nears the end, until it has all 5,000 lines. | [`the diff shows function-named hunks with one gutter, keeps and undoes from the toolbar and pages a 5,000-line file`](../../../packages/mobile/tests/diff-screen.test.tsx) |
 | [MUS-SPEC-23-24P](23-mobile.md#mus-spec-23-24p) | At 390 the diff is inline (one column). At 844 it is split: the removed line on the left with its old number and the added line on the right with its new number, in the same row. | [`landscape and tablet widths show the diff side by side`](../../../packages/mobile/tests/diff-screen.test.tsx) |
+| [MUS-SPEC-23-25A](23-mobile.md#mus-spec-23-25a) | With default settings, Settings › Integrations has no Phone section, never asks for phone status, and searching Settings for "phone" or "pair" does not lead to Integrations; with phone access on, the section and its search terms are back. | [`Settings has no Phone section until phone access is turned on`](../../../packages/agent-app/tests/phone-access-off-dom.tsx) |
+| [MUS-SPEC-23-25B](23-mobile.md#mus-spec-23-25b) | With a relay saved, a paired phone on record and default settings, the runtime starts no relay link and no same-network listener, and pairing commands refuse with a plain sentence; the phone's record stays; turning phone access on starts the listener. | [`phone access off by default: no relay link, no same-network listener, pairing refused, records kept`](../../../packages/agent-app/tests/phone-access-off.test.ts) |
 
 ### Pairing, the device registry and access
 
@@ -1190,4 +1193,28 @@ Boundaries:
 - Test: `packages/mobile/tests/diff-screen.test.tsx::landscape and tablet widths show the diff side by side`
 - Environment: jest (jest-expo preset) in Node with @testing-library/react-native; screens are given fake connections with the MobileClient interface.
 - Known gaps: Anchoring the focused hunk through a rotation is checked on a device.
+- Evidence: UNVERIFIED
+
+### Off until the phone app ships
+
+<a id="mus-spec-23-25a"></a>
+#### MUS-SPEC-23-25A: Settings shows no Phone section while phone access is off
+
+- Precondition: The desktop app with default settings, so phone access is off.
+- Action: Open Settings › Integrations, then search Settings for "phone" and for "pair". Then turn phone access on and open Integrations again.
+- Expected result: Integrations shows no Phone section and never asks the runtime for phone status. Neither search leads to Integrations ("pair" finds nothing; "phone" still finds Chat, through "microphone"). With phone access on, the Phone section is shown and both searches find Integrations.
+- Test: `packages/agent-app/tests/phone-access-off-dom.tsx::Settings has no Phone section until phone access is turned on`
+- Environment: DOM suite (linkedom) rendering the real Settings screen with a stubbed bridge; no runtime.
+- Known gaps: Phone access is turned on through the settings store, as a saved settings file would; there is no switch for it in Settings yet.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-23-25b"></a>
+#### MUS-SPEC-23-25B: The runtime keeps phone access closed while it is off
+
+- Precondition: A data folder with a relay address saved, same-network connections on, one paired phone on record, and settings that leave phone access at its default.
+- Action: Start the agent service, read the phone status, and try to set the relay, start pairing and turn same-network connections on. Then turn phone access on and start pairing.
+- Expected result: The relay link is off and the same-network listener has no address. Each pairing command refuses with "Phone access is off in this version of Muster." The paired phone is still on record. Once phone access is on, pairing no longer refuses for that reason and the same-network listener gets an address.
+- Test: `packages/agent-app/tests/phone-access-off.test.ts::phone access off by default: no relay link, no same-network listener, pairing refused, records kept`
+- Environment: Node test runner; the real agent service and settings and phone domains with a test secret store; the listener is limited to loopback; the relay address points nowhere; no network.
+- Known gaps: Does not connect a phone; the existing phone tests run with phone access on.
 - Evidence: UNVERIFIED

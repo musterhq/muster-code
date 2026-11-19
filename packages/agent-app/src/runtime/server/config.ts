@@ -61,7 +61,7 @@ const secretId = (v: unknown): string | null => typeof v === 'string' && /^[A-Za
 export function parseServerConfig(own: Record<string, unknown>): ServerConfig {
   const mode = own.mode === 'local' || own.mode === 'custom' ? own.mode : 'off';
   const user = own.user && typeof own.user === 'object' ? own.user as ServerUser : null;
-  return { ...DEFAULT_SERVER_CONFIG, mode, baseUrl: s(own.baseUrl) ?? PAPERCLIP_LOCAL_URL, companyId: s(own.companyId), backend: own.backend === 'paperclip' || own.backend === 'muster-server' ? own.backend : null,
+  return { ...DEFAULT_SERVER_CONFIG, mode, baseUrl: s(own.baseUrl) ?? PAPERCLIP_LOCAL_URL, companyId: s(own.companyId), backend: own.backend === 'paperclip' || own.backend === 'muster-server' || own.backend === 'multica' ? own.backend : null,
     tokenOrigin: s(own.tokenOrigin), tokenSecret: secretId(own.tokenSecret) ?? SERVER_SECRET, user, serverVersion: s(own.serverVersion), connectedAt: s(own.connectedAt), signedIn: who(own.signedIn), signInNotice: s(own.signInNotice), sessionOrigin: s(own.sessionOrigin), sessionSecret: secretId(own.sessionSecret) ?? SESSION_SECRET, apiToken: own.apiToken === true, orgs: orgsOf(own.orgs), me: meOf(own.me), ...(Array.isArray(own.migratedFrom) ? { migratedFrom: own.migratedFrom as string[] } : {}) };
 }
 

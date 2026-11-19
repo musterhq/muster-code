@@ -7,6 +7,7 @@ import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.t
 import {HISTORY_WINDOW_EVENT, TOOLS_UNAVAILABLE_EVENT} from '../context-budget.ts';
 import {browserOffered, executeTool, toolInstructions, toolSpecs, type ToolCall} from './http-tools.ts';
 import {fitHttpContext, HISTORY_SUMMARY, httpToolNotes, type HttpMessage} from './http-context.ts';
+import {fitRequestImages, imagesOmittedReporter} from './request-size.ts';
 import {CONTEXT_OVERFLOW, DEFAULT_CONTEXT_WINDOW} from '../../shared/context-window.ts';
 import {setTimeout as delay} from 'node:timers/promises';
 
@@ -198,7 +199,7 @@ export function openAICompatibleAdapter(options: HttpOptions & {tools?: boolean}
     const body = await response.json() as {choices?: Array<{message?: {content?: unknown}}>};
     return body.choices?.[0]?.message?.content;
   };
-  return {kind: 'http', run: input => withSuggestion(input, turn(input, memory, options.label, async (history, rawExtra, tools) => {
+  return {kind: 'http', run: input => { const omitted = imagesOmittedReporter(input.onEvent); return withSuggestion(input, turn(input, memory, options.label, async (history, rawExtra, tools) => {
     const extra = rawExtra as HttpMessage[];
     const key = options.apiKey();
     const images = loadImages(input.images);
@@ -211,6 +212,9 @@ export function openAICompatibleAdapter(options: HttpOptions & {tools?: boolean}
     const window = typeof input.contextWindow === 'number' && Number.isFinite(input.contextWindow) && input.contextWindow > 0 ? input.contextWindow : DEFAULT_CONTEXT_WINDOW;
     let budget = Math.floor(window * 4 * .85), compacted = false;
     fitHttpContext(history, extra, () => body().length, budget);
+    // #887: the pictures of this message and the latest tool round must still fit the provider's 32 MB request limit.
+    const current = {content: user};
+    omitted(fitRequestImages([current, ...extra], Buffer.byteLength(body()), message => message === current));
     // Retry the request for this round, never the stream or already-executed tools. Stop cancels the wait and fetch.
     for (let attempt = 0; ; attempt++) {
       input.signal.throwIfAborted();
@@ -264,7 +268,7 @@ export function openAICompatibleAdapter(options: HttpOptions & {tools?: boolean}
     }
     const calls = [...pending.entries()].sort((a, b) => a[0] - b[0]).map(([, call], position) => ({...call, id: call.id || `call_${position}_${randomUUID().slice(0, 8)}`})).filter(call => call.name);
     return {usage, calls};
-  }, options.tools === false ? undefined : {endpoint: options.endpoint}), ask(input.model))};
+  }, options.tools === false ? undefined : {endpoint: options.endpoint}), ask(input.model)); }};
 }
 
 export const ANTHROPIC_API = 'https://api.anthropic.com/v1';
@@ -280,12 +284,16 @@ export function anthropicAdapter(options: Omit<HttpOptions, 'endpoint' | 'label'
     const body = await response.json() as {content?: Array<{type?: string; text?: unknown}>};
     return body.content?.find(block => block.type === 'text')?.text;
   };
-  return {kind: 'http', run: input => withSuggestion(input, turn(input, memory, label, (history, extra) => {
+  return {kind: 'http', run: input => { const omitted = imagesOmittedReporter(input.onEvent); return withSuggestion(input, turn(input, memory, label, (history, extra) => {
     const images = loadImages(input.images);
     const user = images.length ? [...images.map(image => ({type: 'image', source: {type: 'base64', media_type: image.mediaType, data: image.data}})), {type: 'text', text: input.prompt}] : input.prompt;
+    const current = {role: 'user', content: user};
+    const body = () => JSON.stringify({model: input.model, max_tokens: 16_000, stream: true, ...(input.instructions ? {system: input.instructions} : {}), messages: [...history, current, ...extra]});
+    // #887: attached pictures that together pass the provider's 32 MB request limit are left out, and the chat is told.
+    omitted(fitRequestImages([current], Buffer.byteLength(body()), message => message === current));
     return request(`${endpoint}/messages`, {method: 'POST', redirect: 'error', signal: input.signal,
       headers: {'content-type': 'application/json', accept: 'text/event-stream', 'x-api-key': options.apiKey() ?? '', 'anthropic-version': '2023-06-01'},
-      body: JSON.stringify({model: input.model, max_tokens: 16_000, stream: true, ...(input.instructions ? {system: input.instructions} : {}), messages: [...history, {role: 'user', content: user}, ...extra]})});
+      body: body()});
   }, async (response, emit) => {
     let input_tokens: unknown, output_tokens: unknown;
     for await (const {event, data} of sseEvents(response.body!)) {
@@ -300,7 +308,7 @@ export function anthropicAdapter(options: Omit<HttpOptions, 'endpoint' | 'label'
       if (type === 'message_stop') break;
     }
     return typeof input_tokens === 'number' ? {usage: {inputTokens: input_tokens, outputTokens: typeof output_tokens === 'number' ? output_tokens : 0}} : undefined;
-  }), ask(input.model))};
+  }), ask(input.model)); }};
 }
 
 /** GET a JSON model list with a timeout and a 1 MiB cap. */

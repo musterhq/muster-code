@@ -45,6 +45,9 @@ Boundaries:
 | [MUS-SPEC-12-572A](12-projects-orgs-and-tasks.md#mus-spec-12-572a) | A priority named like an object key is dropped, not sent. | [`creating a task ignores a priority that is an Object.prototype key`](../../../packages/agent-app/tests/protocol-bughunt.test.ts) |
 | [MUS-SPEC-12-673A](12-projects-orgs-and-tasks.md#mus-spec-12-673a) | The branch is named release, not heads/release, when a tag shares the name. | [`checkout and memory name the branch when a tag shares its name`](../../../packages/agent-app/tests/branch-tag-same-name.test.ts) |
 | [MUS-SPEC-12-673B](12-projects-orgs-and-tasks.md#mus-spec-12-673b) | With a detached HEAD, check-out gives the short commit id and memory records no branch. | [`a detached HEAD: checkout falls back to the short sha, memory records no branch`](../../../packages/agent-app/tests/branch-tag-same-name.test.ts) |
+| [MUS-SPEC-12-890A](12-projects-orgs-and-tasks.md#mus-spec-12-890a) | Both workspaces are orgs; the project and its issues show with Multica’s status, priority (urgent as Critical), agent or person assignee and labels; the detail has the description and the agent’s comment; issue calls name their workspace. | [`a Multica workspace shows its projects and issues on the Projects pages, and an issue opens with its description and comments`](../../../packages/agent-app/tests/multica-integration.test.ts) |
+| [MUS-SPEC-12-890B](12-projects-orgs-and-tasks.md#mus-spec-12-890b) | Create, status, priority, person and agent assignee and a comment are sent as Multica’s own fields; mentions go in Multica’s form; a 403 shows Multica’s sentence and changes nothing. | [`acting on a Multica issue sends Multica’s own fields, keeps the server’s answer, and shows a refusal in the server’s words`](../../../packages/agent-app/tests/multica-integration.test.ts) |
+| [MUS-SPEC-12-890C](12-projects-orgs-and-tasks.md#mus-spec-12-890c) | Check-out starts a chat, sets in_progress, keeps it on you and posts the check-out comment; hand-back sets in_review, assigns the reviewer agent and posts the summary with a Multica mention; nothing goes to routes Multica lacks. | [`working a Multica issue from a chat: check-out moves it to in_progress with a comment, hand-back moves it to in_review for the reviewer with a summary that mentions them`](../../../packages/agent-app/tests/multica-integration.test.ts) |
 
 ### Hand-back of a plain folder
 
@@ -377,4 +380,39 @@ Boundaries:
 - Test: `packages/agent-app/tests/ui-sweep-dom.tsx::a project with zero tasks does not claim work is in progress`
 - Environment: Node and linkedom with the real renderer and a fixture bridge; responsive navigation uses a window media-query fixture. No desktop app or network.
 - Known gaps: Does not exercise a live provider or imported history database. Visual layout is checked separately in a browser harness.
+- Evidence: UNVERIFIED
+
+### Multica workspaces, issues and check-out
+
+<a id="mus-spec-12-890a"></a>
+#### MUS-SPEC-12-890A: A Multica workspace shows its projects and issues
+
+- Precondition: A connected Multica server with two workspaces; Acme has one project, three issues (one assigned to an agent, one to you, one unassigned), a label and an agent’s comment.
+- Action: Read the Projects snapshot, then open the first issue.
+- Expected result: Both workspaces are listed as orgs and Acme is shown. The project Website lists two issues, both open. Each issue has its Multica key, status and priority (urgent reads as Critical, none as Low), its assignee by name (Dev Agent, You, or none) and its labels. The workspace members can be assigned. The issue opens with its description and the agent’s comment, its mention shown in Muster’s own link form. Every issue call names its workspace in X-Workspace-ID.
+- Test: `packages/agent-app/tests/multica-integration.test.ts::a Multica workspace shows its projects and issues on the Projects pages, and an issue opens with its description and comments`
+- Environment: Node test runner; the runtime’s paperclip handlers; a fake Multica server on loopback HTTP.
+- Known gaps: The Projects pages render these rows through the same components as other servers; no DOM suite renders a Multica issue page here. Multica runs, inbox items and squads are not read.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-12-890b"></a>
+#### MUS-SPEC-12-890B: Acting on a Multica issue
+
+- Precondition: A connected Multica server and its snapshot read.
+- Action: Create an issue in a project with a priority and an agent; change another issue’s status and priority; assign it to a person, then an agent; comment with a mention; then try to assign it to an agent the server refuses.
+- Expected result: The new issue is created with Multica’s own fields (title, status, description, priority high, project_id, assignee_type agent and assignee_id) and gets the next key. Status and priority are sent as Multica values (Critical as urgent) and the returned issue is the server’s answer. A person is assigned as a member by user id and an agent as an agent. The mention is sent as mention://agent/ so Multica wakes the agent. The refused assignment fails with Multica’s own sentence and code (403), and the issue keeps its assignee.
+- Test: `packages/agent-app/tests/multica-integration.test.ts::acting on a Multica issue sends Multica’s own fields, keeps the server’s answer, and shows a refusal in the server’s words`
+- Environment: Node test runner; the runtime’s paperclip handlers; a fake Multica server on loopback HTTP.
+- Known gaps: Custom statuses are read by their lifecycle category but cannot be picked from Muster. Editing a title or description is not covered.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-12-890c"></a>
+#### MUS-SPEC-12-890C: Working a Multica issue from a chat
+
+- Precondition: A connected Multica server; an issue in the Website project assigned to you; the project bound to a plain folder on this computer.
+- Action: Plan and start the check-out, change a file, then hand it back to the QA agent with a summary.
+- Expected result: The plan shows the issue is yours, in Acme’s Website project. Check-out starts a Muster chat, moves the issue to in_progress, keeps it assigned to you, and posts the check-out comment. Hand-back moves it to in_review (done stays with a person, as Multica’s own agents do), assigns it to the QA agent, and posts the hand-back summary with the agent mentioned as mention://agent/, so Multica wakes it. No request goes to document or cost-event routes, the token goes only to that server, and every call names the issue’s workspace.
+- Test: `packages/agent-app/tests/multica-integration.test.ts::working a Multica issue from a chat: check-out moves it to in_progress with a comment, hand-back moves it to in_review for the reviewer with a summary that mentions them`
+- Environment: Node test runner; the real check-out service and store with SQLite in memory, a fake git and chat port, a plain temp folder, and a fake Multica server on loopback HTTP.
+- Known gaps: Multica has no lease or lock: the check-out lease is Muster’s own comment marker, so two computers are kept apart only by that marker. The local work log document and cost events are not sent, because Multica has no such routes. Muster is not registered as a Multica runtime, so Multica cannot dispatch an issue to Muster.
 - Evidence: UNVERIFIED

@@ -14,7 +14,7 @@ export const SETTINGS_SECTIONS: readonly SectionInfo[] = [
   {id:'plugins', label:'Skills & plugins', description:'Installed plugins and skills with their scope.', keywords:'plugins skills extensions mcp servers apps inventory scope inheritance'},
   {id:'environments', label:'Environments', description:'Where agents run: '+device().lower+' or an isolated Linux sandbox.', keywords:'environments environment sandbox container linux docker local host this mac this pc this computer isolated copy worktree run location'},
   {id:'automations', label:'Automations', description:'Scheduled and file-triggered agent work.', keywords:'automations automation schedule scheduled cron recurring trigger file watch runs history'},
-  {id:'integrations', label:'Integrations', description:'Connect to Muster Server: its projects, tasks and agents show up in the app.', keywords:'phone mobile app pair pairing qr relay iphone android revoke muster server remote connect self-hosted team sign in integrations connection server deployment url api token org projects agents roster this mac off test link import disconnect sign in password browser gitlab bitbucket glab merge request git host token app password self-hosted'},
+  {id:'integrations', label:'Integrations', description:'Connect to Muster Server: its projects, tasks and agents show up in the app.', keywords:'muster server remote connect self-hosted team sign in integrations connection server deployment url api token org projects agents roster this mac off test link import disconnect sign in password browser gitlab bitbucket glab merge request git host token app password self-hosted'},
   {id:'shortcuts', label:'Shortcuts', description:'Keyboard shortcuts from the app menus.', keywords:'keyboard shortcuts hotkeys accelerators keys bindings'},
   {id:'diagnostics', label:'Diagnostics', description:'Versions, processes and the runtime log.', keywords:'diagnostics version electron node core log memory cpu processes metrics debug support redacted'},
   {id:'storage', label:'Storage', description:'Disk use by category, with safe cleanup.', keywords:'storage disk space size attachments scratch cleanup clean delete sqlite database worktrees libreoffice office word powerpoint document runtime'},
@@ -25,12 +25,16 @@ export const SETTINGS_SECTIONS: readonly SectionInfo[] = [
 /** The Server section exists only in the web UI; the desktop app shows exactly the sections it always had. */
 export function visibleSections(web: boolean = isWebHost()): SectionInfo[] { return SETTINGS_SECTIONS.filter(section => section.id !== 'server' || web); }
 
+/** Search terms for Integrations › Phone, only while phone access is on (it stays hidden until the phone app ships). */
+const PHONE_KEYWORDS = 'phone mobile app pair pairing qr relay iphone android revoke';
+
 /** Every whitespace-separated term must appear in the label, description or keywords. */
-export function filterSections(query: string, sections: readonly SectionInfo[] = visibleSections()): SectionInfo[] {
+export function filterSections(query: string, sections: readonly SectionInfo[] = visibleSections(), settings?: {'integrations.phoneAccess'?: boolean}): SectionInfo[] {
   const terms = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return [...sections];
   return sections.filter(section => {
-    const haystack = `${section.label} ${section.description} ${section.keywords}`.toLocaleLowerCase();
+    const keywords = section.id === 'integrations' && settings?.['integrations.phoneAccess'] === true ? `${section.keywords} ${PHONE_KEYWORDS}` : section.keywords;
+    const haystack = `${section.label} ${section.description} ${keywords}`.toLocaleLowerCase();
     return terms.every(term => haystack.includes(term));
   });
 }

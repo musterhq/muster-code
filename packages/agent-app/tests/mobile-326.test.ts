@@ -4,7 +4,7 @@
  *  relay from packages/relay. */
 import assert from 'node:assert/strict';
 import {test, type TestContext} from 'node:test';
-import {mkdtemp, rm, readFile} from 'node:fs/promises';
+import {mkdtemp, rm, readFile, writeFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {basename, join} from 'node:path';
@@ -68,6 +68,8 @@ async function desktop(t: TestContext, provider: ProviderAdapter, options: {secu
   // frame. Production picks the computer's private-network addresses.
   mobileSeams.lanHosts = options.lan ? ['127.0.0.1'] : [];
   const events: AgentEvent[] = [];
+  // Phone access is off until the phone app ships; these tests run with it on, as a saved settings file turns it on.
+  await writeFile(join(dataDir, 'settings.json'), JSON.stringify({version: 1, values: {'integrations.phoneAccess': true}}));
   const service = createAgentService({dataDir, provider, onEvent(event) { events.push(event); }});
   t.after(async () => {
     await service.dispose();
