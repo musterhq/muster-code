@@ -3,6 +3,11 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## 0.3.20
+
+- **Sign in to Multica from its server address.** Enter your Multica hostname in Settings › Integrations and sign in on its own page. Muster stores the resulting token in the system credential store. Token paste is available under Other ways to connect.
+- **Multica named as Multica.** Issues, projects, the top bar, the Projects list and the sidebar now say Multica for a Multica server.
+
 ## 0.3.19
 
 Muster now works with Multica: connect any number of Multica servers, see their workspaces, projects and issues under Projects, update and comment on issues, and work an issue from a chat with Multica's own In progress and In review hand-off. Agents can now start and steer other agents on any provider you have set up, folders and agents can live on an SSH host, and a new Auto access level lets routine work go ahead by itself while anything risky still asks. Also new: compare one prompt across several models, any ACP agent as a provider, interactive MCP apps in the chat, private password and key requests, GitLab and Bitbucket, Android phones over USB and 1Password in the built-in browser. Long chats with many images no longer stop at the provider's 32 MB request limit.

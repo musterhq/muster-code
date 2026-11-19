@@ -33,7 +33,7 @@ export interface SignInRuntime {
   getSession(partition: string): SessionLike;
   openExternal(url: string): Promise<void>;
 }
-export interface SignInWindowOptions { runtime?: SignInRuntime; onSession(baseUrl: string, cookie: string): Promise<unknown> | unknown; watchMs?: number; timers?: { setInterval: typeof setInterval; clearInterval: typeof clearInterval } }
+export interface SignInWindowOptions { onAbandoned?(approvalUrl: string): void; runtime?: SignInRuntime; onSession(baseUrl: string, cookie: string): Promise<unknown> | unknown; watchMs?: number; timers?: { setInterval: typeof setInterval; clearInterval: typeof clearInterval } }
 
 function electronRuntime(): SignInRuntime {
   const { BrowserWindow: Window, session, shell } = createRequire(__filename)('electron') as typeof import('electron');
@@ -57,7 +57,7 @@ const isWeb = (url: string): boolean => { try { return ['http:', 'https:'].inclu
 
 export class ServerSignInWindows {
   private readonly runtime: SignInRuntime;
-  private readonly windows = new Map<string, { window: WindowLike; timer: ReturnType<typeof setInterval> | null; last: string | null }>();
+  private readonly windows = new Map<string, { window: WindowLike; timer: ReturnType<typeof setInterval> | null; last: string | null; url: string; abandon: boolean }>();
   private readonly timers: { setInterval: typeof setInterval; clearInterval: typeof clearInterval };
   constructor(private readonly options: SignInWindowOptions) { this.runtime = options.runtime ?? electronRuntime(); this.timers = options.timers ?? { setInterval, clearInterval }; }
 
@@ -65,40 +65,60 @@ export class ServerSignInWindows {
   async open(input: { url: string; baseUrl: string }, parent?: unknown): Promise<{ opened: true }> {
     const origin = serverOriginOf(input.baseUrl);
     if (serverOriginOf(input.url) !== origin) throw new Error('The sign-in page must be on the server’s own address.');
+    const login = new URL(input.url);
+    const callback = login.searchParams.get('cli_callback');
+    if (callback && !/^http:\/\/127\.0\.0\.1:\d+\/callback$/.test(callback)) throw new Error('Invalid Multica sign-in callback.');
     const existing = this.windows.get(origin);
-    if (existing && !existing.window.isDestroyed()) { existing.window.show(); existing.window.focus(); await existing.window.loadURL(input.url).catch(() => undefined); return { opened: true }; }
+    if (existing && !existing.window.isDestroyed() && (existing.url === input.url || (!callback && !new URL(existing.url).searchParams.has('cli_callback')))) { existing.window.show(); existing.window.focus(); await existing.window.loadURL(input.url).catch(() => undefined); return { opened: true }; }
+    if (existing) this.close(origin);
     const partition = sessionPartition(origin), jar = this.runtime.getSession(partition);
     jar.setPermissionRequestHandler((...args: unknown[]) => { const callback = args.find(a => typeof a === 'function') as ((allow: boolean) => void) | undefined; callback?.(false); });
     const window = this.runtime.createWindow({
-      width: 540, height: 760, minWidth: 420, minHeight: 520, title: `Sign in to Muster Server · ${new URL(origin).host}`, autoHideMenuBar: true, show: true,
+      width: 540, height: 760, minWidth: 420, minHeight: 520, title: `Sign in to ${callback ? 'Multica' : 'Muster Server'} · ${new URL(origin).host}`, autoHideMenuBar: true, show: true,
       webPreferences: { partition, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, allowRunningInsecureContent: false, spellcheck: false, webviewTag: false },
     }, parent);
-    const entry: { window: WindowLike; timer: ReturnType<typeof setInterval> | null; last: string | null } = { window, timer: null, last: null };
+    const entry: { window: WindowLike; timer: ReturnType<typeof setInterval> | null; last: string | null; url: string; abandon: boolean } = { window, timer: null, last: null, url: input.url, abandon: Boolean(callback) };
     this.windows.set(origin, entry);
     // Stay on the server's origin. Anything else belongs in the system browser, never in a window that holds this server's session.
+    const openExternal = (raw: string) => {
+      if (!isWeb(raw)) return;
+      const url = new URL(raw);
+      if (url.username || url.password) return;
+      if (callback && (LOOPBACK.has(url.hostname) || url.searchParams.has('token'))) return;
+      void this.runtime.openExternal(raw).catch(() => undefined);
+    };
     const guard = (event: { url: string; preventDefault(): void }) => {
-      let same = false; try { same = new URL(event.url).origin === origin; } catch { /* unparsable: refused */ }
-      if (!same) { event.preventDefault(); if (isWeb(event.url)) void this.runtime.openExternal(event.url).catch(() => undefined); }
+      let url: URL;
+      try { url = new URL(event.url); } catch { event.preventDefault(); return; }
+      if (url.origin === origin) return;
+      if (callback && url.origin + url.pathname === callback && !url.username && !url.password &&
+          url.searchParams.get('state') === login.searchParams.get('cli_state') && url.searchParams.has('token')) {
+        entry.abandon = false;
+        return;
+      }
+      event.preventDefault();
+      openExternal(event.url);
     };
     window.webContents.on('will-navigate', guard);
     window.webContents.on('will-redirect', guard);
     window.webContents.on('will-attach-webview', event => event.preventDefault());
-    window.webContents.setWindowOpenHandler(({ url }) => { if (isWeb(url)) void this.runtime.openExternal(url).catch(() => undefined); return { action: 'deny' }; });
+    window.webContents.setWindowOpenHandler(({ url }) => { openExternal(url); return { action: 'deny' }; });
     const capture = async () => {
+      if (callback) return;
       const header = sessionCookieHeader(await jar.cookies.get({ url: origin }).catch(() => []), origin);
       if (!header || header === entry.last) return;
       entry.last = header;
       await this.options.onSession(origin, header);
     };
-    entry.timer = this.timers.setInterval(() => { void capture(); }, this.options.watchMs ?? 1500);
-    window.on('closed', () => { if (entry.timer) this.timers.clearInterval(entry.timer); entry.timer = null; void capture().finally(() => { if (this.windows.get(origin) === entry) this.windows.delete(origin); }); });
+    if (!callback) entry.timer = this.timers.setInterval(() => { void capture(); }, this.options.watchMs ?? 1500);
+    window.on('closed', () => { if (entry.abandon) this.options.onAbandoned?.(entry.url); if (entry.timer) this.timers.clearInterval(entry.timer); entry.timer = null; void capture().finally(() => { if (this.windows.get(origin) === entry) this.windows.delete(origin); }); });
     await window.loadURL(input.url).catch(() => undefined);
     void capture();
     return { opened: true };
   }
 
   /** Closes the window (for "Use my browser instead"). */
-  close(baseUrl: string): void { const entry = this.windows.get(serverOriginOf(baseUrl)); if (entry && !entry.window.isDestroyed()) entry.window.close(); }
+  close(baseUrl: string): void { const entry = this.windows.get(serverOriginOf(baseUrl)); if (entry && !entry.window.isDestroyed()) { entry.abandon = false; entry.window.close(); } }
 
   /** Sign out: the window closes and this server's partition loses its cookies and storage. Other servers' partitions are untouched. */
   async clear(baseUrl: string): Promise<void> {

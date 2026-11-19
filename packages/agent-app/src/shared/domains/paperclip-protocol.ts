@@ -152,7 +152,7 @@ export type ApprovalDecision = 'approve' | 'reject' | 'request_revision';
 export type LiveChannel = 'socket' | 'poll' | 'events' | 'off';
 /** The linked Paperclip as the snapshot saw it. `stale`: the last read failed; `cached` then says whether its rows are the
  *  last good copy (true) or missing because nothing was read yet (false). */
-export interface PaperclipLink { origin: string; company: WorkspaceCompany | null; companies: WorkspaceCompany[]; live: LiveChannel; stale?: string; cached?: boolean; /** Offer "Reconnect for live updates" (a browser sign-in whose session ended), and where to reconnect. */ reconnect?: boolean; baseUrl?: string }
+export interface PaperclipLink { origin: string; /** What the linked server is: a Multica server is named Multica on screen, the others Muster Server. */ kind?: ServerBackendKind | null; company: WorkspaceCompany | null; companies: WorkspaceCompany[]; live: LiveChannel; stale?: string; cached?: boolean; /** Offer "Reconnect for live updates" (a browser sign-in whose session ended), and where to reconnect. */ reconnect?: boolean; baseUrl?: string }
 export interface WorkspaceSnapshot {
   paperclip: PaperclipLink | null;
   tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; goals: WorkspaceGoal[];
@@ -407,7 +407,7 @@ export interface PaperclipCommands {
   /** `serverId`: the server the approved key belongs to (`'new'`, or omitted: the one at that address, else a new entry in the list). */
   'paperclip.signin.start': { input: { baseUrl: string; serverId?: string }; output: PaperclipSignInState };
   'paperclip.signin.status': { input: Record<string, never>; output: PaperclipSignInState };
-  'paperclip.signin.cancel': { input: Record<string, never>; output: PaperclipSignInState };
+  'paperclip.signin.cancel': { input: { approvalUrl?: string }; output: PaperclipSignInState };
   /** Revokes the key the server issued to this Mac and removes it. `message`: anything to tell the person (a revoke the server did not confirm). */
   'paperclip.signin.signout': { input: Record<string, never>; output: { config: PaperclipConfigView; revoked: boolean; message?: string } };
   /** Disconnect: revokes the key a browser approval issued (when it did), forgets every key and session, and turns the connection off. */

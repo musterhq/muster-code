@@ -1,7 +1,6 @@
 /**
  * "Sign in to Muster Server" (#285): a browser-approval sign-in that does not care which backend answers.
- * `ServerAuth` is the seam. One adapter exists now (Paperclip's CLI auth challenge, in paperclip-signin.ts); a Muster Server adapter
- * with its own browser-approval or device flow plugs in by implementing the same five calls. The controller below owns everything
+ * Paperclip and Muster Server poll for approval. Multica receives a key through its CLI browser callback. The controller owns everything
  * else: one request at a time, polling only while waiting (at the interval the server suggests, with backoff), expiry by the
  * clock, Cancel, and what the UI sees. The password never reaches Muster; the challenge secret and the key never leave this
  * closure except the key going to `approved()` and the approval link going to the renderer.
@@ -10,7 +9,7 @@ import type { PaperclipSignInState } from '../shared/domains/paperclip-protocol.
 
 export interface SignedInUser { name: string | null; email: string | null; userId: string | null; /** Muster Server also says the account name and role. */ username?: string; role?: string }
 /** What `start` returns. `secret` and `key` stay inside the controller. (`key` is the board key a Paperclip challenge issues up front; a Muster Server fills it in when the approval completes.) */
-export interface ServerChallenge { id: string; secret: string; key: string; approvalUrl: string; expiresAt: number; pollIntervalMs: number }
+export interface ServerChallenge { id: string; secret: string; key: string; approvalUrl: string; expiresAt: number; pollIntervalMs: number; callback?: { key: Promise<string>; finish(success: boolean): void } }
 export type ChallengeStatus = 'pending' | 'approved' | 'cancelled' | 'expired' | 'gone';
 /** Thrown by an adapter when the server cannot be reached (the controller backs off). Any other Error from `start` is shown as is. */
 export class Unreachable extends Error {}
@@ -49,7 +48,7 @@ export function createServerSignIn(auth: ServerAuth, deps: SignInDeps) {
   let generation = 0;
   const set = (next: PaperclipSignInState) => { state = next; deps.changed(); };
   const stop = () => { if (live?.timer) timers.clearTimeout(live.timer); if (live) live.timer = null; };
-  const finish = (next: PaperclipSignInState) => { stop(); live = null; generation++; set(next); };
+  const finish = (next: PaperclipSignInState) => { stop(); live?.challenge.callback?.finish(next.phase === 'signed-in'); live = null; generation++; set(next); };
 
   async function poll(mine: number): Promise<void> {
     const current = live;
@@ -81,11 +80,12 @@ export function createServerSignIn(auth: ServerAuth, deps: SignInDeps) {
     const { base, challenge } = current;
     let who: SignedInUser | null;
     try { who = await auth.whoami(base, challenge.key); }
-    catch { return finish({ phase: 'failed', baseUrl: base, message: `The server approved the request but stopped answering at ${hostOf(base)}. Start again.` }); }
+    catch { if (mine !== generation) return; return finish({ phase: 'failed', baseUrl: base, message: `The server approved the request but stopped answering at ${hostOf(base)}. Start again.` }); }
     if (mine !== generation) return;
     if (!who) return finish({ phase: 'failed', baseUrl: base, message: 'The server approved the request but did not accept the new key. Start again.' });
     try { await deps.approved({ origin: current.origin, baseUrl: base, token: challenge.key, user: who }); }
-    catch (cause) { return finish({ phase: 'failed', baseUrl: base, message: cause instanceof Error ? cause.message : 'Muster could not save the key.' }); }
+    catch (cause) { if (mine !== generation) return; return finish({ phase: 'failed', baseUrl: base, message: cause instanceof Error ? cause.message : 'Muster could not save the key.' }); }
+    if (mine !== generation) return;
     finish({ phase: 'signed-in', baseUrl: base, user: { name: who.name, email: who.email } });
   }
 
@@ -93,24 +93,38 @@ export function createServerSignIn(auth: ServerAuth, deps: SignInDeps) {
     state: (): PaperclipSignInState => state,
     /** Creates the challenge. Resolves with the waiting state (with the approval link) or throws a sentence. */
     async start(input: unknown): Promise<PaperclipSignInState> {
-      if (live) await this.cancel();
-      const { baseUrl, origin, challenge } = await auth.start(input);
+      if (live) void this.cancel();
       const mine = ++generation;
+      const { baseUrl, origin, challenge } = await auth.start(input);
+      if (mine !== generation) {
+        if (challenge.callback) { void challenge.callback.key.catch(() => undefined); challenge.callback.finish(false); }
+        await auth.cancel(baseUrl, challenge).catch(() => undefined);
+        return state;
+      }
       live = { challenge, base: baseUrl, origin, intervalMs: Math.max(MIN_POLL_MS, challenge.pollIntervalMs), failures: 0, timer: null };
       set({ phase: 'waiting', baseUrl, approvalUrl: challenge.approvalUrl, expiresAt: new Date(challenge.expiresAt).toISOString() });
-      schedule(live, mine);
+      const current = live;
+      if (challenge.callback) {
+        void challenge.callback.key.then(key => {
+          if (mine !== generation) return;
+          challenge.key = key;
+          return complete(current, mine);
+        }, cause => {
+          if (mine === generation) finish({ phase: 'failed', baseUrl, message: cause.message });
+        });
+      } else schedule(current, mine);
       return state;
     },
     /** The Cancel button: tells the server (best effort) and stops waiting. */
     async cancel(): Promise<PaperclipSignInState> {
       const current = live;
-      if (!current) return state;
+      if (!current) { generation++; return state; }
       finish({ phase: 'cancelled', baseUrl: current.base, message: 'Sign-in cancelled.' });
       try { await auth.cancel(current.base, current.challenge); } catch { /* the request expires on its own */ }
       return state;
     },
     reset(): void { if (!live) { state = IDLE; deps.changed(); } },
-    dispose(): void { stop(); live = null; generation++; },
+    dispose(): void { stop(); live?.challenge.callback?.finish(false); live = null; generation++; },
     revoke: (baseUrl: string, key: string) => auth.revoke(baseUrl, key),
   };
 }

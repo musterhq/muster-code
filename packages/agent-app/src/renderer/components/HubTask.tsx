@@ -37,6 +37,7 @@ import { useWorkLoad } from '../workHooks';
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const when = (iso: string | null) => iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
 import { foldEntries, type Entry } from '../taskThreadModel';
+import { serverName } from '../serverName';
 /** "@Implementer A" or "@CTO" at the start of a message, or anywhere in it: who the turn is addressed to. */
 export function addressed(body: string, names: readonly string[], self: string): string | null {
   const sorted = [...names].sort((a, b) => b.length - a.length);
@@ -96,7 +97,7 @@ function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, properti
   return <section className="ws-thread" aria-label={`${task.key} conversation`}>
     <div className="ws-thread-head">
       <TaskStatusIcon status={task.status} size={16}/><h1 className="ws-thread-title">{task.title}</h1><span className="ws-key">{task.key}</span><LabelChips labels={task.labels}/>{task.live && <LiveCount count={1}/>}{task.removedInPaperclip && <StateChip tone="warn">Removed in Paperclip</StateChip>}{detail.governance?.hold && <StateChip tone={detail.governance.hold.mode === 'cancel' ? 'danger' : 'warn'}>{detail.governance.hold.mode === 'cancel' ? 'Cancelled with parent' : 'On hold'}</StateChip>}
-      {task.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}
+      {task.source === 'paperclip' && <span className="ws-source">{serverName()}</span>}
       <WorkLocallyBar detail={detail}/>
       {!propertiesOpen && <Tip label="Show properties"><button type="button" className="icon-button ws-thread-toggle" aria-label="Show properties" onClick={onToggleProperties}><PanelRight size={15}/></button></Tip>}
     </div>

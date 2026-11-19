@@ -20,6 +20,7 @@ import { Monogram, TaskStatusIcon } from './HubParts';
 import { PageHeader, type HubNav } from './HubPages';
 import { ResourceState } from './ResourceState';
 import { YouCard } from './YouCard';
+import { serverName } from '../serverName';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const shortDay = (day: string) => { const [, m, d] = day.split('-'); return `${Number(m)}/${Number(d)}`; };
@@ -98,7 +99,7 @@ export function DashboardPage({ snapshot, nav, projectId }: { snapshot: Workspac
         {!data ? null : data.activity.length === 0 ? <p className="ws-board-empty">Task changes, runs, hires and decisions show here as they happen.</p>
           : <ul className="ws-rows">{data.activity.map(a => <li key={a.id}><div className="ws-row is-static dash-activity"><Monogram name={a.actor || 'Muster'} kind={a.actor === 'user' || a.actor === 'You' ? 'user' : 'agent'}/>
               <span className="ws-row-text"><span className="ws-row-title">{a.summary}</span><span className="ws-row-meta">{[a.actor === 'user' ? 'You' : a.actor, a.projectName].filter(Boolean).join(' · ')}</span></span>
-              {a.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}<span className="ws-row-age" title={exactTime(a.at)}>{agoLabel(a.at)}</span></div></li>)}</ul>}
+              {a.source === 'paperclip' && <span className="ws-source">{serverName()}</span>}<span className="ws-row-age" title={exactTime(a.at)}>{agoLabel(a.at)}</span></div></li>)}</ul>}
       </section>
       <section className="ws-section" aria-label="Recent tasks"><h2 className="dash-label">Recent tasks</h2>
         {recent.length === 0 ? <p className="ws-board-empty">No tasks yet. Create one from a project’s Tasks tab.</p>

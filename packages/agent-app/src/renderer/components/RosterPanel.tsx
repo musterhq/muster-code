@@ -25,6 +25,7 @@ import { StarButton } from './WorkParts';
 import { ActivatePanel, ApprovalsPanel, ApprovalThread, OrgPortabilitySheet, PortabilityButton, TeamButton, TeamCatalogSheet } from './OrgPanels';
 import { useEventLoad } from '../orgHooks';
 import { ROSTER_TAB_LABEL, rosterTabs, sortRoster, type RosterTab } from '../rosterModel';
+import { serverName } from '../serverName';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const memberOf = (agentId: string) => agentId.startsWith('member:') ? agentId.slice(7) : null;
@@ -40,7 +41,7 @@ export function RosterPanel({ snapshot, projectId, local, nav, children }: { sna
   const working = agents.filter(a => a.status === 'running').length;
   return <div className="roster-panel">
     <div className="roster-bar">
-      <p className="ws-project-note">{agents.length} {agents.length === 1 ? 'agent' : 'agents'} · {working} working now{snapshot.projects[0]?.source === 'paperclip' ? ` · from ${snapshot.paperclip?.company?.name ?? NAMES.paperclip}` : ''}</p>
+      <p className="ws-project-note">{agents.length} {agents.length === 1 ? 'agent' : 'agents'} · {working} working now{snapshot.projects[0]?.source === 'paperclip' ? ` · from ${snapshot.paperclip?.company?.name ?? serverName()}` : ''}</p>
       <span className="task-toolbar-spacer"/>
       <div className="task-toggle" role="radiogroup" aria-label="Roster layout">
         <Tip label="List"><button type="button" role="radio" aria-checked={layout === 'list'} aria-label="List" className="icon-button" onClick={() => setLayout('list')}><List size={15}/></button></Tip>

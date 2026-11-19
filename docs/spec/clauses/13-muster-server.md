@@ -32,10 +32,19 @@ Boundaries:
 | [MUS-SPEC-13-804D](13-muster-server.md#mus-spec-13-804d) | Two real servers serve two app profiles at once without mixing their work. | [`two servers at once: two app profiles, each signed in to its own server, see only their own server’s work`](../../../packages/agent-app/tests/server-e2e/server-workflows.e2e.ts) |
 | [MUS-SPEC-13-804E](13-muster-server.md#mus-spec-13-804e) | One app profile lists two real servers in Settings and shows both. | not written yet (#803) |
 | [MUS-SPEC-13-890A](13-muster-server.md#mus-spec-13-890a) | Both Multica servers are listed online with their address, kind and “· API token” account; each token is in the secret store, in no file, never in the window, and only ever sent to its own server. | [`two Multica servers added with personal access tokens are both listed online, each token kept in the secret store and sent only to its own server`](../../../packages/agent-app/tests/multica-integration.test.ts) |
-| [MUS-SPEC-13-890B](13-muster-server.md#mus-spec-13-890b) | A bad address, a refused token (in Multica’s words), a missing token (no browser sign-in offered) and a closed port each give their own stage and sentence. | [`Test connection to a Multica server says what is wrong: a bad address, a token Multica refuses, a server that does not answer`](../../../packages/agent-app/tests/multica-integration.test.ts) |
+| [MUS-SPEC-13-890B](13-muster-server.md#mus-spec-13-890b) | A bad address, a refused token (in Multica’s words), a missing token (browser sign-in offered) and a closed port each give their own stage and sentence. | [`Test connection to a Multica server says what is wrong: a bad address, a token Multica refuses, a server that does not answer`](../../../packages/agent-app/tests/multica-integration.test.ts) |
 | [MUS-SPEC-13-890C](13-muster-server.md#mus-spec-13-890c) | A server answering 302 to another address gets its own token, the other address gets no request at all, and the test fails. | [`a Multica server that redirects never passes the token on: the redirect target receives nothing and the test fails`](../../../packages/agent-app/tests/multica-integration.test.ts) |
-| [MUS-SPEC-13-890D](13-muster-server.md#mus-spec-13-890d) | No sign-in window is started; Multica’s instruction is shown word for word and the token field under Other ways to connect is open. | [`Connect on a Multica address opens the token field with Multica’s instructions and no sign-in window`](../../../packages/agent-app/tests/multica-connect-dom.tsx) |
+| [MUS-SPEC-13-890D](13-muster-server.md#mus-spec-13-890d) | Where no sign-in window can open, no sign-in is started; Multica’s instruction is shown word for word as a notice and the token field under Other ways to connect is open. | [`where no sign-in window can open, Connect on a Multica address opens the token field with Multica’s instructions`](../../../packages/agent-app/tests/multica-connect-dom.tsx) |
 | [MUS-SPEC-13-890E](13-muster-server.md#mus-spec-13-890e) | A refused token shows Multica’s sentence and saves nothing; a good one saves the address, token and kind, and the row reads “Acme · Multica” without showing the token. | [`a refused Multica token shows Multica’s words; a good one adds the server, listed as Multica`](../../../packages/agent-app/tests/multica-connect-dom.tsx) |
+| [MUS-SPEC-13-890F](13-muster-server.md#mus-spec-13-890f) | Multica’s instruction is a status notice, not an error line; the steps are Multica’s three; the token field has focus; Connect with token is primary and Connect secondary; the Integrations description names all three server kinds. | [`the Multica connect step reads as guidance: no error colour, Multica’s own steps, the token field focused and Connect with token primary`](../../../packages/agent-app/tests/multica-connect-dom.tsx) |
+| [MUS-SPEC-13-894A](13-muster-server.md#mus-spec-13-894a) | Connect opens Multica’s /login with a 127.0.0.1 cli_callback and a random state; after the redirect back, one 90-day token named “Muster Agent on …” is made with the sign-in token, checked with /api/me, stored as the server’s token, and the server is connected as the person. | [`signing in on a Multica server’s own page connects it: the sign-in comes back to a loopback listener, is swapped for a personal access token and stored like a pasted one`](../../../packages/agent-app/tests/multica-signin.test.ts) |
+| [MUS-SPEC-13-894B](13-muster-server.md#mus-spec-13-894b) | A callback with the wrong state is answered 400, no token is made, and the sign-in still finishes with the right one. | [`a Multica sign-in callback with the wrong state is refused and makes no token`](../../../packages/agent-app/tests/multica-signin.test.ts) |
+| [MUS-SPEC-13-894C](13-muster-server.md#mus-spec-13-894c) | Two callbacks at once make one token; a callback after success finds nothing listening. | [`only the first Multica sign-in callback counts: a second one is ignored and makes no second token`](../../../packages/agent-app/tests/multica-signin.test.ts) |
+| [MUS-SPEC-13-894D](13-muster-server.md#mus-spec-13-894d) | After Cancel, and after the time limit, nothing listens on the callback port any more; the timed-out sign-in ends with a sentence that names the token fallback. | [`cancelling or timing out a Multica sign-in shuts its loopback listener`](../../../packages/agent-app/tests/multica-signin.test.ts) |
+| [MUS-SPEC-13-894E](13-muster-server.md#mus-spec-13-894e) | Neither the sign-in token nor the new personal access token appears in any answer or event the window gets, in the server files, or in a request to any other address. | [`neither Multica token ever reaches the window, the server files or another address`](../../../packages/agent-app/tests/multica-signin.test.ts) |
+| [MUS-SPEC-13-894F](13-muster-server.md#mus-spec-13-894f) | A server that cannot make the token ends with Multica’s own words; one that never sends the sign-in back ends at the time limit; both name the paste-a-token fallback. | [`a Multica server too old for sign-in from Muster ends with Multica’s words and points to the token fallback`](../../../packages/agent-app/tests/multica-signin.test.ts) |
+| [MUS-SPEC-13-894G](13-muster-server.md#mus-spec-13-894g) | Connect on a Multica address starts the sign-in and opens the window on Multica’s page; Connect is primary; the steps say to sign in on your server’s page; the token path stays under Other ways to connect; a failed sign-in shows Multica’s words and opens the token path; success closes the window. | [`Connect on a Multica address opens Multica’s sign-in page in the window, and a failed sign-in points to the token path`](../../../packages/agent-app/tests/multica-signin-dom.tsx) |
+| [MUS-SPEC-13-894H](13-muster-server.md#mus-spec-13-894h) | The sign-in window on a Multica page is isolated like the others, may go only to its own loopback callback beyond the page’s origin, and closing it before the callback reports the sign-in as abandoned. | [`the Multica sign-in window goes only to its own loopback callback, and closing it early abandons the sign-in`](../../../packages/agent-app/tests/multica-signin.test.ts) |
 
 <a id="mus-spec-13-575a"></a>
 #### MUS-SPEC-13-575A: A server value named like an object key falls back to the default
@@ -220,7 +229,7 @@ Boundaries:
 
 - Precondition: A fake Multica server on loopback, and a closed loopback port.
 - Action: Test connection with an address that is not a URL, with a wrong token, with no token, and against the closed port.
-- Expected result: The bad address fails at the config stage saying it is not a valid URL. The wrong token fails at the auth stage, names Multica, and includes Multica’s own error (“invalid token”). With no token the answer says Multica needs a personal access token and offers no browser sign-in. The closed port fails at the network stage saying nothing answered.
+- Expected result: The bad address fails at the config stage saying it is not a valid URL. The wrong token fails at the auth stage, names Multica, and includes Multica’s own error (“invalid token”). With no token the answer says Multica needs a personal access token and offers browser sign-in (case MUS-SPEC-13-894A runs it). The closed port fails at the network stage saying nothing answered.
 - Test: `packages/agent-app/tests/multica-integration.test.ts::Test connection to a Multica server says what is wrong: a bad address, a token Multica refuses, a server that does not answer`
 - Environment: Node test runner; the runtime’s paperclip.test handler; a fake Multica server on loopback HTTP.
 - Known gaps: Does not cover a TLS failure or a slow server timing out.
@@ -238,12 +247,12 @@ Boundaries:
 - Evidence: UNVERIFIED
 
 <a id="mus-spec-13-890d"></a>
-#### MUS-SPEC-13-890D: Connect on a Multica address asks for a token
+#### MUS-SPEC-13-890D: Where no sign-in window can open, Connect on a Multica address asks for a token
 
-- Precondition: Settings › Integrations with no servers; the address is a Multica server that needs a token.
+- Precondition: Settings › Integrations with no servers, where no sign-in window can open (the browser host); the address is a Multica server that needs a token.
 - Action: Type the address and press Connect.
-- Expected result: No browser sign-in is started and no sign-in window opens. The error line shows Multica’s instruction to create a personal access token, Other ways to connect is open with the token field on screen, and its hint says a Multica token starts with mul_.
-- Test: `packages/agent-app/tests/multica-connect-dom.tsx::Connect on a Multica address opens the token field with Multica’s instructions and no sign-in window`
+- Expected result: No browser sign-in is started and no sign-in window opens. A notice shows Multica’s instruction to create a personal access token, Other ways to connect is open with the token field on screen, and its hint says a Multica token starts with mul_.
+- Test: `packages/agent-app/tests/multica-connect-dom.tsx::where no sign-in window can open, Connect on a Multica address opens the token field with Multica’s instructions`
 - Environment: DOM suite (linkedom) rendering the real ServerList and ConnectionPanel with a stubbed bridge.
 - Known gaps: The runtime answer is stubbed here; case MUS-SPEC-13-890B checks the runtime gives that answer.
 - Evidence: UNVERIFIED
@@ -258,3 +267,104 @@ Boundaries:
 - Environment: DOM suite (linkedom) rendering the real ServerList and ConnectionPanel with a stubbed bridge.
 - Known gaps: The runtime answers are stubbed; MUS-SPEC-13-890A covers the runtime side.
 - Evidence: UNVERIFIED
+
+<a id="mus-spec-13-890f"></a>
+#### MUS-SPEC-13-890F: The Multica connect step reads as guidance
+
+- Precondition: Connect was just pressed on a Multica address that needs a token, where no sign-in window can open (the browser host).
+- Action: Look at the connect panel and the Integrations section description.
+- Expected result: The instruction is a status notice, not shown in the error colour, and no error line repeats it. “How connecting works” lists Multica’s steps (create a personal access token in Multica › Settings › Tokens, starting with mul_; paste it and press Connect with token; the workspaces, projects and issues appear under Projects) and no step mentions a sign-in window. The token field has focus, Connect with token is the primary button and Connect is secondary. The Integrations description reads “Connect your team’s servers (Muster Server or Multica): their projects, tasks and agents show up in the app.”
+- Test: `packages/agent-app/tests/multica-connect-dom.tsx::the Multica connect step reads as guidance: no error colour, Multica’s own steps, the token field focused and Connect with token primary`
+- Environment: DOM suite (linkedom) rendering the real components with a stubbed bridge.
+- Known gaps: Colours are not measured: the check is that the notice uses the notice style rather than the error class. The section description is read from its source list, not from the rendered Settings page.
+- Evidence: UNVERIFIED
+
+### Signing in to a Multica server on its own page
+
+<a id="mus-spec-13-894a"></a>
+#### MUS-SPEC-13-894A: Signing in on Multica’s page connects the server
+
+- Precondition: A fake Multica server on loopback that signs people in on its /login page, the way Multica’s web app does for its own command-line tool, and nothing in Settings › Integrations.
+- Action: Start the sign-in for the address (what Connect does), let a stand-in for the sign-in window open the page it is given and follow Multica’s redirect, then wait for the sign-in to finish.
+- Expected result: The page is Multica’s /login with `cli_callback` set to Muster’s own listener on 127.0.0.1, on a random port, and a random 32-character `cli_state`. Multica’s redirect reaches Muster’s listener there, whose page says you are signed in. With the sign-in token, Muster asks Multica for one personal access token named “Muster Agent on” this computer, for 90 days, then checks the new token with /api/me. The sign-in ends signed in as the person. The new token is the server’s stored token (the same entry a pasted token uses), the sign-in token is stored nowhere, and the connection is a Multica server with workspaces to read.
+- Test: `packages/agent-app/tests/multica-signin.test.ts::signing in on a Multica server’s own page connects it: the sign-in comes back to a loopback listener, is swapped for a personal access token and stored like a pasted one`
+- Environment: Node test runner; the runtime’s paperclip and musterServer handlers with real timers; a fake Multica server on loopback HTTP (tests/fixtures/multica-fake-server.ts); a fake secret store; the stand-in window is fetch following redirects.
+- Known gaps: The fake server’s /login redirects at once; Multica’s real page asks for an email code or Google first, and its web app performs the redirect in the page. The real Electron window is covered by MUS-SPEC-13-894H with Electron faked.
+- Evidence: local; tests/multica-signin.test.ts (loopback Multica fixture); exit 0; 7 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
+
+<a id="mus-spec-13-894b"></a>
+#### MUS-SPEC-13-894B: A callback with the wrong state is refused
+
+- Precondition: A Multica sign-in is waiting for its callback.
+- Action: Call the loopback callback with a sign-in token and the wrong state, then let the real page finish.
+- Expected result: The wrong call is answered 400 and no personal access token is made from it. The sign-in keeps waiting and then finishes normally with the right state.
+- Test: `packages/agent-app/tests/multica-signin.test.ts::a Multica sign-in callback with the wrong state is refused and makes no token`
+- Environment: Node test runner; the runtime’s paperclip handlers; a fake Multica server on loopback HTTP.
+- Known gaps: That the comparison takes constant time is checked by reading the code, not measured.
+- Evidence: local; tests/multica-signin.test.ts (loopback Multica fixture); exit 0; 7 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
+
+<a id="mus-spec-13-894c"></a>
+#### MUS-SPEC-13-894C: Only the first callback counts
+
+- Precondition: A Multica sign-in is waiting, and a sign-in token with the right state is at hand.
+- Action: Call the callback twice at the same moment, then once more after the sign-in finished.
+- Expected result: Exactly one call is answered as signed in and Multica makes exactly one personal access token. The other call is refused. After the sign-in finished nothing listens on the callback port.
+- Test: `packages/agent-app/tests/multica-signin.test.ts::only the first Multica sign-in callback counts: a second one is ignored and makes no second token`
+- Environment: Node test runner; the runtime’s paperclip handlers; a fake Multica server on loopback HTTP.
+- Known gaps: None known.
+- Evidence: local; tests/multica-signin.test.ts (loopback Multica fixture); exit 0; 7 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
+
+<a id="mus-spec-13-894d"></a>
+#### MUS-SPEC-13-894D: Cancel and the time limit shut the listener
+
+- Precondition: A Multica sign-in is waiting, once with the normal limit and once with a limit of a fraction of a second.
+- Action: Press Cancel on the first; let the second run out of time.
+- Expected result: After Cancel the callback port no longer accepts a connection, and the sign-in reads cancelled. After the time limit the port no longer accepts a connection either, and the sign-in fails with a sentence that says Multica did not send the sign-in back in time and names pasting a personal access token under Other ways to connect.
+- Test: `packages/agent-app/tests/multica-signin.test.ts::cancelling or timing out a Multica sign-in shuts its loopback listener`
+- Environment: Node test runner; the runtime’s paperclip handlers with real timers and a shortened time limit; a fake Multica server on loopback HTTP.
+- Known gaps: The real limit is 5 minutes; the test shortens it. Closing the window is covered by MUS-SPEC-13-894H (the window reports it) and the main process then cancels, which is not run here.
+- Evidence: local; tests/multica-signin.test.ts (loopback Multica fixture); exit 0; 7 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
+
+<a id="mus-spec-13-894e"></a>
+#### MUS-SPEC-13-894E: Neither token reaches the window or another address
+
+- Precondition: A Multica sign-in that finishes.
+- Action: Record every answer the window’s commands get (start, status, the connection view, the server list) and every event the runtime sends, then read the server files and every request each fake server received.
+- Expected result: Neither the sign-in token nor the new personal access token appears in any of those answers or events, nor in servers.json or server.json. Only the Multica server received either token, the sign-in token only on the call that makes the personal access token. A second fake server on another port received nothing.
+- Test: `packages/agent-app/tests/multica-signin.test.ts::neither Multica token ever reaches the window, the server files or another address`
+- Environment: Node test runner; the runtime’s paperclip and musterServer handlers; two fake Multica servers on loopback HTTP.
+- Known gaps: That the sign-in token is dropped from memory after the swap is checked by reading the code. Logs are not captured; the code writes neither token to a log.
+- Evidence: local; tests/multica-signin.test.ts (loopback Multica fixture); exit 0; 7 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
+
+<a id="mus-spec-13-894f"></a>
+#### MUS-SPEC-13-894F: A server too old for this sign-in falls back clearly
+
+- Precondition: Two fake Multica servers: one whose page sends the sign-in back but that has no /api/tokens, and one whose page ignores `cli_callback`.
+- Action: Sign in on each.
+- Expected result: The first ends failed with Multica’s own answer (“404 page not found”), says the server may be too old to sign in from Muster, and names pasting a personal access token under Other ways to connect; nothing is stored. The second ends at the time limit with the sentence of MUS-SPEC-13-894D. Neither is left connected.
+- Test: `packages/agent-app/tests/multica-signin.test.ts::a Multica server too old for sign-in from Muster ends with Multica’s words and points to the token fallback`
+- Environment: Node test runner; the runtime’s paperclip handlers with a shortened time limit; fake Multica servers on loopback HTTP.
+- Known gaps: Which Multica release added `cli_callback` is not checked; the behaviour is shown for a server without it.
+- Evidence: local; tests/multica-signin.test.ts (loopback Multica fixture); exit 0; 7 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
+
+<a id="mus-spec-13-894g"></a>
+#### MUS-SPEC-13-894G: Connect on a Multica address opens Multica’s sign-in page
+
+- Precondition: Settings › Integrations in the desktop app with no servers; the address is a Multica server that needs a sign-in.
+- Action: Enter the hostname without a scheme and press Connect. Retry after a failed sign-in and complete it.
+- Expected result: The browser sign-in is started for the address and the sign-in window opens on the page the runtime returned (Multica’s /login). Connect is the primary button. “How connecting works” says to sign in on your server’s own page in the window, and Other ways to connect still holds the token field. While waiting, the panel says to sign in on your Multica page and offers Cancel. A failed sign-in shows Multica’s words as the error and opens Other ways to connect; a successful one closes the sign-in window.
+- Test: `packages/agent-app/tests/multica-signin-dom.tsx::Connect on a Multica address opens Multica’s sign-in page in the window, and a failed sign-in points to the token path`
+- Environment: DOM suite (linkedom) rendering the real ServerList and ConnectionPanel with a stubbed bridge.
+- Known gaps: The runtime answers are stubbed; MUS-SPEC-13-894A to 894F cover the runtime side.
+- Evidence: local; multica-signin-dom (real renderer components, stubbed bridge); exit 0; 1 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
+
+<a id="mus-spec-13-894h"></a>
+#### MUS-SPEC-13-894H: The Multica sign-in window is isolated and goes only to its own callback
+
+- Precondition: The sign-in window code with Electron faked.
+- Action: Open the window on a Multica /login page whose `cli_callback` is a 127.0.0.1 port; navigate to that callback, to another path and another port on 127.0.0.1, and off the origin; close one window before the callback and one after.
+- Expected result: The window has the same isolation as the other sign-in windows (its own partition, no Node, context isolation, the sandbox) and is titled “Sign in to Multica”. Its own callback is allowed and sent nowhere else; another loopback path or port and another site are refused in the window. A page without `cli_callback` may not go to 127.0.0.1 at all. Closing the window before its callback reports the sign-in as abandoned once; closing it after does not.
+- Test: `packages/agent-app/tests/multica-signin.test.ts::the Multica sign-in window goes only to its own loopback callback, and closing it early abandons the sign-in`
+- Environment: Node test runner; the main-process ServerSignInWindows with a fake Electron runtime.
+- Known gaps: The main process’s reaction (cancel the waiting sign-in when it is this window’s) is wiring in src/main/index.ts and is not run here.
+- Evidence: local; tests/multica-signin.test.ts (loopback Multica fixture); exit 0; 7 passed, 0 failed, 0 skipped; commit 186b925218d30dbef548bd1d42b3335d0b030bbf
