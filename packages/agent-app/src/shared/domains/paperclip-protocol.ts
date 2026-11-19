@@ -152,7 +152,7 @@ export type ApprovalDecision = 'approve' | 'reject' | 'request_revision';
 export type LiveChannel = 'socket' | 'poll' | 'events' | 'off';
 /** The linked Paperclip as the snapshot saw it. `stale`: the last read failed; `cached` then says whether its rows are the
  *  last good copy (true) or missing because nothing was read yet (false). */
-export interface PaperclipLink { origin: string; company: WorkspaceCompany | null; companies: WorkspaceCompany[]; live: LiveChannel; stale?: string; cached?: boolean; /** Offer "Reconnect for live updates" (a browser sign-in whose session ended), and where to reconnect. */ reconnect?: boolean; baseUrl?: string }
+export interface PaperclipLink { origin: string; /** What the linked server is: a Multica server is named Multica on screen, the others Muster Server. */ kind?: ServerBackendKind | null; company: WorkspaceCompany | null; companies: WorkspaceCompany[]; live: LiveChannel; stale?: string; cached?: boolean; /** Offer "Reconnect for live updates" (a browser sign-in whose session ended), and where to reconnect. */ reconnect?: boolean; baseUrl?: string }
 export interface WorkspaceSnapshot {
   paperclip: PaperclipLink | null;
   tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; goals: WorkspaceGoal[];

@@ -48,6 +48,8 @@ Boundaries:
 | [MUS-SPEC-12-890A](12-projects-orgs-and-tasks.md#mus-spec-12-890a) | Both workspaces are orgs; the project and its issues show with Multica’s status, priority (urgent as Critical), agent or person assignee and labels; the detail has the description and the agent’s comment; issue calls name their workspace. | [`a Multica workspace shows its projects and issues on the Projects pages, and an issue opens with its description and comments`](../../../packages/agent-app/tests/multica-integration.test.ts) |
 | [MUS-SPEC-12-890B](12-projects-orgs-and-tasks.md#mus-spec-12-890b) | Create, status, priority, person and agent assignee and a comment are sent as Multica’s own fields; mentions go in Multica’s form; a 403 shows Multica’s sentence and changes nothing. | [`acting on a Multica issue sends Multica’s own fields, keeps the server’s answer, and shows a refusal in the server’s words`](../../../packages/agent-app/tests/multica-integration.test.ts) |
 | [MUS-SPEC-12-890C](12-projects-orgs-and-tasks.md#mus-spec-12-890c) | Check-out starts a chat, sets in_progress, keeps it on you and posts the check-out comment; hand-back sets in_review, assigns the reviewer agent and posts the summary with a Multica mention; nothing goes to routes Multica lacks. | [`working a Multica issue from a chat: check-out moves it to in_progress with a comment, hand-back moves it to in_review for the reviewer with a summary that mentions them`](../../../packages/agent-app/tests/multica-integration.test.ts) |
+| [MUS-SPEC-12-890D](12-projects-orgs-and-tasks.md#mus-spec-12-890d) | With a Multica connection the top bar reads “Multica · Acme”, the issue and project badges say Multica, the Projects group reads “Acme · Multica”, the sidebar org row names Multica, and no page says Muster Server. | [`a Multica server is called Multica in the top bar, on an issue, on a project, in the Projects list and on the sidebar org`](../../../packages/agent-app/tests/multica-labels-dom.tsx) |
+| [MUS-SPEC-12-890E](12-projects-orgs-and-tasks.md#mus-spec-12-890e) | With a Paperclip connection the top bar and the issue badge still read Muster Server and never Multica. | [`a Paperclip-backed connection keeps the Muster Server name`](../../../packages/agent-app/tests/multica-labels-dom.tsx) |
 
 ### Hand-back of a plain folder
 
@@ -415,4 +417,26 @@ Boundaries:
 - Test: `packages/agent-app/tests/multica-integration.test.ts::working a Multica issue from a chat: check-out moves it to in_progress with a comment, hand-back moves it to in_review for the reviewer with a summary that mentions them`
 - Environment: Node test runner; the real check-out service and store with SQLite in memory, a fake git and chat port, a plain temp folder, and a fake Multica server on loopback HTTP.
 - Known gaps: Multica has no lease or lock: the check-out lease is Muster’s own comment marker, so two computers are kept apart only by that marker. The local work log document and cost events are not sent, because Multica has no such routes. Muster is not registered as a Multica runtime, so Multica cannot dispatch an issue to Muster.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-12-890d"></a>
+#### MUS-SPEC-12-890D: A Multica server is called Multica
+
+- Precondition: The workspace snapshot comes from a Multica server (kind multica) with the Acme workspace, one project and one issue; the sidebar lists the Acme org.
+- Action: Open the issue, then the project, then the Projects list, then the sidebar.
+- Expected result: The hub top bar reads “Multica · Acme”. The issue’s source badge and the project’s badge say Multica, and neither page says Muster Server anywhere. The Projects list groups the project under “Acme · Multica”. The sidebar org row’s tooltip reads “Acme · Multica · projects.acme.example”.
+- Test: `packages/agent-app/tests/multica-labels-dom.tsx::a Multica server is called Multica in the top bar, on an issue, on a project, in the Projects list and on the sidebar org`
+- Environment: DOM suite (linkedom) rendering the real components with a stubbed bridge.
+- Known gaps: The snapshot is stubbed; MUS-SPEC-12-890A checks the runtime marks a Multica snapshot with its kind. The Inbox, Roster and Dashboard use the same name helper but are not opened here.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-12-890e"></a>
+#### MUS-SPEC-12-890E: Paperclip keeps the Muster Server name
+
+- Precondition: The same snapshot, marked as coming from a Paperclip server.
+- Action: Open the issue.
+- Expected result: The top bar reads “Muster Server · Acme” and the issue’s source badge says Muster Server; nothing says Multica.
+- Test: `packages/agent-app/tests/multica-labels-dom.tsx::a Paperclip-backed connection keeps the Muster Server name`
+- Environment: DOM suite (linkedom) rendering the real components with a stubbed bridge.
+- Known gaps: A Muster Server connection uses the same default and is not opened separately.
 - Evidence: UNVERIFIED

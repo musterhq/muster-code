@@ -238,9 +238,9 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const pending = inflight;
     try {
       const part = coalesced ? built!.part : await pending!;
-      return { part, link: { origin: originLabel(), company: companies.find(c => c.id === built?.companyId) ?? null, companies, live: live.channel, ...(conn.view().reconnect && live.channel !== 'socket' ? { reconnect: true, baseUrl: conn.baseUrl() } : {}), ...(lastError ? { stale: lastError, cached: true } : {}) } };
+      return { part, link: { origin: originLabel(), kind: conn.config.backend, company: companies.find(c => c.id === built?.companyId) ?? null, companies, live: live.channel, ...(conn.view().reconnect && live.channel !== 'socket' ? { reconnect: true, baseUrl: conn.baseUrl() } : {}), ...(lastError ? { stale: lastError, cached: true } : {}) } };
     } catch (cause) {
-      return { part: null, link: { origin: originLabel(), company: null, companies, live: 'off', stale: cause instanceof Error ? cause.message : String(cause), cached: false } };
+      return { part: null, link: { origin: originLabel(), kind: conn.config.backend, company: null, companies, live: 'off', stale: cause instanceof Error ? cause.message : String(cause), cached: false } };
     }
   };
 

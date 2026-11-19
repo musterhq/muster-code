@@ -22,6 +22,7 @@ import './project-surface.css';
 import './hub.css';
 // @ts-ignore -- side-effect CSS import; esbuild bundles it into dist/renderer/main.css
 import './automations.css';
+import { serverName } from '../serverName';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(cause);
 const whoText = (user: { name: string | null; email: string | null } | null | undefined) => user ? [user.name, user.email && (user.name ? `(${user.email})` : user.email)].filter(Boolean).join(' ') || 'your account' : '';
@@ -63,6 +64,10 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
   const [signInState, setSignInState] = useState<PaperclipSignInState>({ phase: 'idle' });
   const [imported, setImported] = useState<PaperclipImportReport | null>(null);
   const [error, setError] = useState('');
+  /** Multica's own instruction after Connect on a Multica address: guidance (a notice), not an error. The token field takes focus. */
+  const [guide, setGuide] = useState('');
+  const tokenField = useRef<HTMLInputElement | null>(null);
+  useEffect(() => { if (guide) tokenField.current?.focus(); }, [guide, others]);
   const connectedNow = (view: PaperclipConfigView | null) => !addOnly && Boolean(view && view.mode !== 'off' && (view.hasToken || (isLocalUrl(view.baseUrl) && !view.signInNotice)));
   const load = (view: PaperclipConfigView, live: { current: boolean }) => {
     setConfig(view);
@@ -103,7 +108,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
   const connect = async (target = address) => {
     const baseUrl = target.trim();
     if (!baseUrl) return;
-    setBusy('connect'); setError(''); setImported(null);
+    setBusy('connect'); setError(''); setGuide(''); setImported(null);
     try {
       const probe = await invoke('paperclip.test', { mode: 'custom', baseUrl });
       if (probe.ok) {
@@ -113,7 +118,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
         await refreshWorkspace(true); onSaved?.(view);
       } else if (probe.stage === 'auth' && probe.backend === 'multica') {
         // Multica signs in with a personal access token: no window opens; the token field does, with Multica's own instructions.
-        setOthers(true); setError(probe.message);
+        setOthers(true); setError(''); setGuide(probe.message);
       } else if (probe.stage === 'auth') await beginSignIn(baseUrl);
       else setError(plainProbeError(probe, baseUrl));
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
@@ -198,27 +203,32 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
     {!connected && !waiting && <>
       {local && <p className="ws-connection-detect ws-connection-local" data-ok="true" role="status"><Check size={13} aria-hidden="true"/>Found a server on {device().lower}{local.version ? ` (${local.version})` : ''}. <button type="button" className="settings-button secondary" disabled={busy !== null} onClick={() => void connect(local.baseUrl)}>Connect</button></p>}
       <div className="ws-form">
-        <label className="project-edit-goal"><span>Server address</span><span className="project-edit-name"><Link2 size={14} aria-hidden="true"/><input type="url" inputMode="url" placeholder="https://muster.example.com" value={address} onChange={e => { setAddress(e.target.value); setError(''); }} onKeyDown={e => { if (e.key === 'Enter') void connect(); }} spellCheck={false} autoComplete="off" aria-invalid={error ? true : undefined}/></span></label>
+        <label className="project-edit-goal"><span>Server address</span><span className="project-edit-name"><Link2 size={14} aria-hidden="true"/><input type="url" inputMode="url" placeholder="https://muster.example.com" value={address} onChange={e => { setAddress(e.target.value); setError(''); setGuide(''); }} onKeyDown={e => { if (e.key === 'Enter') void connect(); }} spellCheck={false} autoComplete="off" aria-invalid={error ? true : undefined}/></span></label>
         {(error || notice || warning) && <p role="alert" className="settings-error">{error || notice || warning}</p>}
+        {guide && !error && <p role="status" className="project-edit-hint ws-connection-guide">{guide}</p>}
       </div>
       <div className="project-edit-actions"><span className="project-edit-spacer"/>
         {onCancel && <button type="button" className="project-edit-cancel" disabled={busy !== null} onClick={onCancel}>Cancel</button>}
-        <button type="button" className="settings-button" disabled={busy !== null || !address.trim()} onClick={() => void connect()}>{busy === 'connect' ? 'Connecting…' : 'Connect'}</button>
+        <button type="button" className={guide ? 'settings-button secondary' : 'settings-button'} disabled={busy !== null || !address.trim()} onClick={() => void connect()}>{busy === 'connect' ? 'Connecting…' : 'Connect'}</button>
       </div>
       <section className="ws-connect-steps" aria-label="How connecting works">
         <h4>How connecting works</h4>
-        <ol>
+        {guide ? <ol>
+          <li>In Multica, open Settings › Tokens and create a personal access token (it starts with mul_).</li>
+          <li>Paste it below and press Connect with token.</li>
+          <li>Your Multica workspaces, projects and issues appear under Projects.</li>
+        </ol> : <ol>
           <li>Enter your team’s server address.</li>
           <li>Your server’s own sign-in page opens in a window. Sign in there; Muster never sees your password.</li>
           <li>Your team’s projects, tasks and agents appear under Projects and stay up to date live.</li>
-        </ol>
+        </ol>}
       </section>
       <details className="ws-connection-more" open={others || undefined} onToggle={e => setOthers((e.currentTarget as HTMLDetailsElement).open)}><summary>Other ways to connect</summary>
         <div className="ws-form">
           <p><strong>Use an API token instead</strong></p>
           <p className="project-edit-hint">For scripts and special cases, and how a Multica server connects (a personal access token that starts with mul_). It uses the server address above; the token is stored encrypted in {device().secretStore} and never reaches this window.</p>
-          <label className="project-edit-goal"><span>API token</span><span className="project-edit-name"><input type="password" placeholder="Paste an API token" value={token} onChange={e => { setToken(e.target.value); setError(''); }} spellCheck={false} autoComplete="off"/></span></label>
-          <div className="project-edit-actions"><span className="project-edit-spacer"/><button type="button" className="settings-button secondary" disabled={busy !== null || !address.trim() || !token.trim()} onClick={() => void connectWithToken()}>{busy === 'token' ? 'Connecting…' : 'Connect with token'}</button></div>
+          <label className="project-edit-goal"><span>API token</span><span className="project-edit-name"><input ref={tokenField} type="password" placeholder={guide ? 'Paste a Multica personal access token' : 'Paste an API token'} value={token} onChange={e => { setToken(e.target.value); setError(''); }} spellCheck={false} autoComplete="off"/></span></label>
+          <div className="project-edit-actions"><span className="project-edit-spacer"/><button type="button" className={guide ? 'settings-button' : 'settings-button secondary'} disabled={busy !== null || !address.trim() || !token.trim()} onClick={() => void connectWithToken()}>{busy === 'token' ? 'Connecting…' : 'Connect with token'}</button></div>
         </div>
       </details>
     </>}
@@ -253,8 +263,8 @@ export function ImportMapping({ plan, targets, owners = {}, onOwner = () => unde
   const chosen = plan.projects.filter(p => targets[p.id] !== 'skip');
   const asking = chosen.filter(p => p.existing === 'ask'), unanswered = asking.filter(p => !owners[p.id]).length;
   return <section className="ws-import-map" aria-label="Choose which Muster Server projects to import">
-    <h3>Import {plan.company?.name ?? NAMES.paperclip} into Muster</h3>
-    <p className="project-edit-hint">Each server project becomes its own project here, listed under {plan.company?.name ?? NAMES.paperclip} and updated by later imports. Projects you made in Muster are never changed. What you edit here stays when you import again. Reading is GET only and safe to repeat.</p>
+    <h3>Import {plan.company?.name ?? serverName()} into Muster</h3>
+    <p className="project-edit-hint">Each server project becomes its own project here, listed under {plan.company?.name ?? serverName()} and updated by later imports. Projects you made in Muster are never changed. What you edit here stays when you import again. Reading is GET only and safe to repeat.</p>
     {asking.length > 1 && <label className="project-edit-goal ws-import-all"><span>Same answer for all {asking.length} earlier projects</span><select className="ws-select" aria-label="Same answer for all" value="" disabled={busy} onChange={e => { const v = e.target.value as 'mine' | 'made' | ''; if (v) for (const p of asking) onOwner(p.id, v); }}><option value="">Choose…</option><option value="mine">Mine</option><option value="made">Made by the import</option></select></label>}
     {plan.projects.length === 0 ? <p className="ws-faint">This company has no projects to import.</p> : <ul className="ws-rows">{plan.projects.map(p => {
       const skip = targets[p.id] === 'skip';
@@ -329,7 +339,7 @@ export function NewTaskSheet({ open, snapshot, projectId, parentId = null, onClo
       <label className="project-edit-name"><span className="sr-only">Title</span><input ref={field} required maxLength={500} value={title} disabled={busy !== null} placeholder="Task title" onChange={e => setTitle(e.target.value)}/></label>
       <label className="project-edit-goal"><span>Description</span><textarea rows={4} maxLength={20000} value={description} disabled={busy !== null} placeholder="Context, constraints and what done looks like" onChange={e => setDescription(e.target.value)}/></label>
       <div className="ws-form-row">
-        <label className="project-edit-goal"><span>Project</span><select className="ws-select is-field" value={project} disabled={busy !== null || Boolean(projectId)} onChange={e => { setProject(e.target.value); setAssignee(''); setParent(''); }}>{(snapshot?.projects ?? []).map(p => <option key={p.id} value={p.id}>{p.name}{p.source === 'paperclip' ? ` · ${NAMES.paperclip}` : ''}</option>)}</select></label>
+        <label className="project-edit-goal"><span>Project</span><select className="ws-select is-field" value={project} disabled={busy !== null || Boolean(projectId)} onChange={e => { setProject(e.target.value); setAssignee(''); setParent(''); }}>{(snapshot?.projects ?? []).map(p => <option key={p.id} value={p.id}>{p.name}{p.source === 'paperclip' ? ` · ${serverName()}` : ''}</option>)}</select></label>
         {source === 'paperclip'
           ? <div className="project-edit-goal"><span id="new-task-owner">Owner</span><OwnerPicker label="Owner" value={owner} disabled={busy !== null} options={ownerOptions({ agents, people: snapshot?.people ?? [], noneLabel: 'No owner' })} onChange={setAssignee}/></div>
           : <label className="project-edit-goal"><span>Owner</span><select className="ws-select is-field" value={owner} disabled={busy !== null} onChange={e => setAssignee(e.target.value)}>
@@ -378,7 +388,7 @@ export function PaperclipRoutines(): React.ReactElement | null {
   if (!linked) return null;
   const rows = (list?.rows ?? []).filter(r => r.source === 'paperclip');
   return <section className="ws-section automation-paperclip" aria-label="server automations">
-    <h2 className="ws-group-title">From {NAMES.paperclip}<span>{rows.length}</span></h2>
+    <h2 className="ws-group-title">From {serverName()}<span>{rows.length}</span></h2>
     {!list ? <ResourceState kind="loading" compact label="Loading server automations" rows={2}/>
       : list.note ? <ResourceState kind="partial" compact message={list.note}/>
       : rows.length === 0 ? <p className="automation-help">No automations on the connected Muster Server. Automations created there appear here with their schedule and last run.</p>
@@ -388,7 +398,7 @@ export function PaperclipRoutines(): React.ReactElement | null {
             <span className="automation-item-text"><span className="automation-item-name">{r.title}</span><span className="automation-item-meta">{r.detail} · {r.overlap === 'queue' ? 'queues overlapping runs' : 'skips overlapping runs'}</span></span>
             <span className="automation-item-when">{r.paused ? 'Paused' : r.nextRunAt ? <span title={exactTime(r.nextRunAt)}>Next {new Date(r.nextRunAt).toLocaleString()}</span> : 'Not scheduled'}</span>
             {r.lastRun && <StateChip tone={r.lastRun.status === 'failed' ? 'danger' : 'faint'}>{r.lastRun.status}</StateChip>}
-            <span className="ws-source">{NAMES.paperclip}</span>
+            <span className="ws-source">{serverName()}</span>
           </div></div>
         </li>)}</ul>}
   </section>;

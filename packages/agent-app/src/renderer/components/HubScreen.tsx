@@ -29,6 +29,7 @@ import { RunDetailPage } from './RunDetail';
 import './hub.css';
 // @ts-ignore -- side-effect CSS import; esbuild bundles it into dist/renderer/main.css
 import './workspace.css';
+import { serverName } from '../serverName';
 
 const TITLE: Record<HubPage, string> = { mywork: NAMES.myWork, inbox: NAMES.inbox, ledger: NAMES.ledger, agent: NAMES.roster, task: NAMES.tasks, project: NAMES.projects, dashboard: NAMES.dashboard, tasks: NAMES.tasks, roster: NAMES.roster, outputs: NAMES.outputs, run: 'Run' };
 
@@ -78,7 +79,7 @@ export function HubScreen(): React.ReactElement {
         {task ? <><TaskStatusIcon status={task.status} size={13}/><strong>{task.title}</strong><span className="ws-key">{task.key}</span></>
           : agent ? <strong>{agent.name}</strong> : route.page === 'project' ? <strong>{snapshot?.projects.find(p => p.id === route.arg)?.name ?? NAMES.projects}</strong> : <strong>{TITLE[route.page]}</strong>}
       </span>
-      {snapshot?.paperclip && <span className="ws-topbar-origin" title={snapshot.paperclip.stale ?? (snapshot.paperclip.live === 'poll' ? 'Live updates are not available for this sign-in, so Muster checks the server every few seconds while this screen is open, and not at all while it is hidden.' : undefined)}><span className="ws-conn-dot" data-live={snapshot.paperclip.live} data-stale={snapshot.paperclip.stale ? 'true' : undefined} aria-hidden="true"/>{NAMES.paperclip} · {snapshot.paperclip.company?.name ?? snapshot.paperclip.origin}{snapshot.paperclip.stale ? ' · offline' : snapshot.paperclip.live === 'poll' ? ' · updates every few seconds' : ''}</span>}
+      {snapshot?.paperclip && <span className="ws-topbar-origin" title={snapshot.paperclip.stale ?? (snapshot.paperclip.live === 'poll' ? 'Live updates are not available for this sign-in, so Muster checks the server every few seconds while this screen is open, and not at all while it is hidden.' : undefined)}><span className="ws-conn-dot" data-live={snapshot.paperclip.live} data-stale={snapshot.paperclip.stale ? 'true' : undefined} aria-hidden="true"/>{serverName()} · {snapshot.paperclip.company?.name ?? snapshot.paperclip.origin}{snapshot.paperclip.stale ? ' · offline' : snapshot.paperclip.live === 'poll' ? ' · updates every few seconds' : ''}</span>}
       {snapshot?.paperclip?.reconnect && snapshot.paperclip.baseUrl && <button type="button" className="ws-link ws-reconnect" title="Sign in again in the app window to get instant updates. Your sign-in is still valid; nothing else changes." onClick={() => { void invoke('musterServer.signInWindow', { baseUrl: snapshot.paperclip!.baseUrl!, url: snapshot.paperclip!.baseUrl! }).catch(() => undefined); }}>Reconnect for live updates</button>}
     </header>
     <div className="ws-main">{body}</div>
@@ -101,10 +102,10 @@ function AllRoster({ snapshot, nav }: { snapshot: WorkspaceSnapshot; nav: HubNav
   const agents = snapshot.agents.filter(a => a.role !== 'board');
   const groups = [
     ...snapshot.projects.filter(p => p.source === 'local').map(p => ({ id: p.id, name: p.name, local: true, agents: agents.filter(a => a.projectId === p.id) })),
-    ...(agents.some(a => a.source === 'paperclip') ? [{ id: 'paperclip', name: snapshot.paperclip?.company?.name ?? NAMES.paperclip, local: false, agents: agents.filter(a => a.source === 'paperclip') }] : []),
+    ...(agents.some(a => a.source === 'paperclip') ? [{ id: 'paperclip', name: snapshot.paperclip?.company?.name ?? serverName(), local: false, agents: agents.filter(a => a.source === 'paperclip') }] : []),
   ].filter(g => g.agents.length || g.local);
   return <div className="ws-page">
-    <PageHeader title={NAMES.roster} detail={`${agents.length} ${agents.length === 1 ? 'agent' : 'agents'} across your projects${snapshot.paperclip ? ` and ${snapshot.paperclip.company?.name ?? NAMES.paperclip}` : ''}.`}>
+    <PageHeader title={NAMES.roster} detail={`${agents.length} ${agents.length === 1 ? 'agent' : 'agents'} across your projects${snapshot.paperclip ? ` and ${snapshot.paperclip.company?.name ?? serverName()}` : ''}.`}>
       <div className="task-toggle" role="radiogroup" aria-label="Roster layout">
         <Tip label="List"><button type="button" role="radio" aria-checked={layout === 'list'} aria-label="List" className="icon-button" onClick={() => setLayout('list')}><List size={15}/></button></Tip>
         <Tip label="Org chart"><button type="button" role="radio" aria-checked={layout === 'org'} aria-label="Org chart" className="icon-button" onClick={() => setLayout('org')}><Network size={15}/></button></Tip>

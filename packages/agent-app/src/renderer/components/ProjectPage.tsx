@@ -50,6 +50,7 @@ import { ProjectSetupWizard, SetupCard } from './ProjectSetup';
 import { needsSetup } from '../setupModel';
 import { StarButton } from './WorkParts';
 import { device } from '../../shared/device-noun.ts';
+import { serverName } from '../serverName';
 
 export type ProjectPageTab = 'dashboard' | 'tasks' | 'roster' | 'outputs' | 'ledger' | 'budget' | 'settings';
 const TABS: { id: ProjectPageTab; label: string }[] = [{ id: 'dashboard', label: NAMES.dashboard }, { id: 'tasks', label: NAMES.tasks }, { id: 'roster', label: NAMES.roster }, { id: 'outputs', label: NAMES.outputs }, { id: 'ledger', label: NAMES.ledger }, { id: 'budget', label: NAMES.budget }, { id: 'settings', label: NAMES.settings }];
@@ -95,7 +96,7 @@ export function ProjectPage({ snapshot, projectId, nav, muster, initialTab = 'ta
       <span className="pp-icon" aria-hidden="true"><FolderClosed size={16}/></span>
       <div className="pp-title">
         {project ? <InlineText className="pp-name" label="Project name" placeholder="Name this project" maxLength={256} value={project.name} onSave={next => save({ name: next })}/> : <h1 className="pp-name">{name}</h1>}
-        <p className="pp-sub">{where && <span className="pp-repo" title={where}>{where}</span>}<span>{open} open{scoped ? ` of ${scoped.tasks.length}` : ''}</span>{local && <ProjectStatusChips project={summary}/>}{summary?.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}{project?.archived && <span className="ws-chip" data-tone="warn">Archived</span>}</p>
+        <p className="pp-sub">{where && <span className="pp-repo" title={where}>{where}</span>}<span>{open} open{scoped ? ` of ${scoped.tasks.length}` : ''}</span>{local && <ProjectStatusChips project={summary}/>}{summary?.source === 'paperclip' && <span className="ws-source">{serverName()}</span>}{project?.archived && <span className="ws-chip" data-tone="warn">Archived</span>}</p>
         {summary?.source === 'local' && summary.org && <p className="project-edit-hint pp-imported-note">Imported copy from {summary.org}. Paperclip changes arrive when you import again; edits here, including a task's priority or owner, stay in Muster.</p>}
       </div>
       {muster && project && <div className="pp-actions">
@@ -230,7 +231,7 @@ export function PaperclipSettings({ snapshot }: { snapshot: WorkspaceSnapshot })
       <ProjectCheckoutRow orgId={snapshot.paperclip?.company?.id ?? ''} projectId={p.id}/>
       <div><dt>Memory</dt><dd>{p.memory ? `${p.memory.label} · ${p.memory.count} ${p.memory.count === 1 ? 'note' : 'notes'}` : <span className="ws-faint">No Muster folder matches this repository yet</span>}</dd></div>
     </dl>
-    <p className="project-edit-hint">This project lives in {snapshot.paperclip?.company?.name ?? NAMES.paperclip}; change its configuration there. To work on its tasks in Muster, import it: it becomes its own project here, under its org.</p>
+    <p className="project-edit-hint">This project lives in {snapshot.paperclip?.company?.name ?? serverName()}; change its configuration there. To work on its tasks in Muster, import it: it becomes its own project here, under its org.</p>
     <p><button type="button" className="settings-button secondary" onClick={() => openAppSettings('integrations')}>Import into Muster…</button></p>
   </div>;
 }
@@ -271,7 +272,7 @@ function BudgetTab({ projectId, local, name }: { projectId: string; local: boole
     <div className="pp-budget-head"><div><p className="dash-label">Project</p><h2>{name}</h2><p className="ws-faint">Monthly budget · since {new Date(data.spend.since).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</p></div><span className="ws-chip" data-tone={health === 'Over budget' ? 'danger' : health === 'Near budget' ? 'warn' : health === 'Healthy' ? 'ok' : undefined}>{health}</span></div>
     <div className="pp-budget-grid">
       <div><p className="dash-label">Observed</p><p className="dash-value">{policy ? formatUsd(policy.observedUsd) : spent === null ? (data.spend.unpricedTurns ? 'Unpriced' : formatUsd(0)) : formatUsd(spent)}</p><p className="ws-faint">{data.spend.pricedTurns} priced {data.spend.pricedTurns === 1 ? 'turn' : 'turns'}{data.spend.unpricedTurns ? ` · ${data.spend.unpricedTurns} unpriced` : ''} · {tokens.toLocaleString()} tokens</p></div>
-      <div><p className="dash-label">Budget</p><p className="dash-value">{policy ? formatUsd(policy.limitUsd) : use?.unit === 'tokens' ? `${tokenBudget!.toLocaleString()} tokens` : budget !== null ? formatUsd(budget) : tokenBudget !== null ? `${tokenBudget.toLocaleString()} tokens` : 'Not set'}</p><p className="ws-faint">{policy ? `${policy.hardStop ? 'Hard stop' : 'Soft alert'} at ${policy.hardStop ? 100 : policy.warnPercent}% · set in ${NAMES.paperclip}` : budget === null && tokenBudget === null ? 'No cap configured' : 'Soft alert at 80%, Inbox at 80% and 100%'}</p></div>
+      <div><p className="dash-label">Budget</p><p className="dash-value">{policy ? formatUsd(policy.limitUsd) : use?.unit === 'tokens' ? `${tokenBudget!.toLocaleString()} tokens` : budget !== null ? formatUsd(budget) : tokenBudget !== null ? `${tokenBudget.toLocaleString()} tokens` : 'Not set'}</p><p className="ws-faint">{policy ? `${policy.hardStop ? 'Hard stop' : 'Soft alert'} at ${policy.hardStop ? 100 : policy.warnPercent}% · set in ${serverName()}` : budget === null && tokenBudget === null ? 'No cap configured' : 'Soft alert at 80%, Inbox at 80% and 100%'}</p></div>
     </div>
     {use && <div className="pp-meter" role="meter" aria-label="Budget used" aria-valuemin={0} aria-valuemax={use.limit} aria-valuenow={use.used}><span style={{ width: `${Math.min(100, Math.round(ratio * 100))}%` }} data-tone={ratio >= 1 ? 'danger' : ratio >= 0.8 ? 'warn' : 'ok'}/></div>}
     {local ? <div className="pp-inline-form"><label className="dash-label" htmlFor="pp-budget-input">Monthly budget (USD)</label>
@@ -281,8 +282,8 @@ function BudgetTab({ projectId, local, name }: { projectId: string; local: boole
     {local ? <div className="pp-inline-form"><label className="dash-label" htmlFor="pp-token-budget-input">Monthly budget (tokens)</label>
       <input id="pp-token-budget-input" className="ws-input" inputMode="numeric" placeholder={spent === null && data.spend.unpricedTurns ? 'For unpriced models' : 'No token budget'} value={tokenDraft} onChange={e => setTokenDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void setTokenBudget(); }}/>
       <button type="button" className="settings-button secondary" onClick={() => void setTokenBudget()}>Set token budget</button></div>
-      : <><p className="project-edit-hint">Budgets for this project are set in {NAMES.paperclip}.</p>
-        {data.budgets && data.budgets.policies.length > 0 && <section className="pp-cost" aria-label={`${NAMES.paperclip} budgets`}><h3 className="ws-group-title">{data.budgets.company} budgets{data.budgets.incidents ? ` · ${data.budgets.incidents} open ${data.budgets.incidents === 1 ? 'incident' : 'incidents'}` : ''}</h3>
+      : <><p className="project-edit-hint">Budgets for this project are set in {serverName()}.</p>
+        {data.budgets && data.budgets.policies.length > 0 && <section className="pp-cost" aria-label={`${serverName()} budgets`}><h3 className="ws-group-title">{data.budgets.company} budgets{data.budgets.incidents ? ` · ${data.budgets.incidents} open ${data.budgets.incidents === 1 ? 'incident' : 'incidents'}` : ''}</h3>
           <ul className="ws-rows">{data.budgets.policies.map(p => <li key={p.id}><div className="ws-row is-static"><span className="ws-row-text"><span className="ws-row-title">{p.name}</span><span className="ws-row-meta">{p.scope} · {formatUsd(p.observedUsd)} of {formatUsd(p.limitUsd)} this month{p.hardStop ? ' · hard stop' : ''}</span></span><span className="ws-chip" data-tone={p.status === 'ok' ? 'ok' : p.status === 'warning' ? 'warn' : 'danger'}>{p.paused ? 'paused' : `${Math.round(p.percent)}%`}</span></div></li>)}</ul></section>}</>}
     <section className="dash-card"><RunActivityChart days={data.runs}/></section>
     {local && <section className="pp-cost"><h3 className="ws-group-title">All time</h3><div className="project-card project-cost-card"><ProjectCostSummary projectId={projectId}/></div></section>}

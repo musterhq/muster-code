@@ -32,6 +32,7 @@ import { ResourceState } from './ResourceState';
 import { useRuntimeLabel } from './RosterGraph';
 import { EditAgentButton, HireApprovalCard } from './RosterPanel';
 import { Tip } from './Tooltip';
+import { serverName } from '../serverName';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 export interface HubNav { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; onOpenChat: (id: string) => void; /** Opens a run's own page (G14). */ onOpenRun?: (id: string) => void }
@@ -40,7 +41,7 @@ export function PageHeader({ title, detail, children }: { title: string; detail?
   return <header className="ws-page-head"><div className="ws-page-title"><h1>{title}</h1>{detail && <p>{detail}</p>}</div>{children && <div className="ws-page-actions">{children}</div>}</header>;
 }
 /** Paperclip rows, and Ledger entries imported from past chats (#190): those were never hash-chained, and say so. */
-const SourceTag = ({ source }: { source: LedgerSource }) => source === 'paperclip' ? <span className="ws-source">{NAMES.paperclip}</span>
+const SourceTag = ({ source }: { source: LedgerSource }) => source === 'paperclip' ? <span className="ws-source">{serverName()}</span>
   : source === 'history' ? <span className="ws-source ws-source-history" title="Imported from saved chats and Muster Server activity from before the Ledger recorded turns. Not part of the verified chain.">Imported history</span> : null;
 
 // --- Inbox -----------------------------------------------------------------------------------------------------------
@@ -106,8 +107,8 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
       <InboxOptions columns={columns} onColumns={next => { setColumns(next); writeColumns(globalThis.localStorage, next); }} tidy={tidy} onTidy={next => { setTidy(next); writeTidy(globalThis.localStorage, next); }}/>
       {groups.length > 1 && <select className="ws-select" aria-label="Group" value={group} onChange={e => setGroup(e.target.value)}><option value="all">Everything</option>{groups.map(g => <option key={g} value={g}>{g}</option>)}</select>}
     </div>
-    {offline && <ResourceState kind="partial" compact message={/token|sign.?in|refused|expired|unauthori[sz]ed/i.test(offline.stale ?? '') ? `${offline.stale} Sign in again in Settings › Integrations; the items below are from the last copy.` : offline.cached ? `${NAMES.paperclip} can’t be reached, so its items are from the last copy and may be out of date.` : `${NAMES.paperclip} can’t be reached, so its questions, approvals and problems are not shown.`}/>}
-    {visible.length === 0 ? <ResourceState kind="empty" icon={<Inbox size={20}/>} title={view === 'snoozed' ? 'Nothing snoozed' : view === 'unread' && items.length ? 'Nothing unread' : view === 'mine' && items.length ? 'Nothing is waiting on you' : items.length ? 'Nothing here' : offline ? 'Nothing from Muster needs you' : 'You’re all caught up'} message={view === 'snoozed' ? 'Snoozed items wait here and come back by themselves at the time you chose.' : items.length ? 'No items match these filters.' : offline ? `${NAMES.paperclip} items will show here once it can be reached.` : 'Questions and approvals from your agents, finished turns, reviews, problems and mail land here.'}/>
+    {offline && <ResourceState kind="partial" compact message={/token|sign.?in|refused|expired|unauthori[sz]ed/i.test(offline.stale ?? '') ? `${offline.stale} Sign in again in Settings › Integrations; the items below are from the last copy.` : offline.cached ? `${serverName()} can’t be reached, so its items are from the last copy and may be out of date.` : `${serverName()} can’t be reached, so its questions, approvals and problems are not shown.`}/>}
+    {visible.length === 0 ? <ResourceState kind="empty" icon={<Inbox size={20}/>} title={view === 'snoozed' ? 'Nothing snoozed' : view === 'unread' && items.length ? 'Nothing unread' : view === 'mine' && items.length ? 'Nothing is waiting on you' : items.length ? 'Nothing here' : offline ? 'Nothing from Muster needs you' : 'You’re all caught up'} message={view === 'snoozed' ? 'Snoozed items wait here and come back by themselves at the time you chose.' : items.length ? 'No items match these filters.' : offline ? `${serverName()} items will show here once it can be reached.` : 'Questions and approvals from your agents, finished turns, reviews, problems and mail land here.'}/>
       : [...byGroup].map(([name, rows]) => <section key={name} className="ws-section" aria-label={name}>
         <h2 className="ws-group-title">{name}<span>{rows.length}</span></h2>
         <ul className="ws-rows">{rows.map(item => <li key={item.id}>
@@ -115,7 +116,7 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
             <span className="ws-unread-dot" aria-label={unreadNow(item, meta) ? 'Unread' : undefined}/>
             <StateChip tone={BUCKET_TONE[item.bucket]}>{KIND_LABEL[item.kind] ?? INBOX_BUCKETS[item.bucket]}</StateChip>
             <button type="button" className="ws-row-text ws-row-link" disabled={item.action.kind === 'none'} onClick={() => act(item)}><span className="ws-row-title">{item.title}</span><span className="ws-row-meta">{item.kind === 'failed_run' || item.kind === 'agent_error' ? explainRunError(item.why) : item.why}</span></button>
-            {item.org ? <span className="ws-source ws-org-chip" title={`${item.org.name} · ${NAMES.server}`}>{item.org.name}</span> : item.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}
+            {item.org ? <span className="ws-source ws-org-chip" title={`${item.org.name} · ${NAMES.server}`}>{item.org.name}</span> : item.source === 'paperclip' && <span className="ws-source">{serverName()}</span>}
             <span className="ws-row-age" title={exactTime(item.at)}>{agoLabel(item.at)}</span>
             {item.action.kind !== 'none' && !item.checkout && <button type="button" className="settings-button secondary ws-row-action" onClick={() => act(item)}>{label(item)}</button>}
             <GateActions item={item} onChanged={reloadMeta}/>
@@ -152,7 +153,7 @@ export function PulseBoard({ snapshot, nav, agentId, scoped = false, projectId }
   // The count is the whole company's (what Pause really stops), not just the agents on this page; a pending hire is never counted.
   const running = (s: WorkspaceSource) => s === 'paperclip' && snapshot.agentCounts ? snapshot.agentCounts.active : snapshot.agents.filter(a => a.source === s && a.pausable && a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending').length;
   const paperclipAgents = (n: number) => `${n} server ${n === 1 ? 'agent' : 'agents'}`;
-  const label = (s: WorkspaceSource) => scoped ? s === 'paperclip' ? `${paperclipAgents(running(s))} (org-wide)` : 'Muster agents on this project' : s === 'paperclip' ? snapshot.paperclip?.company?.name ?? NAMES.paperclip : 'Muster';
+  const label = (s: WorkspaceSource) => scoped ? s === 'paperclip' ? `${paperclipAgents(running(s))} (org-wide)` : 'Muster agents on this project' : s === 'paperclip' ? snapshot.paperclip?.company?.name ?? serverName() : 'Muster';
   const confirmText = (s: WorkspaceSource) => scoped && s === 'paperclip' ? `Pause ${paperclipAgents(running(s))}? They also stop working on other projects.`
     : `Pause every ${scoped ? 'Muster agent on this project' : `${label(s)} agent`}? Running work stops and nothing new starts until you resume.`;
   // From a project page: Muster's Pause stops that project's agents, Paperclip's stops the company's (its agents belong to the company).

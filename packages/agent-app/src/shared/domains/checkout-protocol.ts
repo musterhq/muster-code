@@ -42,7 +42,8 @@ export interface MyWorkTask {
   checkout: CheckoutBadge | null;
 }
 export interface OrgWork {
-  org: { id: string; name: string; prefix: string; server: string };
+  /** `kind`: what the server is ("multica" names it Multica; anything else is Muster Server). */
+  org: { id: string; name: string; prefix: string; server: string; kind?: import('./paperclip-protocol.ts').ServerBackendKind | null };
   sidebar: OrgSidebarMode;
   /** The person's open count (My work), shown on the org row. */
   open: number;

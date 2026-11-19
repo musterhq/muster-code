@@ -15,6 +15,7 @@ import { closeSettings, selectChat } from '../store';
 import { Tip } from './Tooltip';
 import { device } from '../../shared/device-noun.ts';
 import './org-sidebar.css';
+import { kindName } from '../serverName';
 
 const HUES = ['var(--info)', 'var(--warn)', 'var(--violet)', 'var(--pink)', 'var(--ok)', 'var(--file-teal)'];
 const hueOf = (name: string) => HUES[[...name].reduce((n, c) => n + c.charCodeAt(0), 0) % HUES.length]!;
@@ -50,7 +51,7 @@ function OrgBlock({ org, open, pinned, onToggle, onPin, activeTask, activeProjec
   return <div className="org-block" data-open={open || undefined}>
     <div className="org-head">
       <button type="button" className="org-toggle" aria-expanded={open} aria-controls={panel} onClick={onToggle}>
-        <ChevronRight size={12} className="org-chev" aria-hidden="true"/><OrgAvatar name={org.org.name}/><span className="org-name" title={`${org.org.name} · ${org.org.server}`}>{org.org.name}</span>
+        <ChevronRight size={12} className="org-chev" aria-hidden="true"/><OrgAvatar name={org.org.name}/><span className="org-name" title={`${org.org.name} · ${org.org.kind === 'multica' ? kindName(org.org.kind) + ' · ' : ''}${org.org.server}`}>{org.org.name}</span>
         {org.stale && <span className="org-stale" title={org.stale} aria-label="Offline: showing the last copy">·</span>}
         <span className={`org-count${org.open ? ' is-hot' : ''}`} aria-label={`${org.open} open for you`}>{org.open}</span>
       </button>

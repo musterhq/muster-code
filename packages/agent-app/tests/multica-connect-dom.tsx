@@ -17,6 +17,9 @@ const styles=()=>({getPropertyValue:()=>'',direction:'ltr',position:'static',ove
 Object.assign(globalThis,{getComputedStyle:styles});(window as any).getComputedStyle=styles;
 (window.HTMLElement.prototype as any).getBoundingClientRect=function(){return {x:0,y:0,top:0,left:0,right:1000,bottom:800,width:1000,height:800};};
 (window.HTMLElement.prototype as any).getClientRects=function(){return [this.getBoundingClientRect()];};
+// linkedom does not track focus: record the element focus() was last called on.
+let focused:Element|null=null;
+(window.HTMLElement.prototype as any).focus=function(){focused=this;};
 Object.defineProperty(globalThis,'navigator',{configurable:true,value:{platform:'MacIntel',userAgent:'linkedom',clipboard:{writeText:async()=>undefined}}});
 const React=await import('react');
 const {createRoot}=await import('react-dom/client');
@@ -65,10 +68,27 @@ await check('Connect on a Multica address opens the token field with Multica’s
   await type(host.querySelector('input[type=url]'),ORIGIN);
   await click(button(/^Connect$/));
   assert.equal(calls.some(c=>c.command==='paperclip.signin.start'||c.command==='musterServer.signInWindow'),false,'no browser sign-in is started for Multica');
-  assert.equal(text(host.querySelector('[role=alert]')),NEEDS_TOKEN,'Multica’s own instruction, word for word');
+  assert.equal(text(host.querySelector('.ws-connection-guide')),NEEDS_TOKEN,'Multica’s own instruction, word for word');
   assert.ok((host.querySelector('details.ws-connection-more') as any)?.hasAttribute('open'),'Other ways to connect is open');
   assert.ok(host.querySelector('input[type=password]'),'the token field is on screen');
   assert.match(text(host.querySelector('details.ws-connection-more')),/personal access token that starts with mul_/);
+});
+
+// Spec: MUS-SPEC-13-890F (docs/spec/clauses/13-muster-server.md#mus-spec-13-890f)
+await check('the Multica connect step reads as guidance: no error colour, Multica’s own steps, the token field focused and Connect with token primary', async()=>{
+  const guide=host.querySelector('.ws-connection-guide');
+  assert.ok(guide,'the instruction is on screen');
+  assert.equal(guide!.getAttribute('role'),'status','it is a notice, not an alert');
+  assert.equal(guide!.classList.contains('settings-error'),false,'not in the error colour');
+  assert.equal([...host.querySelectorAll('.settings-error')].some(e=>text(e)===NEEDS_TOKEN),false,'no error line repeats it');
+  assert.deepEqual([...host.querySelectorAll('.ws-connect-steps li')].map(text),['In Multica, open Settings › Tokens and create a personal access token (it starts with mul_).','Paste it below and press Connect with token.','Your Multica workspaces, projects and issues appear under Projects.']);
+  assert.equal(host.textContent!.includes('sign-in page opens in a window'),false,'no step promises a sign-in window');
+  assert.ok(focused===host.querySelector('input[type=password]'),'the token field has focus');
+  assert.equal(button(/^Connect with token$/)!.className.includes('secondary'),false,'Connect with token is the primary action');
+  assert.ok(button(/^Connect$/)!.className.includes('secondary'),'Connect steps back');
+  const {SETTINGS_SECTIONS}=await import('../src/renderer/components/settings/sections');
+  const integrations=(SETTINGS_SECTIONS as any[]).find(x=>x.id==='integrations');
+  assert.equal(integrations.description,'Connect your team’s servers (Muster Server or Multica): their projects, tasks and agents show up in the app.');
 });
 
 // Spec: MUS-SPEC-13-890E (docs/spec/clauses/13-muster-server.md#mus-spec-13-890e)

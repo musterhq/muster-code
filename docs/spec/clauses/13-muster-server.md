@@ -34,8 +34,9 @@ Boundaries:
 | [MUS-SPEC-13-890A](13-muster-server.md#mus-spec-13-890a) | Both Multica servers are listed online with their address, kind and “· API token” account; each token is in the secret store, in no file, never in the window, and only ever sent to its own server. | [`two Multica servers added with personal access tokens are both listed online, each token kept in the secret store and sent only to its own server`](../../../packages/agent-app/tests/multica-integration.test.ts) |
 | [MUS-SPEC-13-890B](13-muster-server.md#mus-spec-13-890b) | A bad address, a refused token (in Multica’s words), a missing token (no browser sign-in offered) and a closed port each give their own stage and sentence. | [`Test connection to a Multica server says what is wrong: a bad address, a token Multica refuses, a server that does not answer`](../../../packages/agent-app/tests/multica-integration.test.ts) |
 | [MUS-SPEC-13-890C](13-muster-server.md#mus-spec-13-890c) | A server answering 302 to another address gets its own token, the other address gets no request at all, and the test fails. | [`a Multica server that redirects never passes the token on: the redirect target receives nothing and the test fails`](../../../packages/agent-app/tests/multica-integration.test.ts) |
-| [MUS-SPEC-13-890D](13-muster-server.md#mus-spec-13-890d) | No sign-in window is started; Multica’s instruction is shown word for word and the token field under Other ways to connect is open. | [`Connect on a Multica address opens the token field with Multica’s instructions and no sign-in window`](../../../packages/agent-app/tests/multica-connect-dom.tsx) |
+| [MUS-SPEC-13-890D](13-muster-server.md#mus-spec-13-890d) | No sign-in window is started; Multica’s instruction is shown word for word as a notice and the token field under Other ways to connect is open. | [`Connect on a Multica address opens the token field with Multica’s instructions and no sign-in window`](../../../packages/agent-app/tests/multica-connect-dom.tsx) |
 | [MUS-SPEC-13-890E](13-muster-server.md#mus-spec-13-890e) | A refused token shows Multica’s sentence and saves nothing; a good one saves the address, token and kind, and the row reads “Acme · Multica” without showing the token. | [`a refused Multica token shows Multica’s words; a good one adds the server, listed as Multica`](../../../packages/agent-app/tests/multica-connect-dom.tsx) |
+| [MUS-SPEC-13-890F](13-muster-server.md#mus-spec-13-890f) | Multica’s instruction is a status notice, not an error line; the steps are Multica’s three; the token field has focus; Connect with token is primary and Connect secondary; the Integrations description names all three server kinds. | [`the Multica connect step reads as guidance: no error colour, Multica’s own steps, the token field focused and Connect with token primary`](../../../packages/agent-app/tests/multica-connect-dom.tsx) |
 
 <a id="mus-spec-13-575a"></a>
 #### MUS-SPEC-13-575A: A server value named like an object key falls back to the default
@@ -242,7 +243,7 @@ Boundaries:
 
 - Precondition: Settings › Integrations with no servers; the address is a Multica server that needs a token.
 - Action: Type the address and press Connect.
-- Expected result: No browser sign-in is started and no sign-in window opens. The error line shows Multica’s instruction to create a personal access token, Other ways to connect is open with the token field on screen, and its hint says a Multica token starts with mul_.
+- Expected result: No browser sign-in is started and no sign-in window opens. A notice shows Multica’s instruction to create a personal access token, Other ways to connect is open with the token field on screen, and its hint says a Multica token starts with mul_.
 - Test: `packages/agent-app/tests/multica-connect-dom.tsx::Connect on a Multica address opens the token field with Multica’s instructions and no sign-in window`
 - Environment: DOM suite (linkedom) rendering the real ServerList and ConnectionPanel with a stubbed bridge.
 - Known gaps: The runtime answer is stubbed here; case MUS-SPEC-13-890B checks the runtime gives that answer.
@@ -257,4 +258,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/multica-connect-dom.tsx::a refused Multica token shows Multica’s words; a good one adds the server, listed as Multica`
 - Environment: DOM suite (linkedom) rendering the real ServerList and ConnectionPanel with a stubbed bridge.
 - Known gaps: The runtime answers are stubbed; MUS-SPEC-13-890A covers the runtime side.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-13-890f"></a>
+#### MUS-SPEC-13-890F: The Multica connect step reads as guidance
+
+- Precondition: Connect was just pressed on a Multica address that needs a token.
+- Action: Look at the connect panel and the Integrations section description.
+- Expected result: The instruction is a status notice, not shown in the error colour, and no error line repeats it. “How connecting works” lists Multica’s steps (create a personal access token in Multica › Settings › Tokens, starting with mul_; paste it and press Connect with token; the workspaces, projects and issues appear under Projects) and no step mentions a sign-in window. The token field has focus, Connect with token is the primary button and Connect is secondary. The Integrations description reads “Connect your team’s servers (Muster Server or Multica): their projects, tasks and agents show up in the app.”
+- Test: `packages/agent-app/tests/multica-connect-dom.tsx::the Multica connect step reads as guidance: no error colour, Multica’s own steps, the token field focused and Connect with token primary`
+- Environment: DOM suite (linkedom) rendering the real components with a stubbed bridge.
+- Known gaps: Colours are not measured: the check is that the notice uses the notice style rather than the error class. The section description is read from its source list, not from the rendered Settings page.
 - Evidence: UNVERIFIED

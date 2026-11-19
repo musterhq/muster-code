@@ -108,7 +108,7 @@ export class OrgReader {
     const inbox = scopeInbox(part.inbox, part.tasks, me, { team: setting.sidebar === 'team', reporting }).map(item => ({ ...item, org: { id: company.id, name: company.name } }));
     const stale = this.stale.get(company.id);
     return {
-      org: { id: company.id, name: company.name, prefix: company.prefix, server }, sidebar: setting.sidebar, open: mineOnly(rows).length, tasks,
+      org: { id: company.id, name: company.name, prefix: company.prefix, server, kind: this.deps.backend()?.kind ?? null }, sidebar: setting.sidebar, open: mineOnly(rows).length, tasks,
       projects: part.projects.filter(p => p.status !== 'archived').map(p => ({ id: p.id, name: p.name, open: counts.get(p.id) ?? 0 })).sort((a, b) => a.name.localeCompare(b.name)), inbox, ...(stale ? { stale } : {}),
     };
   }
@@ -124,7 +124,7 @@ export class OrgReader {
       catch (cause) {
         const part = this.cached(company.id);
         if (part) return this.build(company, part, me, setting);
-        return { org: { id: company.id, name: company.name, prefix: company.prefix, server: this.deps.serverLabel() }, sidebar: setting.sidebar, open: 0, tasks: [], projects: [], inbox: [], stale: cause instanceof Error ? cause.message : String(cause) } as OrgWork;
+        return { org: { id: company.id, name: company.name, prefix: company.prefix, server: this.deps.serverLabel(), kind: this.deps.backend()?.kind ?? null }, sidebar: setting.sidebar, open: 0, tasks: [], projects: [], inbox: [], stale: cause instanceof Error ? cause.message : String(cause) } as OrgWork;
       }
     }));
     return { me, orgs: built };
