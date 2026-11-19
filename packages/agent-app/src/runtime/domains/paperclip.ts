@@ -958,7 +958,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
           const person = typeof input.assigneeId === 'string' && input.assigneeId.startsWith('user:') ? input.assigneeId.slice(5) : null;
           // A person (their server user id) takes the task and the agent is cleared; an agent takes it and any person is cleared; null clears both.
           changes.assigneeAgentId = input.assigneeId === null || person !== null ? null : id(input.assigneeId);
-          if (connection()?.kind === 'paperclip') changes.assigneeUserId = person !== null && person !== 'local' ? id(person) : null;
+          // Paperclip and Multica assign people by their server user id; a Muster Server's tasks have one owner field.
+          if (connection()?.kind !== 'muster-server') changes.assigneeUserId = person !== null && person !== 'local' ? id(person) : null;
         }
         if (!Object.keys(changes).length) throw new Error('Nothing to change.');
         if (await owner('task', taskId) === 'local') {

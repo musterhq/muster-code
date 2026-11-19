@@ -111,6 +111,9 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
         setAddress(view.baseUrl); load(view, { current: true }); setLocal(null);
         notifySuccess(addOnly ? `Connected to ${hostOf(view.baseUrl)}. Its projects are listed under its name.` : `Connected to ${hostOf(view.baseUrl)}. Its projects appear under Projects.`);
         await refreshWorkspace(true); onSaved?.(view);
+      } else if (probe.stage === 'auth' && probe.backend === 'multica') {
+        // Multica signs in with a personal access token: no window opens; the token field does, with Multica's own instructions.
+        setOthers(true); setError(probe.message);
       } else if (probe.stage === 'auth') await beginSignIn(baseUrl);
       else setError(plainProbeError(probe, baseUrl));
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
@@ -122,7 +125,8 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
     setBusy('token'); setError(''); setImported(null);
     try {
       const probe = await invoke('paperclip.test', { mode: 'custom', baseUrl, token });
-      if (!probe.ok) { setError(probe.stage === 'auth' ? 'The server didn’t accept that token.' : plainProbeError(probe, baseUrl)); return; }
+      // A Multica server's refusal is shown in its own words.
+      if (!probe.ok) { setError(probe.stage === 'auth' ? (probe.backend === 'multica' ? probe.message : 'The server didn’t accept that token.') : plainProbeError(probe, baseUrl)); return; }
       const view = await invoke('paperclip.config.set', { mode: 'custom', baseUrl, token, ...(probe.backend ? { backend: probe.backend } : {}), companyId: probe.companies?.[0]?.id ?? null, ...(serverId ? { serverId } : {}) });
       setToken(''); setAddress(view.baseUrl); load(view, { current: true });
       notifySuccess(`Connected to ${hostOf(view.baseUrl)} with an API token.`);
@@ -212,7 +216,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
       <details className="ws-connection-more" open={others || undefined} onToggle={e => setOthers((e.currentTarget as HTMLDetailsElement).open)}><summary>Other ways to connect</summary>
         <div className="ws-form">
           <p><strong>Use an API token instead</strong></p>
-          <p className="project-edit-hint">For scripts and special cases. It uses the server address above; the token is stored encrypted in {device().secretStore} and never reaches this window.</p>
+          <p className="project-edit-hint">For scripts and special cases, and how a Multica server connects (a personal access token that starts with mul_). It uses the server address above; the token is stored encrypted in {device().secretStore} and never reaches this window.</p>
           <label className="project-edit-goal"><span>API token</span><span className="project-edit-name"><input type="password" placeholder="Paste an API token" value={token} onChange={e => { setToken(e.target.value); setError(''); }} spellCheck={false} autoComplete="off"/></span></label>
           <div className="project-edit-actions"><span className="project-edit-spacer"/><button type="button" className="settings-button secondary" disabled={busy !== null || !address.trim() || !token.trim()} onClick={() => void connectWithToken()}>{busy === 'token' ? 'Connecting…' : 'Connect with token'}</button></div>
         </div>
@@ -235,7 +239,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
       {imported.notes.map(n => <p key={n} className="ws-faint">{n}</p>)}
     </div>}
     {connected && <div className="project-edit-actions">
-      <button type="button" className="settings-button secondary" title="Copy its projects, tasks, threads and Roster into Muster, reading with GET only. Safe to repeat." disabled={busy !== null} onClick={() => void planImport()}>{busy === 'import' && !plan ? 'Reading…' : 'Import a copy…'}</button>
+      {config?.backend !== 'multica' && <button type="button" className="settings-button secondary" title="Copy its projects, tasks, threads and Roster into Muster, reading with GET only. Safe to repeat." disabled={busy !== null} onClick={() => void planImport()}>{busy === 'import' && !plan ? 'Reading…' : 'Import a copy…'}</button>}
       <span className="project-edit-spacer"/>
       <button type="button" className="settings-button secondary" disabled={busy !== null} onClick={() => void disconnect()}>{busy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}</button>
     </div>}

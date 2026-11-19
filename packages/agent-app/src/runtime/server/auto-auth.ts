@@ -13,17 +13,19 @@ import { detectBackend } from './detect.ts';
 export interface AutoAuth extends ServerAuth { backendFor(origin: string): ServerBackendKind | undefined }
 
 export function createAutoAuth(fetcher: FetchLike, saved: (origin: string) => ServerBackendKind | null): AutoAuth {
-  const adapters: Record<ServerBackendKind, ServerAuth> = { paperclip: createPaperclipAuth(fetcher), 'muster-server': createMusterServerAuth(fetcher) };
+  // Multica signs in with a personal access token pasted in Settings; it has no browser approval to run.
+  const adapters: Partial<Record<ServerBackendKind, ServerAuth>> = { paperclip: createPaperclipAuth(fetcher), 'muster-server': createMusterServerAuth(fetcher) };
+  const adapterOf = (kind: ServerBackendKind): ServerAuth => { const found = adapters[kind]; if (!found) throw new Error('Multica signs in with a personal access token. In Multica, create one (it starts with mul_), then paste it under Other ways to connect.'); return found; };
   const chosen = new Map<string, ServerBackendKind>();
   const originOf = (base: string) => new URL(base).origin;
-  const adapterFor = (base: string): ServerAuth => adapters[chosen.get(originOf(base)) ?? saved(originOf(base)) ?? 'paperclip'];
+  const adapterFor = (base: string): ServerAuth => adapterOf(chosen.get(originOf(base)) ?? saved(originOf(base)) ?? 'paperclip');
   return {
     backendFor: origin => chosen.get(origin) ?? saved(origin) ?? undefined,
     async start(input) {
       const base = normalizeBaseUrl(input), host = new URL(base).host;
       const found = await detectBackend(base, fetcher);
       if (!found.ok) throw new Error(found.stage === 'network' ? `Muster can’t reach ${host}. Check the address and that the server is running.` : `${host} isn’t a Muster server. Check the address.`);
-      const started = await adapters[found.kind].start(base);
+      const started = await adapterOf(found.kind).start(base);
       chosen.set(started.origin, found.kind);
       return started;
     },

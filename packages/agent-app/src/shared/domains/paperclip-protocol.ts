@@ -15,8 +15,8 @@ import type { ExecutionPolicy, RunMeta, SecretProposal, TaskMonitor, TaskStageSt
 import type { TaskLabel, TaskPrSummary } from './work-protocol.ts';
 
 export type PaperclipMode = 'off' | 'local' | 'custom';
-/** Which server is behind the one "Muster Server" connection: our own packages/server, or a Paperclip instance (shown only as "Paperclip-compatible" in connection details). */
-export type ServerBackendKind = 'paperclip' | 'muster-server';
+/** Which server is behind a connection: our own packages/server, a Paperclip instance (shown only as "Paperclip-compatible" in connection details), or a Multica server (signs in with a personal access token). */
+export type ServerBackendKind = 'paperclip' | 'muster-server' | 'multica';
 export type ServerSignInMethod = 'password' | 'browser';
 export const PAPERCLIP_LOCAL_URL = 'http://127.0.0.1:3100';
 export type WorkspaceSource = 'paperclip' | 'local';
