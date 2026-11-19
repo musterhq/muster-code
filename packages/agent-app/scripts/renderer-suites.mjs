@@ -28,6 +28,7 @@ export const split = new Set([
   'muster-server-list-dom',
   'multica-connect-dom',
   'multica-labels-dom',
+  'multica-signin-dom',
   'work-components',
   'nav-components',
   'org-components',

@@ -1,5 +1,5 @@
-// Settings › Integrations with a Multica server (#890): Connect on a Multica address opens the token field with Multica's own instructions
-// (no sign-in window), Connect with token saves it as a Multica server, a refused token shows Multica's words, and the list marks the row
+// Settings › Integrations with a Multica server (#890): where no sign-in window can open (the browser host), Connect on a Multica address
+// opens the token field with Multica's own instructions, Connect with token saves it as a Multica server, a refused token shows Multica's words, and the list marks the row
 // Multica. linkedom DOM, the real ServerList and ConnectionPanel, a stubbed bridge; no network, no Electron.
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
@@ -60,11 +60,12 @@ const config={mode:'off',baseUrl:'http://127.0.0.1:3100',hasToken:false,secureSt
 const {ServerList}=await import('../src/renderer/components/settings/ServerList');
 const host=document.getElementById('root')!;
 const root=createRoot(host);
-await act(async()=>{root.render(<ServerList/>);await delay(80);});
+// The browser host: no sign-in window can open, so a Multica server connects with a pasted token.
+await act(async()=>{root.render(<ServerList signInAvailable={false}/>);await delay(80);});
 await settle(120);
 
 // Spec: MUS-SPEC-13-890D (docs/spec/clauses/13-muster-server.md#mus-spec-13-890d)
-await check('Connect on a Multica address opens the token field with Multica’s instructions and no sign-in window', async()=>{
+await check('where no sign-in window can open, Connect on a Multica address opens the token field with Multica’s instructions', async()=>{
   await type(host.querySelector('input[type=url]'),ORIGIN);
   await click(button(/^Connect$/));
   assert.equal(calls.some(c=>c.command==='paperclip.signin.start'||c.command==='musterServer.signInWindow'),false,'no browser sign-in is started for Multica');

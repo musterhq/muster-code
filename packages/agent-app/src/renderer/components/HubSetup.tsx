@@ -26,6 +26,8 @@ import { serverName } from '../serverName';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(cause);
 const whoText = (user: { name: string | null; email: string | null } | null | undefined) => user ? [user.name, user.email && (user.name ? `(${user.email})` : user.email)].filter(Boolean).join(' ') || 'your account' : '';
+// A hostname in Settings is an HTTPS server. Leave fully specified addresses to the runtime validator.
+const serverAddress = (value: string) => /^[a-z0-9.-]+(?::\d+)?(?:\/|$)/i.test(value.trim()) ? 'https://' + value.trim() : value.trim();
 const hostOf = (url: string) => { try { return new URL(url.trim()).host; } catch { return url.trim(); } };
 const isLocalUrl = (url: string) => { try { const h = new URL(url).hostname.replace(/^\[|\]$/g, ''); return h === 'localhost' || h === '::1' || /^127(\.\d{1,3}){3}$/.test(h); } catch { return false; } };
 /** What a probe of an address means in plain words, shown under the address field. */
@@ -66,6 +68,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
   const [error, setError] = useState('');
   /** Multica's own instruction after Connect on a Multica address: guidance (a notice), not an error. The token field takes focus. */
   const [guide, setGuide] = useState('');
+  const multicaLogin = useRef(false);
   const tokenField = useRef<HTMLInputElement | null>(null);
   useEffect(() => { if (guide) tokenField.current?.focus(); }, [guide, others]);
   const connectedNow = (view: PaperclipConfigView | null) => !addOnly && Boolean(view && view.mode !== 'off' && (view.hasToken || (isLocalUrl(view.baseUrl) && !view.signInNotice)));
@@ -90,7 +93,12 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
   const lastPhase = useRef<PaperclipSignInState['phase']>('idle');
   useEffect(() => {
     const was = lastPhase.current; lastPhase.current = signInState.phase;
-    if (was !== 'waiting' || signInState.phase !== 'signed-in') return;
+    if (was !== 'waiting' || signInState.phase === 'waiting') return;
+    if (multicaLogin.current && signInState.baseUrl) {
+      void invoke('musterServer.signInWindow', { baseUrl: signInState.baseUrl, close: true }).catch(() => undefined);
+      if (signInState.phase === 'failed') setOthers(true);
+    }
+    if (signInState.phase !== 'signed-in') return;
     // Approved in the server's window: the key is stored. Say who you are and bring the projects in.
     setError(''); notifySuccess(`Connected to ${hostOf(signInState.baseUrl ?? address)} as ${whoText(signInState.user)}.`);
     void invoke('paperclip.config.get', {}).then(view => { load(view, { current: true }); onSaved?.(view); });
@@ -106,18 +114,19 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
   };
   /** Connect: probe the address, then either link it (nothing to sign in to) or open that server's sign-in. */
   const connect = async (target = address) => {
-    const baseUrl = target.trim();
+    const baseUrl = serverAddress(target);
     if (!baseUrl) return;
     setBusy('connect'); setError(''); setGuide(''); setImported(null);
     try {
       const probe = await invoke('paperclip.test', { mode: 'custom', baseUrl });
+      multicaLogin.current = probe.backend === 'multica';
       if (probe.ok) {
         const view = await invoke('paperclip.config.set', { mode: isLocalUrl(baseUrl) ? 'local' : 'custom', baseUrl, ...(probe.backend ? { backend: probe.backend } : {}), companyId: probe.companies?.[0]?.id ?? null, ...(serverId ? { serverId } : {}) });
         setAddress(view.baseUrl); load(view, { current: true }); setLocal(null);
         notifySuccess(addOnly ? `Connected to ${hostOf(view.baseUrl)}. Its projects are listed under its name.` : `Connected to ${hostOf(view.baseUrl)}. Its projects appear under Projects.`);
         await refreshWorkspace(true); onSaved?.(view);
-      } else if (probe.stage === 'auth' && probe.backend === 'multica') {
-        // Multica signs in with a personal access token: no window opens; the token field does, with Multica's own instructions.
+      } else if (probe.stage === 'auth' && probe.backend === 'multica' && !signInAvailable) {
+        // The web host cannot receive the desktop callback.
         setOthers(true); setError(''); setGuide(probe.message);
       } else if (probe.stage === 'auth') await beginSignIn(baseUrl);
       else setError(plainProbeError(probe, baseUrl));
@@ -125,7 +134,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
   };
   /** The other way in, for scripts and special cases: an address and an API token. */
   const connectWithToken = async () => {
-    const baseUrl = address.trim();
+    const baseUrl = serverAddress(address);
     if (!baseUrl || !token.trim()) return;
     setBusy('token'); setError(''); setImported(null);
     try {
@@ -226,7 +235,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
       <details className="ws-connection-more" open={others || undefined} onToggle={e => setOthers((e.currentTarget as HTMLDetailsElement).open)}><summary>Other ways to connect</summary>
         <div className="ws-form">
           <p><strong>Use an API token instead</strong></p>
-          <p className="project-edit-hint">For scripts and special cases, and how a Multica server connects (a personal access token that starts with mul_). It uses the server address above; the token is stored encrypted in {device().secretStore} and never reaches this window.</p>
+          <p className="project-edit-hint">For scripts and special cases, or when browser sign-in is unavailable. For Multica, use a personal access token that starts with mul_. It uses the server address above; the token is stored encrypted in {device().secretStore} and never reaches this window.</p>
           <label className="project-edit-goal"><span>API token</span><span className="project-edit-name"><input ref={tokenField} type="password" placeholder={guide ? 'Paste a Multica personal access token' : 'Paste an API token'} value={token} onChange={e => { setToken(e.target.value); setError(''); }} spellCheck={false} autoComplete="off"/></span></label>
           <div className="project-edit-actions"><span className="project-edit-spacer"/><button type="button" className={guide ? 'settings-button' : 'settings-button secondary'} disabled={busy !== null || !address.trim() || !token.trim()} onClick={() => void connectWithToken()}>{busy === 'token' ? 'Connecting…' : 'Connect with token'}</button></div>
         </div>
@@ -234,7 +243,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
     </>}
     {waiting && <div className="ws-form">
       <p className="ws-connection-detect" data-ok="true" role="status">Waiting for you to sign in on {hostOf(signInState.baseUrl ?? address)}…{signInState.expiresAt ? ` The request expires at ${new Date(signInState.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.` : ''}</p>
-      <p className="project-edit-hint">The server’s own sign-in page is open in a window. Sign in there and press Approve; Muster never sees your password. <button type="button" className="ws-link" onClick={() => void invoke('musterServer.signInWindow', { url: signInState.approvalUrl!, baseUrl: signInState.baseUrl ?? address }).catch(() => invoke('link.open', { url: signInState.approvalUrl! })).catch(() => setError('Muster could not open the sign-in window.'))}>Open window again</button> · <button type="button" className="ws-link" title="Approve in your own browser. Updates then arrive every few seconds instead of instantly." onClick={() => void invoke('musterServer.signInWindow', { baseUrl: signInState.baseUrl ?? address, close: true }).catch(() => undefined).then(() => invoke('link.open', { url: signInState.approvalUrl! })).catch(() => setError('Muster could not open your browser.'))}>Use my browser instead</button></p>
+      <p className="project-edit-hint">{multicaLogin.current ? 'Your Multica sign-in page is open in a window. Sign in there; Muster never sees your password.' : 'The server’s own sign-in page is open in a window. Sign in there and press Approve; Muster never sees your password.'} <button type="button" className="ws-link" onClick={() => void invoke('musterServer.signInWindow', { url: signInState.approvalUrl!, baseUrl: signInState.baseUrl ?? address }).catch(() => invoke('link.open', { url: signInState.approvalUrl! })).catch(() => setError('Muster could not open the sign-in window.'))}>Open window again</button> · <button type="button" className="ws-link" title="Approve in your own browser. Updates then arrive every few seconds instead of instantly." onClick={() => void invoke('musterServer.signInWindow', { baseUrl: signInState.baseUrl ?? address, close: true }).catch(() => undefined).then(() => invoke('link.open', { url: signInState.approvalUrl! })).catch(() => setError('Muster could not open your browser.'))}>Use my browser instead</button></p>
       {error && <p role="alert" className="settings-error">{error}</p>}
       <div className="project-edit-actions"><span className="project-edit-spacer"/><button type="button" className="settings-button secondary" onClick={() => void cancelSignIn()}>Cancel</button></div>
     </div>}

@@ -407,7 +407,7 @@ export interface PaperclipCommands {
   /** `serverId`: the server the approved key belongs to (`'new'`, or omitted: the one at that address, else a new entry in the list). */
   'paperclip.signin.start': { input: { baseUrl: string; serverId?: string }; output: PaperclipSignInState };
   'paperclip.signin.status': { input: Record<string, never>; output: PaperclipSignInState };
-  'paperclip.signin.cancel': { input: Record<string, never>; output: PaperclipSignInState };
+  'paperclip.signin.cancel': { input: { approvalUrl?: string }; output: PaperclipSignInState };
   /** Revokes the key the server issued to this Mac and removes it. `message`: anything to tell the person (a revoke the server did not confirm). */
   'paperclip.signin.signout': { input: Record<string, never>; output: { config: PaperclipConfigView; revoked: boolean; message?: string } };
   /** Disconnect: revokes the key a browser approval issued (when it did), forgets every key and session, and turns the connection off. */

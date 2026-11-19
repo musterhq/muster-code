@@ -78,7 +78,7 @@ test('Test connection to a Multica server says what is wrong: a bad address, a t
   assert.equal(refused.ok, false); assert.equal(refused.stage, 'auth'); assert.equal(refused.backend, 'multica');
   assert.match(refused.message, /did not accept this token: invalid token\./, 'Multica’s own words are shown');
   const none = await r.call<PaperclipTestResult>('paperclip.test', { mode: 'custom', baseUrl: f.origin });
-  assert.equal(none.stage, 'auth'); assert.deepEqual(none.signIn, [], 'no browser sign-in is offered for Multica');
+  assert.equal(none.stage, 'auth'); assert.deepEqual(none.signIn, ['browser'], 'browser sign-in is offered for Multica');
   assert.match(none.message, /needs a personal access token/);
   const closed = createServer(); await new Promise<void>(res => closed.listen(0, '127.0.0.1', res)); const port = (closed.address() as { port: number }).port; await new Promise(res => closed.close(res));
   const gone = await r.call<PaperclipTestResult>('paperclip.test', { mode: 'custom', baseUrl: `http://127.0.0.1:${port}`, token: f.token });

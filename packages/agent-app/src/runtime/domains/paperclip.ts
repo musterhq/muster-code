@@ -68,6 +68,7 @@ type Json = Record<string, unknown>;
 type PaperclipPart = ServerPart;
 
 export interface PaperclipDomainOptions {
+  multicaSignIn?: { timeoutMs?: number };
   fetch?: FetchLike; socket?: SocketFactory; secrets?: () => SecretStore | undefined;
   /** `git config --get remote.origin.url` for a folder path (tests inject it). */
   remoteOf?: (path: string) => Promise<string | undefined>;
@@ -857,7 +858,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   };
 
   /** Browser-approval sign-in (the ServerAuth seam): the approved key is stored like a pasted token, bound to its origin. */
-  const auth = createAutoAuth(conn.fetcher, origin => (conn.config.backend && originOf(conn.config.baseUrl) === origin ? conn.config.backend : null) ?? registry.byOrigin(origin)?.config.backend ?? null);
+  const auth = createAutoAuth(conn.fetcher, origin => (conn.config.backend && originOf(conn.config.baseUrl) === origin ? conn.config.backend : null) ?? registry.byOrigin(origin)?.config.backend ?? null, options.multicaSignIn?.timeoutMs);
   /** Which server the running browser sign-in belongs to: the one it was started for, else the one at its address, else a new entry. */
   let signInFor: string | undefined;
   const signIn = createServerSignIn(auth, {
@@ -895,12 +896,12 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   return {
     handlers: {
       'paperclip.config.get': () => ({ ...view(), live: live.channel }),
-      'paperclip.signin.start': input => { signInFor = serverIdOf(input); if (signInFor && signInFor !== 'new') registry.connection(signInFor); return signIn.start(input.baseUrl); },
+      'paperclip.signin.start': input => { const target = serverIdOf(input); if (target && target !== 'new') registry.connection(target); signInFor = target; return signIn.start(input.baseUrl); },
       'paperclip.signin.status': () => signIn.state(),
       // A cookie belongs to the server at its origin; one for an address not in the list yet waits on the Projects connection.
       'paperclip.session.set': input => { const origin = originOf(String(input.baseUrl ?? '')), entry = registry.byOrigin(origin); const target = entry && entry.id !== registry.workspaceEntry()?.id ? registry.connection(entry.id) : conn; return { state: target.setSession(String(input.baseUrl ?? ''), input.cookie) }; },
       'paperclip.session.clear': () => { conn.clearSession(); return { ok: true as const }; },
-      'paperclip.signin.cancel': () => signIn.cancel(),
+      'paperclip.signin.cancel': input => input.approvalUrl && signIn.state().approvalUrl !== input.approvalUrl ? signIn.state() : signIn.cancel(),
       'paperclip.signin.signout': async () => {
         if (!conn.config.signedIn) throw new Error(device().title+' is not signed in with browser approval.');
         const baseUrl = conn.baseUrl(), key = conn.tokenFor(baseUrl);

@@ -4,6 +4,12 @@
  * multica-ai/multica): `{"error": "..."}` errors, `X-Workspace-ID` for workspace-scoped routes, `Authorization: Bearer mul_…`, issue
  * lists as `{issues, total, limit, offset, has_more}`, projects as `{projects, total, has_more}`, labels as `{labels, total}`, comments,
  * agents, members and workspaces as plain arrays. The data is invented.
+ *
+ * Signing in on the server's own page (#893), the way Multica's web app signs in its command-line tool: `/login?cli_callback=…&cli_state=…`
+ * checks the callback the way Multica's `validateCliCallback` does (http, and localhost, 127.0.0.1 or an RFC 1918 address), then sends the
+ * browser to `<callback>?token=<sign-in token>&state=<cli_state>` (Multica's page does this after an email code or Google; here it is at
+ * once). `POST /api/tokens` with that token makes a personal access token (`{name, expires_in_days}` in, `{id, name, token_prefix, token}`
+ * out, as server/internal/handler/personal_access_token.go), `GET /api/tokens` lists them and `DELETE /api/tokens/:id` revokes one.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
@@ -17,6 +23,10 @@ export interface MulticaFake {
   forbiddenAgents: Set<string>;
   /** Every /api route answers 302 to this address instead. */
   redirectTo: string | null;
+  /** Sign-in tokens `/login` handed out, and the personal access tokens `POST /api/tokens` made (with what was asked). */
+  sessions: string[]; issued: { id: string; name: string; expires_in_days: unknown; token: string; by: string; revoked: boolean }[];
+  /** An older server: `/login` ignores `cli_callback` (false), or there is no `/api/tokens` (false). */
+  cliCallback: boolean; tokensRoute: boolean;
   close(): Promise<void>;
 }
 export const WS_ACME = '42f2c2b1-0000-4e1f-aa9a-f5b4bdd98501';
@@ -69,6 +79,15 @@ export function seed(): MulticaFake['state'] {
   };
 }
 
+/** Multica's own check of `cli_callback` (packages/views/auth/login-page.tsx `validateCliCallback`). */
+function validCliCallback(value: string): boolean {
+  try {
+    const u = new URL(value);
+    if (u.protocol !== 'http:') return false;
+    const h = u.hostname;
+    return h === 'localhost' || h === '127.0.0.1' || /^10\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^192\.168\./.test(h);
+  } catch { return false; }
+}
 const send = (res: ServerResponse, status: number, value: unknown, type = 'application/json') => { res.writeHead(status, { 'content-type': type }); res.end(typeof value === 'string' ? value : JSON.stringify(value)); };
 const fail = (res: ServerResponse, status: number, error: string) => send(res, status, { error });
 const readBody = (req: IncomingMessage) => new Promise<Json | null>(resolve => { let raw = ''; req.on('data', c => { raw += c; }); req.on('end', () => { try { resolve(raw ? JSON.parse(raw) as Json : null); } catch { resolve(null); } }); });
@@ -77,7 +96,8 @@ export async function startMulticaFake(options: { token?: string; state?: Multic
   const token = options.token ?? `mul_${randomUUID().replace(/-/g, '')}`;
   const state = options.state ?? seed();
   const calls: FakeCall[] = [];
-  const fake = { token, calls, state, forbiddenAgents: new Set<string>(), redirectTo: null as string | null } as MulticaFake;
+  const fake = { token, calls, state, forbiddenAgents: new Set<string>(), redirectTo: null as string | null, sessions: [], issued: [], cliCallback: true, tokensRoute: true } as unknown as MulticaFake;
+  const accepted = (bearer: string) => bearer === token || fake.sessions.includes(bearer) || fake.issued.some(t => t.token === bearer && !t.revoked);
   const find = (ref: string) => state.issues.find(i => i.id === ref || i.identifier === ref);
   const server: Server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://x'), path = url.pathname, body = await readBody(req);
@@ -89,10 +109,29 @@ export async function startMulticaFake(options: { token?: string; state?: Multic
     if (path === '/healthz') return send(res, 404, '<!DOCTYPE html><html><body>404</body></html>', 'text/html; charset=utf-8');
     if (path === '/api/health') return send(res, 404, '404 page not found\n', 'text/plain; charset=utf-8');
     if (path === '/api/config') return send(res, 200, { cdn_domain: '', allow_signup: true, daemon_server_url: fake.origin, daemon_app_url: fake.origin, daemon_setup_target: 'self_host', vcs_integration_available: true, posthog_key: '', analytics_environment: 'production', feature_flags: { agents_agent_builder: true } });
+    if (path === '/login') {
+      const callback = url.searchParams.get('cli_callback'), cliState = url.searchParams.get('cli_state') ?? '';
+      const page = '<!DOCTYPE html><html><body><h1>Sign in to Multica</h1></body></html>';
+      if (callback === null || !fake.cliCallback) return send(res, 200, page, 'text/html; charset=utf-8');
+      if (!validCliCallback(callback)) return send(res, 400, '<!DOCTYPE html><html><body>Invalid callback URL</body></html>', 'text/html; charset=utf-8');
+      const session = `eyJhbGciOiJIUzI1NiJ9.${randomUUID().replace(/-/g, '')}.sig`;
+      fake.sessions.push(session);
+      res.writeHead(302, { location: `${callback}${callback.includes('?') ? '&' : '?'}token=${encodeURIComponent(session)}&state=${encodeURIComponent(cliState)}` }); res.end(); return;
+    }
     if (!path.startsWith('/api/')) return send(res, 404, '404 page not found\n', 'text/plain; charset=utf-8');
     // Everything else needs the token (Multica's auth middleware answers in text/plain with a JSON body).
     if (!auth) return send(res, 401, '{"error":"missing authorization"}', 'text/plain; charset=utf-8');
-    if (auth !== `Bearer ${token}`) return send(res, 401, '{"error":"invalid token"}', 'text/plain; charset=utf-8');
+    if (!auth.startsWith('Bearer ') || !accepted(auth.slice(7))) return send(res, 401, '{"error":"invalid token"}', 'text/plain; charset=utf-8');
+    if (path.startsWith('/api/tokens') && !fake.tokensRoute) return send(res, 404, '404 page not found\n', 'text/plain; charset=utf-8');
+    if (path === '/api/tokens' && req.method === 'POST') {
+      if (!body || typeof body.name !== 'string' || !body.name) return fail(res, 400, 'name is required');
+      const made = { id: randomUUID(), name: body.name, expires_in_days: body.expires_in_days, token: `mul_${randomUUID().replace(/-/g, '')}`, by: auth.slice(7), revoked: false };
+      fake.issued.push(made);
+      return send(res, 201, { id: made.id, name: made.name, token_prefix: made.token.slice(0, 12), expires_at: null, last_used_at: null, created_at: new Date().toISOString(), token: made.token });
+    }
+    if (path === '/api/tokens' && req.method === 'GET') return send(res, 200, fake.issued.filter(t => !t.revoked).map(t => ({ id: t.id, name: t.name, token_prefix: t.token.slice(0, 12), expires_at: null, last_used_at: null, created_at: at(0) })));
+    const revoke = /^\/api\/tokens\/([^/]+)$/.exec(path);
+    if (revoke && req.method === 'DELETE') { const t = fake.issued.find(x => x.id === revoke[1] && !x.revoked); if (!t) return fail(res, 404, 'token not found'); t.revoked = true; res.writeHead(204); res.end(); return; }
     if (path === '/api/me') return send(res, 200, state.me);
     if (path === '/api/workspaces' && req.method === 'GET') return send(res, 200, state.workspaces);
     // Workspace-scoped routes: the workspace comes from X-Workspace-ID (or the URL, for members).

@@ -311,7 +311,7 @@ async function main(): Promise<void> {
   });
   const desktopWork = new DesktopWorkspaces(loaded.service,processes,computers);
   // Sign in to Muster Server inside the app: the server's own page in a window with a per-origin cookie jar. The session cookie goes straight to the runtime (never the renderer).
-  const signInWindows = new ServerSignInWindows({onSession:(baseUrl,cookie)=>loaded.service.invoke('paperclip.session.set',{baseUrl,cookie}).catch(()=>undefined)});
+  const signInWindows = new ServerSignInWindows({onAbandoned:approvalUrl=>{void loaded.service.invoke('paperclip.signin.cancel',{approvalUrl}).catch(()=>undefined);},onSession:(baseUrl,cookie)=>loaded.service.invoke('paperclip.session.set',{baseUrl,cookie}).catch(()=>undefined)});
   // SBX-13: sleep/wake. The runtime pauses timers that would misfire, then on wake fires due work once and re-checks
   // provider sessions; sandboxes are re-inspected here because ScopedComputers lives in main. Lock/unlock are no-ops.
   const forwardPower=(state:'suspend'|'resume'|'lock-screen'|'unlock-screen')=>{
@@ -866,6 +866,10 @@ async function main(): Promise<void> {
       const request=input as Commands['musterServer.signInWindow']['input'];
       if(!request||typeof request.baseUrl!=='string'||request.baseUrl.length>2048||(request.url!==undefined&&(typeof request.url!=='string'||request.url.length>8192)))throw new Error('Invalid sign-in request.');
       if(request.close){signInWindows.close(request.baseUrl);return {opened:false};}
+      if (new URL(request.url ?? request.baseUrl).searchParams.has('cli_callback')) {
+        const pending = await loaded.service.invoke('paperclip.signin.status', {});
+        if (pending.phase !== 'waiting' || pending.approvalUrl !== request.url) throw new Error('This sign-in has ended.');
+      }
       return signInWindows.open({url:request.url??request.baseUrl,baseUrl:request.baseUrl},window&&!window.isDestroyed()?window:undefined);
     }
     if(command === 'link.open'){

@@ -5,7 +5,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
-- **Multica named as Multica.** Issues, projects, the top bar, the Projects list and the sidebar now say Multica for a Multica server (Paperclip and Muster Server keep “Muster Server”), and connecting a Multica address shows its token steps as guidance with the token field ready, instead of an error.
+- **Sign in to Multica from its server address.** Enter your Multica hostname in Settings › Integrations and sign in on its own page. Muster stores the resulting token in the system credential store. Token paste is available under Other ways to connect.
+- **Multica named as Multica.** Issues, projects, the top bar, the Projects list and the sidebar now say Multica for a Multica server.
 
 ## 0.3.19
 
