@@ -11,7 +11,7 @@ import { promises as fs, existsSync, mkdirSync, copyFileSync, statSync } from 'n
 import { basename, dirname, join, resolve, relative } from 'node:path';
 import { rescanProviderListings, setProviderListingStore } from './provider-instances.ts';
 import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, QueuedMessage, ChatFallback, TimelineItem, WakeReason } from '../shared/protocol.ts';
-import { CONTEXT_OVERFLOW, effectiveContextWindow, musterCompactAt, reportedWindowFor, withUserWindow } from '../shared/context-window.ts';
+import { CONTEXT_OVERFLOW, REQUEST_TOO_LARGE, effectiveContextWindow, musterCompactAt, reportedWindowFor, withUserWindow } from '../shared/context-window.ts';
 import { modelKey } from '../shared/model-catalog.ts';
 import type { PendingAttentionSummary, AttentionRequest } from '../shared/attention-protocol.ts';
 import { discoverLocalProviders } from './provider-discovery.ts';
@@ -63,6 +63,7 @@ import { createNativeTurnObserver } from './native-turns.ts';
 import { createNativeQueueMirror } from './native-queue.ts';
 import { ChatAttachments, attachedFileLines } from './attachments.ts';
 import { admissionRetryText, asSentence, RETRY_AFTER_CAP_MS, retryClock, waitForRetry, withAdmissionRetry } from './admission-retry.ts';
+import { IMAGES_OMITTED_EVENT, imagesOmittedNotice } from './adapters/request-size.ts';
 import { ContextLedger, HISTORY_WINDOW_EVENT, TOOLS_UNAVAILABLE_EVENT, requestsConnectors, requestedConnectorNames, type ContextBlock } from './context-budget.ts';
 import { createDomainHooks } from './domains/hooks.ts';
 import { createDomains } from './domains/index.ts';
@@ -987,6 +988,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               scheduleTimeline(chatId); return;
             }
             if (method === TOOLS_UNAVAILABLE_EVENT) { store.appendItem(chatId, 'notice', `${chat.model} can’t run commands or edit files through this route, so it answered without tools. Use “Switch to…” in the composer to pick a model with tools.`, 'completed', {kind: 'tools-unavailable', model: chat.model}); scheduleTimeline(chatId); return; }
+            // #887: pictures were left out of a request to stay under the provider's size limit (the adapter says so once a turn).
+            if (method === IMAGES_OMITTED_EVENT) { const older = Number(params.older) || 0, latest = Number(params.latest) || 0; if (older || latest) { store.appendItem(chatId, 'notice', imagesOmittedNotice(older, latest), 'completed', {kind: 'images-omitted', older, latest}); scheduleTimeline(chatId); } return; }
             if (method === HISTORY_WINDOW_EVENT) { if (typeof params.retainedUserTurns === 'number') retainedTurns = params.retainedUserTurns; return; }
             const compactionItem = params.item && typeof params.item === 'object' && (params.item as Record<string, unknown>).type === 'contextCompaction';
             if (method === 'item/started' && compactionItem && !compactions.has(chatId) && !nativeCompacting.has(chatId) && !acceptedReport(chatId)) { seal(); nativeCompacting.set(chatId, store.appendItem(chatId, 'notice', 'Compacting context…', 'running', {kind:'compaction', status:'running', auto:true}).id); scheduleTimeline(chatId); return; }
@@ -1331,7 +1334,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           : result.status === 'failed' ? (said && result.dispatchState !== 'unknown' ? {kind:'failed',retryable:false,reason:`The provider attempt failed: ${said}`} : {kind:'recovery-needed',retryable:false,reason:'The provider attempt did not settle with confirmed outcome. Check its saved turn before continuing; the prompt was not resent.'}) : undefined);
         // #426: the provider refused the turn because the conversation no longer fits the model's window. That is a settled
         // refusal, never an unconfirmed attempt: say so, and offer compaction or a fresh thread with a summary.
-        if (recovery && recovery.kind !== 'cancelled' && !run.stopped && CONTEXT_OVERFLOW.test(`${said} ${recovery.reason}`)) {
+        // #887: the request grew past the provider's size limit (images re-sent with the history). A fresh thread's summary is text, so it fits.
+        if (recovery && recovery.kind !== 'cancelled' && !run.stopped && (result.failure?.statusCode === 413 || REQUEST_TOO_LARGE.test(`${said} ${recovery.reason}`))) {
+          const modelName = selectedProvider.models.find(entry => entry.id === chat.model)?.name ?? chat.model;
+          recovery = {kind:'failed', retryable:false, reason:`${modelName} refused this turn: the request is over the provider’s size limit.`};
+          store.appendItem(chatId, 'notice', `This conversation grew past the provider’s request size limit, usually from images earlier in the chat. Continue in a fresh thread with a summary (earlier images are left out), or compact it and send again.`, 'failed', {kind:'compaction', status:'failed', reason:'request-too-large', actions:['fresh','retry']});
+        } else if (recovery && recovery.kind !== 'cancelled' && !run.stopped && CONTEXT_OVERFLOW.test(`${said} ${recovery.reason}`)) {
           const modelName = selectedProvider.models.find(entry => entry.id === chat.model)?.name ?? chat.model;
           recovery = {kind:'failed', retryable:false, reason:`${modelName} refused this turn: the conversation no longer fits its context window.`};
           store.appendItem(chatId, 'notice', `The conversation no longer fits ${modelName}’s context window. Compact it and send again, or continue in a fresh thread with a summary.`, 'failed', {kind:'compaction', status:'failed', reason:'context-overflow', actions:['retry','fresh']});

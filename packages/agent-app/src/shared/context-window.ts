@@ -75,3 +75,5 @@ export function musterCompactAt(driver: string | undefined, model: ModelWindowIn
 
 /** Provider errors that mean the request no longer fits the model's context window. */
 export const CONTEXT_OVERFLOW = /context[ _-]?(?:window|length)[ _-]?(?:exceeded|is full|limit)|context_length_exceeded|maximum context length|exceeds? (?:the )?(?:model'?s? )?(?:maximum )?context|prompt is too long|input is too long|too many (?:input )?tokens|request too large for model/i;
+/** #887: the provider refused the request for its size in bytes (images and attachments re-sent with the history), not its tokens. */
+export const REQUEST_TOO_LARGE = /request too large \(max|request_too_large|request (?:size )?exceeds? (?:the )?maximum (?:allowed )?size|payload too large|request entity too large/i;
