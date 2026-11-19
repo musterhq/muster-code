@@ -14,6 +14,7 @@ import {loadImages, responseError, retryAfterMs, sseEvents} from './shared.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
 import {HISTORY_WINDOW_EVENT} from '../context-budget.ts';
 import {browserOffered, executeTool, toolInstructions, toolSpecs} from './http-tools.ts';
+import {fitRequestImages, imagesOmittedReporter} from './request-size.ts';
 
 type Block = Record<string, unknown> & {type: string};
 export interface ClaudeMessage {role: 'user' | 'assistant'; content: string | Block[]}
@@ -164,11 +165,21 @@ export function claudeMessagesAdapter(options: Options): RunnableAdapter {
     // Images are sent once; the saved conversation keeps the prompt text only.
     const saved: ClaudeMessage[] = [...history, {role: 'user', content: text}];
     const live: ClaudeMessage[] = [...history, prompt];
-    const post = async (force: boolean) => request(`${options.endpoint.replace(/\/+$/, '')}/messages`, {method: 'POST', redirect: 'error', signal: input.signal,
-      headers: {...await options.headers(force), 'content-type': 'application/json', accept: 'text/event-stream', 'anthropic-version': '2023-06-01'},
+    const omitted = imagesOmittedReporter(input.onEvent);
+    // #887: each round re-sends every picture of the turn; the oldest give way before the request reaches the 32 MB limit.
+    const payload = () => {
       // Measured on a live router (#688): with tools offered, Opus 5.5 often skips thinking unless the request names an
       // effort; `high` or above brings it back every time. Low and medium chats still ask for high so a tool turn thinks.
-      body: JSON.stringify({model: input.model, max_tokens: budget + 8_000, stream: true, thinking: {type: 'enabled', budget_tokens: budget}, output_config: {effort: OUTPUT_EFFORT[input.reasoningEffort ?? 'medium']}, system, tools, messages: live})});
+      const body = {model: input.model, max_tokens: budget + 8_000, stream: true, thinking: {type: 'enabled', budget_tokens: budget}, output_config: {effort: OUTPUT_EFFORT[input.reasoningEffort ?? 'medium']}, system, tools, messages: live};
+      const json = JSON.stringify(body);
+      const left = fitRequestImages(live, Buffer.byteLength(json), message => message === prompt);
+      if (!left.older && !left.latest) return json;
+      omitted(left);
+      return JSON.stringify(body);
+    };
+    const post = async (force: boolean) => request(`${options.endpoint.replace(/\/+$/, '')}/messages`, {method: 'POST', redirect: 'error', signal: input.signal,
+      headers: {...await options.headers(force), 'content-type': 'application/json', accept: 'text/event-stream', 'anthropic-version': '2023-06-01'},
+      body: payload()});
     // An expired helper token answers 401 before any output: fetch a fresh one and send the same request once more.
     const send = async () => {
       const response = await post(false);

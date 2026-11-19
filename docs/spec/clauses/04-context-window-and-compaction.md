@@ -29,6 +29,8 @@ Boundaries:
 | [MUS-SPEC-04-3A](04-context-window-and-compaction.md#mus-spec-04-3a) | On an observed window the meter reads "at least N" with no percentage and no compaction point; a default estimate is labelled as one. | [`#668 meter: observed usage reads "at least N" with no percentage; a default estimate is labelled and never compacts`](../../../packages/agent-app/tests/context-window-668.test.ts) |
 | [MUS-SPEC-04-4A](04-context-window-and-compaction.md#mus-spec-04-4a) | Saved per-model windows keep only valid sizes on valid model keys; invalid sizes are refused with a plain message. | [`#668 the policy keeps valid windows per model and drops the rest`](../../../packages/agent-app/tests/context-window-668.test.ts) |
 | [MUS-SPEC-04-4B](04-context-window-and-compaction.md#mus-spec-04-4b) | The Settings field accepts 1M, 1.5m, 200k and 1,000,000, and rejects text that is not a size. | [`#668 the Settings field reads 1M, 200k and 1,000,000`](../../../packages/agent-app/tests/context-window-668.test.ts) |
+| [MUS-SPEC-04-887A](04-context-window-and-compaction.md#mus-spec-04-887a) | Through a running chat that reads 24 screenshots of 1.6 MB in one turn, every request stays under 32 MB, the oldest images become a short note, the newest screenshot is still sent, the turn and the next one complete, and the transcript says once that older images were left out. | [`#887 a chat that reads many screenshots keeps every request under 32 MB, keeps the newest images and says once that older ones were left out`](../../../packages/agent-app/tests/request-size-887.test.ts) |
+| [MUS-SPEC-04-887B](04-context-window-and-compaction.md#mus-spec-04-887b) | When the provider refuses a turn with "Request too large (max 32MB)", the chat ends that turn as a settled failure and offers to continue in a fresh thread with a summary, saying earlier images are left out. | [`#887 a "Request too large (max 32MB)" refusal offers a fresh thread with a summary instead of failing every turn`](../../../packages/agent-app/tests/request-size-887.test.ts) |
 
 ### Which window a chat uses
 
@@ -170,4 +172,28 @@ Boundaries:
 - Test: `packages/agent-app/tests/context-window-668.test.ts::#668 the Settings field reads 1M, 200k and 1,000,000`
 - Environment: Node test runner; no provider or network.
 - Known gaps: Calls the field's parser, not the rendered field.
+- Evidence: UNVERIFIED
+
+### When images make the request too large
+
+<a id="mus-spec-04-887a"></a>
+#### MUS-SPEC-04-887A: Many images in a chat never push a request over 32 MB
+
+- Precondition: A chat on a router model that takes images, run over the router's Messages API. The router refuses any request over 32 MB, as Anthropic does. The folder holds 24 screenshots of about 1.6 MB each.
+- Action: Send a message; the model reads the 24 screenshots one by one in the same turn, then answers. Then send a second message.
+- Expected result: No request the router receives is over 32 MB, so none is refused. The oldest screenshots are replaced in the request by a one-line note; the newest screenshot is still sent as an image. Both turns complete. One notice in the transcript says that older images were left out to stay under the provider's size limit.
+- Test: `packages/agent-app/tests/request-size-887.test.ts::#887 a chat that reads many screenshots keeps every request under 32 MB, keeps the newest images and says once that older ones were left out`
+- Environment: Node test runner; the agent service with a fake router (fetch) that enforces the 32 MB limit; real PNG files in a temp folder; no network.
+- Known gaps: Uses a fake router, not a live provider. Images are left out, not downscaled. Claude Code and Codex keep their own history, so Muster cannot trim their requests; MUS-SPEC-04-887B covers what those routes show instead.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-04-887b"></a>
+#### MUS-SPEC-04-887B: A request-size refusal offers a fresh thread
+
+- Precondition: A chat on a router model run over the Messages API. The router answers the turn with HTTP 413 and "Request too large (max 32MB)", as a provider does when its own history (Claude Code, Codex) has grown too large.
+- Action: Send a message.
+- Expected result: The turn ends as a settled failure, not an unconfirmed one. A notice says the conversation grew past the provider's request size limit, that continuing in a fresh thread with a summary leaves earlier images out, and offers that action.
+- Test: `packages/agent-app/tests/request-size-887.test.ts::#887 a "Request too large (max 32MB)" refusal offers a fresh thread with a summary instead of failing every turn`
+- Environment: Node test runner; the agent service with a fake router (fetch); no network.
+- Known gaps: Does not click the action; the fresh-thread path itself is covered by the compaction cases. Uses a fake router, not the Claude Code or Codex binary.
 - Evidence: UNVERIFIED
