@@ -70,6 +70,8 @@ async function desktop(t: TestContext, edit: (root: string, input: ProviderInput
       return (await edit(root, input)) ?? {status: 'completed', finalMessage: 'done'};
     },
   };
+  // Phone access is off until the phone app ships; these tests run with it on, as a saved settings file turns it on.
+  await writeFile(join(dataDir, 'settings.json'), JSON.stringify({version: 1, values: {'integrations.phoneAccess': true}}));
   service = createAgentService({dataDir, provider, onEvent() {}});
   t.after(async () => {
     await service.dispose();
