@@ -1,0 +1,33 @@
+(node:51920) ExperimentalWarning: Transform Types is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:51920) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file://<candidate>/packages/agent-app/tests/multica-integration.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to <candidate>/packages/agent-app/package.json.
+(node:51920) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ two Multica servers added with personal access tokens are both listed online, each token kept in the secret store and sent only to its own server (30.8245ms)
+✔ Test connection to a Multica server says what is wrong: a bad address, a token Multica refuses, a server that does not answer (6.671209ms)
+✔ a Multica server that redirects never passes the token on: the redirect target receives nothing and the test fails (2.902625ms)
+✔ a Multica workspace shows its projects and issues on the Projects pages, and an issue opens with its description and comments (10.276583ms)
+✔ acting on a Multica issue sends Multica’s own fields, keeps the server’s answer, and shows a refusal in the server’s words (11.909667ms)
+✔ working a Multica issue from a chat: check-out moves it to in_progress with a comment, hand-back moves it to in_review for the reviewer with a summary that mentions them (23.827875ms)
+(node:51921) ExperimentalWarning: Transform Types is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:51921) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file://<candidate>/packages/agent-app/tests/multica-signin.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to <candidate>/packages/agent-app/package.json.
+(node:51921) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ signing in on a Multica server’s own page connects it: the sign-in comes back to a loopback listener, is swapped for a personal access token and stored like a pasted one (31.178625ms)
+✔ a Multica sign-in callback with the wrong state is refused and makes no token (107.678292ms)
+✔ only the first Multica sign-in callback counts: a second one is ignored and makes no second token (5.858083ms)
+✔ cancelling or timing out a Multica sign-in shuts its loopback listener (368.804667ms)
+✔ neither Multica token ever reaches the window, the server files or another address (18.37275ms)
+✔ a Multica server too old for sign-in from Muster ends with Multica’s words and points to the token fallback (424.133791ms)
+✔ the Multica sign-in window goes only to its own loopback callback, and closing it early abandons the sign-in (91.735083ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1344.644125

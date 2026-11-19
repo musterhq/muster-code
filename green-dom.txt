@@ -1,0 +1,21 @@
+ok - Connect on a Multica address opens Multica’s sign-in page in the window, and a failed sign-in points to the token path
+multica-signin-dom: ok
+ok - where no sign-in window can open, Connect on a Multica address opens the token field with Multica’s instructions
+ok - the Multica connect step reads as guidance: no error colour, Multica’s own steps, the token field focused and Connect with token primary
+ok - a refused Multica token shows Multica’s words; a good one adds the server, listed as Multica
+multica-connect-dom: ok
+ok - a Multica server is called Multica in the top bar, on an issue, on a project, in the Projects list and on the sidebar org
+ok - a Paperclip-backed connection keeps the Muster Server name
+multica-labels-dom: ok
+paperclip-signin-dom: ok
+paperclip-integration-dom: ok
+ok - opening a scratch edit renders unchanged source and every changed block in both themes
+(node:51692) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok - a scratch chat: every edit of a file edited again in a later turn opens as the whole file in the transcript
+ok - a folder chat: every edit of a file edited again in a later turn opens as the whole file in the transcript
+ok - the Changes popover opens the latest turn’s file as the whole file too
+ok - a file past the old 96 KB colour limit is coloured, and only the mounted rows are coloured and asked for
+ok - Find keeps the colours and marks the matches, in a windowed file and in a small one
+ok - the edited-file and blame views of a file over 256 KB colour their mounted rows
+syntax-highlight-778-dom: ok

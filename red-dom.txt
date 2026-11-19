@@ -1,0 +1,18 @@
+not ok - Connect on a Multica address opens Multica’s sign-in page in the window, and a failed sign-in points to the token path
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: the browser sign-in is started
+    at file://<main>/packages/agent-app/dist/tests/multica-signin-dom.mjs:3206:10
+    at async check (file://<main>/packages/agent-app/dist/tests/multica-signin-dom.mjs:3058:5)
+    at async file://<main>/packages/agent-app/dist/tests/multica-signin-dom.mjs:3199:1 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: undefined,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}
+
+Node.js v24.13.0
