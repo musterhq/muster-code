@@ -69,7 +69,7 @@ export class ServerSignInWindows {
     const callback = login.searchParams.get('cli_callback');
     if (callback && !/^http:\/\/127\.0\.0\.1:\d+\/callback$/.test(callback)) throw new Error('Invalid Multica sign-in callback.');
     const existing = this.windows.get(origin);
-    if (existing && !existing.window.isDestroyed() && existing.url === input.url) { existing.window.show(); existing.window.focus(); await existing.window.loadURL(input.url).catch(() => undefined); return { opened: true }; }
+    if (existing && !existing.window.isDestroyed() && (existing.url === input.url || (!callback && !new URL(existing.url).searchParams.has('cli_callback')))) { existing.window.show(); existing.window.focus(); await existing.window.loadURL(input.url).catch(() => undefined); return { opened: true }; }
     if (existing) this.close(origin);
     const partition = sessionPartition(origin), jar = this.runtime.getSession(partition);
     jar.setPermissionRequestHandler((...args: unknown[]) => { const callback = args.find(a => typeof a === 'function') as ((allow: boolean) => void) | undefined; callback?.(false); });
@@ -80,10 +80,12 @@ export class ServerSignInWindows {
     const entry: { window: WindowLike; timer: ReturnType<typeof setInterval> | null; last: string | null; url: string; abandon: boolean } = { window, timer: null, last: null, url: input.url, abandon: Boolean(callback) };
     this.windows.set(origin, entry);
     // Stay on the server's origin. Anything else belongs in the system browser, never in a window that holds this server's session.
-    const openExternal = (url: URL) => {
-      if (!isWeb(url.href) || url.username || url.password) return;
+    const openExternal = (raw: string) => {
+      if (!isWeb(raw)) return;
+      const url = new URL(raw);
+      if (url.username || url.password) return;
       if (callback && (LOOPBACK.has(url.hostname) || url.searchParams.has('token'))) return;
-      void this.runtime.openExternal(url.href).catch(() => undefined);
+      void this.runtime.openExternal(raw).catch(() => undefined);
     };
     const guard = (event: { url: string; preventDefault(): void }) => {
       let url: URL;
@@ -95,12 +97,12 @@ export class ServerSignInWindows {
         return;
       }
       event.preventDefault();
-      openExternal(url);
+      openExternal(event.url);
     };
     window.webContents.on('will-navigate', guard);
     window.webContents.on('will-redirect', guard);
     window.webContents.on('will-attach-webview', event => event.preventDefault());
-    window.webContents.setWindowOpenHandler(({ url }) => { if (isWeb(url)) openExternal(new URL(url)); return { action: 'deny' }; });
+    window.webContents.setWindowOpenHandler(({ url }) => { openExternal(url); return { action: 'deny' }; });
     const capture = async () => {
       if (callback) return;
       const header = sessionCookieHeader(await jar.cookies.get({ url: origin }).catch(() => []), origin);
