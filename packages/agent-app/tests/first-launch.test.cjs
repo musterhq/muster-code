@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const {mkdirSync, mkdtempSync, rmSync, readFileSync} = require('node:fs');
+const {mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync} = require('node:fs');
 const {tmpdir} = require('node:os');
 const {join} = require('node:path');
 const {once} = require('node:events');
@@ -48,6 +48,12 @@ test('new profiles count once through retries and updates', async t => {
   await launch('existing');
   await launch('opt-out', fetch, true);
   assert.equal(total(), 0);
+
+  mkdirSync(join(root, 'damaged'));
+  writeFileSync(join(root, 'damaged', 'install-count.pending'), 'unrelated file contents');
+  let damagedRequests = 0;
+  await launch('damaged', async () => { damagedRequests++; return new Response(null, {status: 400}); });
+  assert.equal(damagedRequests, 0);
 
   let requests = 0;
   await launch('fresh', async (...args) => {
