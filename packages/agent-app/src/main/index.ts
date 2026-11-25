@@ -36,6 +36,7 @@ import {allowMediaPermission,microphoneAccess} from './microphone.ts';
 import {NativePreviewController} from './native-preview.ts';
 import { buildMenuTemplate } from './menu.ts';
 import {AppUpdater,bundlePathOf,detectInstallMethod,plistString} from './app-updater.ts';
+import {reportFirstLaunch} from './first-launch.ts';
 import {createUpdateGate,type UpdateGate} from './update-gate.ts';
 import type {UpdateStatus} from '../shared/update-protocol.ts';
 import {unpackedPath} from '../runtime/unpacked-path.ts';
@@ -145,7 +146,12 @@ async function main(): Promise<void> {
   app.setAsDefaultProtocolClient('muster');
 
   // --- Agent service -------------------------------------------------------
-  const dataDir = path.join(app.getPath('userData'), 'agent-data');
+  const userData = app.getPath('userData');
+  void reportFirstLaunch({
+    userData, endpoint: process.env.MUSTER_INSTALL_COUNT_URL ?? '',
+    disabled: !app.isPackaged || app.commandLine.hasSwitch('user-data-dir') || process.env.DO_NOT_TRACK === '1' || !!process.env.CI,
+  });
+  const dataDir = path.join(userData, 'agent-data');
   // Pending approvals/questions badge the dock while the window is not in front.
   const badgeTracker = createBadgeTracker();
   // AUT-05: monitoring notifications follow the user's settings (mute, failures only, attention alerts off).

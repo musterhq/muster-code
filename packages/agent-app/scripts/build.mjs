@@ -78,6 +78,8 @@ const sandboxRoot = sourceRoot('MUSTER_SANDBOX_SOURCE_ROOT', 'muster-sandbox');
 const sandboxEntry = path.join(sandboxRoot, 'packages/core/src/local-docker-sandbox.ts');
 const scopeEntry = path.join(sandboxRoot, 'packages/core/src/scoped-runtime.ts');
 if (!existsSync(sandboxEntry) || !existsSync(scopeEntry)) throw new Error(`Scoped computer source unavailable under ${sandboxRoot}. Unset MUSTER_SANDBOX_SOURCE_ROOT to use vendor/muster-sandbox, or point it at the reviewed isolated runtime checkout.`);
+const installCountUrl = process.env.MUSTER_INSTALL_COUNT_URL || '';
+if (installCountUrl && new URL(installCountUrl).protocol !== 'https:') throw new Error('MUSTER_INSTALL_COUNT_URL must use HTTPS');
 const builds = [
   {
     ...common,
@@ -100,6 +102,7 @@ const builds = [
     ...common,
     entryPoints: [src('main', 'index.ts')],
     outfile: dist('main', 'index.cjs'),
+    define: {...common.define, 'process.env.MUSTER_INSTALL_COUNT_URL': JSON.stringify(installCountUrl)},
     platform: 'node',
     format: 'cjs',
     target: 'node22',

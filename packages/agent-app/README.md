@@ -157,6 +157,8 @@ the app; later runs only need `npm start` from `packages/agent-app`.
 
 ### First launch
 
+When install counting is enabled in an official build, the first launch of a new default profile sends a random ID to the Muster install counter. It stores a hash to deduplicate retries. Existing profiles, updates, and repeat launches do not increase the count. Set `DO_NOT_TRACK=1` before launch to opt out. Resetting the profile or starting under another OS user creates a new installation for this metric.
+
 Muster Agent looks for providers you are already signed in to on that Mac and uses them directly.
 If it finds none, it opens guided setup to sign in or add one. Settings and chats live in
 `~/Library/Application Support/Muster Agent`; pass `--user-data-dir=/some/dir` (for example

@@ -72,6 +72,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  MUSTER_INSTALL_COUNT_URL: ${{ vars.MUSTER_INSTALL_COUNT_URL }}
   NODE_OPTIONS: --max-old-space-size=2048
 
 jobs:

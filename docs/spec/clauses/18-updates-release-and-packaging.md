@@ -17,6 +17,7 @@ Boundaries:
 | [MUS-SPEC-18-479L](18-updates-release-and-packaging.md#mus-spec-18-479l) | An update never restarts Muster while a turn is running. | [`an update install waits for running work, says so once, and installs when it finishes`](../../../packages/agent-app/tests/auto-resume.test.ts) |
 | [MUS-SPEC-18-89A](18-updates-release-and-packaging.md#mus-spec-18-89a) | No package in the dependency report has the license UNKNOWN, and the license bundle records buffers as MIT with its source and the MIT terms. | [`no bundled dependency has an unknown license`](../../../packages/agent-app/tests/dependency-discipline.test.ts) |
 | [MUS-SPEC-18-561A](18-updates-release-and-packaging.md#mus-spec-18-561a) | After a failed first read a 15-second retry is scheduled, and when it runs the update status appears. | [`the update status is read again after a failed first read`](../../../packages/agent-app/tests/update-status-retry-dom.tsx) |
+| [MUS-SPEC-18-899A](18-updates-release-and-packaging.md#mus-spec-18-899a) | Each new packaged profile counts once through updates and retries. | [`new profiles count once through retries and updates`](../../../packages/agent-app/tests/first-launch.test.cjs) |
 
 ### Updates wait for running work
 
@@ -55,4 +56,15 @@ Boundaries:
 - Test: `packages/agent-app/tests/update-status-retry-dom.tsx::the update status is read again after a failed first read`
 - Environment: Node and linkedom: a DOM suite with the real update status hook and a fake bridge; the 15-second timer is run by hand, so it does not wait.
 - Known gaps: The retry timer is run by the test, not waited for. Retries stop after 8 failed attempts; that limit is not tested.
+- Evidence: UNVERIFIED
+
+<a id="mus-spec-18-899a"></a>
+#### MUS-SPEC-18-899A: Count new desktop profiles once
+
+- Precondition: A collector is configured for the packaged app. One profile predates tracking.
+- Action: Launch fresh and existing profiles, lose a successful response, reopen its database, then relaunch after an update.
+- Expected result: The aggregate increases once per fresh profile and stays unchanged for upgrades, repeated launches and opted-out profiles.
+- Test: `packages/agent-app/tests/first-launch.test.cjs::new profiles count once through retries and updates`
+- Environment: Node, temporary profiles, SQLite on disk and a loopback HTTP server.
+- Known gaps: Clearing all app data creates a new profile. The count measures profiles, not people.
 - Evidence: UNVERIFIED
