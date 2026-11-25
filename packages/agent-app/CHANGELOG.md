@@ -3,6 +3,10 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Packaged builds can count the first launch of a new desktop profile. Updates and repeated launches reuse the same profile. Set `DO_NOT_TRACK=1` before starting Muster to opt out.
+
 ## 0.3.20
 
 - **Sign in to Multica from its server address.** Enter your Multica hostname in Settings › Integrations and sign in on its own page. Muster stores the resulting token in the system credential store. Token paste is available under Other ways to connect.
